@@ -25,7 +25,7 @@ class Settings(BaseSettings):
     jwt_algorithm: str = "HS256"
     jwt_expiration_minutes: int = 1440
 
-    backend_cors_origins: str = "http://localhost:5173,http://localhost:3000"
+    backend_cors_origins: str = "http://localhost:5173,http://localhost:3000,https://15d2-2407-d000-17-1ba9-81b4-f9f4-820f-b34d.ngrok-free.app"
     backend_host: str = "0.0.0.0"
     backend_port: int = 8001
 
