@@ -156,17 +156,17 @@ async def get_user_chats(
         select(Chat).where(Chat.user_id == user_id).order_by(desc(Chat.created_at))
     )
     chats = list(result.scalars().all())
-    return [ChatListItem(id=c.id, title=c.title, created_at=c.created_at) for c in chats]
+    return [ChatListItem(id=c.id, session_id=c.session_id, title=c.title, created_at=c.created_at) for c in chats]
 
 
-@router.get("/chats/{chat_id}", response_model=ChatResponse)
+@router.get("/chats/{session_id}", response_model=ChatResponse)
 async def view_any_chat(
-    chat_id: int,
+    session_id: str,
     admin: User = Depends(require_admin),
     db: AsyncSession = Depends(get_db),
 ):
     result = await db.execute(
-        select(Chat).options(selectinload(Chat.messages)).where(Chat.id == chat_id)
+        select(Chat).options(selectinload(Chat.messages)).where(Chat.session_id == session_id)
     )
     chat = result.scalar_one_or_none()
     if not chat:

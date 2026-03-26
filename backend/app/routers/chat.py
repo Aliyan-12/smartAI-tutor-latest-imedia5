@@ -41,20 +41,15 @@ async def list_chats(
 ):
     _ensure_student(current_user)
     chats = await chat_service.get_user_chats(db, current_user.id)
-    items = []
-    for c in chats:
-        items.append(ChatListItem(
-            id=c.id,
-            title=c.title,
-            created_at=c.created_at,
-        ))
-    return items
+    return [
+        ChatListItem(id=c.id, session_id=c.session_id, title=c.title, created_at=c.created_at)
+        for c in chats
+    ]
 
 
 @router.get("/credits")
 async def get_credits(
     current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
 ):
     return {
         "credits": float(current_user.credits),
@@ -62,59 +57,29 @@ async def get_credits(
     }
 
 
-@router.get("/{chat_id}", response_model=ChatResponse)
+@router.get("/{session_id}", response_model=ChatResponse)
 async def get_chat(
-    chat_id: int,
+    session_id: str,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
     _ensure_student(current_user)
-    chat = await chat_service.get_chat(db, chat_id, current_user.id)
+    chat = await chat_service.get_chat_by_session(db, session_id, current_user.id)
     if not chat:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Chat not found")
     return ChatResponse.model_validate(chat)
 
 
-@router.delete("/{chat_id}", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete("/{session_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_chat(
-    chat_id: int,
+    session_id: str,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
     _ensure_student(current_user)
-    deleted = await chat_service.delete_chat(db, chat_id, current_user.id)
+    deleted = await chat_service.delete_chat_by_session(db, session_id, current_user.id)
     if not deleted:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Chat not found")
-
-
-@router.post("/send", response_model=MessageResponse)
-async def send_message(
-    payload: MessageCreate,
-    current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
-):
-    _ensure_student(current_user)
-    await _ensure_credits(db, current_user)
-
-    if payload.chat_id:
-        chat = await chat_service.get_chat(db, payload.chat_id, current_user.id)
-        if not chat:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Chat not found")
-    else:
-        chat = await chat_service.create_chat(db, current_user.id)
-
-    await chat_service.add_message(db, chat.id, "user", payload.message)
-    history = await chat_service.build_context(db, chat.id)
-    ai_text = gemini_service.generate_response(history[:-1], payload.message)
-    assistant_msg = await chat_service.add_message(db, chat.id, "assistant", ai_text)
-
-    await credit_service.check_and_deduct_credit(db, current_user)
-
-    if chat.title == "New Chat":
-        title = gemini_service.generate_chat_title(payload.message)
-        await chat_service.update_chat_title(db, chat, title)
-
-    return MessageResponse.model_validate(assistant_msg)
 
 
 @router.post("/stream")
@@ -126,8 +91,8 @@ async def stream_message(
     _ensure_student(current_user)
     await _ensure_credits(db, current_user)
 
-    if payload.chat_id:
-        chat = await chat_service.get_chat(db, payload.chat_id, current_user.id)
+    if payload.session_id:
+        chat = await chat_service.get_chat_by_session(db, payload.session_id, current_user.id)
         if not chat:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Chat not found")
     else:
@@ -138,7 +103,7 @@ async def stream_message(
 
     async def event_stream():
         full_response = []
-        yield f"data: {json.dumps({'type': 'start', 'chat_id': chat.id})}\n\n"
+        yield f"data: {json.dumps({'type': 'start', 'session_id': chat.session_id})}\n\n"
 
         async for token in gemini_service.stream_response_async(history[:-1], payload.message):
             full_response.append(token)
@@ -156,7 +121,7 @@ async def stream_message(
                 yield f"data: {json.dumps({'type': 'credits', 'content': str(float(fresh_user.credits))})}\n\n"
 
             if chat.title == "New Chat":
-                saved_chat = await chat_service.get_chat(save_session, chat.id, current_user.id)
+                saved_chat = await chat_service.get_chat_by_session(save_session, chat.session_id, current_user.id)
                 if saved_chat:
                     title = gemini_service.generate_chat_title(payload.message)
                     await chat_service.update_chat_title(save_session, saved_chat, title)
@@ -192,7 +157,7 @@ async def websocket_chat(websocket: WebSocket):
         while True:
             data = await websocket.receive_json()
             message_text = data.get("message", "")
-            chat_id = data.get("chat_id")
+            session_id = data.get("session_id")
 
             if not message_text:
                 continue
@@ -204,8 +169,8 @@ async def websocket_chat(websocket: WebSocket):
                     await websocket.send_json({"type": "error", "content": "Insufficient credits"})
                     continue
 
-                if chat_id:
-                    chat = await chat_service.get_chat(db, chat_id, user_id)
+                if session_id:
+                    chat = await chat_service.get_chat_by_session(db, session_id, user_id)
                     if not chat:
                         chat = await chat_service.create_chat(db, user_id)
                 else:
@@ -213,9 +178,12 @@ async def websocket_chat(websocket: WebSocket):
 
                 await chat_service.add_message(db, chat.id, "user", message_text)
                 history = await chat_service.build_context(db, chat.id)
+                chat_session_id = chat.session_id
+                chat_id = chat.id
+                chat_title = chat.title
                 await db.commit()
 
-            await websocket.send_json({"type": "start", "chat_id": chat.id})
+            await websocket.send_json({"type": "start", "session_id": chat_session_id})
 
             full_response = []
             async for token_text in gemini_service.stream_response_async(history[:-1], message_text):
@@ -225,15 +193,15 @@ async def websocket_chat(websocket: WebSocket):
             complete_text = "".join(full_response)
 
             async with async_session_factory() as db:
-                await chat_service.add_message(db, chat.id, "assistant", complete_text)
+                await chat_service.add_message(db, chat_id, "assistant", complete_text)
 
                 user = await get_user_by_id(db, user_id)
                 if user:
                     await credit_service.check_and_deduct_credit(db, user)
                     await websocket.send_json({"type": "credits", "content": str(float(user.credits))})
 
-                if chat.title == "New Chat":
-                    saved_chat = await chat_service.get_chat(db, chat.id, user_id)
+                if chat_title == "New Chat":
+                    saved_chat = await chat_service.get_chat_by_session(db, chat_session_id, user_id)
                     if saved_chat:
                         title = gemini_service.generate_chat_title(message_text)
                         await chat_service.update_chat_title(db, saved_chat, title)

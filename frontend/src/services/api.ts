@@ -58,15 +58,15 @@ export const chatApi = {
     return handleResponse(res);
   },
 
-  async getChat(chatId: number) {
-    const res = await fetch(`${API_BASE}/chat/${chatId}`, {
+  async getChat(sessionId: string) {
+    const res = await fetch(`${API_BASE}/chat/${sessionId}`, {
       headers: authHeaders(),
     });
     return handleResponse(res);
   },
 
-  async deleteChat(chatId: number) {
-    const res = await fetch(`${API_BASE}/chat/${chatId}`, {
+  async deleteChat(sessionId: string) {
+    const res = await fetch(`${API_BASE}/chat/${sessionId}`, {
       method: "DELETE",
       headers: authHeaders(),
     });
@@ -84,8 +84,8 @@ export const chatApi = {
 
   streamMessage(
     message: string,
-    chatId: number | null,
-    onEvent: (event: { type: string; content?: string; chat_id?: number }) => void,
+    sessionId: string | null,
+    onEvent: (event: { type: string; content?: string; session_id?: string }) => void,
     onDone: () => void,
     onError: (err: Error) => void
   ) {
@@ -98,7 +98,7 @@ export const chatApi = {
         "Content-Type": "application/json",
         Authorization: `Bearer ${token}`,
       },
-      body: JSON.stringify({ message, chat_id: chatId }),
+      body: JSON.stringify({ message, session_id: sessionId }),
       signal: controller.signal,
     })
       .then(async (res) => {

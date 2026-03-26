@@ -5,7 +5,7 @@ from typing import Optional, List
 
 class MessageCreate(BaseModel):
     message: str = Field(..., min_length=1, max_length=4000)
-    chat_id: Optional[int] = None
+    session_id: Optional[str] = None
 
 
 class MessageResponse(BaseModel):
@@ -20,6 +20,7 @@ class MessageResponse(BaseModel):
 
 class ChatResponse(BaseModel):
     id: int
+    session_id: str
     title: str
     created_at: datetime
     messages: List[MessageResponse] = []
@@ -29,9 +30,9 @@ class ChatResponse(BaseModel):
 
 class ChatListItem(BaseModel):
     id: int
+    session_id: str
     title: str
     created_at: datetime
-    last_message: Optional[str] = None
 
     model_config = {"from_attributes": True}
 
@@ -39,4 +40,4 @@ class ChatListItem(BaseModel):
 class StreamChunk(BaseModel):
     type: str
     content: str
-    chat_id: Optional[int] = None
+    session_id: Optional[str] = None

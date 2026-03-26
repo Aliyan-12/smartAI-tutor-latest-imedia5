@@ -26,6 +26,7 @@ export interface ChatMessage {
 
 export interface Chat {
   id: number;
+  session_id: string;
   title: string;
   created_at: string;
   messages: ChatMessage[];
@@ -33,6 +34,7 @@ export interface Chat {
 
 export interface ChatListItem {
   id: number;
+  session_id: string;
   title: string;
   created_at: string;
   last_message?: string;
@@ -41,7 +43,7 @@ export interface ChatListItem {
 export interface StreamEvent {
   type: "start" | "token" | "end" | "title" | "credits" | "error";
   content?: string;
-  chat_id?: number;
+  session_id?: string;
 }
 
 export interface SubscriptionPlan {

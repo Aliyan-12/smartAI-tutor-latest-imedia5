@@ -52,7 +52,7 @@ function RoleRouter() {
     case "teacher":
       return <TeacherDashboard />;
     case "student":
-      return <ChatPage />;
+      return <Navigate to="/chat" replace />;
     default:
       return <Navigate to="/login" replace />;
   }
@@ -89,6 +89,14 @@ export default function App() {
           />
           <Route
             path="/chat"
+            element={
+              <ProtectedRoute allowedRoles={["student"]}>
+                <ChatPage />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/chat/:sessionId"
             element={
               <ProtectedRoute allowedRoles={["student"]}>
                 <ChatPage />

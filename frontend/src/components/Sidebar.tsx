@@ -5,17 +5,17 @@ import type { ChatListItem } from "../types";
 
 interface Props {
   chatList: ChatListItem[];
-  activeChatId: number | null;
+  activeSessionId: string | null;
   credits: number | null;
   onNewChat: () => void;
-  onSelectChat: (id: number) => void;
-  onDeleteChat: (id: number) => void;
+  onSelectChat: (sessionId: string) => void;
+  onDeleteChat: (sessionId: string) => void;
   onLoadChats: () => void;
 }
 
 export default function Sidebar({
   chatList,
-  activeChatId,
+  activeSessionId,
   credits,
   onNewChat,
   onSelectChat,
@@ -50,16 +50,16 @@ export default function Sidebar({
       <div className="chat-list">
         {chatList.map((chat) => (
           <div
-            key={chat.id}
-            className={`chat-list-item ${chat.id === activeChatId ? "active" : ""}`}
-            onClick={() => onSelectChat(chat.id)}
+            key={chat.session_id}
+            className={`chat-list-item ${chat.session_id === activeSessionId ? "active" : ""}`}
+            onClick={() => onSelectChat(chat.session_id)}
           >
             <span className="title">{chat.title}</span>
             <button
               className="delete-btn"
               onClick={(e) => {
                 e.stopPropagation();
-                onDeleteChat(chat.id);
+                onDeleteChat(chat.session_id);
               }}
             >
               <Trash2 size={14} />

@@ -1,15 +1,17 @@
 import { useState, useCallback, useRef } from "react";
+import { useNavigate } from "react-router-dom";
 import { chatApi } from "../services/api";
 import type { ChatMessage, ChatListItem, Chat } from "../types";
 
 export function useChat() {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [chatList, setChatList] = useState<ChatListItem[]>([]);
-  const [activeChatId, setActiveChatId] = useState<number | null>(null);
+  const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
   const [streaming, setStreaming] = useState(false);
   const [streamContent, setStreamContent] = useState("");
   const [credits, setCredits] = useState<number | null>(null);
   const cancelRef = useRef<(() => void) | null>(null);
+  const navigate = useNavigate();
 
   const loadChats = useCallback(async () => {
     const list = (await chatApi.listChats()) as ChatListItem[];
@@ -21,27 +23,29 @@ export function useChat() {
       const data = await chatApi.getCredits();
       setCredits(data.credits);
     } catch {
-      // ignore if endpoint fails
+      // ignore
     }
   }, []);
 
-  const loadChat = useCallback(async (chatId: number) => {
-    const chat = (await chatApi.getChat(chatId)) as Chat;
+  const loadChat = useCallback(async (sessionId: string) => {
+    const chat = (await chatApi.getChat(sessionId)) as Chat;
     setMessages(chat.messages);
-    setActiveChatId(chatId);
-  }, []);
+    setActiveSessionId(sessionId);
+    navigate(`/chat/${sessionId}`, { replace: true });
+  }, [navigate]);
 
   const startNewChat = useCallback(() => {
     setMessages([]);
-    setActiveChatId(null);
+    setActiveSessionId(null);
     setStreamContent("");
-  }, []);
+    navigate("/chat", { replace: true });
+  }, [navigate]);
 
   const sendMessage = useCallback(
     (text: string) => {
       const userMsg: ChatMessage = {
         id: Date.now(),
-        chat_id: activeChatId || 0,
+        chat_id: 0,
         role: "user",
         content: text,
         timestamp: new Date().toISOString(),
@@ -56,10 +60,11 @@ export function useChat() {
 
       const cancel = chatApi.streamMessage(
         text,
-        activeChatId,
+        activeSessionId,
         (event) => {
-          if (event.type === "start" && event.chat_id) {
-            setActiveChatId(event.chat_id);
+          if (event.type === "start" && event.session_id) {
+            setActiveSessionId(event.session_id);
+            navigate(`/chat/${event.session_id}`, { replace: true });
           } else if (event.type === "token" && event.content) {
             if (event.content.startsWith("[Error:")) {
               hasError = true;
@@ -67,7 +72,7 @@ export function useChat() {
                 ...prev,
                 {
                   id: Date.now() + 1,
-                  chat_id: activeChatId || 0,
+                  chat_id: 0,
                   role: "system",
                   content: event.content,
                   timestamp: new Date().toISOString(),
@@ -79,7 +84,7 @@ export function useChat() {
             }
             accumulated += event.content;
             setStreamContent(accumulated);
-          } else if (event.type === "title" && event.content) {
+          } else if (event.type === "title") {
             loadChats();
           } else if (event.type === "credits" && event.content) {
             setCredits(parseFloat(event.content));
@@ -91,14 +96,16 @@ export function useChat() {
             setStreaming(false);
             return;
           }
-          const assistantMsg: ChatMessage = {
-            id: Date.now() + 1,
-            chat_id: activeChatId || 0,
-            role: "assistant",
-            content: accumulated,
-            timestamp: new Date().toISOString(),
-          };
-          setMessages((prev) => [...prev, assistantMsg]);
+          setMessages((prev) => [
+            ...prev,
+            {
+              id: Date.now() + 1,
+              chat_id: 0,
+              role: "assistant",
+              content: accumulated,
+              timestamp: new Date().toISOString(),
+            },
+          ]);
           setStreamContent("");
           setStreaming(false);
           loadChats();
@@ -109,7 +116,7 @@ export function useChat() {
             ...prev,
             {
               id: Date.now() + 1,
-              chat_id: activeChatId || 0,
+              chat_id: 0,
               role: "system",
               content: err.message || "Something went wrong. Please try again.",
               timestamp: new Date().toISOString(),
@@ -122,18 +129,18 @@ export function useChat() {
 
       cancelRef.current = cancel;
     },
-    [activeChatId, loadChats]
+    [activeSessionId, loadChats, navigate]
   );
 
   const deleteChat = useCallback(
-    async (chatId: number) => {
-      await chatApi.deleteChat(chatId);
-      if (activeChatId === chatId) {
+    async (sessionId: string) => {
+      await chatApi.deleteChat(sessionId);
+      if (activeSessionId === sessionId) {
         startNewChat();
       }
       await loadChats();
     },
-    [activeChatId, startNewChat, loadChats]
+    [activeSessionId, startNewChat, loadChats]
   );
 
   const stopStreaming = useCallback(() => {
@@ -143,22 +150,24 @@ export function useChat() {
     }
     setStreaming(false);
     if (streamContent) {
-      const assistantMsg: ChatMessage = {
-        id: Date.now(),
-        chat_id: activeChatId || 0,
-        role: "assistant",
-        content: streamContent,
-        timestamp: new Date().toISOString(),
-      };
-      setMessages((prev) => [...prev, assistantMsg]);
+      setMessages((prev) => [
+        ...prev,
+        {
+          id: Date.now(),
+          chat_id: 0,
+          role: "assistant",
+          content: streamContent,
+          timestamp: new Date().toISOString(),
+        },
+      ]);
       setStreamContent("");
     }
-  }, [streamContent, activeChatId]);
+  }, [streamContent]);
 
   return {
     messages,
     chatList,
-    activeChatId,
+    activeSessionId,
     streaming,
     streamContent,
     credits,

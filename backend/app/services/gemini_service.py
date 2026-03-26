@@ -2,8 +2,8 @@ import time
 from typing import AsyncGenerator, List
 import logging
 
-import google.generativeai as genai
-from google.api_core import exceptions as google_exceptions
+from google import genai
+from google.genai import types
 
 from app.core.config import settings
 
@@ -21,30 +21,23 @@ SYSTEM_PROMPT = (
 MAX_RETRIES = 2
 RETRY_DELAY = 1.5
 
-_configured = False
+_client = None
 
 
-def _ensure_configured():
-    global _configured
-    if not _configured:
-        genai.configure(api_key=settings.gemini_api_key)
-        _configured = True
+def _get_client() -> genai.Client:
+    global _client
+    if _client is None:
+        _client = genai.Client(api_key=settings.gemini_api_key)
+    return _client
 
 
-def _get_model(instruction: str = SYSTEM_PROMPT):
-    _ensure_configured()
-    return genai.GenerativeModel(
-        model_name=settings.gemini_model,
-        system_instruction=instruction,
-    )
-
-
-def _build_history(history: List[dict]) -> list:
-    gemini_history = []
+def _build_contents(history: List[dict], user_message: str) -> list:
+    contents = []
     for msg in history:
         role = "user" if msg["role"] == "user" else "model"
-        gemini_history.append({"role": role, "parts": [msg["content"]]})
-    return gemini_history
+        contents.append(types.Content(role=role, parts=[types.Part(text=msg["content"])]))
+    contents.append(types.Content(role="user", parts=[types.Part(text=user_message)]))
+    return contents
 
 
 def _friendly_error(exc: Exception) -> str:
@@ -58,21 +51,29 @@ def _friendly_error(exc: Exception) -> str:
     return "Something went wrong while generating a response. Please try again."
 
 
+def _is_retryable(exc: Exception) -> bool:
+    msg = str(exc).lower()
+    return "429" in msg or "resource_exhausted" in msg or "unavailable" in msg
+
+
 def generate_response(history: List[dict], user_message: str) -> str:
     last_error = None
     for attempt in range(MAX_RETRIES + 1):
         try:
-            model = _get_model()
-            chat = model.start_chat(history=_build_history(history))
-            response = chat.send_message(user_message)
+            client = _get_client()
+            response = client.models.generate_content(
+                model=settings.gemini_model,
+                contents=_build_contents(history, user_message),
+                config=types.GenerateContentConfig(
+                    system_instruction=SYSTEM_PROMPT,
+                ),
+            )
             return response.text
-        except (google_exceptions.ResourceExhausted, google_exceptions.ServiceUnavailable) as e:
-            last_error = e
-            if attempt < MAX_RETRIES:
-                time.sleep(RETRY_DELAY * (attempt + 1))
-                continue
         except Exception as e:
             last_error = e
+            if _is_retryable(e) and attempt < MAX_RETRIES:
+                time.sleep(RETRY_DELAY * (attempt + 1))
+                continue
             break
 
     logger.error(f"Gemini generate error after {MAX_RETRIES + 1} attempts: {last_error}")
@@ -83,21 +84,24 @@ def stream_response(history: List[dict], user_message: str):
     last_error = None
     for attempt in range(MAX_RETRIES + 1):
         try:
-            model = _get_model()
-            chat = model.start_chat(history=_build_history(history))
-            response = chat.send_message(user_message, stream=True)
+            client = _get_client()
+            response = client.models.generate_content_stream(
+                model=settings.gemini_model,
+                contents=_build_contents(history, user_message),
+                config=types.GenerateContentConfig(
+                    system_instruction=SYSTEM_PROMPT,
+                ),
+            )
 
             for chunk in response:
                 if chunk.text:
                     yield chunk.text
             return
-        except (google_exceptions.ResourceExhausted, google_exceptions.ServiceUnavailable) as e:
-            last_error = e
-            if attempt < MAX_RETRIES:
-                time.sleep(RETRY_DELAY * (attempt + 1))
-                continue
         except Exception as e:
             last_error = e
+            if _is_retryable(e) and attempt < MAX_RETRIES:
+                time.sleep(RETRY_DELAY * (attempt + 1))
+                continue
             break
 
     logger.error(f"Gemini stream error after {MAX_RETRIES + 1} attempts: {last_error}")
@@ -111,10 +115,14 @@ async def stream_response_async(history: List[dict], user_message: str) -> Async
 
 def generate_chat_title(user_message: str) -> str:
     try:
-        model = _get_model(
-            instruction="Generate a short title (max 6 words) for a chat. Return only the title, no quotes or formatting."
+        client = _get_client()
+        response = client.models.generate_content(
+            model=settings.gemini_model,
+            contents=user_message,
+            config=types.GenerateContentConfig(
+                system_instruction="Generate a short title (max 6 words) for a chat. Return only the title, no quotes or formatting.",
+            ),
         )
-        response = model.generate_content(user_message)
         title = response.text.strip()
         return title[:60] if len(title) > 60 else title
     except Exception as e:

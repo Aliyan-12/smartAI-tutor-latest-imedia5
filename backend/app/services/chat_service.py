@@ -16,11 +16,18 @@ async def create_chat(db: AsyncSession, user_id: int, title: str = "New Chat") -
     return chat
 
 
-async def get_chat(db: AsyncSession, chat_id: int, user_id: int) -> Optional[Chat]:
+async def get_chat_by_session(db: AsyncSession, session_id: str, user_id: int) -> Optional[Chat]:
     result = await db.execute(
         select(Chat)
         .options(selectinload(Chat.messages))
-        .where(Chat.id == chat_id, Chat.user_id == user_id)
+        .where(Chat.session_id == session_id, Chat.user_id == user_id)
+    )
+    return result.scalar_one_or_none()
+
+
+async def get_chat_by_id(db: AsyncSession, chat_id: int) -> Optional[Chat]:
+    result = await db.execute(
+        select(Chat).options(selectinload(Chat.messages)).where(Chat.id == chat_id)
     )
     return result.scalar_one_or_none()
 
@@ -63,8 +70,8 @@ async def update_chat_title(db: AsyncSession, chat: Chat, title: str):
     await db.flush()
 
 
-async def delete_chat(db: AsyncSession, chat_id: int, user_id: int) -> bool:
-    chat = await get_chat(db, chat_id, user_id)
+async def delete_chat_by_session(db: AsyncSession, session_id: str, user_id: int) -> bool:
+    chat = await get_chat_by_session(db, session_id, user_id)
     if not chat:
         return False
     await db.delete(chat)

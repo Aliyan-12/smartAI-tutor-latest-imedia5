@@ -1,4 +1,5 @@
 import { useEffect } from "react";
+import { useParams } from "react-router-dom";
 import Sidebar from "../components/Sidebar";
 import ChatWindow from "../components/ChatWindow";
 import ChatInput from "../components/ChatInput";
@@ -7,10 +8,12 @@ import { useChat } from "../hooks/useChat";
 import { useVoice } from "../hooks/useVoice";
 
 export default function ChatPage() {
+  const { sessionId } = useParams<{ sessionId?: string }>();
+
   const {
     messages,
     chatList,
-    activeChatId,
+    activeSessionId,
     streaming,
     streamContent,
     credits,
@@ -29,13 +32,21 @@ export default function ChatPage() {
     loadCredits();
   }, [loadCredits]);
 
+  useEffect(() => {
+    if (sessionId && sessionId !== activeSessionId) {
+      loadChat(sessionId);
+    } else if (!sessionId && activeSessionId) {
+      // URL is /chat but we have an active session — clear it
+    }
+  }, [sessionId]); // eslint-disable-line react-hooks/exhaustive-deps
+
   const showWelcome = messages.length === 0 && !streaming;
 
   return (
     <div className="app-layout">
       <Sidebar
         chatList={chatList}
-        activeChatId={activeChatId}
+        activeSessionId={activeSessionId}
         credits={credits}
         onNewChat={startNewChat}
         onSelectChat={loadChat}
