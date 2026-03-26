@@ -1,4 +1,3 @@
-import asyncio
 import json
 import logging
 from typing import List
@@ -10,13 +9,29 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.db.session import get_db, async_session_factory
 from app.middleware.auth import get_current_user
 from app.core.security import decode_access_token
-from app.models.user import User
+from app.models.user import User, ROLE_STUDENT
 from app.schemas.chat import MessageCreate, ChatResponse, ChatListItem, MessageResponse
-from app.services import chat_service, gemini_service
+from app.services import chat_service, gemini_service, credit_service
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/chat", tags=["chat"])
+
+
+def _ensure_student(user: User):
+    if user.role != ROLE_STUDENT:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only students can use the chat feature",
+        )
+
+
+async def _ensure_credits(db: AsyncSession, user: User):
+    if not user.has_credits:
+        raise HTTPException(
+            status_code=status.HTTP_402_PAYMENT_REQUIRED,
+            detail="Insufficient credits. Please subscribe to continue.",
+        )
 
 
 @router.get("/list", response_model=List[ChatListItem])
@@ -24,6 +39,7 @@ async def list_chats(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
+    _ensure_student(current_user)
     chats = await chat_service.get_user_chats(db, current_user.id)
     items = []
     for c in chats:
@@ -35,12 +51,24 @@ async def list_chats(
     return items
 
 
+@router.get("/credits")
+async def get_credits(
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    return {
+        "credits": float(current_user.credits),
+        "cost_per_message": credit_service.COST_PER_MESSAGE,
+    }
+
+
 @router.get("/{chat_id}", response_model=ChatResponse)
 async def get_chat(
     chat_id: int,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
+    _ensure_student(current_user)
     chat = await chat_service.get_chat(db, chat_id, current_user.id)
     if not chat:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Chat not found")
@@ -53,6 +81,7 @@ async def delete_chat(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
+    _ensure_student(current_user)
     deleted = await chat_service.delete_chat(db, chat_id, current_user.id)
     if not deleted:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Chat not found")
@@ -64,6 +93,9 @@ async def send_message(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
+    _ensure_student(current_user)
+    await _ensure_credits(db, current_user)
+
     if payload.chat_id:
         chat = await chat_service.get_chat(db, payload.chat_id, current_user.id)
         if not chat:
@@ -72,11 +104,11 @@ async def send_message(
         chat = await chat_service.create_chat(db, current_user.id)
 
     await chat_service.add_message(db, chat.id, "user", payload.message)
-
     history = await chat_service.build_context(db, chat.id)
     ai_text = gemini_service.generate_response(history[:-1], payload.message)
-
     assistant_msg = await chat_service.add_message(db, chat.id, "assistant", ai_text)
+
+    await credit_service.check_and_deduct_credit(db, current_user)
 
     if chat.title == "New Chat":
         title = gemini_service.generate_chat_title(payload.message)
@@ -91,6 +123,9 @@ async def stream_message(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
+    _ensure_student(current_user)
+    await _ensure_credits(db, current_user)
+
     if payload.chat_id:
         chat = await chat_service.get_chat(db, payload.chat_id, current_user.id)
         if not chat:
@@ -113,6 +148,13 @@ async def stream_message(
 
         async with async_session_factory() as save_session:
             await chat_service.add_message(save_session, chat.id, "assistant", complete_text)
+
+            from app.services.user_service import get_user_by_id
+            fresh_user = await get_user_by_id(save_session, current_user.id)
+            if fresh_user:
+                await credit_service.check_and_deduct_credit(save_session, fresh_user)
+                yield f"data: {json.dumps({'type': 'credits', 'content': str(float(fresh_user.credits))})}\n\n"
+
             if chat.title == "New Chat":
                 saved_chat = await chat_service.get_chat(save_session, chat.id, current_user.id)
                 if saved_chat:
@@ -141,8 +183,9 @@ async def websocket_chat(websocket: WebSocket):
         return
 
     user_id = int(payload.get("sub", 0))
-    if not user_id:
-        await websocket.close(code=4001, reason="Invalid token payload")
+    user_role = payload.get("role", "")
+    if not user_id or user_role != ROLE_STUDENT:
+        await websocket.close(code=4003, reason="Only students can use chat")
         return
 
     try:
@@ -155,6 +198,12 @@ async def websocket_chat(websocket: WebSocket):
                 continue
 
             async with async_session_factory() as db:
+                from app.services.user_service import get_user_by_id
+                user = await get_user_by_id(db, user_id)
+                if not user or not user.has_credits:
+                    await websocket.send_json({"type": "error", "content": "Insufficient credits"})
+                    continue
+
                 if chat_id:
                     chat = await chat_service.get_chat(db, chat_id, user_id)
                     if not chat:
@@ -177,6 +226,12 @@ async def websocket_chat(websocket: WebSocket):
 
             async with async_session_factory() as db:
                 await chat_service.add_message(db, chat.id, "assistant", complete_text)
+
+                user = await get_user_by_id(db, user_id)
+                if user:
+                    await credit_service.check_and_deduct_credit(db, user)
+                    await websocket.send_json({"type": "credits", "content": str(float(user.credits))})
+
                 if chat.title == "New Chat":
                     saved_chat = await chat_service.get_chat(db, chat.id, user_id)
                     if saved_chat:

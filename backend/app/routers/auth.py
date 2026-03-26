@@ -6,7 +6,7 @@ from app.schemas.user import UserCreate, UserLogin, UserResponse, TokenResponse
 from app.services.user_service import create_user, authenticate_user, get_user_by_email
 from app.core.security import create_access_token
 from app.middleware.auth import get_current_user
-from app.models.user import User
+from app.models.user import User, ROLE_STUDENT
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
 
@@ -20,8 +20,8 @@ async def register(payload: UserCreate, db: AsyncSession = Depends(get_db)):
             detail="An account with this email already exists",
         )
 
-    user = await create_user(db, payload.name, payload.email, payload.password)
-    token = create_access_token({"sub": str(user.id)})
+    user = await create_user(db, payload.name, payload.email, payload.password, role=ROLE_STUDENT)
+    token = create_access_token({"sub": str(user.id), "role": user.role})
 
     return TokenResponse(
         access_token=token,
@@ -38,7 +38,7 @@ async def login(payload: UserLogin, db: AsyncSession = Depends(get_db)):
             detail="Invalid email or password",
         )
 
-    token = create_access_token({"sub": str(user.id)})
+    token = create_access_token({"sub": str(user.id), "role": user.role})
 
     return TokenResponse(
         access_token=token,

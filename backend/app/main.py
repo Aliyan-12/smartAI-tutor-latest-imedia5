@@ -2,12 +2,10 @@ import logging
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from contextlib import asynccontextmanager
 
 from app.core.config import settings
-from app.db.init_db import init_database
 from app.middleware.rate_limit import RateLimitMiddleware
-from app.routers import auth, chat, voice, health
+from app.routers import auth, chat, voice, health, admin, teacher, subscription
 
 logging.basicConfig(
     level=logging.INFO,
@@ -15,21 +13,10 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    logger.info("Starting SmartAI Tutor API...")
-    await init_database()
-    logger.info("Database initialized")
-    yield
-    logger.info("Shutting down SmartAI Tutor API")
-
-
 app = FastAPI(
     title=settings.app_name,
     version="1.0.0",
     description="AI-powered tutoring platform API",
-    lifespan=lifespan,
 )
 
 app.add_middleware(
@@ -45,3 +32,6 @@ app.include_router(health.router)
 app.include_router(auth.router)
 app.include_router(chat.router)
 app.include_router(voice.router)
+app.include_router(admin.router)
+app.include_router(teacher.router)
+app.include_router(subscription.router)

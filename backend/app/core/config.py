@@ -1,16 +1,21 @@
+from pathlib import Path
 from pydantic_settings import BaseSettings
 from typing import List
 import os
+
+BASE_DIR = Path(__file__).resolve().parent.parent.parent
+ROOT_DIR = BASE_DIR.parent
+ENV_FILE = ROOT_DIR / ".env" if (ROOT_DIR / ".env").exists() else BASE_DIR / ".env"
 
 
 class Settings(BaseSettings):
     app_name: str = "SmartAI Tutor"
     debug: bool = False
 
-    postgres_user: str = "smartai"
-    postgres_password: str = "smartai_secret_2024"
+    postgres_user: str = ""
+    postgres_password: str = ""
     postgres_db: str = "smartai_tutor"
-    postgres_host: str = "db"
+    postgres_host: str = "localhost"
     postgres_port: int = 5432
 
     gemini_api_key: str = ""
@@ -46,7 +51,7 @@ class Settings(BaseSettings):
         return [origin.strip() for origin in self.backend_cors_origins.split(",")]
 
     class Config:
-        env_file = ".env"
+        env_file = str(ENV_FILE)
         env_file_encoding = "utf-8"
 
 
