@@ -45,9 +45,9 @@ export default function TeacherDashboard() {
     }
   };
 
-  const viewChat = async (chatId: number) => {
+  const viewChat = async (sessionId: string) => {
     try {
-      const chat = (await teacherApi.viewChat(chatId)) as Chat;
+      const chat = (await teacherApi.viewChat(sessionId)) as Chat;
       setViewingChat(chat);
     } catch (err: any) {
       setError(err.message);
@@ -124,7 +124,7 @@ export default function TeacherDashboard() {
                 <>
                   <h3>Chat History</h3>
                   {studentChats.map((c) => (
-                    <div key={c.id} className="chat-row" onClick={() => viewChat(c.id)}>
+                    <div key={c.session_id} className="chat-row" onClick={() => viewChat(c.session_id)}>
                       <span>{c.title}</span>
                       <span className="chat-date">{new Date(c.created_at).toLocaleDateString()}</span>
                     </div>
@@ -162,7 +162,7 @@ export default function TeacherDashboard() {
           <h3>Recent Student Questions</h3>
           <div className="activity-list">
             {recentActivity.map((a: any, i: number) => (
-              <div key={i} className="activity-item" onClick={() => viewChat(a.chat_id)}>
+              <div key={i} className="activity-item" onClick={() => viewChat(a.session_id)}>
                 <p className="activity-content">{a.content}</p>
                 <span className="activity-time">{new Date(a.timestamp).toLocaleString()}</span>
               </div>

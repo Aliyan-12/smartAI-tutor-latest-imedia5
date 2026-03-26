@@ -109,20 +109,20 @@ async def recent_activity(
     db: AsyncSession = Depends(get_db),
 ):
     result = await db.execute(
-        select(Message)
+        select(Message, Chat.session_id)
         .join(Chat, Chat.id == Message.chat_id)
         .join(User, User.id == Chat.user_id)
         .where(User.role == ROLE_STUDENT, Message.role == "user")
         .order_by(desc(Message.timestamp))
         .limit(limit)
     )
-    messages = list(result.scalars().all())
+    rows = result.all()
     items = []
-    for m in messages:
+    for msg, session_id in rows:
         items.append({
-            "message_id": m.id,
-            "chat_id": m.chat_id,
-            "content": m.content[:200],
-            "timestamp": m.timestamp.isoformat(),
+            "message_id": msg.id,
+            "session_id": session_id,
+            "content": msg.content[:200],
+            "timestamp": msg.timestamp.isoformat(),
         })
     return items

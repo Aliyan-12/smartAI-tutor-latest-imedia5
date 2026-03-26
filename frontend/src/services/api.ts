@@ -229,8 +229,8 @@ export const adminApi = {
     return handleResponse(res);
   },
 
-  async viewChat(chatId: number) {
-    const res = await fetch(`${API_BASE}/admin/chats/${chatId}`, { headers: authHeaders() });
+  async viewChat(sessionId: string) {
+    const res = await fetch(`${API_BASE}/admin/chats/${sessionId}`, { headers: authHeaders() });
     return handleResponse(res);
   },
 };
@@ -253,8 +253,8 @@ export const teacherApi = {
     return handleResponse(res);
   },
 
-  async viewChat(chatId: number) {
-    const res = await fetch(`${API_BASE}/teacher/chats/${chatId}`, { headers: authHeaders() });
+  async viewChat(sessionId: string) {
+    const res = await fetch(`${API_BASE}/teacher/chats/${sessionId}`, { headers: authHeaders() });
     return handleResponse(res);
   },
 
