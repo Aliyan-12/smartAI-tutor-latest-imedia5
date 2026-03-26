@@ -19,7 +19,7 @@ class Settings(BaseSettings):
     postgres_port: int = 5432
 
     gemini_api_key: str = ""
-    gemini_model: str = "gemini-2.0-flash"
+    gemini_model: str = "gemini-2.5-flash"
 
     jwt_secret_key: str = "change-this-to-a-random-64-char-string"
     jwt_algorithm: str = "HS256"
