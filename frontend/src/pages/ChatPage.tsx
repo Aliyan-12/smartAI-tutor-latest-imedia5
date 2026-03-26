@@ -1,3 +1,4 @@
+import { useEffect } from "react";
 import Sidebar from "../components/Sidebar";
 import ChatWindow from "../components/ChatWindow";
 import ChatInput from "../components/ChatInput";
@@ -12,7 +13,9 @@ export default function ChatPage() {
     activeChatId,
     streaming,
     streamContent,
+    credits,
     loadChats,
+    loadCredits,
     loadChat,
     startNewChat,
     sendMessage,
@@ -22,6 +25,10 @@ export default function ChatPage() {
 
   const { recording, startRecording, stopRecording, speakText } = useVoice();
 
+  useEffect(() => {
+    loadCredits();
+  }, [loadCredits]);
+
   const showWelcome = messages.length === 0 && !streaming;
 
   return (
@@ -29,6 +36,7 @@ export default function ChatPage() {
       <Sidebar
         chatList={chatList}
         activeChatId={activeChatId}
+        credits={credits}
         onNewChat={startNewChat}
         onSelectChat={loadChat}
         onDeleteChat={deleteChat}

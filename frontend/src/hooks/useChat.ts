@@ -8,11 +8,21 @@ export function useChat() {
   const [activeChatId, setActiveChatId] = useState<number | null>(null);
   const [streaming, setStreaming] = useState(false);
   const [streamContent, setStreamContent] = useState("");
+  const [credits, setCredits] = useState<number | null>(null);
   const cancelRef = useRef<(() => void) | null>(null);
 
   const loadChats = useCallback(async () => {
     const list = (await chatApi.listChats()) as ChatListItem[];
     setChatList(list);
+  }, []);
+
+  const loadCredits = useCallback(async () => {
+    try {
+      const data = await chatApi.getCredits();
+      setCredits(data.credits);
+    } catch {
+      // ignore if endpoint fails
+    }
   }, []);
 
   const loadChat = useCallback(async (chatId: number) => {
@@ -42,6 +52,7 @@ export function useChat() {
       setStreamContent("");
 
       let accumulated = "";
+      let hasError = false;
 
       const cancel = chatApi.streamMessage(
         text,
@@ -50,13 +61,36 @@ export function useChat() {
           if (event.type === "start" && event.chat_id) {
             setActiveChatId(event.chat_id);
           } else if (event.type === "token" && event.content) {
+            if (event.content.startsWith("[Error:")) {
+              hasError = true;
+              setMessages((prev) => [
+                ...prev,
+                {
+                  id: Date.now() + 1,
+                  chat_id: activeChatId || 0,
+                  role: "system",
+                  content: event.content,
+                  timestamp: new Date().toISOString(),
+                },
+              ]);
+              setStreamContent("");
+              setStreaming(false);
+              return;
+            }
             accumulated += event.content;
             setStreamContent(accumulated);
           } else if (event.type === "title" && event.content) {
             loadChats();
+          } else if (event.type === "credits" && event.content) {
+            setCredits(parseFloat(event.content));
           }
         },
         () => {
+          if (hasError || !accumulated) {
+            setStreamContent("");
+            setStreaming(false);
+            return;
+          }
           const assistantMsg: ChatMessage = {
             id: Date.now() + 1,
             chat_id: activeChatId || 0,
@@ -71,6 +105,16 @@ export function useChat() {
         },
         (err) => {
           console.error("Stream error:", err);
+          setMessages((prev) => [
+            ...prev,
+            {
+              id: Date.now() + 1,
+              chat_id: activeChatId || 0,
+              role: "system",
+              content: err.message || "Something went wrong. Please try again.",
+              timestamp: new Date().toISOString(),
+            },
+          ]);
           setStreaming(false);
           setStreamContent("");
         }
@@ -117,7 +161,9 @@ export function useChat() {
     activeChatId,
     streaming,
     streamContent,
+    credits,
     loadChats,
+    loadCredits,
     loadChat,
     startNewChat,
     sendMessage,

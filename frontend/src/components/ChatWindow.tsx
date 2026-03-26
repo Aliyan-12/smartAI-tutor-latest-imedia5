@@ -28,30 +28,43 @@ export default function ChatWindow({
 
   return (
     <>
-      {messages.map((msg) => (
-        <div key={msg.id} className={`message ${msg.role}`}>
-          <div className="message-avatar">
-            {msg.role === "user" ? "U" : "AI"}
-          </div>
-          <div>
-            <div className="message-bubble">
-              {msg.role === "assistant" ? (
-                <ReactMarkdown>{msg.content}</ReactMarkdown>
-              ) : (
-                msg.content
+      {messages.map((msg) => {
+        if (msg.role === "system") {
+          return (
+            <div key={msg.id} className="message assistant">
+              <div className="message-avatar error-avatar">!</div>
+              <div>
+                <div className="message-bubble error-bubble">{msg.content}</div>
+              </div>
+            </div>
+          );
+        }
+
+        return (
+          <div key={msg.id} className={`message ${msg.role}`}>
+            <div className="message-avatar">
+              {msg.role === "user" ? "U" : "AI"}
+            </div>
+            <div>
+              <div className="message-bubble">
+                {msg.role === "assistant" ? (
+                  <ReactMarkdown>{msg.content}</ReactMarkdown>
+                ) : (
+                  msg.content
+                )}
+              </div>
+              {msg.role === "assistant" && (
+                <div className="message-actions">
+                  <button onClick={() => onSpeak(msg.content)} title="Read aloud">
+                    <Volume2 size={14} />
+                    <span>Listen</span>
+                  </button>
+                </div>
               )}
             </div>
-            {msg.role === "assistant" && (
-              <div className="message-actions">
-                <button onClick={() => onSpeak(msg.content)} title="Read aloud">
-                  <Volume2 size={14} />
-                  <span>Listen</span>
-                </button>
-              </div>
-            )}
           </div>
-        </div>
-      ))}
+        );
+      })}
 
       {streaming && streamContent && (
         <div className="message assistant">

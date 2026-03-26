@@ -75,11 +75,9 @@ export const chatApi = {
     }
   },
 
-  async sendMessage(message: string, chatId?: number) {
-    const res = await fetch(`${API_BASE}/chat/send`, {
-      method: "POST",
+  async getCredits(): Promise<{ credits: number; cost_per_message: number }> {
+    const res = await fetch(`${API_BASE}/chat/credits`, {
       headers: authHeaders(),
-      body: JSON.stringify({ message, chat_id: chatId }),
     });
     return handleResponse(res);
   },
@@ -171,5 +169,123 @@ export const voiceApi = {
     if (!res.ok) throw new Error("Transcription failed");
     const data = await res.json();
     return data.text;
+  },
+};
+
+export const adminApi = {
+  async getDashboard() {
+    const res = await fetch(`${API_BASE}/admin/dashboard`, { headers: authHeaders() });
+    return handleResponse(res);
+  },
+
+  async getUsers(params?: { role?: string; is_active?: boolean }) {
+    const query = new URLSearchParams();
+    if (params?.role) query.set("role", params.role);
+    if (params?.is_active !== undefined) query.set("is_active", String(params.is_active));
+    const res = await fetch(`${API_BASE}/admin/users?${query}`, { headers: authHeaders() });
+    return handleResponse(res);
+  },
+
+  async createUser(data: { name: string; email: string; password: string; role: string; credits: number }) {
+    const res = await fetch(`${API_BASE}/admin/users`, {
+      method: "POST",
+      headers: authHeaders(),
+      body: JSON.stringify(data),
+    });
+    return handleResponse(res);
+  },
+
+  async updateUser(userId: number, data: Record<string, unknown>) {
+    const res = await fetch(`${API_BASE}/admin/users/${userId}`, {
+      method: "PATCH",
+      headers: authHeaders(),
+      body: JSON.stringify(data),
+    });
+    return handleResponse(res);
+  },
+
+  async deleteUser(userId: number) {
+    const res = await fetch(`${API_BASE}/admin/users/${userId}`, {
+      method: "DELETE",
+      headers: authHeaders(),
+    });
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      throw new Error(body.detail || "Failed to delete user");
+    }
+  },
+
+  async adjustCredits(userId: number, amount: number, description: string) {
+    const res = await fetch(`${API_BASE}/admin/users/${userId}/credits`, {
+      method: "POST",
+      headers: authHeaders(),
+      body: JSON.stringify({ amount, description }),
+    });
+    return handleResponse(res);
+  },
+
+  async getUserChats(userId: number) {
+    const res = await fetch(`${API_BASE}/admin/users/${userId}/chats`, { headers: authHeaders() });
+    return handleResponse(res);
+  },
+
+  async viewChat(chatId: number) {
+    const res = await fetch(`${API_BASE}/admin/chats/${chatId}`, { headers: authHeaders() });
+    return handleResponse(res);
+  },
+};
+
+export const teacherApi = {
+  async getDashboard() {
+    const res = await fetch(`${API_BASE}/teacher/dashboard`, { headers: authHeaders() });
+    return handleResponse(res);
+  },
+
+  async getStudents(params?: { is_active?: boolean }) {
+    const query = new URLSearchParams();
+    if (params?.is_active !== undefined) query.set("is_active", String(params.is_active));
+    const res = await fetch(`${API_BASE}/teacher/students?${query}`, { headers: authHeaders() });
+    return handleResponse(res);
+  },
+
+  async getStudentChats(studentId: number) {
+    const res = await fetch(`${API_BASE}/teacher/students/${studentId}/chats`, { headers: authHeaders() });
+    return handleResponse(res);
+  },
+
+  async viewChat(chatId: number) {
+    const res = await fetch(`${API_BASE}/teacher/chats/${chatId}`, { headers: authHeaders() });
+    return handleResponse(res);
+  },
+
+  async getActivity(limit: number = 20) {
+    const res = await fetch(`${API_BASE}/teacher/activity?limit=${limit}`, { headers: authHeaders() });
+    return handleResponse(res);
+  },
+};
+
+export const subscriptionApi = {
+  async getPlans() {
+    const res = await fetch(`${API_BASE}/subscription/plans`, { headers: authHeaders() });
+    return handleResponse(res);
+  },
+
+  async subscribe(planName: string) {
+    const res = await fetch(`${API_BASE}/subscription/subscribe`, {
+      method: "POST",
+      headers: authHeaders(),
+      body: JSON.stringify({ plan_name: planName }),
+    });
+    return handleResponse(res);
+  },
+
+  async getHistory() {
+    const res = await fetch(`${API_BASE}/subscription/history`, { headers: authHeaders() });
+    return handleResponse(res);
+  },
+
+  async getTransactions() {
+    const res = await fetch(`${API_BASE}/subscription/transactions`, { headers: authHeaders() });
+    return handleResponse(res);
   },
 };
