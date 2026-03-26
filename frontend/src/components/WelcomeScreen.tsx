@@ -5,16 +5,16 @@ interface Props {
 }
 
 const PROMPTS = [
-  { icon: BookOpen, text: "Explain photosynthesis in simple terms", color: "#30a46c" },
-  { icon: Calculator, text: "Help me solve a quadratic equation", color: "#4f6df5" },
-  { icon: Globe, text: "What are the main causes of World War II?", color: "#f5a623" },
-  { icon: Atom, text: "Explain how fractions and decimals work", color: "#7c5cfc" },
+  { icon: BookOpen, text: "Explain photosynthesis in simple terms", color: "#2d8a56" },
+  { icon: Calculator, text: "Help me solve a quadratic equation", color: "#2563a8" },
+  { icon: Globe, text: "What are the main causes of World War II?", color: "#c47a1a" },
+  { icon: Atom, text: "Explain how fractions and decimals work", color: "#7044c4" },
 ];
 
 export default function WelcomeScreen({ onPromptClick }: Props) {
   return (
     <div className="welcome-screen">
-      <div className="icon">AI</div>
+      <img src="/Original-Logo.png" alt="SmartAI Tutor" className="welcome-logo" />
       <h1>SmartAI Tutor</h1>
       <p>
         Your personal AI learning companion. Ask questions, get explanations,

@@ -27,7 +27,7 @@ export default function LoginPage() {
     <div className="auth-page">
       <div className="auth-card">
         <div className="logo-section">
-          <div className="icon">AI</div>
+          <img src="/Original-Logo.png" alt="SmartAI Tutor" className="auth-logo" />
           <h1>Welcome Back</h1>
           <p>Sign in to continue learning</p>
         </div>

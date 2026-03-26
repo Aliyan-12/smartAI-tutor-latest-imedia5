@@ -1,72 +1,140 @@
 import { useEffect } from "react";
-import { MessageSquarePlus, Trash2, LogOut, Coins } from "lucide-react";
+import { useNavigate, useLocation } from "react-router-dom";
+import {
+  MessageSquarePlus, Trash2, LogOut, Coins,
+  LayoutDashboard, Users, Activity, Shield,
+  BookOpen, Settings,
+} from "lucide-react";
 import { useAuth } from "../context/AuthContext";
 import type { ChatListItem } from "../types";
 
 interface Props {
-  chatList: ChatListItem[];
-  activeSessionId: string | null;
-  credits: number | null;
-  onNewChat: () => void;
-  onSelectChat: (sessionId: string) => void;
-  onDeleteChat: (sessionId: string) => void;
-  onLoadChats: () => void;
+  chatList?: ChatListItem[];
+  activeSessionId?: string | null;
+  credits?: number | null;
+  onNewChat?: () => void;
+  onSelectChat?: (sessionId: string) => void;
+  onDeleteChat?: (sessionId: string) => void;
+  onLoadChats?: () => void;
 }
 
 export default function Sidebar({
-  chatList,
-  activeSessionId,
-  credits,
+  chatList = [],
+  activeSessionId = null,
+  credits = null,
   onNewChat,
   onSelectChat,
   onDeleteChat,
   onLoadChats,
 }: Props) {
   const { user, logout } = useAuth();
+  const navigate = useNavigate();
+  const location = useLocation();
 
   useEffect(() => {
-    onLoadChats();
+    if (onLoadChats) onLoadChats();
   }, [onLoadChats]);
+
+  const isActive = (path: string) => location.pathname === path;
 
   return (
     <div className="sidebar">
       <div className="sidebar-header">
-        <div className="logo">AI</div>
+        <img src="/Original-Logo.png" alt="SmartAI Tutor" className="logo-img" />
         <h2>SmartAI Tutor</h2>
       </div>
 
-      {credits !== null && (
+      {user?.role === "student" && credits !== null && (
         <div className="credits-display">
           <Coins size={14} />
           <span>{credits.toFixed(0)} credits</span>
         </div>
       )}
 
-      <button className="new-chat-btn" onClick={onNewChat}>
-        <MessageSquarePlus size={16} />
-        New Chat
-      </button>
-
-      <div className="chat-list">
-        {chatList.map((chat) => (
+      {/* Admin nav */}
+      {user?.role === "admin" && (
+        <div className="sidebar-nav">
           <div
-            key={chat.session_id}
-            className={`chat-list-item ${chat.session_id === activeSessionId ? "active" : ""}`}
-            onClick={() => onSelectChat(chat.session_id)}
+            className={`nav-item ${isActive("/admin") ? "active" : ""}`}
+            onClick={() => navigate("/admin")}
           >
-            <span className="title">{chat.title}</span>
-            <button
-              className="delete-btn"
-              onClick={(e) => {
-                e.stopPropagation();
-                onDeleteChat(chat.session_id);
-              }}
-            >
-              <Trash2 size={14} />
-            </button>
+            <LayoutDashboard size={16} />
+            <span>Dashboard</span>
           </div>
-        ))}
-      </div>
+          <div
+            className={`nav-item ${isActive("/admin/users") ? "active" : ""}`}
+            onClick={() => navigate("/admin/users")}
+          >
+            <Users size={16} />
+            <span>Users</span>
+          </div>
+          <div
+            className={`nav-item ${isActive("/admin/chats") ? "active" : ""}`}
+            onClick={() => navigate("/admin/chats")}
+          >
+            <MessageSquarePlus size={16} />
+            <span>All Chats</span>
+          </div>
+        </div>
+      )}
+
+      {/* Teacher nav */}
+      {user?.role === "teacher" && (
+        <div className="sidebar-nav">
+          <div
+            className={`nav-item ${isActive("/teacher") ? "active" : ""}`}
+            onClick={() => navigate("/teacher")}
+          >
+            <LayoutDashboard size={16} />
+            <span>Dashboard</span>
+          </div>
+          <div
+            className={`nav-item ${isActive("/teacher/students") ? "active" : ""}`}
+            onClick={() => navigate("/teacher/students")}
+          >
+            <BookOpen size={16} />
+            <span>Students</span>
+          </div>
+          <div
+            className={`nav-item ${isActive("/teacher/activity") ? "active" : ""}`}
+            onClick={() => navigate("/teacher/activity")}
+          >
+            <Activity size={16} />
+            <span>Activity</span>
+          </div>
+        </div>
+      )}
+
+      {/* Student chat controls */}
+      {user?.role === "student" && onNewChat && (
+        <>
+          <button className="new-chat-btn" onClick={onNewChat}>
+            <MessageSquarePlus size={16} />
+            New Chat
+          </button>
+
+          <div className="chat-list">
+            {chatList.map((chat) => (
+              <div
+                key={chat.session_id}
+                className={`chat-list-item ${chat.session_id === activeSessionId ? "active" : ""}`}
+                onClick={() => onSelectChat?.(chat.session_id)}
+              >
+                <span className="title">{chat.title}</span>
+                <button
+                  className="delete-btn"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onDeleteChat?.(chat.session_id);
+                  }}
+                >
+                  <Trash2 size={14} />
+                </button>
+              </div>
+            ))}
+          </div>
+        </>
+      )}
 
       <div className="sidebar-footer">
         <div className="user-info">

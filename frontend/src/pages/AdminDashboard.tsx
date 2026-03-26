@@ -1,14 +1,49 @@
 import { useState, useEffect, useCallback } from "react";
-import { Users, MessageSquare, BookOpen, Shield, Plus, Trash2, Edit3, Coins } from "lucide-react";
+import { useLocation } from "react-router-dom";
+import { Users, MessageSquare, BookOpen, Plus, Trash2, Edit3, Coins } from "lucide-react";
 import { adminApi } from "../services/api";
-import { useAuth } from "../context/AuthContext";
+import Sidebar from "../components/Sidebar";
 import type { User, DashboardStats } from "../types";
 
-export default function AdminDashboard() {
-  const { logout } = useAuth();
-  const [stats, setStats] = useState<DashboardStats | null>(null);
-  const [users, setUsers] = useState<User[]>([]);
-  const [roleFilter, setRoleFilter] = useState<string>("");
+function DashboardView({ stats }: { stats: DashboardStats | null }) {
+  if (!stats) return null;
+  return (
+    <div className="stats-grid">
+      <div className="stat-card">
+        <Users size={20} />
+        <div className="stat-value">{stats.total_users}</div>
+        <div className="stat-label">Total Users</div>
+      </div>
+      <div className="stat-card">
+        <BookOpen size={20} />
+        <div className="stat-value">{stats.total_students}</div>
+        <div className="stat-label">Students</div>
+      </div>
+      <div className="stat-card">
+        <Users size={20} />
+        <div className="stat-value">{stats.total_teachers}</div>
+        <div className="stat-label">Teachers</div>
+      </div>
+      <div className="stat-card">
+        <MessageSquare size={20} />
+        <div className="stat-value">{stats.total_chats}</div>
+        <div className="stat-label">Chats</div>
+      </div>
+    </div>
+  );
+}
+
+function UsersView({
+  users,
+  roleFilter,
+  setRoleFilter,
+  onReload,
+}: {
+  users: User[];
+  roleFilter: string;
+  setRoleFilter: (v: string) => void;
+  onReload: () => void;
+}) {
   const [showCreateForm, setShowCreateForm] = useState(false);
   const [editingUser, setEditingUser] = useState<User | null>(null);
   const [creditUserId, setCreditUserId] = useState<number | null>(null);
@@ -17,23 +52,6 @@ export default function AdminDashboard() {
   const [form, setForm] = useState({ name: "", email: "", password: "", role: "student", credits: 100 });
   const [error, setError] = useState("");
 
-  const loadData = useCallback(async () => {
-    try {
-      const [dashData, userData] = await Promise.all([
-        adminApi.getDashboard() as Promise<DashboardStats>,
-        adminApi.getUsers(roleFilter ? { role: roleFilter } : undefined) as Promise<User[]>,
-      ]);
-      setStats(dashData);
-      setUsers(userData);
-    } catch (err: any) {
-      setError(err.message);
-    }
-  }, [roleFilter]);
-
-  useEffect(() => {
-    loadData();
-  }, [loadData]);
-
   const handleCreate = async (e: React.FormEvent) => {
     e.preventDefault();
     setError("");
@@ -41,10 +59,8 @@ export default function AdminDashboard() {
       await adminApi.createUser(form);
       setShowCreateForm(false);
       setForm({ name: "", email: "", password: "", role: "student", credits: 100 });
-      await loadData();
-    } catch (err: any) {
-      setError(err.message);
-    }
+      onReload();
+    } catch (err: any) { setError(err.message); }
   };
 
   const handleUpdate = async (e: React.FormEvent) => {
@@ -58,20 +74,16 @@ export default function AdminDashboard() {
       if (form.role && form.role !== editingUser.role) updates.role = form.role;
       await adminApi.updateUser(editingUser.id, updates);
       setEditingUser(null);
-      await loadData();
-    } catch (err: any) {
-      setError(err.message);
-    }
+      onReload();
+    } catch (err: any) { setError(err.message); }
   };
 
   const handleDelete = async (userId: number) => {
     if (!confirm("Are you sure you want to delete this user?")) return;
     try {
       await adminApi.deleteUser(userId);
-      await loadData();
-    } catch (err: any) {
-      setError(err.message);
-    }
+      onReload();
+    } catch (err: any) { setError(err.message); }
   };
 
   const handleCreditAdjust = async (e: React.FormEvent) => {
@@ -82,10 +94,8 @@ export default function AdminDashboard() {
       setCreditUserId(null);
       setCreditAmount("");
       setCreditDesc("");
-      await loadData();
-    } catch (err: any) {
-      setError(err.message);
-    }
+      onReload();
+    } catch (err: any) { setError(err.message); }
   };
 
   const startEdit = (user: User) => {
@@ -95,42 +105,8 @@ export default function AdminDashboard() {
   };
 
   return (
-    <div className="dashboard-layout">
-      <div className="dashboard-header">
-        <div className="dashboard-title">
-          <Shield size={24} />
-          <h1>Admin Dashboard</h1>
-        </div>
-        <button className="logout-btn-top" onClick={logout}>Sign Out</button>
-      </div>
-
+    <>
       {error && <div className="dashboard-error">{error}</div>}
-
-      {stats && (
-        <div className="stats-grid">
-          <div className="stat-card">
-            <Users size={20} />
-            <div className="stat-value">{stats.total_users}</div>
-            <div className="stat-label">Total Users</div>
-          </div>
-          <div className="stat-card">
-            <BookOpen size={20} />
-            <div className="stat-value">{stats.total_students}</div>
-            <div className="stat-label">Students</div>
-          </div>
-          <div className="stat-card">
-            <Users size={20} />
-            <div className="stat-value">{stats.total_teachers}</div>
-            <div className="stat-label">Teachers</div>
-          </div>
-          <div className="stat-card">
-            <MessageSquare size={20} />
-            <div className="stat-value">{stats.total_chats}</div>
-            <div className="stat-label">Chats</div>
-          </div>
-        </div>
-      )}
-
       <div className="dashboard-section">
         <div className="section-header">
           <h2>User Management</h2>
@@ -186,13 +162,7 @@ export default function AdminDashboard() {
           <table>
             <thead>
               <tr>
-                <th>ID</th>
-                <th>Name</th>
-                <th>Email</th>
-                <th>Role</th>
-                <th>Credits</th>
-                <th>Status</th>
-                <th>Actions</th>
+                <th>ID</th><th>Name</th><th>Email</th><th>Role</th><th>Credits</th><th>Status</th><th>Actions</th>
               </tr>
             </thead>
             <tbody>
@@ -213,6 +183,71 @@ export default function AdminDashboard() {
               ))}
             </tbody>
           </table>
+        </div>
+      </div>
+    </>
+  );
+}
+
+export default function AdminDashboard() {
+  const location = useLocation();
+  const [stats, setStats] = useState<DashboardStats | null>(null);
+  const [users, setUsers] = useState<User[]>([]);
+  const [roleFilter, setRoleFilter] = useState<string>("");
+  const [error, setError] = useState("");
+
+  const currentView = location.pathname === "/admin/users"
+    ? "users"
+    : location.pathname === "/admin/chats"
+    ? "chats"
+    : "dashboard";
+
+  const loadData = useCallback(async () => {
+    try {
+      const [dashData, userData] = await Promise.all([
+        adminApi.getDashboard() as Promise<DashboardStats>,
+        adminApi.getUsers(roleFilter ? { role: roleFilter } : undefined) as Promise<User[]>,
+      ]);
+      setStats(dashData);
+      setUsers(userData);
+    } catch (err: any) {
+      setError(err.message);
+    }
+  }, [roleFilter]);
+
+  useEffect(() => {
+    loadData();
+  }, [loadData]);
+
+  return (
+    <div className="app-layout">
+      <Sidebar />
+      <div className="main-content">
+        <div className="dashboard-content">
+          <div className="dashboard-page-header">
+            <h1>
+              {currentView === "users" ? "User Management" : currentView === "chats" ? "All Chats" : "Admin Dashboard"}
+            </h1>
+          </div>
+
+          {error && <div className="dashboard-error">{error}</div>}
+
+          {currentView === "dashboard" && (
+            <>
+              <DashboardView stats={stats} />
+              <UsersView users={users} roleFilter={roleFilter} setRoleFilter={setRoleFilter} onReload={loadData} />
+            </>
+          )}
+
+          {currentView === "users" && (
+            <UsersView users={users} roleFilter={roleFilter} setRoleFilter={setRoleFilter} onReload={loadData} />
+          )}
+
+          {currentView === "chats" && (
+            <div className="dashboard-section">
+              <p className="empty-text">Select a user from User Management to view their chats</p>
+            </div>
+          )}
         </div>
       </div>
     </div>

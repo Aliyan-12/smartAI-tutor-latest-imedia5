@@ -28,7 +28,7 @@ export default function RegisterPage() {
     <div className="auth-page">
       <div className="auth-card">
         <div className="logo-section">
-          <div className="icon">AI</div>
+          <img src="/Original-Logo.png" alt="SmartAI Tutor" className="auth-logo" />
           <h1>Create Account</h1>
           <p>Start your learning journey</p>
         </div>
