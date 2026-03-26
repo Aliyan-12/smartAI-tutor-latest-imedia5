@@ -1,14 +1,17 @@
-import { useEffect } from "react";
-import { useParams } from "react-router-dom";
+import { useEffect, useState, useCallback, useRef } from "react";
+import { useParams, useNavigate } from "react-router-dom";
+import { X } from "lucide-react";
 import Sidebar from "../components/Sidebar";
 import ChatWindow from "../components/ChatWindow";
 import ChatInput from "../components/ChatInput";
 import WelcomeScreen from "../components/WelcomeScreen";
 import { useChat } from "../hooks/useChat";
 import { useVoice } from "../hooks/useVoice";
+import type { ChatMessage } from "../types";
 
 export default function ChatPage() {
   const { sessionId } = useParams<{ sessionId?: string }>();
+  const navigate = useNavigate();
 
   const {
     messages,
@@ -26,7 +29,19 @@ export default function ChatPage() {
     stopStreaming,
   } = useChat();
 
-  const { recording, startRecording, stopRecording, speakText } = useVoice();
+  const {
+    voiceStatus,
+    isVoiceActive,
+    voiceError,
+    clearVoiceError,
+    connectVoice,
+    disconnectVoice,
+    speakText,
+  } = useVoice();
+
+  const [voiceMessages, setVoiceMessages] = useState<ChatMessage[]>([]);
+  const [voiceAiStream, setVoiceAiStream] = useState("");
+  const userTranscriptRef = useRef("");
 
   useEffect(() => {
     loadCredits();
@@ -35,12 +50,85 @@ export default function ChatPage() {
   useEffect(() => {
     if (sessionId && sessionId !== activeSessionId) {
       loadChat(sessionId);
-    } else if (!sessionId && activeSessionId) {
-      // URL is /chat but we have an active session — clear it
     }
   }, [sessionId]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const showWelcome = messages.length === 0 && !streaming;
+  const handleVoiceStart = useCallback(() => {
+    setVoiceMessages([]);
+    setVoiceAiStream("");
+    userTranscriptRef.current = "";
+
+    connectVoice(activeSessionId, {
+      onUserTranscript: (chunk) => {
+        userTranscriptRef.current += chunk;
+        // Update or create user message in voiceMessages
+        setVoiceMessages((prev) => {
+          const last = prev[prev.length - 1];
+          if (last && last.role === "user" && last.id === -1) {
+            return [...prev.slice(0, -1), { ...last, content: userTranscriptRef.current }];
+          }
+          return [...prev, {
+            id: -1,
+            chat_id: 0,
+            role: "user" as const,
+            content: userTranscriptRef.current,
+            timestamp: new Date().toISOString(),
+          }];
+        });
+      },
+      onAiTranscriptChunk: (chunk) => {
+        setVoiceAiStream((prev) => prev + chunk);
+      },
+      onTurnComplete: () => {
+        // Finalize the AI message
+        setVoiceAiStream((current) => {
+          if (current.trim()) {
+            setVoiceMessages((prev) => [
+              ...prev,
+              {
+                id: Date.now(),
+                chat_id: 0,
+                role: "assistant" as const,
+                content: current,
+                timestamp: new Date().toISOString(),
+              },
+            ]);
+          }
+          return "";
+        });
+        // Finalize user message with a real ID
+        setVoiceMessages((prev) =>
+          prev.map((m) => (m.id === -1 ? { ...m, id: Date.now() - 1 } : m))
+        );
+        userTranscriptRef.current = "";
+      },
+      onCreditsUpdate: () => {
+        loadCredits();
+      },
+      onSessionCreated: (sid) => {
+        navigate(`/chat/${sid}`, { replace: true });
+        loadChats();
+      },
+      onError: () => {
+        // handled by useVoice
+      },
+    });
+  }, [activeSessionId, connectVoice, navigate, loadChats, loadCredits]);
+
+  const handleVoiceEnd = useCallback(() => {
+    disconnectVoice();
+    if (activeSessionId) {
+      loadChat(activeSessionId);
+    }
+    setVoiceMessages([]);
+    setVoiceAiStream("");
+    userTranscriptRef.current = "";
+  }, [disconnectVoice, activeSessionId, loadChat]);
+
+  const allMessages = isVoiceActive ? [...messages, ...voiceMessages] : messages;
+  const currentStreamContent = isVoiceActive ? voiceAiStream : streamContent;
+  const isStreaming = isVoiceActive ? voiceAiStream.length > 0 : streaming;
+  const showWelcome = allMessages.length === 0 && !isStreaming && !isVoiceActive;
 
   return (
     <div className="app-layout">
@@ -60,21 +148,30 @@ export default function ChatPage() {
             <WelcomeScreen onPromptClick={sendMessage} />
           ) : (
             <ChatWindow
-              messages={messages}
-              streaming={streaming}
-              streamContent={streamContent}
+              messages={allMessages}
+              streaming={isStreaming}
+              streamContent={currentStreamContent}
               onSpeak={speakText}
             />
           )}
         </div>
 
+        {voiceError && (
+          <div className="voice-error-bar">
+            <span>{voiceError}</span>
+            <button onClick={clearVoiceError} className="voice-error-close">
+              <X size={14} />
+            </button>
+          </div>
+        )}
+
         <ChatInput
           onSend={sendMessage}
           streaming={streaming}
           onStop={stopStreaming}
-          recording={recording}
-          onStartRecording={startRecording}
-          onStopRecording={stopRecording}
+          voiceStatus={voiceStatus}
+          onVoiceStart={handleVoiceStart}
+          onVoiceEnd={handleVoiceEnd}
         />
       </div>
     </div>

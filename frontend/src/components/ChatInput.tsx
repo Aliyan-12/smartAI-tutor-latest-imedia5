@@ -1,35 +1,48 @@
 import { useState, useRef, useCallback, type KeyboardEvent } from "react";
-import { Send, Mic, MicOff, Square } from "lucide-react";
+import { Send, Mic, Square, PhoneOff } from "lucide-react";
+
+type VoiceStatus = "idle" | "connecting" | "listening" | "processing" | "speaking";
 
 interface Props {
   onSend: (text: string) => void;
   streaming: boolean;
   onStop: () => void;
-  recording: boolean;
-  onStartRecording: () => void;
-  onStopRecording: () => Promise<string | null>;
+  voiceStatus: VoiceStatus;
+  onVoiceStart: () => void;
+  onVoiceEnd: () => void;
 }
+
+const STATUS_LABELS: Record<VoiceStatus, string> = {
+  idle: "",
+  connecting: "Connecting to voice...",
+  listening: "Listening...",
+  processing: "Thinking...",
+  speaking: "Tutor is speaking...",
+};
 
 export default function ChatInput({
   onSend,
   streaming,
   onStop,
-  recording,
-  onStartRecording,
-  onStopRecording,
+  voiceStatus,
+  onVoiceStart,
+  onVoiceEnd,
 }: Props) {
   const [input, setInput] = useState("");
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
+  const inVoiceMode = voiceStatus !== "idle";
+  const busy = streaming || voiceStatus === "connecting";
+
   const handleSend = useCallback(() => {
     const trimmed = input.trim();
-    if (!trimmed || streaming) return;
+    if (!trimmed || busy) return;
     onSend(trimmed);
     setInput("");
     if (textareaRef.current) {
       textareaRef.current.style.height = "auto";
     }
-  }, [input, streaming, onSend]);
+  }, [input, busy, onSend]);
 
   const handleKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === "Enter" && !e.shiftKey) {
@@ -45,16 +58,28 @@ export default function ChatInput({
     el.style.height = Math.min(el.scrollHeight, 160) + "px";
   };
 
-  const handleMic = async () => {
-    if (recording) {
-      const text = await onStopRecording();
-      if (text) {
-        setInput((prev) => (prev ? prev + " " + text : text));
-      }
-    } else {
-      onStartRecording();
-    }
-  };
+  if (inVoiceMode) {
+    return (
+      <div className="input-area">
+        <div className="voice-mode-bar">
+          <div className="voice-status">
+            <span className={`voice-dot ${voiceStatus}`} />
+            <span className="voice-label">{STATUS_LABELS[voiceStatus]}</span>
+          </div>
+          <div className="voice-controls">
+            <button
+              className="input-btn end-call-btn"
+              onClick={onVoiceEnd}
+              title="End voice conversation"
+              type="button"
+            >
+              <PhoneOff size={18} />
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="input-area">
@@ -66,33 +91,29 @@ export default function ChatInput({
           onKeyDown={handleKeyDown}
           placeholder="Ask me anything about your studies..."
           rows={1}
-          disabled={streaming}
+          disabled={busy}
         />
 
         <button
-          className={`input-btn mic-btn ${recording ? "active" : ""}`}
-          onClick={handleMic}
-          title={recording ? "Stop recording" : "Start recording"}
+          className="input-btn mic-btn"
+          onClick={onVoiceStart}
+          disabled={busy}
+          title="Start voice conversation"
           type="button"
         >
-          {recording ? <MicOff size={18} /> : <Mic size={18} />}
+          <Mic size={18} />
         </button>
 
         {streaming ? (
-          <button
-            className="input-btn stop-btn"
-            onClick={onStop}
-            title="Stop generating"
-            type="button"
-          >
+          <button className="input-btn stop-btn" onClick={onStop} title="Stop" type="button">
             <Square size={16} />
           </button>
         ) : (
           <button
             className="input-btn send-btn"
             onClick={handleSend}
-            disabled={!input.trim()}
-            title="Send message"
+            disabled={!input.trim() || busy}
+            title="Send"
             type="button"
           >
             <Send size={16} />

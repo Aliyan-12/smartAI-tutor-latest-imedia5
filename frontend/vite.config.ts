@@ -13,13 +13,17 @@ export default defineConfig({
     port: 5173,
     allowedHosts: [".ngrok-free.app", ".ngrok.io"],
     proxy: {
+      "/api/voice/ws": {
+        target: "ws://localhost:8001",
+        ws: true,
+      },
+      "/api/chat/ws": {
+        target: "ws://localhost:8001",
+        ws: true,
+      },
       "/api": {
         target: "http://localhost:8001",
         changeOrigin: true,
-      },
-      "/ws": {
-        target: "ws://localhost:8001",
-        ws: true,
       },
     },
   },

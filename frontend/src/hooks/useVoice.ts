@@ -1,72 +1,273 @@
 import { useState, useRef, useCallback } from "react";
 import { voiceApi } from "../services/api";
 
+type VoiceStatus = "idle" | "connecting" | "listening" | "processing" | "speaking";
+
+interface VoiceCallbacks {
+  onUserTranscript: (chunk: string) => void;
+  onAiTranscriptChunk: (chunk: string) => void;
+  onTurnComplete: () => void;
+  onCreditsUpdate: (credits: number) => void;
+  onSessionCreated: (sessionId: string) => void;
+  onError: (msg: string) => void;
+}
+
 export function useVoice() {
-  const [recording, setRecording] = useState(false);
+  const [voiceStatus, setVoiceStatus] = useState<VoiceStatus>("idle");
+  const [voiceError, setVoiceError] = useState<string | null>(null);
   const [playing, setPlaying] = useState(false);
-  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
-  const audioChunksRef = useRef<Blob[]>([]);
+
+  const wsRef = useRef<WebSocket | null>(null);
+  const audioContextRef = useRef<AudioContext | null>(null);
+  const workletNodeRef = useRef<AudioWorkletNode | null>(null);
+  const streamRef = useRef<MediaStream | null>(null);
+  const sourceRef = useRef<MediaStreamAudioSourceNode | null>(null);
+  const callbacksRef = useRef<VoiceCallbacks | null>(null);
+  const playQueueRef = useRef<ArrayBuffer[]>([]);
+  const playingRef = useRef(false);
   const audioRef = useRef<HTMLAudioElement | null>(null);
 
-  const startRecording = useCallback(async (): Promise<void> => {
-    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-    const recorder = new MediaRecorder(stream, { mimeType: "audio/webm" });
-    audioChunksRef.current = [];
+  const isVoiceActive = voiceStatus !== "idle";
 
-    recorder.ondataavailable = (e) => {
-      if (e.data.size > 0) {
-        audioChunksRef.current.push(e.data);
+  const clearVoiceError = useCallback(() => setVoiceError(null), []);
+
+  const playNextChunk = useCallback(async () => {
+    if (playingRef.current || playQueueRef.current.length === 0) return;
+    playingRef.current = true;
+    setPlaying(true);
+
+    const ctx = audioContextRef.current;
+    if (!ctx) {
+      playingRef.current = false;
+      setPlaying(false);
+      return;
+    }
+
+    while (playQueueRef.current.length > 0) {
+      const raw = playQueueRef.current.shift()!;
+      const samples = new Int16Array(raw);
+      const floats = new Float32Array(samples.length);
+      for (let i = 0; i < samples.length; i++) {
+        floats[i] = samples[i] / 32768;
+      }
+
+      const buffer = ctx.createBuffer(1, floats.length, 24000);
+      buffer.copyToChannel(floats, 0);
+
+      const src = ctx.createBufferSource();
+      src.buffer = buffer;
+      src.connect(ctx.destination);
+
+      await new Promise<void>((resolve) => {
+        src.onended = () => resolve();
+        src.start();
+      });
+    }
+
+    playingRef.current = false;
+    setPlaying(false);
+  }, []);
+
+  const connectVoice = useCallback(async (sessionId: string | null, callbacks: VoiceCallbacks) => {
+    callbacksRef.current = callbacks;
+    setVoiceError(null);
+    setVoiceStatus("connecting");
+
+    const token = localStorage.getItem("token");
+    if (!token) {
+      setVoiceError("Not authenticated");
+      setVoiceStatus("idle");
+      return;
+    }
+
+    // Create AudioContext for playback and mic processing
+    const audioCtx = new AudioContext({ sampleRate: 16000 });
+    audioContextRef.current = audioCtx;
+
+    // Register PCM worklet for mic capture
+    const workletCode = `
+      class PcmProcessor extends AudioWorkletProcessor {
+        process(inputs) {
+          const input = inputs[0];
+          if (input && input[0]) {
+            const samples = input[0];
+            const pcm16 = new Int16Array(samples.length);
+            for (let i = 0; i < samples.length; i++) {
+              const s = Math.max(-1, Math.min(1, samples[i]));
+              pcm16[i] = s < 0 ? s * 0x8000 : s * 0x7FFF;
+            }
+            this.port.postMessage(pcm16.buffer, [pcm16.buffer]);
+          }
+          return true;
+        }
+      }
+      registerProcessor('pcm-processor', PcmProcessor);
+    `;
+
+    const blob = new Blob([workletCode], { type: "application/javascript" });
+    const workletUrl = URL.createObjectURL(blob);
+
+    try {
+      await audioCtx.audioWorklet.addModule(workletUrl);
+    } catch (e) {
+      setVoiceError("Audio processing setup failed");
+      setVoiceStatus("idle");
+      return;
+    }
+
+    // Connect WebSocket
+    const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
+    const host = window.location.host;
+    let wsUrl = `${protocol}//${host}/api/voice/ws?token=${token}`;
+    if (sessionId) wsUrl += `&session_id=${sessionId}`;
+
+    const ws = new WebSocket(wsUrl);
+    wsRef.current = ws;
+
+    ws.onopen = async () => {
+      // Start mic
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({
+          audio: { sampleRate: 16000, channelCount: 1, echoCancellation: true, noiseSuppression: true },
+        });
+        streamRef.current = stream;
+
+        const source = audioCtx.createMediaStreamSource(stream);
+        sourceRef.current = source;
+
+        const workletNode = new AudioWorkletNode(audioCtx, "pcm-processor");
+        workletNodeRef.current = workletNode;
+
+        workletNode.port.onmessage = (event) => {
+          if (ws.readyState === WebSocket.OPEN) {
+            ws.send(event.data as ArrayBuffer);
+          }
+        };
+
+        source.connect(workletNode);
+        workletNode.connect(audioCtx.destination);
+
+        setVoiceStatus("listening");
+      } catch {
+        setVoiceError("Microphone access denied");
+        ws.close();
+        setVoiceStatus("idle");
       }
     };
 
-    recorder.start();
-    mediaRecorderRef.current = recorder;
-    setRecording(true);
-  }, []);
+    ws.onmessage = (event) => {
+      try {
+        const data = JSON.parse(event.data);
+        const cb = callbacksRef.current;
 
-  const stopRecording = useCallback(async (): Promise<string | null> => {
-    return new Promise((resolve) => {
-      const recorder = mediaRecorderRef.current;
-      if (!recorder || recorder.state === "inactive") {
-        setRecording(false);
-        resolve(null);
-        return;
-      }
+        switch (data.type) {
+          case "status":
+            if (data.content === "connected") setVoiceStatus("listening");
+            break;
 
-      recorder.onstop = async () => {
-        const blob = new Blob(audioChunksRef.current, { type: "audio/webm" });
-        setRecording(false);
+          case "session":
+            cb?.onSessionCreated(data.content);
+            break;
 
-        recorder.stream.getTracks().forEach((t) => t.stop());
+          case "user_transcript":
+            cb?.onUserTranscript(data.content);
+            break;
 
-        try {
-          const text = await voiceApi.transcribe(blob);
-          resolve(text);
-        } catch {
-          resolve(null);
+          case "ai_transcript":
+            cb?.onAiTranscriptChunk(data.content);
+            setVoiceStatus("speaking");
+            break;
+
+          case "audio":
+            if (data.content) {
+              const raw = Uint8Array.from(atob(data.content), (c) => c.charCodeAt(0));
+              playQueueRef.current.push(raw.buffer);
+              playNextChunk();
+            }
+            break;
+
+          case "turn_complete":
+            cb?.onTurnComplete();
+            setVoiceStatus("listening");
+            break;
+
+          case "interrupted":
+            playQueueRef.current.length = 0;
+            setVoiceStatus("listening");
+            break;
+
+          case "credits":
+            if (data.content) cb?.onCreditsUpdate(parseFloat(data.content));
+            break;
+
+          case "error":
+            setVoiceError(data.content);
+            break;
         }
-      };
+      } catch {
+        // non-json message
+      }
+    };
 
-      recorder.stop();
-    });
+    ws.onerror = () => {
+      setVoiceError("Voice connection failed");
+      setVoiceStatus("idle");
+    };
+
+    ws.onclose = () => {
+      cleanupAudio();
+      setVoiceStatus("idle");
+    };
+  }, [playNextChunk]);
+
+  const cleanupAudio = useCallback(() => {
+    if (workletNodeRef.current) {
+      workletNodeRef.current.disconnect();
+      workletNodeRef.current = null;
+    }
+    if (sourceRef.current) {
+      sourceRef.current.disconnect();
+      sourceRef.current = null;
+    }
+    if (streamRef.current) {
+      streamRef.current.getTracks().forEach((t) => t.stop());
+      streamRef.current = null;
+    }
+    if (audioContextRef.current && audioContextRef.current.state !== "closed") {
+      audioContextRef.current.close();
+      audioContextRef.current = null;
+    }
+    playQueueRef.current.length = 0;
+    playingRef.current = false;
+    setPlaying(false);
   }, []);
+
+  const disconnectVoice = useCallback(() => {
+    if (wsRef.current) {
+      try {
+        wsRef.current.send(JSON.stringify({ type: "stop" }));
+      } catch {}
+      wsRef.current.close();
+      wsRef.current = null;
+    }
+    cleanupAudio();
+    setVoiceStatus("idle");
+  }, [cleanupAudio]);
 
   const speakText = useCallback(async (text: string) => {
+    setVoiceError(null);
     try {
       setPlaying(true);
-      const blob = await voiceApi.speak(text);
-      const url = URL.createObjectURL(blob);
+      const blobData = await voiceApi.speak(text);
+      const url = URL.createObjectURL(blobData);
       const audio = new Audio(url);
       audioRef.current = audio;
-
-      audio.onended = () => {
-        setPlaying(false);
-        URL.revokeObjectURL(url);
-      };
-
+      audio.onended = () => { setPlaying(false); URL.revokeObjectURL(url); };
+      audio.onerror = () => { setPlaying(false); URL.revokeObjectURL(url); };
       await audio.play();
     } catch {
       setPlaying(false);
+      setVoiceError("Text-to-speech failed.");
     }
   }, []);
 
@@ -79,10 +280,13 @@ export function useVoice() {
   }, []);
 
   return {
-    recording,
+    voiceStatus,
+    isVoiceActive,
     playing,
-    startRecording,
-    stopRecording,
+    voiceError,
+    clearVoiceError,
+    connectVoice,
+    disconnectVoice,
     speakText,
     stopSpeaking,
   };

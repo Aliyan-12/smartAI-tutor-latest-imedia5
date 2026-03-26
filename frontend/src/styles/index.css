@@ -266,6 +266,36 @@ input, textarea, select {
   color: var(--danger);
 }
 
+/* ============ VOICE ERROR BAR ============ */
+.voice-error-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin: 0 20px;
+  padding: 10px 14px;
+  background: var(--danger-light);
+  border: 1px solid rgba(217, 48, 37, 0.15);
+  border-radius: var(--radius);
+  color: var(--danger);
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.voice-error-close {
+  background: none;
+  color: var(--danger);
+  padding: 2px;
+  border-radius: 4px;
+  flex-shrink: 0;
+  opacity: 0.7;
+  transition: opacity 0.12s;
+}
+
+.voice-error-close:hover {
+  opacity: 1;
+}
+
 /* ============ MAIN CONTENT ============ */
 .main-content {
   flex: 1;
@@ -480,6 +510,72 @@ input, textarea, select {
   30% { opacity: 1; }
 }
 
+/* ============ VOICE MODE ============ */
+.voice-mode-bar {
+  max-width: 780px;
+  margin: 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: 12px 16px;
+}
+
+.voice-status {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.voice-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--text-muted);
+}
+
+.voice-dot.connecting {
+  background: var(--warning);
+  animation: pulse 1s ease-in-out infinite;
+}
+
+.voice-dot.listening {
+  background: var(--success);
+  animation: pulse 1.5s ease-in-out infinite;
+}
+
+.voice-dot.processing {
+  background: var(--accent);
+  animation: pulse 0.8s ease-in-out infinite;
+}
+
+.voice-dot.speaking {
+  background: var(--purple);
+  animation: pulse 1s ease-in-out infinite;
+}
+
+.voice-label {
+  font-size: 14px;
+  color: var(--text-secondary);
+  font-weight: 500;
+}
+
+.voice-controls {
+  display: flex;
+  gap: 8px;
+}
+
+.end-call-btn {
+  background: var(--danger) !important;
+  color: white !important;
+}
+
+.end-call-btn:hover {
+  opacity: 0.85;
+}
+
 /* ============ INPUT AREA ============ */
 .input-area {
   padding: 14px 20px 20px;
@@ -562,6 +658,15 @@ input, textarea, select {
 @keyframes pulse {
   0%, 100% { opacity: 1; }
   50% { opacity: 0.5; }
+}
+
+.spin {
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
 }
 
 .stop-btn {

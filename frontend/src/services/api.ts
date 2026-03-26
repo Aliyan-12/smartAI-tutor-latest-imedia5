@@ -154,22 +154,6 @@ export const voiceApi = {
     if (!res.ok) throw new Error("TTS request failed");
     return res.blob();
   },
-
-  async transcribe(audioBlob: Blob): Promise<string> {
-    const formData = new FormData();
-    formData.append("file", audioBlob, "recording.webm");
-
-    const token = getToken();
-    const res = await fetch(`${API_BASE}/voice/transcribe`, {
-      method: "POST",
-      headers: { Authorization: `Bearer ${token}` },
-      body: formData,
-    });
-
-    if (!res.ok) throw new Error("Transcription failed");
-    const data = await res.json();
-    return data.text;
-  },
 };
 
 export const adminApi = {
