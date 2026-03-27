@@ -96,6 +96,7 @@ async def voice_websocket(websocket: WebSocket):
             await _send_safe(websocket, {"type": "session", "content": session_id})
 
         chat_id_local = chat.id
+        session_id = chat.session_id  # ensure we have the actual session_id
         history = await chat_service.build_context(db, chat.id)
 
     system_text = SYSTEM_PROMPT
@@ -163,7 +164,7 @@ async def voice_websocket(websocket: WebSocket):
                     stop_event.set()
 
             async def gemini_to_browser():
-                nonlocal user_transcript_accum, ai_transcript_accum
+                nonlocal user_transcript_accum, ai_transcript_accum, chat_id_local, session_id
                 try:
                     while not stop_event.is_set():
                         try:
@@ -198,25 +199,41 @@ async def voice_websocket(websocket: WebSocket):
                         if sc.turn_complete:
                             await _send_safe(websocket, {"type": "turn_complete"})
 
-                            if user_transcript_accum.strip() or ai_transcript_accum.strip():
+                            user_text = user_transcript_accum.strip()
+                            ai_text = ai_transcript_accum.strip()
+                            user_transcript_accum = ""
+                            ai_transcript_accum = ""
+
+                            if user_text or ai_text:
                                 try:
                                     async with async_session_factory() as db:
-                                        if user_transcript_accum.strip():
-                                            await chat_service.add_message(db, chat_id_local, "user", user_transcript_accum.strip())
-                                        if ai_transcript_accum.strip():
-                                            await chat_service.add_message(db, chat_id_local, "assistant", ai_transcript_accum.strip())
+                                        chat = await chat_service.get_chat_by_session(db, session_id, user_id)
+                                        if not chat:
+                                            chat = await chat_service.create_chat(db, user_id)
+                                            chat_id_local = chat.id
+                                            session_id = chat.session_id
+                                            await _send_safe(websocket, {"type": "session", "content": chat.session_id})
+
+                                        if user_text:
+                                            await chat_service.add_message(db, chat.id, "user", user_text)
+                                        if ai_text:
+                                            await chat_service.add_message(db, chat.id, "assistant", ai_text)
 
                                         from app.services.user_service import get_user_by_id
                                         fresh_user = await get_user_by_id(db, user_id)
                                         if fresh_user:
                                             await credit_service.check_and_deduct_credit(db, fresh_user)
                                             await _send_safe(websocket, {"type": "credits", "content": str(float(fresh_user.credits))})
+
+                                        if chat.title == "New Chat" and user_text:
+                                            from app.services.gemini_service import generate_chat_title
+                                            title = generate_chat_title(user_text)
+                                            await chat_service.update_chat_title(db, chat, title)
+                                            await _send_safe(websocket, {"type": "title", "content": title})
+
                                         await db.commit()
                                 except Exception as db_err:
                                     logger.error(f"DB save error: {db_err}")
-
-                            user_transcript_accum = ""
-                            ai_transcript_accum = ""
 
                         if sc.interrupted:
                             await _send_safe(websocket, {"type": "interrupted"})
