@@ -42,6 +42,7 @@ export default function ChatPage() {
   const [voiceMessages, setVoiceMessages] = useState<ChatMessage[]>([]);
   const [voiceAiStream, setVoiceAiStream] = useState("");
   const userTranscriptRef = useRef("");
+  const voiceSessionRef = useRef<string | null>(null);
 
   useEffect(() => {
     loadCredits();
@@ -57,11 +58,11 @@ export default function ChatPage() {
     setVoiceMessages([]);
     setVoiceAiStream("");
     userTranscriptRef.current = "";
+    voiceSessionRef.current = activeSessionId;
 
     connectVoice(activeSessionId, {
       onUserTranscript: (chunk) => {
         userTranscriptRef.current += chunk;
-        // Update or create user message in voiceMessages
         setVoiceMessages((prev) => {
           const last = prev[prev.length - 1];
           if (last && last.role === "user" && last.id === -1) {
@@ -80,13 +81,12 @@ export default function ChatPage() {
         setVoiceAiStream((prev) => prev + chunk);
       },
       onTurnComplete: () => {
-        // Finalize the AI message
         setVoiceAiStream((current) => {
           if (current.trim()) {
             setVoiceMessages((prev) => [
               ...prev,
               {
-                id: Date.now(),
+                id: Date.now() + 1,
                 chat_id: 0,
                 role: "assistant" as const,
                 content: current,
@@ -96,7 +96,6 @@ export default function ChatPage() {
           }
           return "";
         });
-        // Finalize user message with a real ID
         setVoiceMessages((prev) =>
           prev.map((m) => (m.id === -1 ? { ...m, id: Date.now() - 1 } : m))
         );
@@ -106,24 +105,26 @@ export default function ChatPage() {
         loadCredits();
       },
       onSessionCreated: (sid) => {
+        voiceSessionRef.current = sid;
         navigate(`/chat/${sid}`, { replace: true });
         loadChats();
       },
-      onError: () => {
-        // handled by useVoice
-      },
+      onError: () => {},
     });
   }, [activeSessionId, connectVoice, navigate, loadChats, loadCredits]);
 
   const handleVoiceEnd = useCallback(() => {
     disconnectVoice();
-    if (activeSessionId) {
-      loadChat(activeSessionId);
+    const sid = voiceSessionRef.current || activeSessionId;
+    if (sid) {
+      loadChat(sid);
     }
+    loadChats();
     setVoiceMessages([]);
     setVoiceAiStream("");
     userTranscriptRef.current = "";
-  }, [disconnectVoice, activeSessionId, loadChat]);
+    voiceSessionRef.current = null;
+  }, [disconnectVoice, activeSessionId, loadChat, loadChats]);
 
   const allMessages = isVoiceActive ? [...messages, ...voiceMessages] : messages;
   const currentStreamContent = isVoiceActive ? voiceAiStream : streamContent;

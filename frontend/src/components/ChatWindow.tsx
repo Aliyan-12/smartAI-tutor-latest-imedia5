@@ -33,7 +33,7 @@ export default function ChatWindow({
           return (
             <div key={msg.id} className="message assistant">
               <div className="message-avatar error-avatar">!</div>
-              <div>
+              <div className="message-content">
                 <div className="message-bubble error-bubble">{msg.content}</div>
               </div>
             </div>
@@ -45,7 +45,7 @@ export default function ChatWindow({
             <div className="message-avatar">
               {msg.role === "user" ? "U" : "AI"}
             </div>
-            <div>
+            <div className="message-content">
               <div className="message-bubble">
                 {msg.role === "assistant" ? (
                   <ReactMarkdown>{msg.content}</ReactMarkdown>
@@ -69,7 +69,7 @@ export default function ChatWindow({
       {streaming && streamContent && (
         <div className="message assistant">
           <div className="message-avatar">AI</div>
-          <div>
+          <div className="message-content">
             <div className="message-bubble">
               <ReactMarkdown>{streamContent}</ReactMarkdown>
             </div>
@@ -80,11 +80,13 @@ export default function ChatWindow({
       {streaming && !streamContent && (
         <div className="message assistant">
           <div className="message-avatar">AI</div>
-          <div className="message-bubble">
-            <div className="typing-indicator">
-              <span></span>
-              <span></span>
-              <span></span>
+          <div className="message-content">
+            <div className="message-bubble">
+              <div className="typing-indicator">
+                <span></span>
+                <span></span>
+                <span></span>
+              </div>
             </div>
           </div>
         </div>

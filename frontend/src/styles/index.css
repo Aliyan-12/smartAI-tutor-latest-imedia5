@@ -379,6 +379,7 @@ input, textarea, select {
   max-width: 780px;
   width: 100%;
   margin: 0 auto;
+  align-items: flex-start;
 }
 
 .message.user {
@@ -395,6 +396,7 @@ input, textarea, select {
   font-size: 12px;
   font-weight: 700;
   flex-shrink: 0;
+  margin-top: 2px;
 }
 
 .message.user .message-avatar {
@@ -407,19 +409,35 @@ input, textarea, select {
   color: var(--text-secondary);
 }
 
+.message-content {
+  min-width: 0;
+  max-width: 80%;
+}
+
 .message-bubble {
   padding: 12px 16px;
   border-radius: var(--radius-lg);
-  max-width: 72%;
   line-height: 1.6;
   font-size: 14px;
   word-wrap: break-word;
+  overflow-wrap: break-word;
 }
 
 .message.user .message-bubble {
   background: var(--accent);
   color: white;
   border-bottom-right-radius: 4px;
+  display: inline-block;
+  min-width: 40px;
+  text-align: left;
+}
+
+.message.user .message-content {
+  text-align: right;
+}
+
+.message.assistant .message-content {
+  max-width: 80%;
 }
 
 .message.assistant .message-bubble {
