@@ -136,6 +136,9 @@ export default function Sidebar({
         </>
       )}
 
+      {/* Spacer to push footer down for admin/teacher */}
+      {user?.role !== "student" && <div style={{ flex: 1 }} />}
+
       <div className="sidebar-footer">
         <div className="user-info">
           <span>{user?.name}</span>

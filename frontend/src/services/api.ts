@@ -213,6 +213,11 @@ export const adminApi = {
     return handleResponse(res);
   },
 
+  async getAllChats() {
+    const res = await fetch(`${API_BASE}/admin/chats`, { headers: authHeaders() });
+    return handleResponse(res);
+  },
+
   async viewChat(sessionId: string) {
     const res = await fetch(`${API_BASE}/admin/chats/${sessionId}`, { headers: authHeaders() });
     return handleResponse(res);

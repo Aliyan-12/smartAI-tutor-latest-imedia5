@@ -244,12 +244,72 @@ export default function AdminDashboard() {
           )}
 
           {currentView === "chats" && (
-            <div className="dashboard-section">
-              <p className="empty-text">Select a user from User Management to view their chats</p>
-            </div>
+            <AllChatsView />
           )}
         </div>
       </div>
     </div>
+  );
+}
+
+function AllChatsView() {
+  const [allChats, setAllChats] = useState<any[]>([]);
+  const [viewingChat, setViewingChat] = useState<any>(null);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    adminApi.getAllChats()
+      .then((data) => setAllChats(data as any[]))
+      .catch((err: any) => setError(err.message));
+  }, []);
+
+  const viewChat = async (sessionId: string) => {
+    try {
+      const chat = await adminApi.viewChat(sessionId);
+      setViewingChat(chat);
+    } catch (err: any) {
+      setError(err.message);
+    }
+  };
+
+  return (
+    <>
+      {error && <div className="dashboard-error">{error}</div>}
+      <div className="dashboard-section">
+        <div className="teacher-columns" style={{ gridTemplateColumns: "1fr 1fr" }}>
+          <div className="chat-list-panel" style={{ maxHeight: 600 }}>
+            <h3>All Student Chats</h3>
+            {allChats.map((c: any) => (
+              <div key={c.session_id} className="chat-row" onClick={() => viewChat(c.session_id)}>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontSize: 13, fontWeight: 500 }}>{c.title}</div>
+                  <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 2 }}>{c.student_name}</div>
+                </div>
+                <span className="chat-date">{new Date(c.created_at).toLocaleDateString()}</span>
+              </div>
+            ))}
+            {allChats.length === 0 && <p className="empty-text">No chats found</p>}
+          </div>
+
+          <div className="chat-view-panel" style={{ maxHeight: 600 }}>
+            {viewingChat ? (
+              <>
+                <h3>{viewingChat.title}</h3>
+                <div className="chat-messages-view">
+                  {viewingChat.messages.map((m: any) => (
+                    <div key={m.id} className={`view-message ${m.role}`}>
+                      <span className="view-role">{m.role === "user" ? "Student" : "AI"}</span>
+                      <p>{m.content}</p>
+                    </div>
+                  ))}
+                </div>
+              </>
+            ) : (
+              <p className="empty-text">Select a chat to view messages</p>
+            )}
+          </div>
+        </div>
+      </div>
+    </>
   );
 }

@@ -159,6 +159,31 @@ async def get_user_chats(
     return [ChatListItem(id=c.id, session_id=c.session_id, title=c.title, created_at=c.created_at) for c in chats]
 
 
+@router.get("/chats")
+async def list_all_chats(
+    limit: int = Query(100, ge=1, le=500),
+    admin: User = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    result = await db.execute(
+        select(Chat, User.name)
+        .join(User, User.id == Chat.user_id)
+        .order_by(desc(Chat.created_at))
+        .limit(limit)
+    )
+    rows = result.all()
+    return [
+        {
+            "id": chat.id,
+            "session_id": chat.session_id,
+            "title": chat.title,
+            "created_at": chat.created_at.isoformat(),
+            "student_name": name,
+        }
+        for chat, name in rows
+    ]
+
+
 @router.get("/chats/{session_id}", response_model=ChatResponse)
 async def view_any_chat(
     session_id: str,
