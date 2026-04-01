@@ -71,3 +71,23 @@ export interface DashboardStats {
   total_chats: number;
   total_messages: number;
 }
+
+export interface KnowledgeDocument {
+  id: number;
+  title: string;
+  subject: string;
+  source_type: "upload" | "scrape" | "onedrive" | "gdocs";
+  source_url?: string;
+  file_type?: string;
+  status: "pending" | "processing" | "ready" | "failed";
+  error_message?: string;
+  chunk_count: number;
+  uploaded_by: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface DocumentListResponse {
+  documents: KnowledgeDocument[];
+  total: number;
+}

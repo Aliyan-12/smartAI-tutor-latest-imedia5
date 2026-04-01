@@ -253,6 +253,61 @@ export const teacherApi = {
   },
 };
 
+export const documentsApi = {
+  async list(params?: { subject?: string; status?: string }) {
+    const query = new URLSearchParams();
+    if (params?.subject) query.set("subject", params.subject);
+    if (params?.status) query.set("status", params.status);
+    const res = await fetch(`${API_BASE}/documents?${query}`, { headers: authHeaders() });
+    return handleResponse(res);
+  },
+
+  async upload(file: File, title: string, subject: string) {
+    const token = getToken();
+    const form = new FormData();
+    form.append("file", file);
+    form.append("title", title);
+    form.append("subject", subject);
+    const res = await fetch(`${API_BASE}/documents/upload`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${token}` },
+      body: form,
+    });
+    return handleResponse(res);
+  },
+
+  async scrape(url: string, title: string, subject: string) {
+    const res = await fetch(`${API_BASE}/documents/scrape`, {
+      method: "POST",
+      headers: authHeaders(),
+      body: JSON.stringify({ url, title, subject }),
+    });
+    return handleResponse(res);
+  },
+
+  async importLink(url: string, title: string, subject: string, sourceType: string) {
+    const res = await fetch(`${API_BASE}/documents/import-link`, {
+      method: "POST",
+      headers: authHeaders(),
+      body: JSON.stringify({ url, title, subject, source_type: sourceType }),
+    });
+    return handleResponse(res);
+  },
+
+  async getSubjects(): Promise<string[]> {
+    const res = await fetch(`${API_BASE}/documents/subjects`, { headers: authHeaders() });
+    return handleResponse(res);
+  },
+
+  async remove(documentId: number) {
+    const res = await fetch(`${API_BASE}/documents/${documentId}`, {
+      method: "DELETE",
+      headers: authHeaders(),
+    });
+    if (!res.ok) throw new Error("Failed to delete document");
+  },
+};
+
 export const subscriptionApi = {
   async getPlans() {
     const res = await fetch(`${API_BASE}/subscription/plans`, { headers: authHeaders() });

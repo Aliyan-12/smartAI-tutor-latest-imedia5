@@ -1,9 +1,13 @@
+import logging
 from sqlalchemy import select, desc
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
-from typing import List, Optional
+from typing import List, Optional, Tuple
 
 from app.models.chat import Chat, Message
+from app.schemas.documents import RetrievedChunk
+
+logger = logging.getLogger(__name__)
 
 MAX_CONTEXT_MESSAGES = 20
 
@@ -59,10 +63,27 @@ async def get_chat_history(db: AsyncSession, chat_id: int) -> List[Message]:
     return list(result.scalars().all())
 
 
-async def build_context(db: AsyncSession, chat_id: int) -> List[dict]:
+async def build_context(
+    db: AsyncSession,
+    chat_id: int,
+    user_query: Optional[str] = None,
+) -> Tuple[List[dict], List[RetrievedChunk]]:
     messages = await get_chat_history(db, chat_id)
     recent = messages[-MAX_CONTEXT_MESSAGES:] if len(messages) > MAX_CONTEXT_MESSAGES else messages
-    return [{"role": msg.role, "content": msg.content} for msg in recent]
+    history = [{"role": msg.role, "content": msg.content} for msg in recent]
+
+    rag_chunks: List[RetrievedChunk] = []
+
+    if user_query:
+        try:
+            from app.core.config import settings
+            if settings.rag_enabled:
+                from app.services.retrieval_service import retrieve_relevant_chunks
+                rag_chunks = await retrieve_relevant_chunks(db=db, query=user_query)
+        except Exception as e:
+            logger.warning(f"RAG retrieval skipped: {e}")
+
+    return history, rag_chunks
 
 
 async def update_chat_title(db: AsyncSession, chat: Chat, title: str):

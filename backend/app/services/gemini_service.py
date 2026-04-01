@@ -1,11 +1,14 @@
 import time
-from typing import AsyncGenerator, List
+from typing import AsyncGenerator, List, Optional, TYPE_CHECKING
 import logging
 
 from google import genai
 from google.genai import types
 
 from app.core.config import settings
+
+if TYPE_CHECKING:
+    from app.schemas.documents import RetrievedChunk
 
 logger = logging.getLogger(__name__)
 
@@ -15,7 +18,11 @@ SYSTEM_PROMPT = (
     "and encourage students to think critically. You adapt your responses based on the student's "
     "level and ask follow-up questions to check understanding. Keep your tone warm, supportive, "
     "and patient. Use examples and analogies when helpful. If a question is outside the educational "
-    "scope, gently redirect the student back to learning topics."
+    "scope, gently redirect the student back to learning topics.\n\n"
+    "When KNOWLEDGE BASE CONTEXT is provided in a message, use it as your primary reference material "
+    "to answer the student's question. Synthesise the information naturally and accurately. "
+    "Do not mention chunk boundaries or source labels. If the context does not fully answer the "
+    "question, supplement with your general knowledge and say so."
 )
 
 MAX_RETRIES = 2
@@ -31,12 +38,35 @@ def _get_client() -> genai.Client:
     return _client
 
 
-def _build_contents(history: List[dict], user_message: str) -> list:
+def _format_rag_context(rag_chunks: List["RetrievedChunk"]) -> str:
+    if not rag_chunks:
+        return ""
+    lines = ["[KNOWLEDGE BASE CONTEXT]"]
+    for i, chunk in enumerate(rag_chunks, 1):
+        lines.append(f"--- Source {i}: {chunk.document_title} ({chunk.subject}) ---")
+        lines.append(chunk.content.strip())
+        lines.append("")
+    lines.append("[END OF CONTEXT]")
+    return "\n".join(lines)
+
+
+def _build_contents(
+    history: List[dict],
+    user_message: str,
+    rag_chunks: Optional[List["RetrievedChunk"]] = None,
+) -> list:
     contents = []
     for msg in history:
         role = "user" if msg["role"] == "user" else "model"
         contents.append(types.Content(role=role, parts=[types.Part(text=msg["content"])]))
-    contents.append(types.Content(role="user", parts=[types.Part(text=user_message)]))
+
+    context_block = _format_rag_context(rag_chunks) if rag_chunks else ""
+    if context_block:
+        full_message = f"{context_block}\n\n{user_message}"
+    else:
+        full_message = user_message
+
+    contents.append(types.Content(role="user", parts=[types.Part(text=full_message)]))
     return contents
 
 
@@ -56,17 +86,19 @@ def _is_retryable(exc: Exception) -> bool:
     return "429" in msg or "resource_exhausted" in msg or "unavailable" in msg
 
 
-def generate_response(history: List[dict], user_message: str) -> str:
+def generate_response(
+    history: List[dict],
+    user_message: str,
+    rag_chunks: Optional[List["RetrievedChunk"]] = None,
+) -> str:
     last_error = None
     for attempt in range(MAX_RETRIES + 1):
         try:
             client = _get_client()
             response = client.models.generate_content(
                 model=settings.gemini_model,
-                contents=_build_contents(history, user_message),
-                config=types.GenerateContentConfig(
-                    system_instruction=SYSTEM_PROMPT,
-                ),
+                contents=_build_contents(history, user_message, rag_chunks),
+                config=types.GenerateContentConfig(system_instruction=SYSTEM_PROMPT),
             )
             return response.text
         except Exception as e:
@@ -80,19 +112,20 @@ def generate_response(history: List[dict], user_message: str) -> str:
     return f"[Error: {_friendly_error(last_error)}]"
 
 
-def stream_response(history: List[dict], user_message: str):
+def stream_response(
+    history: List[dict],
+    user_message: str,
+    rag_chunks: Optional[List["RetrievedChunk"]] = None,
+):
     last_error = None
     for attempt in range(MAX_RETRIES + 1):
         try:
             client = _get_client()
             response = client.models.generate_content_stream(
                 model=settings.gemini_model,
-                contents=_build_contents(history, user_message),
-                config=types.GenerateContentConfig(
-                    system_instruction=SYSTEM_PROMPT,
-                ),
+                contents=_build_contents(history, user_message, rag_chunks),
+                config=types.GenerateContentConfig(system_instruction=SYSTEM_PROMPT),
             )
-
             for chunk in response:
                 if chunk.text:
                     yield chunk.text
@@ -108,8 +141,12 @@ def stream_response(history: List[dict], user_message: str):
     yield f"[Error: {_friendly_error(last_error)}]"
 
 
-async def stream_response_async(history: List[dict], user_message: str) -> AsyncGenerator[str, None]:
-    for token in stream_response(history, user_message):
+async def stream_response_async(
+    history: List[dict],
+    user_message: str,
+    rag_chunks: Optional[List["RetrievedChunk"]] = None,
+) -> AsyncGenerator[str, None]:
+    for token in stream_response(history, user_message, rag_chunks):
         yield token
 
 

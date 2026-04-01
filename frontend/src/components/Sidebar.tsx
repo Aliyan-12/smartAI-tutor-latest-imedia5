@@ -75,6 +75,13 @@ export default function Sidebar({
             <MessageSquarePlus size={16} />
             <span>All Chats</span>
           </div>
+          <div
+            className={`nav-item ${isActive("/admin/knowledge") ? "active" : ""}`}
+            onClick={() => navigate("/admin/knowledge")}
+          >
+            <BookOpen size={16} />
+            <span>Knowledge Base</span>
+          </div>
         </div>
       )}
 
@@ -101,6 +108,13 @@ export default function Sidebar({
           >
             <Activity size={16} />
             <span>Activity</span>
+          </div>
+          <div
+            className={`nav-item ${isActive("/teacher/knowledge") ? "active" : ""}`}
+            onClick={() => navigate("/teacher/knowledge")}
+          >
+            <BookOpen size={16} />
+            <span>Knowledge Base</span>
           </div>
         </div>
       )}

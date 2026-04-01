@@ -99,13 +99,13 @@ async def stream_message(
         chat = await chat_service.create_chat(db, current_user.id)
 
     await chat_service.add_message(db, chat.id, "user", payload.message)
-    history = await chat_service.build_context(db, chat.id)
+    history, rag_chunks = await chat_service.build_context(db, chat.id, user_query=payload.message)
 
     async def event_stream():
         full_response = []
         yield f"data: {json.dumps({'type': 'start', 'session_id': chat.session_id})}\n\n"
 
-        async for token in gemini_service.stream_response_async(history[:-1], payload.message):
+        async for token in gemini_service.stream_response_async(history[:-1], payload.message, rag_chunks=rag_chunks):
             full_response.append(token)
             yield f"data: {json.dumps({'type': 'token', 'content': token})}\n\n"
 
@@ -177,7 +177,7 @@ async def websocket_chat(websocket: WebSocket):
                     chat = await chat_service.create_chat(db, user_id)
 
                 await chat_service.add_message(db, chat.id, "user", message_text)
-                history = await chat_service.build_context(db, chat.id)
+                history, rag_chunks = await chat_service.build_context(db, chat.id, user_query=message_text)
                 chat_session_id = chat.session_id
                 chat_id = chat.id
                 chat_title = chat.title
@@ -186,7 +186,7 @@ async def websocket_chat(websocket: WebSocket):
             await websocket.send_json({"type": "start", "session_id": chat_session_id})
 
             full_response = []
-            async for token_text in gemini_service.stream_response_async(history[:-1], message_text):
+            async for token_text in gemini_service.stream_response_async(history[:-1], message_text, rag_chunks=rag_chunks):
                 full_response.append(token_text)
                 await websocket.send_json({"type": "token", "content": token_text})
 

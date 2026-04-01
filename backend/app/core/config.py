@@ -32,6 +32,15 @@ class Settings(BaseSettings):
     tts_provider: str = "google"
     whisper_model: str = "base"
 
+    embedding_model: str = "models/text-embedding-004"
+    rag_chunk_size: int = 500
+    rag_chunk_overlap: int = 50
+    rag_top_k: int = 5
+    rag_min_similarity: float = 0.3
+    rag_enabled: bool = True
+    upload_dir: str = "uploads/documents"
+    max_upload_size_mb: int = 50
+
     @property
     def database_url(self) -> str:
         return (
