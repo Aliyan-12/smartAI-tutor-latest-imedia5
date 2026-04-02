@@ -33,17 +33,41 @@ def extract_text_from_docx(file_path: str) -> str:
 
 
 def extract_text_from_pptx(file_path: str) -> str:
-    from pptx import Presentation
-    prs = Presentation(file_path)
-    slide_texts = []
-    for slide in prs.slides:
-        parts = []
-        for shape in slide.shapes:
-            if hasattr(shape, "text") and shape.text.strip():
-                parts.append(shape.text.strip())
-        if parts:
-            slide_texts.append("\n".join(parts))
-    return "\n\n".join(slide_texts)
+    import zipfile
+
+    # First try python-pptx
+    try:
+        from pptx import Presentation
+        prs = Presentation(file_path)
+        slide_texts = []
+        for slide in prs.slides:
+            parts = []
+            for shape in slide.shapes:
+                if hasattr(shape, "text") and shape.text.strip():
+                    parts.append(shape.text.strip())
+            if parts:
+                slide_texts.append("\n".join(parts))
+        return "\n\n".join(slide_texts)
+    except Exception:
+        pass
+
+    # Fallback: extract text directly from XML inside the ZIP
+    try:
+        from xml.etree import ElementTree
+        texts = []
+        with zipfile.ZipFile(file_path) as zf:
+            for name in sorted(zf.namelist()):
+                if name.startswith("ppt/slides/slide") and name.endswith(".xml"):
+                    xml_data = zf.read(name)
+                    root = ElementTree.fromstring(xml_data)
+                    for elem in root.iter():
+                        if elem.text and elem.text.strip():
+                            texts.append(elem.text.strip())
+        return "\n\n".join(texts)
+    except Exception:
+        pass
+
+    raise ValueError(f"Could not extract text from PPTX: file may be corrupted")
 
 
 def extract_text(file_path: str, file_type: str) -> str:
@@ -98,9 +122,14 @@ def chunk_text(text: str, chunk_size: int = 500, overlap: int = 50) -> List[Tupl
     return chunks
 
 
-def save_upload(content: bytes, extension: str) -> str:
-    upload_dir = Path(settings.upload_dir)
+def _get_upload_dir() -> Path:
+    upload_dir = Path(settings.upload_dir).resolve()
     upload_dir.mkdir(parents=True, exist_ok=True)
+    return upload_dir
+
+
+def save_upload(content: bytes, extension: str) -> str:
+    upload_dir = _get_upload_dir()
     filename = f"{uuid.uuid4()}.{extension}"
     file_path = str(upload_dir / filename)
     with open(file_path, "wb") as f:
@@ -109,8 +138,7 @@ def save_upload(content: bytes, extension: str) -> str:
 
 
 def save_text_content(text: str) -> str:
-    upload_dir = Path(settings.upload_dir)
-    upload_dir.mkdir(parents=True, exist_ok=True)
+    upload_dir = _get_upload_dir()
     filename = f"{uuid.uuid4()}.txt"
     file_path = str(upload_dir / filename)
     with open(file_path, "w", encoding="utf-8") as f:

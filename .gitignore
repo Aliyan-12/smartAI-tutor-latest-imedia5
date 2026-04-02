@@ -18,6 +18,7 @@ Thumbs.db
 *.db
 frontend/dist/
 frontend/build/
+backend/uploads/
 .pytest_cache/
 .mypy_cache/
 htmlcov/

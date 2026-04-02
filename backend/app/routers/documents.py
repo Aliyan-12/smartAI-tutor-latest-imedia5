@@ -1,6 +1,6 @@
 import logging
 import uuid
-from typing import Optional
+from typing import Optional, List
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, BackgroundTasks, Query, status
@@ -26,40 +26,50 @@ async def list_subjects(current_user: User = Depends(require_teacher)):
     return SUPPORTED_SUBJECTS
 
 
-@router.post("/upload", response_model=DocumentResponse, status_code=status.HTTP_202_ACCEPTED)
-async def upload_document(
+@router.post("/upload", response_model=List[DocumentResponse], status_code=status.HTTP_202_ACCEPTED)
+async def upload_documents(
     background_tasks: BackgroundTasks,
-    file: UploadFile = File(...),
-    title: str = Form(...),
+    files: List[UploadFile] = File(...),
     subject: str = Form(...),
     current_user: User = Depends(require_teacher),
     db: AsyncSession = Depends(get_db),
 ):
-    ext = Path(file.filename or "").suffix.lstrip(".").lower()
-    if ext not in ALLOWED_EXTENSIONS:
-        raise HTTPException(status_code=400, detail=f"Unsupported file type. Allowed: {', '.join(ALLOWED_EXTENSIONS)}")
-
-    content = await file.read()
     max_bytes = settings.max_upload_size_mb * 1024 * 1024
-    if len(content) > max_bytes:
-        raise HTTPException(status_code=413, detail=f"File too large. Max {settings.max_upload_size_mb}MB")
+    created_docs = []
 
-    file_path = document_service.save_upload(content, ext)
+    for file in files:
+        ext = Path(file.filename or "").suffix.lstrip(".").lower()
+        if ext not in ALLOWED_EXTENSIONS:
+            continue
 
-    doc = await document_service.create_document_record(
-        db=db, title=title, subject=subject,
-        source_type="upload", uploaded_by=current_user.id,
-        file_path=file_path, file_type=ext,
-    )
+        content = await file.read()
+        if len(content) > max_bytes:
+            continue
+
+        name = Path(file.filename or "document").stem
+        file_path = document_service.save_upload(content, ext)
+
+        doc = await document_service.create_document_record(
+            db=db, title=name, subject=subject,
+            source_type="upload", uploaded_by=current_user.id,
+            file_path=file_path, file_type=ext,
+        )
+        created_docs.append(doc)
+
+    if not created_docs:
+        raise HTTPException(status_code=400, detail="No valid files uploaded. Allowed: pdf, docx, pptx")
+
     await db.commit()
 
-    async def process_bg():
-        async with async_session_factory() as bg_db:
-            await document_service.process_document(bg_db, doc.id)
-            await bg_db.commit()
+    for doc in created_docs:
+        doc_id = doc.id
+        async def process_bg(did=doc_id):
+            async with async_session_factory() as bg_db:
+                await document_service.process_document(bg_db, did)
+                await bg_db.commit()
+        background_tasks.add_task(process_bg)
 
-    background_tasks.add_task(process_bg)
-    return DocumentResponse.model_validate(doc)
+    return [DocumentResponse.model_validate(d) for d in created_docs]
 
 
 @router.post("/scrape", response_model=DocumentResponse, status_code=status.HTTP_202_ACCEPTED)
@@ -164,6 +174,37 @@ async def get_document(
     doc = result.scalar_one_or_none()
     if not doc:
         raise HTTPException(status_code=404, detail="Document not found")
+    return DocumentResponse.model_validate(doc)
+
+
+@router.post("/{document_id}/retry", response_model=DocumentResponse, status_code=status.HTTP_202_ACCEPTED)
+async def retry_document(
+    document_id: int,
+    background_tasks: BackgroundTasks,
+    current_user: User = Depends(require_teacher),
+    db: AsyncSession = Depends(get_db),
+):
+    from sqlalchemy import select
+    from app.models.documents import Document, DocumentChunk
+    result = await db.execute(select(Document).where(Document.id == document_id))
+    doc = result.scalar_one_or_none()
+    if not doc:
+        raise HTTPException(status_code=404, detail="Document not found")
+
+    doc.status = "pending"
+    doc.error_message = None
+    await db.execute(
+        DocumentChunk.__table__.delete().where(DocumentChunk.document_id == document_id)
+    )
+    doc.chunk_count = 0
+    await db.commit()
+
+    async def process_bg():
+        async with async_session_factory() as bg_db:
+            await document_service.process_document(bg_db, doc.id)
+            await bg_db.commit()
+
+    background_tasks.add_task(process_bg)
     return DocumentResponse.model_validate(doc)
 
 

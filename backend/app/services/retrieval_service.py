@@ -26,34 +26,54 @@ async def retrieve_relevant_chunks(
         logger.warning(f"Query embedding failed, skipping RAG: {e}")
         return []
 
-    embedding_str = "[" + ",".join(str(v) for v in query_embedding) + "]"
+    embedding_literal = "[" + ",".join(str(v) for v in query_embedding) + "]"
 
-    subject_clause = "AND d.subject = :subject" if subject else ""
+    subject_clause = "AND d.subject = $3" if subject else ""
 
-    sql = text(f"""
-        SELECT
-            dc.id AS chunk_id,
-            dc.document_id,
-            d.title AS document_title,
-            d.subject,
-            dc.content,
-            1 - (dc.embedding <=> CAST(:embedding AS vector)) AS similarity
-        FROM document_chunks dc
-        JOIN documents d ON d.id = dc.document_id
-        WHERE d.status = 'ready'
-          AND dc.embedding IS NOT NULL
-          {subject_clause}
-        ORDER BY dc.embedding <=> CAST(:embedding AS vector)
-        LIMIT :top_k
-    """)
-
-    params = {"embedding": embedding_str, "top_k": top_k}
+    # Use dollar-sign params ($1, $2...) to avoid conflict with pgvector's :: cast
     if subject:
-        params["subject"] = subject
+        sql_str = f"""
+            SELECT
+                dc.id            AS chunk_id,
+                dc.document_id,
+                d.title          AS document_title,
+                d.subject,
+                dc.content,
+                1 - (dc.embedding <=> $1::vector) AS similarity
+            FROM document_chunks dc
+            JOIN documents d ON d.id = dc.document_id
+            WHERE d.status = 'ready'
+              AND dc.embedding IS NOT NULL
+              AND d.subject = $3
+            ORDER BY dc.embedding <=> $1::vector
+            LIMIT $2
+        """
+    else:
+        sql_str = """
+            SELECT
+                dc.id            AS chunk_id,
+                dc.document_id,
+                d.title          AS document_title,
+                d.subject,
+                dc.content,
+                1 - (dc.embedding <=> $1::vector) AS similarity
+            FROM document_chunks dc
+            JOIN documents d ON d.id = dc.document_id
+            WHERE d.status = 'ready'
+              AND dc.embedding IS NOT NULL
+            ORDER BY dc.embedding <=> $1::vector
+            LIMIT $2
+        """
 
     try:
-        result = await db.execute(sql, params)
-        rows = result.mappings().all()
+        conn = await db.connection()
+        raw_conn = await conn.get_raw_connection()
+        asyncpg_conn = raw_conn.dbapi_connection._connection
+
+        if subject:
+            rows = await asyncpg_conn.fetch(sql_str, embedding_literal, top_k, subject)
+        else:
+            rows = await asyncpg_conn.fetch(sql_str, embedding_literal, top_k)
 
         chunks = []
         for row in rows:
@@ -68,8 +88,12 @@ async def retrieve_relevant_chunks(
                 content=row["content"],
                 similarity=sim,
             ))
+
+        if chunks:
+            logger.info(f"RAG retrieved {len(chunks)} chunks (top similarity: {chunks[0].similarity:.3f})")
+
         return chunks
 
     except Exception as e:
-        logger.warning(f"Vector search failed, skipping RAG: {e}")
+        logger.warning(f"pgvector search failed, skipping RAG: {e}")
         return []

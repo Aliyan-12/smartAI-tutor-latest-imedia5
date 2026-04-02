@@ -32,7 +32,7 @@ class Settings(BaseSettings):
     tts_provider: str = "google"
     whisper_model: str = "base"
 
-    embedding_model: str = "models/text-embedding-004"
+    embedding_model: str = "gemini-embedding-001"
     rag_chunk_size: int = 500
     rag_chunk_overlap: int = 50
     rag_top_k: int = 5

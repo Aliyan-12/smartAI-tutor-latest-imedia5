@@ -213,22 +213,20 @@ function DocumentList({
 
 
 function UploadForm({ onSuccess, onError }: { onSuccess: (msg: string) => void; onError: (msg: string) => void }) {
-  const [title, setTitle] = useState("");
   const [subject, setSubject] = useState("General");
-  const [file, setFile] = useState<File | null>(null);
+  const [files, setFiles] = useState<File[]>([]);
   const [uploading, setUploading] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!file || !title) return;
+    if (files.length === 0) return;
 
     setUploading(true);
     try {
-      await documentsApi.upload(file, title, subject);
-      onSuccess(`"${title}" uploaded and processing started`);
-      setTitle("");
-      setFile(null);
+      await documentsApi.upload(files, subject);
+      onSuccess(`${files.length} file(s) uploaded and processing started`);
+      setFiles([]);
       if (fileRef.current) fileRef.current.value = "";
     } catch (err: any) {
       onError(err.message);
@@ -239,10 +237,12 @@ function UploadForm({ onSuccess, onError }: { onSuccess: (msg: string) => void; 
 
   return (
     <div className="dashboard-section">
-      <h2 style={{ marginBottom: 16 }}>Upload Document</h2>
+      <h2 style={{ marginBottom: 16 }}>Upload Unit / Documents</h2>
+      <p style={{ fontSize: 13, color: "var(--text-secondary)", marginBottom: 16 }}>
+        Select one or more PDF, DOCX, or PPTX files. Each file will be chunked and embedded for RAG retrieval.
+      </p>
       <form onSubmit={handleSubmit}>
         <div className="form-row">
-          <input placeholder="Document title" value={title} onChange={(e) => setTitle(e.target.value)} required />
           <select value={subject} onChange={(e) => setSubject(e.target.value)}>
             {SUBJECTS.map((s) => <option key={s} value={s}>{s}</option>)}
           </select>
@@ -252,14 +252,20 @@ function UploadForm({ onSuccess, onError }: { onSuccess: (msg: string) => void; 
             ref={fileRef}
             type="file"
             accept=".pdf,.docx,.pptx"
-            onChange={(e) => setFile(e.target.files?.[0] || null)}
+            multiple
+            onChange={(e) => setFiles(Array.from(e.target.files || []))}
             required
             style={{ flex: 1 }}
           />
         </div>
+        {files.length > 0 && (
+          <div style={{ fontSize: 13, color: "var(--text-secondary)", marginBottom: 12 }}>
+            {files.length} file(s) selected: {files.map((f) => f.name).join(", ")}
+          </div>
+        )}
         <div className="form-actions">
-          <button type="submit" className="btn-primary" disabled={uploading || !file}>
-            <Upload size={14} /> {uploading ? "Uploading..." : "Upload & Process"}
+          <button type="submit" className="btn-primary" disabled={uploading || files.length === 0}>
+            <Upload size={14} /> {uploading ? "Uploading..." : `Upload ${files.length || ""} File(s) & Process`}
           </button>
         </div>
       </form>

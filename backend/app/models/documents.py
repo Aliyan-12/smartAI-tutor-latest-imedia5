@@ -10,6 +10,8 @@ SUPPORTED_SUBJECTS = [
     "Geography", "Computing", "Art", "Music", "General",
 ]
 
+EMBEDDING_DIM = 768
+
 
 class Document(Base):
     __tablename__ = "documents"
@@ -47,10 +49,20 @@ class DocumentChunk(Base):
     )
     chunk_index: Mapped[int] = mapped_column(Integer, nullable=False)
     content: Mapped[str] = mapped_column(Text, nullable=False)
-    embedding = mapped_column(Vector(768), nullable=True)
+    embedding = mapped_column(Vector(EMBEDDING_DIM), nullable=True)
     token_count: Mapped[int] = mapped_column(Integer, default=0)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
     )
 
     document = relationship("Document", back_populates="chunks")
+
+    __table_args__ = (
+        Index(
+            "ix_chunk_embedding_hnsw",
+            "embedding",
+            postgresql_using="hnsw",
+            postgresql_with={"m": 16, "ef_construction": 64},
+            postgresql_ops={"embedding": "vector_cosine_ops"},
+        ),
+    )

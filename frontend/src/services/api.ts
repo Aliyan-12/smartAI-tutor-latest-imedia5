@@ -262,11 +262,12 @@ export const documentsApi = {
     return handleResponse(res);
   },
 
-  async upload(file: File, title: string, subject: string) {
+  async upload(files: File[], subject: string) {
     const token = getToken();
     const form = new FormData();
-    form.append("file", file);
-    form.append("title", title);
+    for (const file of files) {
+      form.append("files", file);
+    }
     form.append("subject", subject);
     const res = await fetch(`${API_BASE}/documents/upload`, {
       method: "POST",

@@ -18,14 +18,17 @@ def _get_client() -> genai.Client:
     return _client
 
 
+EMBED_DIM = 768
+
+
 def _embed_sync(text: str, task_type: str) -> List[float]:
     client = _get_client()
     response = client.models.embed_content(
         model=settings.embedding_model,
         contents=text,
-        config={"task_type": task_type},
+        config={"task_type": task_type, "output_dimensionality": EMBED_DIM},
     )
-    return response.embeddings[0].values
+    return list(response.embeddings[0].values)
 
 
 def _embed_batch_sync(texts: List[str], task_type: str) -> List[List[float]]:
@@ -33,9 +36,9 @@ def _embed_batch_sync(texts: List[str], task_type: str) -> List[List[float]]:
     response = client.models.embed_content(
         model=settings.embedding_model,
         contents=texts,
-        config={"task_type": task_type},
+        config={"task_type": task_type, "output_dimensionality": EMBED_DIM},
     )
-    return [e.values for e in response.embeddings]
+    return [list(e.values) for e in response.embeddings]
 
 
 async def embed_text(text: str) -> List[float]:
@@ -69,6 +72,6 @@ async def embed_batch(texts: List[str]) -> List[List[float]]:
                     all_embeddings.append(emb)
                 except Exception as inner_e:
                     logger.error(f"Single embed failed: {inner_e}")
-                    all_embeddings.append([0.0] * 768)
+                    all_embeddings.append([0.0] * EMBED_DIM)
 
     return all_embeddings
