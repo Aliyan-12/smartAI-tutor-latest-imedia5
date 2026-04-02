@@ -149,17 +149,22 @@ def save_text_content(text: str) -> str:
 async def create_document_record(
     db: AsyncSession,
     title: str,
+    key_stage: str,
     subject: str,
     source_type: str,
     uploaded_by: int,
+    exam_board: str = "None",
+    tier: str = "None",
+    unit_name: Optional[str] = None,
     source_url: Optional[str] = None,
     file_path: Optional[str] = None,
     file_type: Optional[str] = None,
 ) -> Document:
     doc = Document(
-        title=title, subject=subject, source_type=source_type,
-        uploaded_by=uploaded_by, source_url=source_url,
-        file_path=file_path, file_type=file_type,
+        title=title, key_stage=key_stage, subject=subject,
+        exam_board=exam_board, tier=tier, unit_name=unit_name,
+        source_type=source_type, uploaded_by=uploaded_by,
+        source_url=source_url, file_path=file_path, file_type=file_type,
     )
     db.add(doc)
     await db.flush()
@@ -217,7 +222,9 @@ async def process_document(db: AsyncSession, document_id: int) -> None:
 
 async def list_documents(
     db: AsyncSession,
+    key_stage: Optional[str] = None,
     subject: Optional[str] = None,
+    exam_board: Optional[str] = None,
     status: Optional[str] = None,
     limit: int = 100,
     offset: int = 0,
@@ -225,12 +232,19 @@ async def list_documents(
     query = select(Document)
     count_query = select(func.count(Document.id))
 
+    filters = []
+    if key_stage:
+        filters.append(Document.key_stage == key_stage)
     if subject:
-        query = query.where(Document.subject == subject)
-        count_query = count_query.where(Document.subject == subject)
+        filters.append(Document.subject == subject)
+    if exam_board:
+        filters.append(Document.exam_board == exam_board)
     if status:
-        query = query.where(Document.status == status)
-        count_query = count_query.where(Document.status == status)
+        filters.append(Document.status == status)
+
+    for f in filters:
+        query = query.where(f)
+        count_query = count_query.where(f)
 
     query = query.order_by(Document.created_at.desc()).limit(limit).offset(offset)
     result = await db.execute(query)

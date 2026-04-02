@@ -5,10 +5,19 @@ from pgvector.sqlalchemy import Vector
 
 from app.db.session import Base
 
-SUPPORTED_SUBJECTS = [
-    "Math", "Science", "English", "History",
-    "Geography", "Computing", "Art", "Music", "General",
+KEY_STAGES = ["KS1", "KS2", "KS3", "KS4", "KS5"]
+
+SUBJECTS = [
+    "Biology", "Chemistry", "Physics", "Combined Science",
+    "Maths", "English", "History", "Geography",
+    "Computing", "Art", "Music", "DT", "PE",
+    "French", "German", "Spanish",
+    "General",
 ]
+
+EXAM_BOARDS = ["AQA", "Edexcel", "OCR", "WJEC", "None"]
+
+TIERS = ["Foundation", "Higher", "None"]
 
 EMBEDDING_DIM = 768
 
@@ -18,7 +27,11 @@ class Document(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     title: Mapped[str] = mapped_column(String(500), nullable=False)
+    key_stage: Mapped[str] = mapped_column(String(10), nullable=False, index=True)
     subject: Mapped[str] = mapped_column(String(100), nullable=False, index=True)
+    exam_board: Mapped[str] = mapped_column(String(20), nullable=False, default="None", index=True)
+    tier: Mapped[str] = mapped_column(String(20), nullable=False, default="None")
+    unit_name: Mapped[str] = mapped_column(String(300), nullable=True)
     source_type: Mapped[str] = mapped_column(String(16), nullable=False)
     source_url: Mapped[str] = mapped_column(Text, nullable=True)
     file_path: Mapped[str] = mapped_column(Text, nullable=True)

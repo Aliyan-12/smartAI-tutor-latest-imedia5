@@ -2,29 +2,36 @@ from pydantic import BaseModel, Field
 from datetime import datetime
 from typing import Optional, List
 
-VALID_SUBJECTS = [
-    "Math", "Science", "English", "History",
-    "Geography", "Computing", "Art", "Music", "General",
-]
-
 
 class ScrapeRequest(BaseModel):
     url: str = Field(..., min_length=5)
     title: str = Field(..., min_length=1, max_length=500)
+    key_stage: str
     subject: str
+    exam_board: str = "None"
+    tier: str = "None"
+    unit_name: Optional[str] = None
 
 
 class LinkImportRequest(BaseModel):
     url: str = Field(..., min_length=5)
     title: str = Field(..., min_length=1, max_length=500)
+    key_stage: str
     subject: str
+    exam_board: str = "None"
+    tier: str = "None"
+    unit_name: Optional[str] = None
     source_type: str = Field(..., description="onedrive or gdocs")
 
 
 class DocumentResponse(BaseModel):
     id: int
     title: str
+    key_stage: str
     subject: str
+    exam_board: str
+    tier: str
+    unit_name: Optional[str] = None
     source_type: str
     source_url: Optional[str] = None
     file_type: Optional[str] = None
@@ -48,5 +55,13 @@ class RetrievedChunk(BaseModel):
     document_id: int
     document_title: str
     subject: str
+    key_stage: str
     content: str
     similarity: float
+
+
+class CurriculumInfo(BaseModel):
+    key_stages: List[str]
+    subjects: List[str]
+    exam_boards: List[str]
+    tiers: List[str]

@@ -1,95 +1,82 @@
 # SmartAI Tutor
 
-AI-powered tutoring platform for K-12 students with chat, streaming responses, and voice support.
+AI-powered tutoring platform for UK GCSE curriculum (KS1-KS5) with text chat, real-time voice conversation, and RAG-based knowledge retrieval.
 
-## Tech Stack
+## Prerequisites
 
-- **Backend:** FastAPI (Python 3.11+)
-- **Frontend:** React 18 + TypeScript (Vite)
-- **Database:** PostgreSQL 16 with pgvector
-- **AI:** Google Gemini API
-- **Voice:** gTTS (text-to-speech), Whisper (speech-to-text)
-- **Infrastructure:** Docker & Docker Compose
-
-## Project Structure
-
-```
-├── backend/
-│   ├── app/
-│   │   ├── core/          # Config, security utilities
-│   │   ├── db/            # Database session, initialization
-│   │   ├── middleware/     # Auth guards, rate limiting
-│   │   ├── models/        # SQLAlchemy ORM models
-│   │   ├── routers/       # API route handlers
-│   │   ├── schemas/       # Pydantic request/response schemas
-│   │   ├── services/      # Business logic (chat, gemini, voice)
-│   │   └── main.py        # FastAPI application entry
-│   ├── Dockerfile
-│   └── requirements.txt
-├── frontend/
-│   ├── src/
-│   │   ├── components/    # Reusable UI components
-│   │   ├── context/       # React context (auth)
-│   │   ├── hooks/         # Custom hooks (chat, voice)
-│   │   ├── pages/         # Page components
-│   │   ├── services/      # API client
-│   │   ├── styles/        # CSS
-│   │   └── types/         # TypeScript interfaces
-│   ├── Dockerfile
-│   ├── nginx.conf
-│   └── package.json
-├── docker-compose.yml
-├── .env
-└── .env.example
-```
-
-## Setup
-
-### Prerequisites
-
-- Docker & Docker Compose
+- Python 3.11+
+- Node.js 18+
+- PostgreSQL 17 with [pgvector extension](https://github.com/pgvector/pgvector)
 - Google Gemini API key ([get one here](https://aistudio.google.com/apikey))
 
-### Quick Start (Docker)
+## Local Setup (Step by Step)
 
-1. Clone and configure environment:
+### 1. Clone and configure
 
 ```bash
+git clone <repo-url>
+cd smartAI-tutor-latest-imedia5
 cp .env.example .env
 ```
 
-2. Set your Gemini API key in `.env`:
-
+Edit `.env` and set your values:
 ```
-GEMINI_API_KEY=your_actual_api_key
+POSTGRES_USER=postgres
+POSTGRES_PASSWORD=your_pg_password
+POSTGRES_DB=smartai_tutor
+POSTGRES_HOST=localhost
+POSTGRES_PORT=5432
+GEMINI_API_KEY=your_gemini_api_key
+GEMINI_MODEL=gemini-2.5-flash
 ```
 
-3. Start all services:
+### 2. Install pgvector (if not already installed)
 
-```bash
-docker-compose up --build
+pgvector is required for the RAG knowledge base. On Windows with PostgreSQL 17:
+
+1. Download prebuilt binary from [andreiramani/pgvector_pgsql_windows](https://github.com/andreiramani/pgvector_pgsql_windows/releases)
+2. Extract and copy files into your PostgreSQL installation:
+   - `vector.dll` -> `C:\Program Files\PostgreSQL\17\lib\`
+   - `vector.control` + `*.sql` files -> `C:\Program Files\PostgreSQL\17\share\extension\`
+   - Header files -> `C:\Program Files\PostgreSQL\17\include\server\extension\vector\`
+3. Restart PostgreSQL service
+
+On Linux/Mac: `apt install postgresql-17-pgvector` or build from source.
+
+### 3. Create the database
+
+Open pgAdmin or psql and create the database:
+```sql
+CREATE DATABASE smartai_tutor;
 ```
 
-4. Access the app:
-   - Frontend: http://localhost:3000
-   - Backend API: http://localhost:8001
-   - API Docs: http://localhost:8001/docs
-
-### Local Development (without Docker)
-
-**Backend:**
+### 4. Set up the backend
 
 ```bash
 cd backend
 python -m venv venv
-source venv/bin/activate  # Windows: venv\Scripts\activate
+venv\Scripts\activate        # Windows
+# source venv/bin/activate   # Linux/Mac
+
 pip install -r requirements.txt
 
-# Set environment variables or create backend/.env
-uvicorn app.main:app --host 0.0.0.0 --port 8001 --reload
+# Create tables (pgvector extension + HNSW index)
+python -m app.setup --fresh
+
+# Seed default users (admin, teacher, student)
+python -m app.seed
 ```
 
-**Frontend:**
+### 5. Start the backend
+
+```bash
+cd backend
+uvicorn app.main:app --host 0.0.0.0 --port 8001 --reload --ws-ping-timeout 300 --ws-ping-interval 30
+```
+
+The `--ws-ping-timeout` and `--ws-ping-interval` flags are needed for the real-time voice WebSocket to stay alive during long conversations.
+
+### 6. Set up and start the frontend
 
 ```bash
 cd frontend
@@ -97,47 +84,108 @@ npm install
 npm run dev
 ```
 
-The frontend dev server runs on port 5173 and proxies API calls to the backend on port 8001.
+### 7. Open the app
 
-**Database:**
+- Frontend: http://localhost:5173
+- Backend API docs: http://localhost:8001/docs
 
-```bash
-# Run PostgreSQL with pgvector
-docker run -d --name smartai-db \
-  -e POSTGRES_USER=smartai \
-  -e POSTGRES_PASSWORD=smartai_secret_2024 \
-  -e POSTGRES_DB=smartai_tutor \
-  -p 5432:5432 \
-  pgvector/pgvector:pg16
+### 8. Login and upload content
+
+1. Login as teacher: `teacher@smartai.com` / `teacher123`
+2. Go to **Knowledge Base** in the sidebar
+3. Upload PDF/DOCX/PPTX files with the correct Key Stage, Subject, Exam Board, and Tier
+4. Wait for status to change from "pending" to "ready"
+5. Login as student: `student@smartai.com` / `student123`
+6. Ask questions about the uploaded content - the AI will use document chunks as context
+
+## Default Logins
+
+| Role | Email | Password |
+|---------|--------------------------|-------------|
+| Admin | admin@smartai.com | admin123 |
+| Teacher | teacher@smartai.com | teacher123 |
+| Student | student@smartai.com | student123 |
+
+## Project Structure
+
+```
+backend/
+  app/
+    core/           # Config, security (JWT, bcrypt)
+    db/             # Database session, init
+    middleware/     # Auth guards, rate limiting
+    models/         # SQLAlchemy models (users, chats, documents, subscriptions)
+    routers/        # API endpoints (auth, chat, voice, admin, teacher, documents)
+    schemas/        # Pydantic request/response models
+    services/       # Business logic
+      chat_service.py        # Chat CRUD + RAG context building
+      gemini_service.py      # Gemini API (streaming, RAG injection)
+      embedding_service.py   # Gemini text-embedding-001
+      retrieval_service.py   # pgvector cosine similarity search
+      document_service.py    # PDF/DOCX/PPTX extraction, chunking
+      scraper_service.py     # Web scraping, OneDrive/GDocs download
+      voice_service.py       # TTS (gTTS)
+      credit_service.py      # Credit deduction, subscriptions
+      user_service.py        # User CRUD
+    setup.py        # Database table creation
+    seed.py         # Default user seeding
+    main.py         # FastAPI app entry point
+
+frontend/
+  src/
+    components/     # Sidebar, ChatWindow, ChatInput, WelcomeScreen
+    context/        # AuthContext (JWT state)
+    hooks/          # useChat (streaming), useVoice (Gemini Live)
+    pages/          # ChatPage, LoginPage, RegisterPage, AdminDashboard,
+                    #   TeacherDashboard, KnowledgeBasePage
+    services/       # API client (all endpoints)
+    styles/         # CSS
+    types/          # TypeScript interfaces
+
+docker-compose.yml
+.env / .env.example
 ```
 
-## API Endpoints
+## Docker Setup
 
-| Method | Endpoint              | Description                |
-|--------|-----------------------|----------------------------|
-| POST   | /api/auth/register    | Create new user account    |
-| POST   | /api/auth/login       | Sign in, receive JWT       |
-| GET    | /api/auth/me          | Get current user profile   |
-| GET    | /api/chat/list        | List user's chats          |
-| GET    | /api/chat/{id}        | Get chat with messages     |
-| POST   | /api/chat/send        | Send message (non-stream)  |
-| POST   | /api/chat/stream      | Send message (SSE stream)  |
-| WS     | /api/chat/ws          | WebSocket chat endpoint    |
-| DELETE | /api/chat/{id}        | Delete a chat              |
-| POST   | /api/voice/speak      | Text-to-speech (MP3)       |
-| POST   | /api/voice/transcribe | Speech-to-text (upload)    |
-| GET    | /api/health           | Health check               |
+```bash
+cp .env.example .env   # edit GEMINI_API_KEY
+docker-compose up --build
+# Frontend: http://localhost:3000
+# Backend: http://localhost:8001
+```
+
+The Docker setup uses `pgvector/pgvector:pg16` image which includes pgvector pre-installed.
+
+## Key Features
+
+- **RAG Knowledge Base**: Upload curriculum documents, auto-chunk and embed with Gemini, retrieve via pgvector HNSW index
+- **UK GCSE Curriculum**: Documents tagged by Key Stage, Subject, Exam Board, Tier, and Unit
+- **Real-time Voice**: Gemini Live API for bidirectional audio streaming with automatic speech detection
+- **Multi-role**: Admin (full control), Teacher (manage content + monitor students), Student (chat + voice)
+- **Credit System**: Per-message billing with subscription plans
+- **Streaming**: SSE for text chat, WebSocket for voice, real-time transcript display
 
 ## Environment Variables
 
-| Variable                | Description                          |
-|-------------------------|--------------------------------------|
-| POSTGRES_USER           | Database username                    |
-| POSTGRES_PASSWORD       | Database password                    |
-| POSTGRES_DB             | Database name                        |
-| POSTGRES_HOST           | Database host (use `db` in Docker)   |
-| GEMINI_API_KEY          | Google Gemini API key                |
-| GEMINI_MODEL            | Gemini model name                    |
-| JWT_SECRET_KEY          | Secret for JWT token signing         |
-| JWT_EXPIRATION_MINUTES  | Token expiry in minutes              |
-| BACKEND_CORS_ORIGINS    | Comma-separated allowed origins      |
+| Variable | Description | Default |
+|--------------------------|------------------------------------------|-----------------|
+| POSTGRES_USER | Database username | - |
+| POSTGRES_PASSWORD | Database password | - |
+| POSTGRES_DB | Database name | smartai_tutor |
+| POSTGRES_HOST | Database host | localhost |
+| POSTGRES_PORT | Database port | 5432 |
+| GEMINI_API_KEY | Google Gemini API key | - |
+| GEMINI_MODEL | Generation model | gemini-2.5-flash |
+| JWT_SECRET_KEY | JWT signing secret | - |
+| JWT_EXPIRATION_MINUTES | Token expiry | 1440 |
+| BACKEND_CORS_ORIGINS | Allowed CORS origins | localhost |
+| BACKEND_PORT | Backend port | 8001 |
+| EMBEDDING_MODEL | Embedding model | gemini-embedding-001 |
+| RAG_CHUNK_SIZE | Tokens per chunk | 500 |
+| RAG_CHUNK_OVERLAP | Overlap between chunks | 50 |
+| RAG_TOP_K | Chunks retrieved per query | 5 |
+| RAG_MIN_SIMILARITY | Minimum similarity threshold | 0.3 |
+| RAG_ENABLED | Enable/disable RAG | true |
+| UPLOAD_DIR | Document upload directory | uploads/documents |
+| MAX_UPLOAD_SIZE_MB | Max file upload size | 50 |

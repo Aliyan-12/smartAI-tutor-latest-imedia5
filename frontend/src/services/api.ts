@@ -254,21 +254,25 @@ export const teacherApi = {
 };
 
 export const documentsApi = {
-  async list(params?: { subject?: string; status?: string }) {
+  async list(params?: { key_stage?: string; subject?: string; exam_board?: string; status?: string }) {
     const query = new URLSearchParams();
+    if (params?.key_stage) query.set("key_stage", params.key_stage);
     if (params?.subject) query.set("subject", params.subject);
+    if (params?.exam_board) query.set("exam_board", params.exam_board);
     if (params?.status) query.set("status", params.status);
     const res = await fetch(`${API_BASE}/documents?${query}`, { headers: authHeaders() });
     return handleResponse(res);
   },
 
-  async upload(files: File[], subject: string) {
+  async upload(files: File[], keyStage: string, subject: string, examBoard: string, tier: string, unitName?: string) {
     const token = getToken();
     const form = new FormData();
-    for (const file of files) {
-      form.append("files", file);
-    }
+    for (const file of files) form.append("files", file);
+    form.append("key_stage", keyStage);
     form.append("subject", subject);
+    form.append("exam_board", examBoard);
+    form.append("tier", tier);
+    if (unitName) form.append("unit_name", unitName);
     const res = await fetch(`${API_BASE}/documents/upload`, {
       method: "POST",
       headers: { Authorization: `Bearer ${token}` },
@@ -277,26 +281,29 @@ export const documentsApi = {
     return handleResponse(res);
   },
 
-  async scrape(url: string, title: string, subject: string) {
+  async scrape(url: string, title: string, keyStage: string, subject: string, examBoard: string, tier: string, unitName?: string) {
     const res = await fetch(`${API_BASE}/documents/scrape`, {
       method: "POST",
       headers: authHeaders(),
-      body: JSON.stringify({ url, title, subject }),
+      body: JSON.stringify({ url, title, key_stage: keyStage, subject, exam_board: examBoard, tier, unit_name: unitName }),
     });
     return handleResponse(res);
   },
 
-  async importLink(url: string, title: string, subject: string, sourceType: string) {
+  async importLink(url: string, title: string, keyStage: string, subject: string, examBoard: string, tier: string, unitName: string | undefined, sourceType: string) {
     const res = await fetch(`${API_BASE}/documents/import-link`, {
       method: "POST",
       headers: authHeaders(),
-      body: JSON.stringify({ url, title, subject, source_type: sourceType }),
+      body: JSON.stringify({ url, title, key_stage: keyStage, subject, exam_board: examBoard, tier, unit_name: unitName, source_type: sourceType }),
     });
     return handleResponse(res);
   },
 
-  async getSubjects(): Promise<string[]> {
-    const res = await fetch(`${API_BASE}/documents/subjects`, { headers: authHeaders() });
+  async retry(documentId: number) {
+    const res = await fetch(`${API_BASE}/documents/${documentId}/retry`, {
+      method: "POST",
+      headers: authHeaders(),
+    });
     return handleResponse(res);
   },
 

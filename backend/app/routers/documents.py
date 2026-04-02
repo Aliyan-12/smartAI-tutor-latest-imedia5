@@ -1,16 +1,16 @@
 import logging
-import uuid
 from typing import Optional, List
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, BackgroundTasks, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select
 
 from app.db.session import get_db, async_session_factory
 from app.middleware.auth import require_teacher
 from app.models.user import User
-from app.models.documents import SUPPORTED_SUBJECTS
-from app.schemas.documents import DocumentResponse, DocumentListResponse, ScrapeRequest, LinkImportRequest
+from app.models.documents import KEY_STAGES, SUBJECTS, EXAM_BOARDS, TIERS, Document, DocumentChunk
+from app.schemas.documents import DocumentResponse, DocumentListResponse, ScrapeRequest, LinkImportRequest, CurriculumInfo
 from app.services import document_service, scraper_service
 from app.core.config import settings
 
@@ -21,16 +21,25 @@ router = APIRouter(prefix="/api/documents", tags=["documents"])
 ALLOWED_EXTENSIONS = {"pdf", "docx", "pptx"}
 
 
-@router.get("/subjects")
-async def list_subjects(current_user: User = Depends(require_teacher)):
-    return SUPPORTED_SUBJECTS
+@router.get("/curriculum")
+async def get_curriculum_info(current_user: User = Depends(require_teacher)):
+    return CurriculumInfo(
+        key_stages=KEY_STAGES,
+        subjects=SUBJECTS,
+        exam_boards=EXAM_BOARDS,
+        tiers=TIERS,
+    )
 
 
 @router.post("/upload", response_model=List[DocumentResponse], status_code=status.HTTP_202_ACCEPTED)
 async def upload_documents(
     background_tasks: BackgroundTasks,
     files: List[UploadFile] = File(...),
+    key_stage: str = Form(...),
     subject: str = Form(...),
+    exam_board: str = Form("None"),
+    tier: str = Form("None"),
+    unit_name: Optional[str] = Form(None),
     current_user: User = Depends(require_teacher),
     db: AsyncSession = Depends(get_db),
 ):
@@ -50,14 +59,15 @@ async def upload_documents(
         file_path = document_service.save_upload(content, ext)
 
         doc = await document_service.create_document_record(
-            db=db, title=name, subject=subject,
+            db=db, title=name, key_stage=key_stage, subject=subject,
+            exam_board=exam_board, tier=tier, unit_name=unit_name,
             source_type="upload", uploaded_by=current_user.id,
             file_path=file_path, file_type=ext,
         )
         created_docs.append(doc)
 
     if not created_docs:
-        raise HTTPException(status_code=400, detail="No valid files uploaded. Allowed: pdf, docx, pptx")
+        raise HTTPException(status_code=400, detail="No valid files. Allowed: pdf, docx, pptx")
 
     await db.commit()
 
@@ -87,12 +97,14 @@ async def scrape_document(
         raise HTTPException(status_code=502, detail=f"Failed to fetch URL: {e}")
 
     if not scraped_text or len(scraped_text) < 50:
-        raise HTTPException(status_code=422, detail="Insufficient content extracted from URL")
+        raise HTTPException(status_code=422, detail="Insufficient content extracted")
 
     file_path = document_service.save_text_content(scraped_text)
 
     doc = await document_service.create_document_record(
-        db=db, title=payload.title, subject=payload.subject,
+        db=db, title=payload.title, key_stage=payload.key_stage,
+        subject=payload.subject, exam_board=payload.exam_board,
+        tier=payload.tier, unit_name=payload.unit_name,
         source_type="scrape", uploaded_by=current_user.id,
         source_url=payload.url, file_path=file_path, file_type="txt",
     )
@@ -129,7 +141,9 @@ async def import_link(
     file_path = document_service.save_upload(file_bytes, ext)
 
     doc = await document_service.create_document_record(
-        db=db, title=payload.title, subject=payload.subject,
+        db=db, title=payload.title, key_stage=payload.key_stage,
+        subject=payload.subject, exam_board=payload.exam_board,
+        tier=payload.tier, unit_name=payload.unit_name,
         source_type=payload.source_type, uploaded_by=current_user.id,
         source_url=payload.url, file_path=file_path, file_type=ext,
     )
@@ -146,7 +160,9 @@ async def import_link(
 
 @router.get("", response_model=DocumentListResponse)
 async def list_documents(
+    key_stage: Optional[str] = Query(None),
     subject: Optional[str] = Query(None),
+    exam_board: Optional[str] = Query(None),
     status_filter: Optional[str] = Query(None, alias="status"),
     limit: int = Query(50, ge=1, le=200),
     offset: int = Query(0, ge=0),
@@ -154,27 +170,13 @@ async def list_documents(
     db: AsyncSession = Depends(get_db),
 ):
     docs, total = await document_service.list_documents(
-        db, subject=subject, status=status_filter, limit=limit, offset=offset
+        db, key_stage=key_stage, subject=subject, exam_board=exam_board,
+        status=status_filter, limit=limit, offset=offset,
     )
     return DocumentListResponse(
         documents=[DocumentResponse.model_validate(d) for d in docs],
         total=total,
     )
-
-
-@router.get("/{document_id}", response_model=DocumentResponse)
-async def get_document(
-    document_id: int,
-    current_user: User = Depends(require_teacher),
-    db: AsyncSession = Depends(get_db),
-):
-    from sqlalchemy import select
-    from app.models.documents import Document
-    result = await db.execute(select(Document).where(Document.id == document_id))
-    doc = result.scalar_one_or_none()
-    if not doc:
-        raise HTTPException(status_code=404, detail="Document not found")
-    return DocumentResponse.model_validate(doc)
 
 
 @router.post("/{document_id}/retry", response_model=DocumentResponse, status_code=status.HTTP_202_ACCEPTED)
@@ -184,8 +186,6 @@ async def retry_document(
     current_user: User = Depends(require_teacher),
     db: AsyncSession = Depends(get_db),
 ):
-    from sqlalchemy import select
-    from app.models.documents import Document, DocumentChunk
     result = await db.execute(select(Document).where(Document.id == document_id))
     doc = result.scalar_one_or_none()
     if not doc:

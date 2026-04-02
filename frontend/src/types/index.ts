@@ -75,7 +75,11 @@ export interface DashboardStats {
 export interface KnowledgeDocument {
   id: number;
   title: string;
+  key_stage: string;
   subject: string;
+  exam_board: string;
+  tier: string;
+  unit_name?: string;
   source_type: "upload" | "scrape" | "onedrive" | "gdocs";
   source_url?: string;
   file_type?: string;
