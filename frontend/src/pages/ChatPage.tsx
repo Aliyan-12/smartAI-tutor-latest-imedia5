@@ -46,7 +46,8 @@ export default function ChatPage() {
 
   useEffect(() => {
     loadCredits();
-  }, [loadCredits]);
+    loadChats();
+  }, [loadCredits, loadChats]);
 
   useEffect(() => {
     if (sessionId && sessionId !== activeSessionId) {

@@ -264,7 +264,7 @@ export const documentsApi = {
     return handleResponse(res);
   },
 
-  async upload(files: File[], keyStage: string, subject: string, examBoard: string, tier: string, unitName?: string) {
+  async upload(files: File[], keyStage: string, subject: string, examBoard: string, tier: string) {
     const token = getToken();
     const form = new FormData();
     for (const file of files) form.append("files", file);
@@ -272,7 +272,6 @@ export const documentsApi = {
     form.append("subject", subject);
     form.append("exam_board", examBoard);
     form.append("tier", tier);
-    if (unitName) form.append("unit_name", unitName);
     const res = await fetch(`${API_BASE}/documents/upload`, {
       method: "POST",
       headers: { Authorization: `Bearer ${token}` },

@@ -14,8 +14,12 @@ export function useChat() {
   const navigate = useNavigate();
 
   const loadChats = useCallback(async () => {
-    const list = (await chatApi.listChats()) as ChatListItem[];
-    setChatList(list);
+    try {
+      const list = (await chatApi.listChats()) as ChatListItem[];
+      setChatList(list);
+    } catch (err) {
+      console.error("Failed to load chats:", err);
+    }
   }, []);
 
   const loadCredits = useCallback(async () => {
@@ -28,10 +32,17 @@ export function useChat() {
   }, []);
 
   const loadChat = useCallback(async (sessionId: string) => {
-    const chat = (await chatApi.getChat(sessionId)) as Chat;
-    setMessages(chat.messages);
-    setActiveSessionId(sessionId);
-    navigate(`/chat/${sessionId}`, { replace: true });
+    try {
+      const chat = (await chatApi.getChat(sessionId)) as Chat;
+      setMessages(chat.messages);
+      setActiveSessionId(sessionId);
+      navigate(`/chat/${sessionId}`, { replace: true });
+    } catch (err) {
+      console.error("Chat not found:", sessionId);
+      setMessages([]);
+      setActiveSessionId(null);
+      navigate("/chat", { replace: true });
+    }
   }, [navigate]);
 
   const startNewChat = useCallback(() => {
