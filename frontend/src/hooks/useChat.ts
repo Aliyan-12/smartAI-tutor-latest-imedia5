@@ -79,13 +79,14 @@ export function useChat() {
           } else if (event.type === "token" && event.content) {
             if (event.content.startsWith("[Error:")) {
               hasError = true;
+              const errorText = event.content;
               setMessages((prev) => [
                 ...prev,
                 {
                   id: Date.now() + 1,
                   chat_id: 0,
-                  role: "system",
-                  content: event.content,
+                  role: "system" as const,
+                  content: errorText,
                   timestamp: new Date().toISOString(),
                 },
               ]);
