@@ -445,6 +445,15 @@ export const gamificationApi = {
 };
 
 export const lessonsApi = {
+  async getAvailableFilters() {
+    const res = await fetch(`${API_BASE}/lessons/available-filters`, { headers: authHeaders() });
+    return handleResponse<{ subjects: string[]; key_stages: string[] }>(res);
+  },
+  async getUnits(subject: string, keyStage: string) {
+    const query = new URLSearchParams({ subject, key_stage: keyStage });
+    const res = await fetch(`${API_BASE}/lessons/units?${query}`, { headers: authHeaders() });
+    return handleResponse<{ units: Array<{ id: number; title: string; unit_name: string }> }>(res);
+  },
   async getTopics(subject: string, keyStage: string) {
     const query = new URLSearchParams({ subject, key_stage: keyStage });
     const res = await fetch(`${API_BASE}/lessons/topics?${query}`, { headers: authHeaders() });

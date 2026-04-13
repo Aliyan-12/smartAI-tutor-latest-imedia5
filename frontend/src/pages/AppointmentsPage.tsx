@@ -10,7 +10,8 @@ import {
   Plus,
   AlertCircle,
 } from "lucide-react";
-import { appointmentsApi, teacherApi, parentApi } from "../services/api";import Sidebar from "../components/Sidebar";
+import { appointmentsApi, teacherApi, parentApi, lessonsApi } from "../services/api";
+import Sidebar from "../components/Sidebar";
 import { useAuth } from "../context/AuthContext";
 import type { Appointment, User } from "../types";
 
@@ -290,7 +291,12 @@ function BookingForm({ userRole, userId, onBooked }: BookingFormProps) {
   const [availability, setAvailability] = useState<{ used: number; limit: number } | null>(null);
   const [loadingAvailability, setLoadingAvailability] = useState(false);
 
-  // For teachers, pre-fill their own id as teacher_id
+  // Knowledge base filters
+  const [kbSubjects, setKbSubjects] = useState<string[]>([]);
+  const [kbStages, setKbStages] = useState<string[]>([]);
+  const [kbUnits, setKbUnits] = useState<Array<{ id: number; title: string; unit_name: string }>>([]);
+  const [selectedUnits, setSelectedUnits] = useState<string[]>([]);
+
   const [form, setForm] = useState({
     student_id: "",
     teacher_id: userRole === "teacher" ? String(userId) : "",
@@ -311,21 +317,50 @@ function BookingForm({ userRole, userId, onBooked }: BookingFormProps) {
     if (!open) return;
     const load = async () => {
       try {
+        const filtersPromise = lessonsApi.getAvailableFilters();
+
         if (userRole === "teacher") {
-          const studentList = (await teacherApi.getStudents()) as User[];
+          const [studentList, filters] = await Promise.all([
+            teacherApi.getStudents() as Promise<User[]>,
+            filtersPromise,
+          ]);
           setStudents(studentList);
+          setKbSubjects(filters.subjects);
+          setKbStages(filters.key_stages);
         } else if (userRole === "parent") {
-          const [studentList, teacherList] = await Promise.all([
+          const [studentList, teacherList, filters] = await Promise.all([
             parentApi.getStudents() as Promise<User[]>,
             appointmentsApi.getTeachers() as Promise<User[]>,
+            filtersPromise,
           ]);
           setStudents(studentList);
           setTeachers(teacherList);
+          setKbSubjects(filters.subjects);
+          setKbStages(filters.key_stages);
         }
       } catch {}
     };
     load();
   }, [open, userRole]);
+
+  // Load units when subject + key_stage change
+  useEffect(() => {
+    if (!form.subject || !form.key_stage) {
+      setKbUnits([]);
+      setSelectedUnits([]);
+      return;
+    }
+    lessonsApi.getUnits(form.subject, form.key_stage).then((data) => {
+      setKbUnits(data.units);
+      setSelectedUnits([]);
+    }).catch(() => setKbUnits([]));
+  }, [form.subject, form.key_stage]);
+
+  const toggleUnit = (unitName: string) => {
+    setSelectedUnits((prev) =>
+      prev.includes(unitName) ? prev.filter((u) => u !== unitName) : [...prev, unitName]
+    );
+  };
 
   const checkAvailability = async (studentId: number) => {
     if (!studentId) return;
@@ -377,7 +412,10 @@ function BookingForm({ userRole, userId, onBooked }: BookingFormProps) {
         title: form.title,
         scheduled_at: new Date(form.scheduled_at).toISOString(),
         duration_minutes: parseInt(form.duration_minutes, 10) || 60,
-        description: form.description || undefined,
+        description: [
+          selectedUnits.length > 0 ? `Topics: ${selectedUnits.join(", ")}` : "",
+          form.description || "",
+        ].filter(Boolean).join("\n") || undefined,
         payment_amount: form.payment_amount ? parseFloat(form.payment_amount) : undefined,
         passcode: form.passcode || undefined,
       });
@@ -512,32 +550,64 @@ function BookingForm({ userRole, userId, onBooked }: BookingFormProps) {
           </div>
 
           <div className="form-row">
-            <input
-              type="text"
-              placeholder="Session title *"
-              value={form.title}
-              onChange={(e) => setForm((f) => ({ ...f, title: e.target.value }))}
-              required
-            />
-            <input
-              type="text"
-              placeholder="Subject *"
-              value={form.subject}
-              onChange={(e) => setForm((f) => ({ ...f, subject: e.target.value }))}
-              required
-            />
-            <select
-              value={form.key_stage}
-              onChange={(e) => setForm((f) => ({ ...f, key_stage: e.target.value }))}
-            >
-              <option value="">Key Stage (optional)</option>
-              <option value="KS1">KS1</option>
-              <option value="KS2">KS2</option>
-              <option value="KS3">KS3</option>
-              <option value="KS4">KS4 (GCSE)</option>
-              <option value="KS5">KS5 (A-Level)</option>
-            </select>
+            <div style={{ flex: 1 }}>
+              <label style={{ display: "block", fontSize: 12, color: "var(--text-muted)", marginBottom: 4, fontWeight: 600 }}>Subject *</label>
+              <select value={form.subject} onChange={(e) => setForm((f) => ({ ...f, subject: e.target.value, key_stage: "", title: "" }))} required style={{ width: "100%" }}>
+                <option value="">Select Subject</option>
+                {kbSubjects.map((s) => <option key={s} value={s}>{s}</option>)}
+              </select>
+            </div>
+            <div style={{ flex: 1 }}>
+              <label style={{ display: "block", fontSize: 12, color: "var(--text-muted)", marginBottom: 4, fontWeight: 600 }}>Key Stage *</label>
+              <select value={form.key_stage} onChange={(e) => setForm((f) => ({ ...f, key_stage: e.target.value }))} required style={{ width: "100%" }}>
+                <option value="">Select Key Stage</option>
+                {kbStages.map((k) => <option key={k} value={k}>{k}</option>)}
+              </select>
+            </div>
+            <div style={{ flex: 1 }}>
+              <label style={{ display: "block", fontSize: 12, color: "var(--text-muted)", marginBottom: 4, fontWeight: 600 }}>Session Title *</label>
+              <input type="text" placeholder="e.g. Cell Structure Revision" value={form.title} onChange={(e) => setForm((f) => ({ ...f, title: e.target.value }))} required style={{ width: "100%" }} />
+            </div>
           </div>
+
+          {/* Units/Topics from knowledge base */}
+          {kbUnits.length > 0 && (
+            <div style={{ marginBottom: 14 }}>
+              <label style={{ display: "block", fontSize: 12, color: "var(--text-muted)", marginBottom: 6, fontWeight: 600 }}>
+                Select Topics/Units to Cover ({selectedUnits.length} selected)
+              </label>
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+                {kbUnits.map((unit) => {
+                  const isSelected = selectedUnits.includes(unit.unit_name);
+                  return (
+                    <button
+                      key={unit.id}
+                      type="button"
+                      onClick={() => toggleUnit(unit.unit_name)}
+                      style={{
+                        padding: "6px 12px",
+                        borderRadius: 16,
+                        fontSize: 12,
+                        fontWeight: 500,
+                        border: isSelected ? "1.5px solid var(--accent)" : "1px solid var(--border)",
+                        background: isSelected ? "var(--accent)" : "var(--bg-secondary)",
+                        color: isSelected ? "white" : "var(--text-primary)",
+                        cursor: "pointer",
+                        transition: "all 0.15s",
+                      }}
+                    >
+                      {unit.title}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+          {form.subject && form.key_stage && kbUnits.length === 0 && (
+            <p style={{ fontSize: 12, color: "var(--text-muted)", marginBottom: 14 }}>
+              No documents found for {form.subject} {form.key_stage}. Upload materials in the Knowledge Base first, or the AI will use general knowledge.
+            </p>
+          )}
 
           <div className="form-row">
             <div style={{ flex: 1, minWidth: 200 }}>
