@@ -22,7 +22,12 @@ SYSTEM_PROMPT = (
     "When KNOWLEDGE BASE CONTEXT is provided in a message, use it as your primary reference material "
     "to answer the student's question. Synthesise the information naturally and accurately. "
     "Do not mention chunk boundaries or source labels. If the context does not fully answer the "
-    "question, supplement with your general knowledge and say so."
+    "question, supplement with your general knowledge and say so.\n\n"
+    "After you have finished explaining a concept clearly and the student seems to understand, "
+    "offer a short quiz by including this exact marker on its own line at the END of your response:\n"
+    '[QUIZ_OFFER: topic="<specific topic name>"]\n'
+    "Only include this marker once per explanation. The topic should be specific. "
+    "Do not include the marker if you have already offered a quiz recently in this conversation."
 )
 
 MAX_RETRIES = 2
@@ -148,6 +153,90 @@ async def stream_response_async(
 ) -> AsyncGenerator[str, None]:
     for token in stream_response(history, user_message, rag_chunks):
         yield token
+
+
+import re
+import json as json_module
+
+QUIZ_OFFER_RE = re.compile(r'\[QUIZ_OFFER:\s*topic="([^"]+)"\]')
+
+
+def extract_quiz_offer(text: str) -> Optional[str]:
+    match = QUIZ_OFFER_RE.search(text)
+    return match.group(1) if match else None
+
+
+def strip_quiz_offer(text: str) -> str:
+    return QUIZ_OFFER_RE.sub("", text).rstrip()
+
+
+def generate_mcq_questions(
+    topic: str,
+    subject: str,
+    key_stage: str,
+    chat_history_summary: str = "",
+    num_questions: int = 5,
+) -> List[dict]:
+    prompt = f"""Generate exactly {num_questions} multiple-choice questions for a {key_stage} {subject} student on the topic: "{topic}".
+
+{f"Recent context: {chat_history_summary}" if chat_history_summary else ""}
+
+Return ONLY a valid JSON array. No markdown fences, no explanation.
+
+Each item must have this exact structure:
+{{"question_index": 0, "question_text": "...", "options": ["A) ...", "B) ...", "C) ...", "D) ..."], "correct_answer": 0, "explanation": "...", "topic_tag": "..."}}
+
+Rules:
+- correct_answer is the 0-based index (0-3)
+- topic_tag is a short sub-topic label
+- explanation is 1-2 sentences
+- question_index starts at 0
+- All 4 options must be plausible"""
+
+    client = _get_client()
+    response = client.models.generate_content(
+        model=settings.gemini_model,
+        contents=prompt,
+        config=types.GenerateContentConfig(
+            system_instruction="You are a quiz generator. Output only valid JSON.",
+        ),
+    )
+
+    raw = response.text.strip()
+    if raw.startswith("```"):
+        parts = raw.split("```")
+        raw = parts[1] if len(parts) > 1 else raw
+        if raw.startswith("json"):
+            raw = raw[4:]
+        raw = raw.strip()
+
+    return json_module.loads(raw)
+
+
+def generate_assessment_report(
+    topic: str,
+    subject: str,
+    score_percent: float,
+    weak_topics: List[str],
+    strong_topics: List[str],
+) -> str:
+    prompt = f"""A student just completed a quiz on "{topic}" ({subject}).
+Score: {score_percent:.0f}%
+Strong areas: {', '.join(strong_topics) if strong_topics else 'None'}
+Weak areas: {', '.join(weak_topics) if weak_topics else 'None'}
+
+Write a brief, encouraging report (3-4 sentences) summarizing their performance.
+Mention specific strong and weak areas. Suggest what to review next. Keep it warm and motivating."""
+
+    client = _get_client()
+    response = client.models.generate_content(
+        model=settings.gemini_model,
+        contents=prompt,
+        config=types.GenerateContentConfig(
+            system_instruction="You are a supportive tutor writing a student progress report.",
+        ),
+    )
+    return response.text.strip()
 
 
 def generate_chat_title(user_message: str) -> str:

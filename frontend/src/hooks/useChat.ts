@@ -1,7 +1,7 @@
 import { useState, useCallback, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import { chatApi } from "../services/api";
-import type { ChatMessage, ChatListItem, Chat } from "../types";
+import type { ChatMessage, ChatListItem, Chat, QuizOffer } from "../types";
 
 export function useChat() {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -10,6 +10,7 @@ export function useChat() {
   const [streaming, setStreaming] = useState(false);
   const [streamContent, setStreamContent] = useState("");
   const [credits, setCredits] = useState<number | null>(null);
+  const [quizOffer, setQuizOffer] = useState<QuizOffer | null>(null);
   const cancelRef = useRef<(() => void) | null>(null);
   const navigate = useNavigate();
 
@@ -49,6 +50,7 @@ export function useChat() {
     setMessages([]);
     setActiveSessionId(null);
     setStreamContent("");
+    setQuizOffer(null);
     navigate("/chat", { replace: true });
   }, [navigate]);
 
@@ -100,6 +102,11 @@ export function useChat() {
             loadChats();
           } else if (event.type === "credits" && event.content) {
             setCredits(parseFloat(event.content));
+          } else if (event.type === "quiz_offer" && event.content) {
+            setQuizOffer({
+              topic: event.content,
+              chat_session_id: activeSessionId || "",
+            });
           }
         },
         () => {
@@ -176,6 +183,8 @@ export function useChat() {
     }
   }, [streamContent]);
 
+  const clearQuizOffer = useCallback(() => setQuizOffer(null), []);
+
   return {
     messages,
     chatList,
@@ -183,6 +192,7 @@ export function useChat() {
     streaming,
     streamContent,
     credits,
+    quizOffer,
     loadChats,
     loadCredits,
     loadChat,
@@ -190,5 +200,6 @@ export function useChat() {
     sendMessage,
     deleteChat,
     stopStreaming,
+    clearQuizOffer,
   };
 }

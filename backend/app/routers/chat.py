@@ -111,8 +111,11 @@ async def stream_message(
 
         complete_text = "".join(full_response)
 
+        quiz_topic = gemini_service.extract_quiz_offer(complete_text)
+        clean_text = gemini_service.strip_quiz_offer(complete_text)
+
         async with async_session_factory() as save_session:
-            await chat_service.add_message(save_session, chat.id, "assistant", complete_text)
+            await chat_service.add_message(save_session, chat.id, "assistant", clean_text)
 
             from app.services.user_service import get_user_by_id
             fresh_user = await get_user_by_id(save_session, current_user.id)
@@ -127,6 +130,9 @@ async def stream_message(
                     await chat_service.update_chat_title(save_session, saved_chat, title)
                     yield f"data: {json.dumps({'type': 'title', 'content': title})}\n\n"
             await save_session.commit()
+
+        if quiz_topic:
+            yield f"data: {json.dumps({'type': 'quiz_offer', 'content': quiz_topic})}\n\n"
 
         yield f"data: {json.dumps({'type': 'end'})}\n\n"
 

@@ -340,3 +340,104 @@ export const subscriptionApi = {
     return handleResponse(res);
   },
 };
+
+export const parentApi = {
+  async getDashboard() {
+    const res = await fetch(`${API_BASE}/parent/dashboard`, { headers: authHeaders() });
+    return handleResponse(res);
+  },
+  async getStudents() {
+    const res = await fetch(`${API_BASE}/parent/students`, { headers: authHeaders() });
+    return handleResponse(res);
+  },
+  async getStudentProgress(studentId: number) {
+    const res = await fetch(`${API_BASE}/parent/students/${studentId}/progress`, { headers: authHeaders() });
+    return handleResponse(res);
+  },
+  async getStudentChats(studentId: number) {
+    const res = await fetch(`${API_BASE}/parent/students/${studentId}/chats`, { headers: authHeaders() });
+    return handleResponse(res);
+  },
+  async getStudentAssessments(studentId: number) {
+    const res = await fetch(`${API_BASE}/parent/students/${studentId}/assessments`, { headers: authHeaders() });
+    return handleResponse(res);
+  },
+  async linkWithCode(code: string) {
+    const res = await fetch(`${API_BASE}/parent/link`, {
+      method: "POST",
+      headers: authHeaders(),
+      body: JSON.stringify({ code }),
+    });
+    return handleResponse(res);
+  },
+};
+
+export const assessmentsApi = {
+  async start(data: { chat_session_id?: string; subject: string; key_stage: string; topic: string }) {
+    const res = await fetch(`${API_BASE}/assessments/start`, {
+      method: "POST",
+      headers: authHeaders(),
+      body: JSON.stringify(data),
+    });
+    return handleResponse(res);
+  },
+  async submitAnswer(assessmentId: number, data: { question_index: number; student_answer: number }) {
+    const res = await fetch(`${API_BASE}/assessments/${assessmentId}/answer`, {
+      method: "POST",
+      headers: authHeaders(),
+      body: JSON.stringify(data),
+    });
+    return handleResponse(res);
+  },
+  async complete(assessmentId: number) {
+    const res = await fetch(`${API_BASE}/assessments/${assessmentId}/complete`, {
+      method: "POST",
+      headers: authHeaders(),
+    });
+    return handleResponse(res);
+  },
+  async get(assessmentId: number) {
+    const res = await fetch(`${API_BASE}/assessments/${assessmentId}`, { headers: authHeaders() });
+    return handleResponse(res);
+  },
+  async listForStudent(studentId: number) {
+    const res = await fetch(`${API_BASE}/assessments/student/${studentId}`, { headers: authHeaders() });
+    return handleResponse(res);
+  },
+};
+
+export const appointmentsApi = {
+  async book(data: {
+    student_id: number; teacher_id: number; subject: string; key_stage: string;
+    title: string; scheduled_at: string; duration_minutes?: number;
+    description?: string; payment_amount?: number;
+  }) {
+    const res = await fetch(`${API_BASE}/appointments/book`, {
+      method: "POST",
+      headers: authHeaders(),
+      body: JSON.stringify(data),
+    });
+    return handleResponse(res);
+  },
+  async list(status?: string) {
+    const query = status ? `?status=${status}` : "";
+    const res = await fetch(`${API_BASE}/appointments${query}`, { headers: authHeaders() });
+    return handleResponse(res);
+  },
+  async get(id: number) {
+    const res = await fetch(`${API_BASE}/appointments/${id}`, { headers: authHeaders() });
+    return handleResponse(res);
+  },
+  async updateStatus(id: number, status: string) {
+    const res = await fetch(`${API_BASE}/appointments/${id}/status`, {
+      method: "PATCH",
+      headers: authHeaders(),
+      body: JSON.stringify({ status }),
+    });
+    return handleResponse(res);
+  },
+  async checkAvailability(studentId: number) {
+    const res = await fetch(`${API_BASE}/appointments/availability?student_id=${studentId}`, { headers: authHeaders() });
+    return handleResponse(res);
+  },
+};

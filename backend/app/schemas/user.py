@@ -21,6 +21,7 @@ class UserResponse(BaseModel):
     role: str
     is_active: bool
     credits: float
+    parent_id: Optional[int] = None
     created_at: datetime
 
     model_config = {"from_attributes": True}
@@ -36,14 +37,14 @@ class AdminUserCreate(BaseModel):
     name: str = Field(..., min_length=2, max_length=120)
     email: EmailStr
     password: str = Field(..., min_length=6, max_length=128)
-    role: Literal["admin", "teacher", "student"] = "student"
+    role: Literal["admin", "teacher", "student", "parent"] = "student"
     credits: float = 100
 
 
 class AdminUserUpdate(BaseModel):
     name: Optional[str] = Field(None, min_length=2, max_length=120)
     email: Optional[EmailStr] = None
-    role: Optional[Literal["admin", "teacher", "student"]] = None
+    role: Optional[Literal["admin", "teacher", "student", "parent"]] = None
     is_active: Optional[bool] = None
     credits: Optional[float] = None
 

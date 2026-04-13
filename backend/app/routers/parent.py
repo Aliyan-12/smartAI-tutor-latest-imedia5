@@ -1,0 +1,150 @@
+import logging
+from typing import List
+
+from fastapi import APIRouter, Depends, HTTPException, status
+from pydantic import BaseModel
+from sqlalchemy import select, desc
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
+
+from app.db.session import get_db
+from app.middleware.auth import require_parent
+from app.models.user import User, ROLE_STUDENT
+from app.models.chat import Chat
+from app.models.parent_student import InviteCode
+from app.schemas.user import UserResponse
+from app.schemas.chat import ChatListItem, ChatResponse
+from app.schemas.assessment import AssessmentResponse, StudentProgressResponse
+from app.services import assessment_service
+
+logger = logging.getLogger(__name__)
+
+router = APIRouter(prefix="/api/parent", tags=["parent"])
+
+
+async def _get_children(db: AsyncSession, parent_id: int) -> List[User]:
+    result = await db.execute(
+        select(User).where(User.parent_id == parent_id, User.role == ROLE_STUDENT)
+    )
+    return list(result.scalars().all())
+
+
+async def _assert_is_child(db: AsyncSession, parent_id: int, student_id: int):
+    result = await db.execute(
+        select(User.id).where(
+            User.id == student_id, User.parent_id == parent_id, User.role == ROLE_STUDENT
+        )
+    )
+    if not result.scalar_one_or_none():
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Student is not linked to your account")
+
+
+class LinkCodePayload(BaseModel):
+    code: str
+
+
+@router.get("/dashboard")
+async def parent_dashboard(
+    parent: User = Depends(require_parent),
+    db: AsyncSession = Depends(get_db),
+):
+    children = await _get_children(db, parent.id)
+    child_data = []
+    for child in children:
+        progress = await assessment_service.get_student_progress(db, child.id)
+        child_data.append({
+            "student": UserResponse.model_validate(child),
+            "progress": progress,
+        })
+
+    return {
+        "linked_students": len(children),
+        "children": child_data,
+    }
+
+
+@router.get("/students", response_model=List[UserResponse])
+async def list_children(
+    parent: User = Depends(require_parent),
+    db: AsyncSession = Depends(get_db),
+):
+    children = await _get_children(db, parent.id)
+    return [UserResponse.model_validate(c) for c in children]
+
+
+@router.get("/students/{student_id}/progress")
+async def get_student_progress(
+    student_id: int,
+    parent: User = Depends(require_parent),
+    db: AsyncSession = Depends(get_db),
+):
+    await _assert_is_child(db, parent.id, student_id)
+    progress = await assessment_service.get_student_progress(db, student_id)
+    assessments = await assessment_service.list_student_assessments(db, student_id)
+
+    student = await db.execute(select(User).where(User.id == student_id))
+    student_user = student.scalar_one()
+
+    return StudentProgressResponse(
+        student_id=student_id,
+        student_name=student_user.name,
+        total_assessments=progress["total_assessments"],
+        average_score=progress["average_score"],
+        latest_score=progress["latest_score"],
+        weak_topics=progress["weak_topics"],
+        strong_topics=progress["strong_topics"],
+        assessments=[AssessmentResponse.model_validate(a) for a in assessments],
+    )
+
+
+@router.get("/students/{student_id}/chats", response_model=List[ChatListItem])
+async def get_student_chats(
+    student_id: int,
+    parent: User = Depends(require_parent),
+    db: AsyncSession = Depends(get_db),
+):
+    await _assert_is_child(db, parent.id, student_id)
+    result = await db.execute(
+        select(Chat).where(Chat.user_id == student_id).order_by(desc(Chat.created_at))
+    )
+    chats = list(result.scalars().all())
+    return [ChatListItem(id=c.id, session_id=c.session_id, title=c.title, created_at=c.created_at) for c in chats]
+
+
+@router.get("/students/{student_id}/assessments", response_model=List[AssessmentResponse])
+async def get_student_assessments(
+    student_id: int,
+    parent: User = Depends(require_parent),
+    db: AsyncSession = Depends(get_db),
+):
+    await _assert_is_child(db, parent.id, student_id)
+    assessments = await assessment_service.list_student_assessments(db, student_id)
+    return [AssessmentResponse.model_validate(a) for a in assessments]
+
+
+@router.post("/link")
+async def link_with_code(
+    payload: LinkCodePayload,
+    parent: User = Depends(require_parent),
+    db: AsyncSession = Depends(get_db),
+):
+    result = await db.execute(
+        select(InviteCode).where(InviteCode.code == payload.code.strip().upper(), InviteCode.used == False)
+    )
+    invite = result.scalar_one_or_none()
+    if not invite:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Invalid or already used invite code")
+
+    student = await db.execute(select(User).where(User.id == invite.student_id))
+    student_user = student.scalar_one_or_none()
+    if not student_user or student_user.role != ROLE_STUDENT:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Student not found")
+
+    if student_user.parent_id and student_user.parent_id != parent.id:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Student already linked to another parent")
+
+    student_user.parent_id = parent.id
+    invite.used = True
+    await db.flush()
+
+    return {"message": f"Successfully linked to {student_user.name}", "student": UserResponse.model_validate(student_user)}

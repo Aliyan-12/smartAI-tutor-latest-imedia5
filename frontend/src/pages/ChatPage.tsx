@@ -5,9 +5,10 @@ import Sidebar from "../components/Sidebar";
 import ChatWindow from "../components/ChatWindow";
 import ChatInput from "../components/ChatInput";
 import WelcomeScreen from "../components/WelcomeScreen";
+import AssessmentMode from "../components/AssessmentMode";
 import { useChat } from "../hooks/useChat";
 import { useVoice } from "../hooks/useVoice";
-import type { ChatMessage } from "../types";
+import type { ChatMessage, Assessment } from "../types";
 
 export default function ChatPage() {
   const { sessionId } = useParams<{ sessionId?: string }>();
@@ -20,6 +21,7 @@ export default function ChatPage() {
     streaming,
     streamContent,
     credits,
+    quizOffer,
     loadChats,
     loadCredits,
     loadChat,
@@ -27,6 +29,7 @@ export default function ChatPage() {
     sendMessage,
     deleteChat,
     stopStreaming,
+    clearQuizOffer,
   } = useChat();
 
   const {
@@ -167,14 +170,32 @@ export default function ChatPage() {
           </div>
         )}
 
-        <ChatInput
-          onSend={sendMessage}
-          streaming={streaming}
-          onStop={stopStreaming}
-          voiceStatus={voiceStatus}
-          onVoiceStart={handleVoiceStart}
-          onVoiceEnd={handleVoiceEnd}
-        />
+        {quizOffer ? (
+          <AssessmentMode
+            quizOffer={quizOffer}
+            onComplete={(assessment: Assessment) => {
+              clearQuizOffer();
+              const reportMsg: ChatMessage = {
+                id: Date.now(),
+                chat_id: 0,
+                role: "assistant",
+                content: `**Quiz Complete: ${assessment.topic}**\n\nScore: ${assessment.score_percent.toFixed(0)}%\n${assessment.report_text || ""}`,
+                timestamp: new Date().toISOString(),
+              };
+              // The assessment is saved in DB. Just show the result in chat.
+            }}
+            onDecline={clearQuizOffer}
+          />
+        ) : (
+          <ChatInput
+            onSend={sendMessage}
+            streaming={streaming}
+            onStop={stopStreaming}
+            voiceStatus={voiceStatus}
+            onVoiceStart={handleVoiceStart}
+            onVoiceEnd={handleVoiceEnd}
+          />
+        )}
       </div>
     </div>
   );

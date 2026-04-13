@@ -41,6 +41,16 @@ class Settings(BaseSettings):
     upload_dir: str = "uploads/documents"
     max_upload_size_mb: int = 50
 
+    email_enabled: bool = False
+    email_smtp_host: str = "smtp.gmail.com"
+    email_smtp_port: int = 587
+    email_smtp_user: str = ""
+    email_smtp_password: str = ""
+    email_from_address: str = "noreply@smartai.com"
+
+    max_appointments_per_week: int = 2
+    default_class_price: float = 25.00
+
     @property
     def database_url(self) -> str:
         return (

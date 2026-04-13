@@ -197,3 +197,47 @@ async def view_any_chat(
     if not chat:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Chat not found")
     return ChatResponse.model_validate(chat)
+
+
+@router.post("/users/{student_id}/generate-invite")
+async def generate_invite_code(
+    student_id: int,
+    admin: User = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    from app.models.parent_student import InviteCode
+    from app.models.user import ROLE_STUDENT
+
+    student = await get_user_by_id(db, student_id)
+    if not student or student.role != ROLE_STUDENT:
+        raise HTTPException(status_code=404, detail="Student not found")
+
+    code = InviteCode.generate_code()
+    invite = InviteCode(code=code, student_id=student_id)
+    db.add(invite)
+    await db.flush()
+
+    return {"code": code, "student_id": student_id, "student_name": student.name}
+
+
+@router.post("/users/{parent_id}/link-student")
+async def link_student_to_parent(
+    parent_id: int,
+    student_id: int = Query(...),
+    admin: User = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    from app.models.user import ROLE_PARENT, ROLE_STUDENT
+
+    parent = await get_user_by_id(db, parent_id)
+    if not parent or parent.role != ROLE_PARENT:
+        raise HTTPException(status_code=404, detail="Parent not found")
+
+    student = await get_user_by_id(db, student_id)
+    if not student or student.role != ROLE_STUDENT:
+        raise HTTPException(status_code=404, detail="Student not found")
+
+    student.parent_id = parent.id
+    await db.flush()
+
+    return {"message": f"Linked {student.name} to {parent.name}"}

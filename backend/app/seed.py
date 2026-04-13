@@ -1,6 +1,7 @@
 """
 Database seed script.
-Populates the database with initial data: admin user, sample teacher, sample student.
+Populates the database with initial data: admin, teacher, student, parent.
+Links parent to student and generates invite code.
 
 Usage:
     cd backend
@@ -35,18 +36,28 @@ SEED_USERS = [
         "role": "student",
         "credits": 100,
     },
+    {
+        "name": "Patricia Williams",
+        "email": "parent@smartai.com",
+        "password": "parent123",
+        "role": "parent",
+        "credits": 0,
+    },
 ]
 
 
 async def run_seed():
     from app.db.session import async_session_factory
     from app.services.user_service import get_user_by_email, create_user
+    from app.models.parent_student import InviteCode
 
     async with async_session_factory() as db:
+        created_users = {}
         for user_data in SEED_USERS:
             existing = await get_user_by_email(db, user_data["email"])
             if existing:
                 logger.info(f"User already exists: {user_data['email']} (skipping)")
+                created_users[user_data["role"]] = existing
                 continue
 
             user = await create_user(
@@ -57,7 +68,27 @@ async def run_seed():
                 role=user_data["role"],
                 credits=user_data["credits"],
             )
+            created_users[user_data["role"]] = user
             logger.info(f"Created {user.role}: {user.email}")
+
+        # Link parent to student
+        parent = created_users.get("parent")
+        student = created_users.get("student")
+        if parent and student and not student.parent_id:
+            student.parent_id = parent.id
+            logger.info(f"Linked {student.name} to parent {parent.name}")
+
+        # Generate invite code for student
+        if student:
+            from sqlalchemy import select
+            existing_code = await db.execute(
+                select(InviteCode).where(InviteCode.student_id == student.id)
+            )
+            if not existing_code.scalar_one_or_none():
+                code = InviteCode.generate_code()
+                invite = InviteCode(code=code, student_id=student.id, used=True)
+                db.add(invite)
+                logger.info(f"Generated invite code for {student.name}: {code}")
 
         await db.commit()
 
@@ -73,6 +104,7 @@ def main():
     logger.info("  Admin:   admin@smartai.com   / admin123")
     logger.info("  Teacher: teacher@smartai.com / teacher123")
     logger.info("  Student: student@smartai.com / student123")
+    logger.info("  Parent:  parent@smartai.com  / parent123")
 
 
 if __name__ == "__main__":

@@ -3,7 +3,7 @@ import { useNavigate, useLocation } from "react-router-dom";
 import {
   MessageSquarePlus, Trash2, LogOut, Coins,
   LayoutDashboard, Users, Activity, Shield,
-  BookOpen, Settings,
+  BookOpen, Settings, Calendar,
 } from "lucide-react";
 import { useAuth } from "../context/AuthContext";
 import type { ChatListItem } from "../types";
@@ -115,6 +115,46 @@ export default function Sidebar({
           >
             <BookOpen size={16} />
             <span>Knowledge Base</span>
+          </div>
+        </div>
+      )}
+
+      {/* Parent nav */}
+      {user?.role === "parent" && (
+        <div className="sidebar-nav">
+          <div
+            className={`nav-item ${isActive("/parent") ? "active" : ""}`}
+            onClick={() => navigate("/parent")}
+          >
+            <LayoutDashboard size={16} />
+            <span>Dashboard</span>
+          </div>
+          <div
+            className={`nav-item ${isActive("/parent/students") ? "active" : ""}`}
+            onClick={() => navigate("/parent/students")}
+          >
+            <Users size={16} />
+            <span>My Children</span>
+          </div>
+          <div
+            className={`nav-item ${isActive("/appointments") ? "active" : ""}`}
+            onClick={() => navigate("/appointments")}
+          >
+            <Calendar size={16} />
+            <span>Appointments</span>
+          </div>
+        </div>
+      )}
+
+      {/* Teacher appointments nav item */}
+      {user?.role === "teacher" && (
+        <div className="sidebar-nav" style={{ paddingTop: 0 }}>
+          <div
+            className={`nav-item ${isActive("/appointments") ? "active" : ""}`}
+            onClick={() => navigate("/appointments")}
+          >
+            <Calendar size={16} />
+            <span>Appointments</span>
           </div>
         </div>
       )}

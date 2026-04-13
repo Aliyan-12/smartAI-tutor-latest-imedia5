@@ -1,4 +1,4 @@
-export type UserRole = "admin" | "teacher" | "student";
+export type UserRole = "admin" | "teacher" | "student" | "parent";
 
 export interface User {
   id: number;
@@ -7,6 +7,7 @@ export interface User {
   role: UserRole;
   is_active: boolean;
   credits: number;
+  parent_id?: number | null;
   created_at: string;
 }
 
@@ -41,7 +42,7 @@ export interface ChatListItem {
 }
 
 export interface StreamEvent {
-  type: "start" | "token" | "end" | "title" | "credits" | "error";
+  type: "start" | "token" | "end" | "title" | "credits" | "error" | "quiz_offer";
   content?: string;
   session_id?: string;
 }
@@ -94,4 +95,72 @@ export interface KnowledgeDocument {
 export interface DocumentListResponse {
   documents: KnowledgeDocument[];
   total: number;
+}
+
+export interface AssessmentQuestion {
+  id: number;
+  question_index: number;
+  question_text: string;
+  options: string[];
+  correct_answer: number | null;
+  student_answer: number | null;
+  is_correct: boolean | null;
+  explanation: string | null;
+  topic_tag: string;
+}
+
+export interface Assessment {
+  id: number;
+  student_id: number;
+  chat_session_id: string | null;
+  subject: string;
+  key_stage: string;
+  topic: string;
+  total_questions: number;
+  correct_answers: number;
+  score_percent: number;
+  weak_topics: string[] | null;
+  strong_topics: string[] | null;
+  report_text: string | null;
+  status: "in_progress" | "completed";
+  created_at: string;
+  questions: AssessmentQuestion[];
+}
+
+export interface Appointment {
+  id: number;
+  student_id: number;
+  teacher_id: number;
+  booked_by: number;
+  subject: string;
+  key_stage: string;
+  title: string;
+  description: string | null;
+  scheduled_at: string;
+  duration_minutes: number;
+  status: "booked" | "confirmed" | "completed" | "cancelled";
+  payment_status: "pending" | "paid" | "refunded";
+  payment_amount: number | null;
+  meeting_link: string | null;
+  notes: string | null;
+  student_name?: string | null;
+  teacher_name?: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface QuizOffer {
+  topic: string;
+  chat_session_id: string;
+}
+
+export interface StudentProgress {
+  student_id: number;
+  student_name: string;
+  total_assessments: number;
+  average_score: number | null;
+  latest_score: number | null;
+  weak_topics: string[];
+  strong_topics: string[];
+  assessments: Assessment[];
 }
