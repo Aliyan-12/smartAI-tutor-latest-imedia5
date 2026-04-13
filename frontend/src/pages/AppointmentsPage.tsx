@@ -10,8 +10,7 @@ import {
   Plus,
   AlertCircle,
 } from "lucide-react";
-import { appointmentsApi, teacherApi, parentApi } from "../services/api";
-import Sidebar from "../components/Sidebar";
+import { appointmentsApi, teacherApi, parentApi } from "../services/api";import Sidebar from "../components/Sidebar";
 import { useAuth } from "../context/AuthContext";
 import type { Appointment, User } from "../types";
 
@@ -302,6 +301,7 @@ function BookingForm({ userRole, userId, onBooked }: BookingFormProps) {
     duration_minutes: "60",
     description: "",
     payment_amount: "",
+    passcode: "",
   });
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
@@ -315,15 +315,12 @@ function BookingForm({ userRole, userId, onBooked }: BookingFormProps) {
           const studentList = (await teacherApi.getStudents()) as User[];
           setStudents(studentList);
         } else if (userRole === "parent") {
-          const studentList = (await parentApi.getStudents()) as User[];
+          const [studentList, teacherList] = await Promise.all([
+            parentApi.getStudents() as Promise<User[]>,
+            appointmentsApi.getTeachers() as Promise<User[]>,
+          ]);
           setStudents(studentList);
-          // Parents also need a teacher list — use teacherApi if allowed, otherwise skip
-          try {
-            const teacherList = (await teacherApi.getStudents()) as User[];
-            setTeachers(teacherList);
-          } catch {
-            // Not authorized or not needed
-          }
+          setTeachers(teacherList);
         }
       } catch {}
     };
@@ -338,7 +335,12 @@ function BookingForm({ userRole, userId, onBooked }: BookingFormProps) {
         used: number;
         limit: number;
       };
-      setAvailability(data);
+      // Guard against malformed response
+      if (data && typeof data.used === "number" && typeof data.limit === "number") {
+        setAvailability(data);
+      } else {
+        setAvailability(null);
+      }
     } catch {
       setAvailability(null);
     } finally {
@@ -377,6 +379,7 @@ function BookingForm({ userRole, userId, onBooked }: BookingFormProps) {
         duration_minutes: parseInt(form.duration_minutes, 10) || 60,
         description: form.description || undefined,
         payment_amount: form.payment_amount ? parseFloat(form.payment_amount) : undefined,
+        passcode: form.passcode || undefined,
       });
       setSuccess("Appointment booked successfully!");
       setForm({
@@ -389,6 +392,7 @@ function BookingForm({ userRole, userId, onBooked }: BookingFormProps) {
         duration_minutes: "60",
         description: "",
         payment_amount: "",
+        passcode: "",
       });
       setAvailability(null);
       onBooked();
@@ -576,6 +580,22 @@ function BookingForm({ userRole, userId, onBooked }: BookingFormProps) {
                 min="0"
                 step="0.01"
                 style={{ width: "100%" }}
+              />
+            </div>
+          </div>
+
+          <div className="form-row">
+            <div style={{ flex: 1, minWidth: 140 }}>
+              <label style={{ display: "block", fontSize: 12, color: "var(--text-muted)", marginBottom: 4, fontWeight: 600 }}>
+                Session Passcode (optional)
+              </label>
+              <input
+                type="text"
+                placeholder="e.g. ABC123"
+                value={form.passcode}
+                onChange={(e) => setForm((f) => ({ ...f, passcode: e.target.value.toUpperCase() }))}
+                maxLength={16}
+                style={{ width: "100%", letterSpacing: 2 }}
               />
             </div>
           </div>

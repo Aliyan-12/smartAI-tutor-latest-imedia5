@@ -141,6 +141,8 @@ export interface Appointment {
   status: "booked" | "confirmed" | "completed" | "cancelled";
   payment_status: "pending" | "paid" | "refunded";
   payment_amount: number | null;
+  passcode: string | null;
+  session_started_at: string | null;
   meeting_link: string | null;
   notes: string | null;
   student_name?: string | null;

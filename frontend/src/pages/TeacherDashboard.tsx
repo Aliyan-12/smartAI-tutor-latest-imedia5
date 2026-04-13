@@ -1,9 +1,10 @@
 import { useState, useEffect, useCallback } from "react";
 import { useLocation } from "react-router-dom";
-import { Users, MessageSquare, Eye, Activity } from "lucide-react";
-import { teacherApi } from "../services/api";
+import { Users, MessageSquare, Eye, Activity, BookOpen } from "lucide-react";
+import { teacherApi, assessmentsApi } from "../services/api";
 import Sidebar from "../components/Sidebar";
-import type { User, DashboardStats, ChatListItem, Chat } from "../types";
+import StudentProgress from "../components/StudentProgress";
+import type { User, DashboardStats, ChatListItem, Chat, Assessment } from "../types";
 
 function StatsCards({ stats }: { stats: DashboardStats | null }) {
   if (!stats) return null;
@@ -36,14 +37,21 @@ function StatsCards({ stats }: { stats: DashboardStats | null }) {
 function StudentsView({ students, error }: { students: User[]; error: string }) {
   const [selectedStudent, setSelectedStudent] = useState<number | null>(null);
   const [studentChats, setStudentChats] = useState<ChatListItem[]>([]);
+  const [studentAssessments, setStudentAssessments] = useState<Assessment[]>([]);
   const [viewingChat, setViewingChat] = useState<Chat | null>(null);
+  const [activeTab, setActiveTab] = useState<"chats" | "progress">("chats");
 
-  const viewStudentChats = async (studentId: number) => {
+  const viewStudentData = async (studentId: number) => {
     try {
-      const chats = (await teacherApi.getStudentChats(studentId)) as ChatListItem[];
+      const [chats, assessments] = await Promise.all([
+        teacherApi.getStudentChats(studentId) as Promise<ChatListItem[]>,
+        assessmentsApi.listForStudent(studentId) as Promise<Assessment[]>,
+      ]);
       setStudentChats(chats);
+      setStudentAssessments(assessments);
       setSelectedStudent(studentId);
       setViewingChat(null);
+      setActiveTab("chats");
     } catch {}
   };
 
@@ -63,7 +71,7 @@ function StudentsView({ students, error }: { students: User[]; error: string }) 
             <div
               key={s.id}
               className={`student-row ${selectedStudent === s.id ? "selected" : ""}`}
-              onClick={() => viewStudentChats(s.id)}
+              onClick={() => viewStudentData(s.id)}
             >
               <span className="student-name">{s.name}</span>
               <span className="student-credits">{Number(s.credits).toFixed(0)} cr</span>
@@ -76,17 +84,40 @@ function StudentsView({ students, error }: { students: User[]; error: string }) 
         <div className="chat-list-panel">
           {selectedStudent ? (
             <>
-              <h3>Chat History</h3>
-              {studentChats.map((c) => (
-                <div key={c.session_id} className="chat-row" onClick={() => viewChat(c.session_id)}>
-                  <span>{c.title}</span>
-                  <span className="chat-date">{new Date(c.created_at).toLocaleDateString()}</span>
+              <div className="tab-bar" style={{ marginBottom: 10 }}>
+                <button
+                  className={`tab ${activeTab === "chats" ? "active" : ""}`}
+                  onClick={() => setActiveTab("chats")}
+                >
+                  <MessageSquare size={12} />
+                  Chat History
+                </button>
+                <button
+                  className={`tab ${activeTab === "progress" ? "active" : ""}`}
+                  onClick={() => setActiveTab("progress")}
+                >
+                  <BookOpen size={12} />
+                  Progress
+                </button>
+              </div>
+              {activeTab === "chats" ? (
+                <>
+                  {studentChats.map((c) => (
+                    <div key={c.session_id} className="chat-row" onClick={() => viewChat(c.session_id)}>
+                      <span>{c.title}</span>
+                      <span className="chat-date">{new Date(c.created_at).toLocaleDateString()}</span>
+                    </div>
+                  ))}
+                  {studentChats.length === 0 && <p className="empty-text">No chats yet</p>}
+                </>
+              ) : (
+                <div style={{ overflowY: "auto", maxHeight: 500 }}>
+                  <StudentProgress studentId={selectedStudent} assessments={studentAssessments} />
                 </div>
-              ))}
-              {studentChats.length === 0 && <p className="empty-text">No chats yet</p>}
+              )}
             </>
           ) : (
-            <p className="empty-text">Select a student to view their chats</p>
+            <p className="empty-text">Select a student to view their details</p>
           )}
         </div>
 

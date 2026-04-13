@@ -1,6 +1,6 @@
-import { useState, useEffect, useCallback } from "react";
+import React, { useState, useEffect, useCallback } from "react";
 import { useLocation } from "react-router-dom";
-import { Users, MessageSquare, BookOpen, Plus, Trash2, Edit3, Coins } from "lucide-react";
+import { Users, MessageSquare, BookOpen, Plus, Trash2, Edit3, Coins, Key, Link2 } from "lucide-react";
 import { adminApi } from "../services/api";
 import Sidebar from "../components/Sidebar";
 import type { User, DashboardStats } from "../types";
@@ -51,6 +51,10 @@ function UsersView({
   const [creditDesc, setCreditDesc] = useState("");
   const [form, setForm] = useState({ name: "", email: "", password: "", role: "student", credits: 100 });
   const [error, setError] = useState("");
+  const [inviteCodes, setInviteCodes] = useState<Record<number, string>>({});
+  const [linkingStudentId, setLinkingStudentId] = useState<number | null>(null);
+  const [selectedParentId, setSelectedParentId] = useState<string>("");
+  const parents = users.filter((u) => u.role === "parent");
 
   const handleCreate = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -102,6 +106,23 @@ function UsersView({
     setEditingUser(user);
     setForm({ name: user.name, email: user.email, password: "", role: user.role, credits: user.credits });
     setShowCreateForm(false);
+  };
+
+  const handleGenerateInvite = async (userId: number) => {
+    try {
+      const result = await adminApi.generateInviteCode(userId) as { code: string; student_id: number; student_name: string };
+      setInviteCodes((prev) => ({ ...prev, [userId]: result.code }));
+    } catch (err: any) { setError(err.message); }
+  };
+
+  const handleLinkToParent = async (studentId: number) => {
+    if (!selectedParentId) return;
+    try {
+      await adminApi.linkStudentToParent(parseInt(selectedParentId, 10), studentId);
+      setLinkingStudentId(null);
+      setSelectedParentId("");
+      onReload();
+    } catch (err: any) { setError(err.message); }
   };
 
   return (
@@ -167,19 +188,52 @@ function UsersView({
             </thead>
             <tbody>
               {users.map((u) => (
-                <tr key={u.id}>
-                  <td>{u.id}</td>
-                  <td>{u.name}</td>
-                  <td>{u.email}</td>
-                  <td><span className={`role-tag role-${u.role}`}>{u.role}</span></td>
-                  <td>{Number(u.credits).toFixed(0)}</td>
-                  <td><span className={`status-dot ${u.is_active ? "active" : "inactive"}`}>{u.is_active ? "Active" : "Inactive"}</span></td>
-                  <td className="action-cell">
-                    <button onClick={() => startEdit(u)} title="Edit"><Edit3 size={14} /></button>
-                    <button onClick={() => setCreditUserId(u.id)} title="Adjust Credits"><Coins size={14} /></button>
-                    <button onClick={() => handleDelete(u.id)} title="Delete" className="danger"><Trash2 size={14} /></button>
-                  </td>
-                </tr>
+                <React.Fragment key={u.id}>
+                  <tr>
+                    <td>{u.id}</td>
+                    <td>{u.name}</td>
+                    <td>{u.email}</td>
+                    <td><span className={`role-tag role-${u.role}`}>{u.role}</span></td>
+                    <td>{Number(u.credits).toFixed(0)}</td>
+                    <td><span className={`status-dot ${u.is_active ? "active" : "inactive"}`}>{u.is_active ? "Active" : "Inactive"}</span></td>
+                    <td className="action-cell">
+                      <button onClick={() => startEdit(u)} title="Edit"><Edit3 size={14} /></button>
+                      <button onClick={() => setCreditUserId(u.id)} title="Adjust Credits"><Coins size={14} /></button>
+                      {u.role === "student" && (
+                        <button onClick={() => handleGenerateInvite(u.id)} title="Generate Invite Code"><Key size={14} /></button>
+                      )}
+                      {u.role === "student" && (
+                        <button onClick={() => { setLinkingStudentId(linkingStudentId === u.id ? null : u.id); setSelectedParentId(""); }} title="Link to Parent"><Link2 size={14} /></button>
+                      )}
+                      <button onClick={() => handleDelete(u.id)} title="Delete" className="danger"><Trash2 size={14} /></button>
+                    </td>
+                  </tr>
+                  {inviteCodes[u.id] && (
+                    <tr>
+                      <td colSpan={7} style={{ padding: "6px 12px", background: "var(--bg-tertiary)" }}>
+                        <span style={{ fontSize: 12, color: "var(--text-secondary)" }}>Invite code for <strong>{u.name}</strong>: </span>
+                        <code style={{ fontWeight: 700, color: "var(--accent)", fontSize: 13 }}>{inviteCodes[u.id]}</code>
+                      </td>
+                    </tr>
+                  )}
+                  {linkingStudentId === u.id && (
+                    <tr>
+                      <td colSpan={7} style={{ padding: "8px 12px", background: "var(--bg-tertiary)" }}>
+                        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                          <span style={{ fontSize: 12, color: "var(--text-secondary)" }}>Link <strong>{u.name}</strong> to parent:</span>
+                          <select value={selectedParentId} onChange={(e) => setSelectedParentId(e.target.value)} style={{ fontSize: 12 }}>
+                            <option value="">Select parent…</option>
+                            {parents.map((p) => (
+                              <option key={p.id} value={p.id}>{p.name} ({p.email})</option>
+                            ))}
+                          </select>
+                          <button className="btn-primary" style={{ fontSize: 12, padding: "4px 10px" }} onClick={() => handleLinkToParent(u.id)} disabled={!selectedParentId}>Link</button>
+                          <button className="btn-secondary" style={{ fontSize: 12, padding: "4px 10px" }} onClick={() => setLinkingStudentId(null)}>Cancel</button>
+                        </div>
+                      </td>
+                    </tr>
+                  )}
+                </React.Fragment>
               ))}
             </tbody>
           </table>

@@ -13,11 +13,16 @@ class AppointmentCreate(BaseModel):
     duration_minutes: int = Field(default=60, ge=15, le=180)
     description: Optional[str] = None
     payment_amount: Optional[float] = 25.00
+    passcode: Optional[str] = Field(None, max_length=16)
     notes: Optional[str] = None
 
 
 class AppointmentStatusUpdate(BaseModel):
     status: Literal["booked", "confirmed", "completed", "cancelled"]
+
+
+class SessionJoinRequest(BaseModel):
+    passcode: str
 
 
 class AppointmentResponse(BaseModel):
@@ -34,6 +39,8 @@ class AppointmentResponse(BaseModel):
     status: str
     payment_status: str
     payment_amount: Optional[float] = None
+    passcode: Optional[str] = None
+    session_started_at: Optional[datetime] = None
     meeting_link: Optional[str] = None
     notes: Optional[str] = None
     created_at: datetime

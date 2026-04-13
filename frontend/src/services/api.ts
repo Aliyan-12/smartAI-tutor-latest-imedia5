@@ -222,6 +222,22 @@ export const adminApi = {
     const res = await fetch(`${API_BASE}/admin/chats/${sessionId}`, { headers: authHeaders() });
     return handleResponse(res);
   },
+
+  async generateInviteCode(studentId: number) {
+    const res = await fetch(`${API_BASE}/admin/users/${studentId}/generate-invite`, {
+      method: "POST",
+      headers: authHeaders(),
+    });
+    return handleResponse(res);
+  },
+
+  async linkStudentToParent(parentId: number, studentId: number) {
+    const res = await fetch(`${API_BASE}/admin/users/${parentId}/link-student?student_id=${studentId}`, {
+      method: "POST",
+      headers: authHeaders(),
+    });
+    return handleResponse(res);
+  },
 };
 
 export const teacherApi = {
@@ -407,10 +423,14 @@ export const assessmentsApi = {
 };
 
 export const appointmentsApi = {
+  async getTeachers() {
+    const res = await fetch(`${API_BASE}/appointments/teachers`, { headers: authHeaders() });
+    return handleResponse(res);
+  },
   async book(data: {
     student_id: number; teacher_id: number; subject: string; key_stage: string;
     title: string; scheduled_at: string; duration_minutes?: number;
-    description?: string; payment_amount?: number;
+    description?: string; payment_amount?: number; passcode?: string;
   }) {
     const res = await fetch(`${API_BASE}/appointments/book`, {
       method: "POST",
@@ -438,6 +458,14 @@ export const appointmentsApi = {
   },
   async checkAvailability(studentId: number) {
     const res = await fetch(`${API_BASE}/appointments/availability?student_id=${studentId}`, { headers: authHeaders() });
+    return handleResponse(res);
+  },
+  async joinSession(appointmentId: number, passcode: string) {
+    const res = await fetch(`${API_BASE}/appointments/${appointmentId}/join`, {
+      method: "POST",
+      headers: authHeaders(),
+      body: JSON.stringify({ passcode }),
+    });
     return handleResponse(res);
   },
 };

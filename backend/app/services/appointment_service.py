@@ -46,6 +46,7 @@ async def book_appointment(
     description: Optional[str] = None,
     payment_amount: Optional[float] = 25.00,
     notes: Optional[str] = None,
+    passcode: Optional[str] = None,
 ) -> Appointment:
     weekly_count = await count_weekly_appointments(db, student_id, scheduled_at)
     max_per_week = settings.max_appointments_per_week
@@ -67,6 +68,7 @@ async def book_appointment(
         description=description,
         payment_amount=payment_amount,
         notes=notes,
+        passcode=passcode or None,
         status="booked",
         payment_status="pending",
     )

@@ -8,6 +8,7 @@ import TeacherDashboard from "./pages/TeacherDashboard";
 import KnowledgeBasePage from "./pages/KnowledgeBasePage";
 import ParentDashboard from "./pages/ParentDashboard";
 import AppointmentsPage from "./pages/AppointmentsPage";
+import SessionPage from "./pages/SessionPage";
 import type { ReactNode } from "react";
 
 function ProtectedRoute({ children, allowedRoles }: { children: ReactNode; allowedRoles?: string[] }) {
@@ -87,7 +88,8 @@ export default function App() {
           <Route path="/parent" element={<ProtectedRoute allowedRoles={["parent"]}><ParentDashboard /></ProtectedRoute>} />
           <Route path="/parent/students" element={<ProtectedRoute allowedRoles={["parent"]}><ParentDashboard /></ProtectedRoute>} />
           <Route path="/parent/appointments" element={<ProtectedRoute allowedRoles={["parent"]}><ParentDashboard /></ProtectedRoute>} />
-          <Route path="/appointments" element={<ProtectedRoute allowedRoles={["teacher", "parent"]}><AppointmentsPage /></ProtectedRoute>} />
+          <Route path="/appointments" element={<ProtectedRoute allowedRoles={["admin", "teacher", "parent"]}><AppointmentsPage /></ProtectedRoute>} />
+          <Route path="/admin/assessments" element={<ProtectedRoute allowedRoles={["admin"]}><AdminDashboard /></ProtectedRoute>} />
           <Route
             path="/chat"
             element={
@@ -101,6 +103,14 @@ export default function App() {
             element={
               <ProtectedRoute allowedRoles={["student"]}>
                 <ChatPage />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/session/:appointmentId"
+            element={
+              <ProtectedRoute allowedRoles={["student"]}>
+                <SessionPage />
               </ProtectedRoute>
             }
           />

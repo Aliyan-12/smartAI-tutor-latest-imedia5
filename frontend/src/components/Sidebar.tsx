@@ -1,17 +1,19 @@
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
 import {
   MessageSquarePlus, Trash2, LogOut, Coins,
   LayoutDashboard, Users, Activity, Shield,
-  BookOpen, Settings, Calendar,
+  BookOpen, Settings, Calendar, ChevronDown, ChevronRight,
+  MessageSquare, Award,
 } from "lucide-react";
 import { useAuth } from "../context/AuthContext";
-import type { ChatListItem } from "../types";
+import type { ChatListItem, Appointment } from "../types";
 
 interface Props {
   chatList?: ChatListItem[];
   activeSessionId?: string | null;
   credits?: number | null;
+  appointments?: Appointment[];
   onNewChat?: () => void;
   onSelectChat?: (sessionId: string) => void;
   onDeleteChat?: (sessionId: string) => void;
@@ -22,6 +24,7 @@ export default function Sidebar({
   chatList = [],
   activeSessionId = null,
   credits = null,
+  appointments = [],
   onNewChat,
   onSelectChat,
   onDeleteChat,
@@ -30,10 +33,14 @@ export default function Sidebar({
   const { user, logout } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
+  const [chatsOpen, setChatsOpen] = useState(true);
+  const [apptsOpen, setApptsOpen] = useState(false);
 
   useEffect(() => {
     if (onLoadChats) onLoadChats();
   }, [onLoadChats]);
+
+  const upcomingAppts = appointments.filter((a) => a.status === "confirmed" || a.status === "booked");
 
   const isActive = (path: string) => location.pathname === path;
 
@@ -82,6 +89,20 @@ export default function Sidebar({
             <BookOpen size={16} />
             <span>Knowledge Base</span>
           </div>
+          <div
+            className={`nav-item ${isActive("/appointments") ? "active" : ""}`}
+            onClick={() => navigate("/appointments")}
+          >
+            <Calendar size={16} />
+            <span>Appointments</span>
+          </div>
+          <div
+            className={`nav-item ${isActive("/admin/assessments") ? "active" : ""}`}
+            onClick={() => navigate("/admin/assessments")}
+          >
+            <Settings size={16} />
+            <span>Assessments</span>
+          </div>
         </div>
       )}
 
@@ -116,6 +137,13 @@ export default function Sidebar({
             <BookOpen size={16} />
             <span>Knowledge Base</span>
           </div>
+          <div
+            className={`nav-item ${isActive("/appointments") ? "active" : ""}`}
+            onClick={() => navigate("/appointments")}
+          >
+            <Calendar size={16} />
+            <span>Appointments</span>
+          </div>
         </div>
       )}
 
@@ -146,20 +174,7 @@ export default function Sidebar({
         </div>
       )}
 
-      {/* Teacher appointments nav item */}
-      {user?.role === "teacher" && (
-        <div className="sidebar-nav" style={{ paddingTop: 0 }}>
-          <div
-            className={`nav-item ${isActive("/appointments") ? "active" : ""}`}
-            onClick={() => navigate("/appointments")}
-          >
-            <Calendar size={16} />
-            <span>Appointments</span>
-          </div>
-        </div>
-      )}
-
-      {/* Student chat controls */}
+      {/* Student sections */}
       {user?.role === "student" && onNewChat && (
         <>
           <button className="new-chat-btn" onClick={onNewChat}>
@@ -167,30 +182,75 @@ export default function Sidebar({
             New Chat
           </button>
 
-          <div className="chat-list">
-            {chatList.map((chat) => (
-              <div
-                key={chat.session_id}
-                className={`chat-list-item ${chat.session_id === activeSessionId ? "active" : ""}`}
-                onClick={() => onSelectChat?.(chat.session_id)}
-              >
-                <span className="title">{chat.title}</span>
-                <button
-                  className="delete-btn"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    onDeleteChat?.(chat.session_id);
-                  }}
-                >
-                  <Trash2 size={14} />
-                </button>
-              </div>
-            ))}
+          {/* Chats dropdown */}
+          <div
+            className="sidebar-section-header"
+            onClick={() => setChatsOpen(!chatsOpen)}
+          >
+            {chatsOpen ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+            <MessageSquare size={14} />
+            <span>Chats</span>
+            <span className="section-count">{chatList.length}</span>
           </div>
+          {chatsOpen && (
+            <div className="chat-list">
+              {chatList.map((chat) => (
+                <div
+                  key={chat.session_id}
+                  className={`chat-list-item ${chat.session_id === activeSessionId ? "active" : ""}`}
+                  onClick={() => onSelectChat?.(chat.session_id)}
+                >
+                  <span className="title">{chat.title}</span>
+                  <button
+                    className="delete-btn"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onDeleteChat?.(chat.session_id);
+                    }}
+                  >
+                    <Trash2 size={14} />
+                  </button>
+                </div>
+              ))}
+              {chatList.length === 0 && (
+                <div style={{ padding: "8px 14px", fontSize: 12, color: "rgba(255,255,255,0.3)" }}>No chats yet</div>
+              )}
+            </div>
+          )}
+
+          {/* Appointments dropdown */}
+          <div
+            className="sidebar-section-header"
+            onClick={() => setApptsOpen(!apptsOpen)}
+          >
+            {apptsOpen ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+            <Calendar size={14} />
+            <span>Sessions</span>
+            {upcomingAppts.length > 0 && <span className="section-count">{upcomingAppts.length}</span>}
+          </div>
+          {apptsOpen && (
+            <div className="chat-list">
+              {upcomingAppts.map((appt) => (
+                <div
+                  key={appt.id}
+                  className="chat-list-item"
+                  onClick={() => navigate(`/session/${appt.id}`)}
+                >
+                  <span className="title">{appt.title}</span>
+                  <span style={{ fontSize: 10, color: appt.status === "confirmed" ? "#8bd4a8" : "rgba(255,255,255,0.4)" }}>
+                    {appt.status === "confirmed" ? "Ready" : "Pending"}
+                  </span>
+                </div>
+              ))}
+              {upcomingAppts.length === 0 && (
+                <div style={{ padding: "8px 14px", fontSize: 12, color: "rgba(255,255,255,0.3)" }}>No upcoming sessions</div>
+              )}
+            </div>
+          )}
         </>
       )}
 
-      {/* Spacer to push footer down for admin/teacher */}
+      {/* Spacer to push footer down for non-student */}
       {user?.role !== "student" && <div style={{ flex: 1 }} />}
 
       <div className="sidebar-footer">

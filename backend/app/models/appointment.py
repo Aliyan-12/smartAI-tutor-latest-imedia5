@@ -31,6 +31,8 @@ class Appointment(Base):
     status: Mapped[str] = mapped_column(String(20), default="booked", nullable=False, index=True)
     payment_status: Mapped[str] = mapped_column(String(20), default="pending", nullable=False)
     payment_amount: Mapped[Optional[float]] = mapped_column(NUMERIC(10, 2), nullable=True, default=25.00)
+    passcode: Mapped[Optional[str]] = mapped_column(String(16), nullable=True)
+    session_started_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
     meeting_link: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(

@@ -1,19 +1,34 @@
 import logging
+from datetime import datetime, timezone
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, status, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from sqlalchemy import select
+
 from app.db.session import get_db
 from app.middleware.auth import require_parent_or_teacher, require_any_authenticated
-from app.models.user import User, ROLE_PARENT
-from app.schemas.appointment import AppointmentCreate, AppointmentStatusUpdate, AppointmentResponse, AvailabilityResponse
+from app.models.user import User, ROLE_PARENT, ROLE_TEACHER, ROLE_STUDENT
+from app.schemas.user import UserResponse
+from app.schemas.appointment import AppointmentCreate, AppointmentStatusUpdate, AppointmentResponse, AvailabilityResponse, SessionJoinRequest
 from app.services import appointment_service, email_service
 from app.services.user_service import get_user_by_id
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/appointments", tags=["appointments"])
+
+
+@router.get("/teachers", response_model=list[UserResponse])
+async def list_teachers(
+    current_user: User = Depends(require_any_authenticated),
+    db: AsyncSession = Depends(get_db),
+):
+    result = await db.execute(
+        select(User).where(User.role == ROLE_TEACHER, User.is_active == True)
+    )
+    return [UserResponse.model_validate(t) for t in result.scalars().all()]
 
 
 @router.post("/book", response_model=AppointmentResponse)
@@ -47,6 +62,7 @@ async def book_appointment(
             description=payload.description,
             payment_amount=payload.payment_amount,
             notes=payload.notes,
+            passcode=payload.passcode,
         )
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(e))
@@ -117,6 +133,40 @@ async def get_appointment(
     resp.student_name = student.name if student else None
     resp.teacher_name = teacher.name if teacher else None
     return resp
+
+
+@router.post("/{appointment_id}/join")
+async def join_session(
+    appointment_id: int,
+    payload: SessionJoinRequest,
+    current_user: User = Depends(require_any_authenticated),
+    db: AsyncSession = Depends(get_db),
+):
+    appt = await appointment_service.get_appointment(db, appointment_id)
+    if not appt:
+        raise HTTPException(status_code=404, detail="Appointment not found")
+
+    if current_user.role == ROLE_STUDENT and appt.student_id != current_user.id:
+        raise HTTPException(status_code=403, detail="Not your appointment")
+
+    if appt.status != "confirmed":
+        raise HTTPException(status_code=400, detail="Appointment must be confirmed before joining")
+
+    if appt.passcode and appt.passcode != payload.passcode:
+        raise HTTPException(status_code=403, detail="Invalid passcode")
+
+    if not appt.session_started_at:
+        appt.session_started_at = datetime.now(timezone.utc)
+        await db.flush()
+        await db.refresh(appt)
+
+    return {
+        "appointment_id": appt.id,
+        "session_started_at": appt.session_started_at.isoformat(),
+        "duration_minutes": appt.duration_minutes,
+        "subject": appt.subject,
+        "title": appt.title,
+    }
 
 
 @router.patch("/{appointment_id}/status", response_model=AppointmentResponse)

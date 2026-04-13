@@ -173,10 +173,37 @@ input, textarea, select {
   background: var(--accent-hover);
 }
 
+.sidebar-section-header {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 8px 14px;
+  cursor: pointer;
+  color: var(--sidebar-text);
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  transition: color 0.12s;
+  user-select: none;
+}
+
+.sidebar-section-header:hover {
+  color: #fff;
+}
+
+.section-count {
+  margin-left: auto;
+  background: rgba(255, 255, 255, 0.1);
+  padding: 1px 6px;
+  border-radius: 8px;
+  font-size: 10px;
+  font-weight: 500;
+}
+
 .chat-list {
-  flex: 1;
   overflow-y: auto;
-  padding: 6px 8px;
+  padding: 2px 8px 6px;
 }
 
 .chat-list-item {

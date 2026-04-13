@@ -8,7 +8,8 @@ import WelcomeScreen from "../components/WelcomeScreen";
 import AssessmentMode from "../components/AssessmentMode";
 import { useChat } from "../hooks/useChat";
 import { useVoice } from "../hooks/useVoice";
-import type { ChatMessage, Assessment } from "../types";
+import { appointmentsApi } from "../services/api";
+import type { ChatMessage, Assessment, Appointment } from "../types";
 
 export default function ChatPage() {
   const { sessionId } = useParams<{ sessionId?: string }>();
@@ -46,10 +47,12 @@ export default function ChatPage() {
   const [voiceAiStream, setVoiceAiStream] = useState("");
   const userTranscriptRef = useRef("");
   const voiceSessionRef = useRef<string | null>(null);
+  const [studentAppointments, setStudentAppointments] = useState<Appointment[]>([]);
 
   useEffect(() => {
     loadCredits();
     loadChats();
+    appointmentsApi.list().then((data) => setStudentAppointments(data as Appointment[])).catch(() => {});
   }, [loadCredits, loadChats]);
 
   useEffect(() => {
@@ -141,6 +144,7 @@ export default function ChatPage() {
         chatList={chatList}
         activeSessionId={activeSessionId}
         credits={credits}
+        appointments={studentAppointments}
         onNewChat={startNewChat}
         onSelectChat={loadChat}
         onDeleteChat={deleteChat}
