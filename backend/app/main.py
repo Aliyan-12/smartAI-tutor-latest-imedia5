@@ -6,7 +6,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.core.config import settings
 from app.middleware.rate_limit import RateLimitMiddleware
 from app.routers import auth, chat, voice, health, admin, teacher, subscription, documents
-from app.routers import parent, appointments, assessments
+from app.routers import parent, appointments, assessments, gamification, lessons
 
 logging.basicConfig(
     level=logging.INFO,
@@ -40,3 +40,5 @@ app.include_router(documents.router)
 app.include_router(parent.router)
 app.include_router(appointments.router)
 app.include_router(assessments.router)
+app.include_router(gamification.router)
+app.include_router(lessons.router)

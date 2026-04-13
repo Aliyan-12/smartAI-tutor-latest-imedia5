@@ -118,10 +118,16 @@ async def stream_message(
             await chat_service.add_message(save_session, chat.id, "assistant", clean_text)
 
             from app.services.user_service import get_user_by_id
+            from app.services import gamification_service
             fresh_user = await get_user_by_id(save_session, current_user.id)
             if fresh_user:
                 await credit_service.check_and_deduct_credit(save_session, fresh_user)
                 yield f"data: {json.dumps({'type': 'credits', 'content': str(float(fresh_user.credits))})}\n\n"
+                try:
+                    await gamification_service.award_xp(save_session, current_user.id, 5, "chat_message")
+                    await gamification_service.check_and_update_streak(save_session, current_user.id)
+                except Exception:
+                    pass
 
             if chat.title == "New Chat":
                 saved_chat = await chat_service.get_chat_by_session(save_session, chat.session_id, current_user.id)

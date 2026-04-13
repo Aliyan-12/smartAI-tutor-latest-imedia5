@@ -152,8 +152,9 @@ async def join_session(
     if appt.status != "confirmed":
         raise HTTPException(status_code=400, detail="Appointment must be confirmed before joining")
 
-    if appt.passcode and appt.passcode != payload.passcode:
-        raise HTTPException(status_code=403, detail="Invalid passcode")
+    if appt.passcode:
+        if not payload.passcode or appt.passcode != payload.passcode:
+            raise HTTPException(status_code=403, detail="Invalid passcode")
 
     if not appt.session_started_at:
         appt.session_started_at = datetime.now(timezone.utc)

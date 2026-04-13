@@ -122,6 +122,24 @@ async def complete_assessment(
         parent_email=parent_email,
     )
 
+    # Award XP and update mastery
+    try:
+        from app.services import gamification_service
+        await gamification_service.award_xp(db, current_user.id, 50, "quiz_complete")
+        if completed.score_percent >= 80:
+            await gamification_service.award_xp(db, current_user.id, 100, "quiz_high_score")
+        if completed.score_percent >= 100:
+            await gamification_service.award_xp(db, current_user.id, 200, "quiz_perfect")
+        await gamification_service.check_and_update_streak(db, current_user.id)
+
+        for topic_tag in (completed.strong_topics or []) + (completed.weak_topics or []):
+            await gamification_service.update_topic_mastery(
+                db, current_user.id, completed.subject,
+                completed.key_stage, topic_tag, completed.score_percent,
+            )
+    except Exception as e:
+        logger.warning(f"Gamification update failed: {e}")
+
     return AssessmentResponse.model_validate(completed)
 
 

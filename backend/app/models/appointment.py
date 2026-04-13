@@ -1,5 +1,5 @@
 from datetime import datetime, timezone
-from typing import Optional
+from typing import Optional, TYPE_CHECKING
 from sqlalchemy import Integer, String, Text, DateTime, ForeignKey, SmallInteger
 from sqlalchemy.dialects.postgresql import NUMERIC
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -47,3 +47,10 @@ class Appointment(Base):
     student = relationship("User", foreign_keys=[student_id])
     teacher = relationship("User", foreign_keys=[teacher_id])
     booked_by_user = relationship("User", foreign_keys=[booked_by])
+    # One appointment can have at most one lesson plan (FK lives on lesson_plans side)
+    lesson_plan = relationship(
+        "LessonPlan",
+        foreign_keys="[LessonPlan.appointment_id]",
+        back_populates="appointment",
+        uselist=False,
+    )

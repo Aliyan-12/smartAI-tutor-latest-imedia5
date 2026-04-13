@@ -422,6 +422,69 @@ export const assessmentsApi = {
   },
 };
 
+export const gamificationApi = {
+  async getDashboard() {
+    const res = await fetch(`${API_BASE}/gamification/dashboard`, { headers: authHeaders() });
+    return handleResponse(res);
+  },
+  async getProfile() {
+    const res = await fetch(`${API_BASE}/gamification/profile`, { headers: authHeaders() });
+    return handleResponse(res);
+  },
+  async getMastery() {
+    const res = await fetch(`${API_BASE}/gamification/mastery`, { headers: authHeaders() });
+    return handleResponse(res);
+  },
+  async checkStreak() {
+    const res = await fetch(`${API_BASE}/gamification/streak-check`, {
+      method: "POST",
+      headers: authHeaders(),
+    });
+    return handleResponse(res);
+  },
+};
+
+export const lessonsApi = {
+  async getTopics(subject: string, keyStage: string) {
+    const query = new URLSearchParams({ subject, key_stage: keyStage });
+    const res = await fetch(`${API_BASE}/lessons/topics?${query}`, { headers: authHeaders() });
+    return handleResponse<{ topics: Array<{ unit_name: string; document_count: number }> }>(res);
+  },
+  async getSubtopics(subject: string, unitName: string) {
+    const query = new URLSearchParams({ subject, unit_name: unitName });
+    const res = await fetch(`${API_BASE}/lessons/subtopics?${query}`, { headers: authHeaders() });
+    return handleResponse<{ subtopics: string[] }>(res);
+  },
+  async create(data: {
+    student_id: number;
+    subject: string;
+    key_stage: string;
+    unit_name?: string;
+    subtopic?: string;
+    ability_level: string;
+    goal: string;
+    appointment_id?: number;
+  }) {
+    const res = await fetch(`${API_BASE}/lessons/create`, {
+      method: "POST",
+      headers: authHeaders(),
+      body: JSON.stringify(data),
+    });
+    return handleResponse(res);
+  },
+  async start(id: number) {
+    const res = await fetch(`${API_BASE}/lessons/${id}/start`, {
+      method: "POST",
+      headers: authHeaders(),
+    });
+    return handleResponse(res);
+  },
+  async get(id: number) {
+    const res = await fetch(`${API_BASE}/lessons/${id}`, { headers: authHeaders() });
+    return handleResponse(res);
+  },
+};
+
 export const appointmentsApi = {
   async getTeachers() {
     const res = await fetch(`${API_BASE}/appointments/teachers`, { headers: authHeaders() });

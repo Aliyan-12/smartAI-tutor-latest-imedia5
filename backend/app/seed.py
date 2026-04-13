@@ -90,6 +90,27 @@ async def run_seed():
                 db.add(invite)
                 logger.info(f"Generated invite code for {student.name}: {code}")
 
+        # Create StudentProfile for the seeded student (gamification)
+        if student:
+            from sqlalchemy import select as sa_select
+            from app.models.student_profile import StudentProfile
+            existing_profile = await db.execute(
+                sa_select(StudentProfile).where(StudentProfile.student_id == student.id)
+            )
+            if not existing_profile.scalar_one_or_none():
+                profile = StudentProfile(
+                    student_id=student.id,
+                    xp_total=0,
+                    xp_level=1,
+                    current_streak=0,
+                    longest_streak=0,
+                    last_active_date=None,
+                    interests=["Science", "Maths"],
+                    preferred_subjects=["Maths", "Physics"],
+                )
+                db.add(profile)
+                logger.info(f"Created StudentProfile for {student.name}")
+
         await db.commit()
 
     logger.info("Seed data inserted")

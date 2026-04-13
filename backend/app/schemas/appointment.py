@@ -22,7 +22,7 @@ class AppointmentStatusUpdate(BaseModel):
 
 
 class SessionJoinRequest(BaseModel):
-    passcode: str
+    passcode: Optional[str] = ""
 
 
 class AppointmentResponse(BaseModel):

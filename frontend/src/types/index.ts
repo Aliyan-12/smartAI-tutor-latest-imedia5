@@ -166,3 +166,64 @@ export interface StudentProgress {
   strong_topics: string[];
   assessments: Assessment[];
 }
+
+export interface StudentProfile {
+  id: number;
+  student_id: number;
+  xp_total: number;
+  xp_level: number;
+  current_streak: number;
+  longest_streak: number;
+  last_active_date: string | null;
+  interests: string[] | null;
+  preferred_subjects: string[] | null;
+}
+
+export interface TopicMastery {
+  id: number;
+  student_id: number;
+  subject: string;
+  key_stage: string;
+  topic: string;
+  mastery_level: "not_started" | "learning" | "practicing" | "mastered";
+  score_history: Array<{ score: number; date: string }> | null;
+  attempts: number;
+  last_practiced_at: string | null;
+}
+
+export interface LessonPlan {
+  id: number;
+  appointment_id: number | null;
+  student_id: number;
+  created_by: number;
+  subject: string;
+  key_stage: string;
+  unit_name: string | null;
+  subtopic: string | null;
+  ability_level: string;
+  goal: string;
+  status: string;
+  session_summary: string | null;
+  created_at: string;
+}
+
+export interface DailyPlan {
+  weak_spots: Array<{ topic: string; subject: string; mastery_level: string; last_score?: number }>;
+  spaced_review: Array<{ topic: string; subject: string; days_since: number }>;
+  confidence_boost: Array<{ topic: string; subject: string }>;
+  upcoming_sessions: Array<{ id: number; title: string; subject: string; scheduled_at: string }>;
+}
+
+export interface DashboardData {
+  profile: StudentProfile;
+  mastery_overview: TopicMastery[];
+  daily_plan: DailyPlan;
+  continue_learning: {
+    topic: string;
+    subject: string;
+    key_stage: string;
+    mastery: number;
+    last_mistake?: string;
+  } | null;
+  xp_to_next_level: number;
+}
