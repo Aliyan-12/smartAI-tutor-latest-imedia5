@@ -188,3 +188,41 @@ async def update_appointment_status(
 
     resp = AppointmentResponse.model_validate(updated)
     return resp
+
+
+@router.get("/{appointment_id}/report")
+async def get_appointment_report(
+    appointment_id: int,
+    current_user: User = Depends(require_any_authenticated),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Retrieve the AI-generated session report for a completed appointment.
+    Auth: student, teacher, parent, or admin.
+    """
+    appt = await appointment_service.get_appointment(db, appointment_id)
+    if not appt:
+        raise HTTPException(status_code=404, detail="Appointment not found")
+
+    # Access control: student can only see their own, parent can see their child's
+    if current_user.role == ROLE_STUDENT and appt.student_id != current_user.id:
+        raise HTTPException(status_code=403, detail="Not your appointment")
+    if current_user.role == ROLE_PARENT:
+        student = await get_user_by_id(db, appt.student_id)
+        if not student or student.parent_id != current_user.id:
+            raise HTTPException(status_code=403, detail="Not your child's appointment")
+
+    from app.services.lesson_service import get_appointment_report
+    report = await get_appointment_report(db, appointment_id)
+    if report is None:
+        raise HTTPException(
+            status_code=404,
+            detail="No session report found. The session may not have completed yet."
+        )
+
+    return {
+        "appointment_id": appointment_id,
+        "status": appt.status,
+        "subject": appt.subject,
+        "report": report,
+    }

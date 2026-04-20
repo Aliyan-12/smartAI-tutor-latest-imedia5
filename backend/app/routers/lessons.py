@@ -1,4 +1,5 @@
 import logging
+from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -10,7 +11,15 @@ from app.middleware.auth import (
     require_any_authenticated,
 )
 from app.models.user import User
-from app.schemas.lesson import LessonPlanCreate, LessonPlanResponse, TopicListResponse
+from app.schemas.lesson import (
+    LessonPlanCreate,
+    LessonPlanResponse,
+    TopicListResponse,
+    GenerateLessonPlanRequest,
+    GeneratedLessonPlanResponse,
+    CheckpointSaveRequest,
+    ContinuationResponse,
+)
 from app.services import lesson_service, gamification_service
 
 logger = logging.getLogger(__name__)
@@ -89,6 +98,97 @@ async def list_subtopics(
     return {"subtopics": subtopics}
 
 
+# Task 1: AI lesson plan generation
+@router.post("/generate-plan")
+async def generate_lesson_plan(
+    payload: GenerateLessonPlanRequest,
+    current_user: User = Depends(require_any_authenticated),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Generate a personalised AI lesson plan for a student.
+    Auth: student, teacher, or admin.
+    If appointment_id is provided and the current user is the student, save plan_blocks to the LessonPlan.
+    """
+    # Determine which student to personalise for
+    if current_user.role == "student":
+        student_id = current_user.id
+    else:
+        # For teachers/admins generating a plan, use their own id as a fallback
+        # (no personalisation data will be loaded)
+        student_id = current_user.id
+
+    plan_data = await lesson_service.generate_lesson_plan(
+        db=db,
+        student_id=student_id,
+        subject=payload.subject,
+        topic=payload.topic,
+        goal=payload.goal,
+        duration_minutes=payload.duration_minutes,
+        subtopic=payload.subtopic,
+    )
+
+    # If appointment_id provided, save to LessonPlan.plan_blocks
+    if payload.appointment_id:
+        from sqlalchemy import select
+        from app.models.lesson_plan import LessonPlan
+
+        lp_result = await db.execute(
+            select(LessonPlan).where(LessonPlan.appointment_id == payload.appointment_id)
+        )
+        lp = lp_result.scalar_one_or_none()
+        if lp:
+            lp.plan_blocks = plan_data
+            lp.updated_at = datetime.now(timezone.utc)
+            await db.flush()
+            await db.refresh(lp)
+            await db.commit()
+            logger.info(f"Saved plan_blocks to lesson_plan for appointment_id={payload.appointment_id}")
+
+    return plan_data
+
+
+# Task 2: Checkpoint save
+@router.post("/{lesson_plan_id}/checkpoint")
+async def save_checkpoint(
+    lesson_plan_id: int,
+    payload: CheckpointSaveRequest,
+    current_user: User = Depends(require_any_authenticated),
+    db: AsyncSession = Depends(get_db),
+):
+    """Save a mid-session checkpoint for a lesson plan."""
+    try:
+        checkpoint_data = payload.model_dump()
+        plan = await lesson_service.save_checkpoint(db, lesson_plan_id, checkpoint_data)
+        await db.commit()
+        return {
+            "lesson_plan_id": plan.id,
+            "session_state": plan.session_state,
+            "message": "Checkpoint saved",
+        }
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+
+
+# Task 2: Get continuation state
+@router.get("/continuation", response_model=ContinuationResponse)
+async def get_continuation(
+    student_id: int = Query(..., description="Student user ID"),
+    subject: str = Query(..., description="Subject"),
+    topic: str = Query(..., description="Topic to resume"),
+    current_user: User = Depends(require_any_authenticated),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Query for the last session state for this student/subject/topic.
+    Returns last checkpoint data so the next session can resume.
+    """
+    result = await lesson_service.get_continuation(db, student_id, subject, topic)
+    if result is None:
+        return ContinuationResponse(found=False)
+    return ContinuationResponse(**result)
+
+
 @router.post("/create", response_model=LessonPlanResponse)
 async def create_lesson_plan(
     payload: LessonPlanCreate,
@@ -111,6 +211,7 @@ async def create_lesson_plan(
         teacher_notes=payload.teacher_notes,
         appointment_id=payload.appointment_id,
     )
+    await db.commit()
     return LessonPlanResponse.model_validate(plan)
 
 
@@ -147,6 +248,7 @@ async def start_lesson_plan(
     # Award XP for starting a lesson and update streak
     await gamification_service.award_xp(db, current_user.id, 10, reason="lesson_started")
     await gamification_service.check_and_update_streak(db, current_user.id)
+    await db.commit()
 
     return LessonPlanResponse.model_validate(plan)
 
@@ -216,5 +318,6 @@ async def complete_lesson_plan(
 
     # Update streak
     await gamification_service.check_and_update_streak(db, current_user.id)
+    await db.commit()
 
     return LessonPlanResponse.model_validate(plan)

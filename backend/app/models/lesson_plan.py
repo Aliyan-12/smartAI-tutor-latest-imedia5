@@ -34,6 +34,10 @@ class LessonPlan(Base):
     status: Mapped[str] = mapped_column(String(20), default="planned", nullable=False, index=True)
     session_summary: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     materials_uploaded: Mapped[Optional[list]] = mapped_column(JSONB, nullable=True)
+    # Task 1: AI-generated lesson plan blocks
+    plan_blocks: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True)
+    # Task 2: Session checkpoint state
+    session_state: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
     )

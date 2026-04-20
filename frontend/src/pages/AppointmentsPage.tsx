@@ -98,7 +98,7 @@ function AppointmentCard({ appointment: a, userRole, onStatusUpdate, updating }:
   const scheduledDate = new Date(a.scheduled_at);
   const isPast = scheduledDate < new Date();
 
-  const canConfirm = a.status === "booked" && userRole === "teacher";
+  const canConfirm = a.status === "booked" && userRole === "parent";
   const canComplete = a.status === "confirmed" && (userRole === "teacher" || isPast);
   const canCancel = a.status !== "completed" && a.status !== "cancelled";
 

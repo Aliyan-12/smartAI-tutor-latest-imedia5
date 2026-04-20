@@ -1,12 +1,15 @@
 """
-Lesson plan service: topic discovery, CRUD for lesson plans, AI context builder.
+Lesson plan service: topic discovery, CRUD for lesson plans, AI context builder,
+pre-lesson intelligence, session checkpoints, and post-session report generation.
 """
+import json
 import logging
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
 from sqlalchemy import select, func, distinct
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 from app.models.documents import Document, DocumentChunk
 from app.models.lesson_plan import LessonPlan
@@ -50,7 +53,6 @@ async def get_subtopics(
     Return unique topic_tag values from DocumentChunk rows whose parent Document
     matches *subject* and *unit_name*.
     """
-    # Find matching document ids first
     doc_result = await db.execute(
         select(Document.id).where(
             Document.subject == subject,
@@ -63,13 +65,6 @@ async def get_subtopics(
     if not doc_ids:
         return []
 
-    # DocumentChunk does not have a topic_tag column in the current schema;
-    # we fall back to distinct chunk content keywords. Instead, for safety we
-    # import AssessmentQuestion which has topic_tag and link via subject/topic.
-    # However, the spec says "returns unique topic_tag values from document_chunks".
-    # DocumentChunk currently has no topic_tag field, so we derive subtopics from
-    # AssessmentQuestion topic_tags for matching subject/unit_name documents,
-    # or return an empty list if none are found.
     from app.models.assessment import AssessmentQuestion, Assessment
 
     aq_result = await db.execute(
@@ -199,3 +194,437 @@ def build_lesson_context(plan: LessonPlan) -> str:
 
     lines.append("=== END OF LESSON CONTEXT ===")
     return "\n".join(lines)
+
+
+# ---------------------------------------------------------------------------
+# Task 1: Pre-Lesson Intelligence + AI Lesson Plan Generation
+# ---------------------------------------------------------------------------
+
+async def generate_lesson_plan(
+    db: AsyncSession,
+    student_id: int,
+    subject: str,
+    topic: str,
+    goal: str,
+    duration_minutes: int,
+    subtopic: Optional[str] = None,
+) -> Dict[str, Any]:
+    """
+    Generate an AI-powered lesson plan for a student, personalised using their
+    TopicMastery data and StudentProfile preferences.
+    Returns the generated plan as a dict (also suitable for storing in plan_blocks).
+    """
+    from app.models.student_profile import StudentProfile, TopicMastery
+    from app.services.gemini_service import _get_client
+    from app.core.config import settings
+    from google.genai import types as genai_types
+
+    # 1. Fetch student's topic mastery for personalisation
+    mastery_result = await db.execute(
+        select(TopicMastery).where(
+            TopicMastery.student_id == student_id,
+            TopicMastery.subject == subject,
+            TopicMastery.topic == topic,
+        )
+    )
+    mastery = mastery_result.scalar_one_or_none()
+
+    weak_areas: List[str] = []
+    mastery_level = "not_started"
+    score_history_summary = "No prior attempts"
+    if mastery:
+        mastery_level = mastery.mastery_level
+        scores = [e["score"] for e in (mastery.score_history or []) if "score" in e]
+        avg = 0.0
+        if scores:
+            avg = sum(scores) / len(scores)
+            score_history_summary = f"Average score: {avg:.0f}% over {len(scores)} attempt(s)"
+        # Derive weak areas from poor scores (or if no attempts yet)
+        if not scores or avg < 50:
+            weak_areas = [topic]
+
+    # 2. Fetch student profile for interests and learning style
+    profile_result = await db.execute(
+        select(StudentProfile).where(StudentProfile.student_id == student_id)
+    )
+    profile = profile_result.scalar_one_or_none()
+
+    interests = []
+    preferred_subjects = []
+    learning_style = []
+    teaching_pace = "just_right"
+    teaching_preferences: Dict[str, Any] = {}
+
+    if profile:
+        interests = profile.interests or []
+        preferred_subjects = profile.preferred_subjects or []
+        # New fields from Task 5 (gracefully handle if not yet migrated)
+        learning_style = getattr(profile, "learning_style", None) or []
+        teaching_pace = getattr(profile, "teaching_pace", "just_right") or "just_right"
+        teaching_preferences = getattr(profile, "teaching_preferences", None) or {}
+
+    # 3. Build session-length guidance
+    if duration_minutes <= 30:
+        session_guidance = (
+            "This is a SHORT 30-minute session. Cover ONLY 1 concept. "
+            "Use light practice (1-2 exercises). End with a quick 2-question recap. "
+            "Keep each block concise."
+        )
+    else:
+        session_guidance = (
+            "This is a FULL 60-minute session. Cover 1-2 concepts in depth. "
+            "Include meaningful practice with 3-5 exercises. Use a proper assessment at the end."
+        )
+
+    # 4. Build goal-specific guidance
+    goal_guidance_map = {
+        "teach_from_scratch": (
+            "Goal: TEACH FROM SCRATCH. The student has NO prior knowledge. "
+            "Start with fundamentals. Use lots of explanation. Minimal jumping ahead."
+        ),
+        "practice": (
+            "Goal: PRACTICE. Student already knows the basics. "
+            "Skip lengthy introductions. Jump straight to problems and exercises."
+        ),
+        "test_prep": (
+            "Goal: TEST PREPARATION. Minimal teaching. "
+            "Focus on exam-style questions, time-pressure practice, and weak area drilling."
+        ),
+        "help_homework": (
+            "Goal: HOMEWORK HELP. Walk through specific problems step by step."
+        ),
+        "revise_quickly": (
+            "Goal: QUICK REVISION. Rapid recap of key points, then short self-test."
+        ),
+    }
+    goal_guidance = goal_guidance_map.get(goal, f"Goal: {goal}")
+
+    # 5. Build personalisation context
+    personalisation_parts = []
+    if mastery_level != "not_started":
+        personalisation_parts.append(f"Student mastery level: {mastery_level}. {score_history_summary}.")
+    if weak_areas:
+        personalisation_parts.append(f"Known weak areas: {', '.join(weak_areas)}.")
+    if interests:
+        personalisation_parts.append(f"Student interests (use in examples): {', '.join(interests)}.")
+    if learning_style:
+        personalisation_parts.append(f"Preferred learning styles: {', '.join(learning_style)}.")
+    if teaching_pace == "slower":
+        personalisation_parts.append("Student learns better at a slower pace — explain more carefully.")
+    elif teaching_pace == "faster":
+        personalisation_parts.append("Student prefers a faster pace — be concise and move ahead quickly.")
+    if teaching_preferences.get("real_life_examples"):
+        personalisation_parts.append("Always use real-world examples.")
+    if teaching_preferences.get("step_by_step"):
+        personalisation_parts.append("Always break explanations into numbered steps.")
+    if teaching_preferences.get("practice_as_we_go"):
+        personalisation_parts.append("Interleave small practice tasks within explanations.")
+
+    personalisation_context = " ".join(personalisation_parts) if personalisation_parts else "No specific personalisation data."
+
+    topic_line = f"Topic: {topic}"
+    if subtopic:
+        topic_line += f" (focusing on subtopic: {subtopic})"
+
+    prompt = f"""You are an expert UK curriculum lesson planner. Generate a structured lesson plan as JSON.
+
+Subject: {subject}
+{topic_line}
+Duration: {duration_minutes} minutes
+
+{session_guidance}
+{goal_guidance}
+
+Student personalisation:
+{personalisation_context}
+
+Generate a lesson plan with this EXACT JSON structure (no markdown, no extra text — raw JSON only):
+{{
+  "lesson_title": "A specific, engaging title for this lesson",
+  "preview_summary": "In this lesson you will: [2-3 bullet points of what student will learn/do]",
+  "blocks": [
+    {{"type": "intro", "title": "...", "duration_minutes": 2, "description": "What the AI tutor will say/do in this block"}},
+    {{"type": "teach", "title": "...", "duration_minutes": 15, "description": "...", "subtopics": ["subtopic1", "subtopic2"]}},
+    {{"type": "practice", "title": "...", "duration_minutes": 10, "description": "..."}},
+    {{"type": "check", "title": "...", "duration_minutes": 5, "description": "..."}},
+    {{"type": "summary", "title": "...", "duration_minutes": 3, "description": "..."}}
+  ],
+  "personalisation_notes": "Brief note on how this plan was adapted for this specific student",
+  "continuation_point": null
+}}
+
+Rules:
+- Total block durations must sum to approximately {duration_minutes} minutes
+- For short sessions (<=30 min): use fewer blocks, shorter durations
+- For test_prep goal: make "check" block the largest
+- For practice goal: make "practice" block the largest
+- For teach_from_scratch: make "teach" block the largest
+- Block types allowed: intro, teach, practice, check, summary
+- Only include "subtopics" field on "teach" blocks
+- Return ONLY valid JSON, no markdown fences"""
+
+    try:
+        client = _get_client()
+        response = client.models.generate_content(
+            model=settings.gemini_model,
+            contents=prompt,
+            config=genai_types.GenerateContentConfig(
+                system_instruction="You are a lesson plan generator. Output only valid JSON.",
+            ),
+        )
+        raw = response.text.strip()
+        # Strip markdown fences if present
+        if raw.startswith("```"):
+            parts = raw.split("```")
+            raw = parts[1] if len(parts) > 1 else raw
+            if raw.startswith("json"):
+                raw = raw[4:]
+            raw = raw.strip()
+        plan_data = json.loads(raw)
+        logger.info(f"Generated lesson plan for student={student_id}, topic={topic}")
+        return plan_data
+    except Exception as exc:
+        logger.error(f"Failed to generate lesson plan via Gemini: {exc}")
+        # Fallback: return a basic structure
+        fallback_teach_mins = max(5, duration_minutes - 10)
+        return {
+            "lesson_title": f"{subject}: {topic}",
+            "preview_summary": f"In this lesson you will study {topic} in {subject}.",
+            "blocks": [
+                {"type": "intro", "title": "Introduction", "duration_minutes": 2, "description": f"Overview of {topic}"},
+                {"type": "teach", "title": f"Learning {topic}", "duration_minutes": fallback_teach_mins, "description": f"AI tutor teaches {topic}", "subtopics": [topic]},
+                {"type": "summary", "title": "Recap", "duration_minutes": 3, "description": "Summary and next steps"},
+            ],
+            "personalisation_notes": "Default plan — AI generation failed.",
+            "continuation_point": None,
+        }
+
+
+# ---------------------------------------------------------------------------
+# Task 2: Session Checkpoint + Smart Continuation
+# ---------------------------------------------------------------------------
+
+async def save_checkpoint(
+    db: AsyncSession,
+    lesson_plan_id: int,
+    checkpoint_data: Dict[str, Any],
+) -> LessonPlan:
+    """
+    Save the current session state (progress) to LessonPlan.session_state.
+    Automatically stamps last_checkpoint_at if not provided.
+    """
+    plan = await get_lesson_plan(db, lesson_plan_id)
+    if plan is None:
+        raise ValueError(f"LessonPlan id={lesson_plan_id} not found")
+
+    if "last_checkpoint_at" not in checkpoint_data or not checkpoint_data["last_checkpoint_at"]:
+        checkpoint_data["last_checkpoint_at"] = datetime.now(timezone.utc).isoformat()
+
+    plan.session_state = checkpoint_data
+    plan.updated_at = datetime.now(timezone.utc)
+    await db.flush()
+    await db.refresh(plan)
+    logger.info(f"Saved checkpoint for lesson_plan_id={lesson_plan_id}, block_index={checkpoint_data.get('current_block_index')}")
+    return plan
+
+
+async def get_continuation(
+    db: AsyncSession,
+    student_id: int,
+    subject: str,
+    topic: str,
+) -> Optional[Dict[str, Any]]:
+    """
+    Find the most recent LessonPlan for this student/subject/topic that has
+    session_state data, so the next session can resume from where it left off.
+    Returns None if no continuation found.
+    """
+    result = await db.execute(
+        select(LessonPlan)
+        .where(
+            LessonPlan.student_id == student_id,
+            LessonPlan.subject == subject,
+            LessonPlan.session_state.isnot(None),
+        )
+        .order_by(LessonPlan.updated_at.desc())
+        .limit(1)
+    )
+    plan = result.scalar_one_or_none()
+
+    if plan is None:
+        return None
+
+    # Check topic match against unit_name or subtopic
+    topic_lower = topic.lower()
+    unit_match = plan.unit_name and topic_lower in plan.unit_name.lower()
+    subtopic_match = plan.subtopic and topic_lower in plan.subtopic.lower()
+    if not unit_match and not subtopic_match:
+        return None
+
+    return {
+        "found": True,
+        "lesson_plan_id": plan.id,
+        "subject": plan.subject,
+        "topic": plan.unit_name or plan.subtopic,
+        "session_state": plan.session_state,
+    }
+
+
+# ---------------------------------------------------------------------------
+# Task 3: Post-Session Report Generation
+# ---------------------------------------------------------------------------
+
+async def generate_session_report(
+    db: AsyncSession,
+    appointment: Any,
+    lesson_plan: Optional[Any],
+    assessments: List[Any],
+    student_name: Optional[str] = None,
+) -> Dict[str, Any]:
+    """
+    Generate a structured AI session report from appointment + lesson plan + assessments.
+    Saves the report JSON string to lesson_plan.session_summary and returns the dict.
+    """
+    from app.services.gemini_service import _get_client
+    from app.core.config import settings
+    from google.genai import types as genai_types
+
+    # Calculate quiz stats across all assessments
+    total_questions = sum(getattr(a, "total_questions", 0) for a in assessments)
+    total_correct = sum(getattr(a, "correct_answers", 0) for a in assessments)
+    avg_score = (total_correct / total_questions * 100) if total_questions > 0 else 0.0
+
+    all_weak: List[str] = []
+    all_strong: List[str] = []
+    topics_covered: List[str] = []
+    for a in assessments:
+        if hasattr(a, "topic") and a.topic:
+            topics_covered.append(a.topic)
+        weak = a.weak_topics if hasattr(a, "weak_topics") and a.weak_topics else {}
+        strong = a.strong_topics if hasattr(a, "strong_topics") and a.strong_topics else {}
+        if isinstance(weak, dict):
+            all_weak.extend(weak.keys())
+        elif isinstance(weak, list):
+            all_weak.extend(weak)
+        if isinstance(strong, dict):
+            all_strong.extend(strong.keys())
+        elif isinstance(strong, list):
+            all_strong.extend(strong)
+
+    # De-duplicate
+    topics_covered = list(dict.fromkeys(topics_covered))
+    if not topics_covered and lesson_plan:
+        topics_covered = [lesson_plan.unit_name or lesson_plan.subtopic or appointment.subject]
+    all_weak = list(dict.fromkeys(all_weak))
+    all_strong = list(dict.fromkeys(all_strong))
+
+    subject = appointment.subject
+    key_stage = appointment.key_stage
+    duration = appointment.duration_minutes
+    if student_name is None:
+        student_name = "Student"
+
+    # Determine understanding level from score
+    if avg_score >= 80:
+        understanding = "Excellent"
+    elif avg_score >= 60:
+        understanding = "Good"
+    elif avg_score >= 40:
+        understanding = "Developing"
+    else:
+        understanding = "Needs Support"
+
+    # Build Gemini prompt for the report
+    topics_str = ", ".join(topics_covered) if topics_covered else subject
+    weak_str = ", ".join(all_weak) if all_weak else "None identified"
+    strong_str = ", ".join(all_strong) if all_strong else "None identified"
+
+    goal = lesson_plan.goal if lesson_plan else "teach_from_scratch"
+    unit = lesson_plan.unit_name if lesson_plan else ""
+    subtopic = lesson_plan.subtopic if lesson_plan else ""
+
+    prompt = f"""A student just completed a {duration}-minute AI tutoring session.
+
+Subject: {subject} ({key_stage})
+Unit/Topic covered: {unit or topics_str}
+Subtopic: {subtopic or 'N/A'}
+Session goal: {goal}
+Quiz score: {avg_score:.0f}% ({total_correct}/{total_questions} correct)
+Strong areas: {strong_str}
+Weak areas: {weak_str}
+
+Generate a structured session report as JSON (raw JSON only, no markdown):
+{{
+  "summary": "2-3 sentence warm summary of what was covered and overall performance",
+  "topics_covered": {json.dumps(topics_covered)},
+  "quiz_score_percent": {avg_score:.1f},
+  "weak_areas": {json.dumps(all_weak)},
+  "strong_areas": {json.dumps(all_strong)},
+  "understanding_level": "{understanding}",
+  "next_session_recommendation": "1-2 sentences on what to cover next",
+  "time_spent_minutes": {duration},
+  "encouragement": "A short motivational message for the student"
+}}"""
+
+    try:
+        client = _get_client()
+        response = client.models.generate_content(
+            model=settings.gemini_model,
+            contents=prompt,
+            config=genai_types.GenerateContentConfig(
+                system_instruction="You are a tutor writing a student session report. Output only valid JSON.",
+            ),
+        )
+        raw = response.text.strip()
+        if raw.startswith("```"):
+            parts = raw.split("```")
+            raw = parts[1] if len(parts) > 1 else raw
+            if raw.startswith("json"):
+                raw = raw[4:]
+            raw = raw.strip()
+        report = json.loads(raw)
+    except Exception as exc:
+        logger.error(f"Failed to generate session report via Gemini: {exc}")
+        report = {
+            "summary": f"Session completed: {subject} — {topics_str}.",
+            "topics_covered": topics_covered,
+            "quiz_score_percent": round(avg_score, 1),
+            "weak_areas": all_weak,
+            "strong_areas": all_strong,
+            "understanding_level": understanding,
+            "next_session_recommendation": f"Continue practising {subject} in the next session.",
+            "time_spent_minutes": duration,
+            "encouragement": "Well done for completing your session!",
+        }
+
+    # Save to lesson_plan.session_summary as JSON string
+    if lesson_plan is not None:
+        lesson_plan.session_summary = json.dumps(report)
+        lesson_plan.updated_at = datetime.now(timezone.utc)
+        await db.flush()
+        await db.refresh(lesson_plan)
+        logger.info(f"Saved session report to lesson_plan_id={lesson_plan.id}")
+
+    return report
+
+
+async def get_appointment_report(
+    db: AsyncSession,
+    appointment_id: int,
+) -> Optional[Dict[str, Any]]:
+    """
+    Retrieve the session report for a given appointment.
+    Returns parsed JSON dict from lesson_plan.session_summary, or None.
+    """
+    result = await db.execute(
+        select(LessonPlan).where(LessonPlan.appointment_id == appointment_id)
+    )
+    plan = result.scalar_one_or_none()
+    if plan is None or not plan.session_summary:
+        return None
+
+    try:
+        return json.loads(plan.session_summary)
+    except (json.JSONDecodeError, TypeError):
+        # If stored as plain text (legacy), return wrapped
+        return {"summary": plan.session_summary}

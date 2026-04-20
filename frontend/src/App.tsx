@@ -9,6 +9,15 @@ import KnowledgeBasePage from "./pages/KnowledgeBasePage";
 import ParentDashboard from "./pages/ParentDashboard";
 import AppointmentsPage from "./pages/AppointmentsPage";
 import SessionPage from "./pages/SessionPage";
+import SessionsPage from "./pages/SessionsPage";
+import ProgressPage from "./pages/ProgressPage";
+import AssignmentsPage from "./pages/AssignmentsPage";
+import SettingsPage from "./pages/SettingsPage";
+import LessonSetupPage from "./pages/LessonSetupPage";
+import ParentReportsPage from "./pages/ParentReportsPage";
+import ParentSettingsPage from "./pages/ParentSettingsPage";
+import TeacherReportsPage from "./pages/TeacherReportsPage";
+import TeacherSettingsPage from "./pages/TeacherSettingsPage";
 import type { ReactNode } from "react";
 
 function ProtectedRoute({ children, allowedRoles }: { children: ReactNode; allowedRoles?: string[] }) {
@@ -83,11 +92,15 @@ export default function App() {
           <Route path="/teacher" element={<ProtectedRoute allowedRoles={["admin", "teacher"]}><TeacherDashboard /></ProtectedRoute>} />
           <Route path="/teacher/students" element={<ProtectedRoute allowedRoles={["admin", "teacher"]}><TeacherDashboard /></ProtectedRoute>} />
           <Route path="/teacher/activity" element={<ProtectedRoute allowedRoles={["admin", "teacher"]}><TeacherDashboard /></ProtectedRoute>} />
+          <Route path="/teacher/reports" element={<ProtectedRoute allowedRoles={["admin", "teacher"]}><TeacherReportsPage /></ProtectedRoute>} />
+          <Route path="/teacher/settings" element={<ProtectedRoute allowedRoles={["admin", "teacher"]}><TeacherSettingsPage /></ProtectedRoute>} />
           <Route path="/admin/knowledge" element={<ProtectedRoute allowedRoles={["admin"]}><KnowledgeBasePage /></ProtectedRoute>} />
           <Route path="/teacher/knowledge" element={<ProtectedRoute allowedRoles={["admin", "teacher"]}><KnowledgeBasePage /></ProtectedRoute>} />
           <Route path="/parent" element={<ProtectedRoute allowedRoles={["parent"]}><ParentDashboard /></ProtectedRoute>} />
           <Route path="/parent/students" element={<ProtectedRoute allowedRoles={["parent"]}><ParentDashboard /></ProtectedRoute>} />
           <Route path="/parent/appointments" element={<ProtectedRoute allowedRoles={["parent"]}><ParentDashboard /></ProtectedRoute>} />
+          <Route path="/parent/reports" element={<ProtectedRoute allowedRoles={["parent"]}><ParentReportsPage /></ProtectedRoute>} />
+          <Route path="/parent/settings" element={<ProtectedRoute allowedRoles={["parent"]}><ParentSettingsPage /></ProtectedRoute>} />
           <Route path="/appointments" element={<ProtectedRoute allowedRoles={["admin", "teacher", "parent"]}><AppointmentsPage /></ProtectedRoute>} />
           <Route path="/admin/assessments" element={<ProtectedRoute allowedRoles={["admin"]}><AdminDashboard /></ProtectedRoute>} />
           <Route
@@ -111,6 +124,46 @@ export default function App() {
             element={
               <ProtectedRoute allowedRoles={["student"]}>
                 <SessionPage />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/sessions"
+            element={
+              <ProtectedRoute allowedRoles={["student"]}>
+                <SessionsPage />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/progress"
+            element={
+              <ProtectedRoute allowedRoles={["student"]}>
+                <ProgressPage />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/assignments"
+            element={
+              <ProtectedRoute allowedRoles={["student"]}>
+                <AssignmentsPage />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/settings"
+            element={
+              <ProtectedRoute allowedRoles={["student"]}>
+                <SettingsPage />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/lesson/setup"
+            element={
+              <ProtectedRoute allowedRoles={["student"]}>
+                <LessonSetupPage />
               </ProtectedRoute>
             }
           />

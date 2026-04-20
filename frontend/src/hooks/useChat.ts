@@ -54,8 +54,15 @@ export function useChat() {
     navigate("/chat", { replace: true });
   }, [navigate]);
 
+  const resetChat = useCallback(() => {
+    setMessages([]);
+    setActiveSessionId(null);
+    setStreamContent("");
+    setQuizOffer(null);
+  }, []);
+
   const sendMessage = useCallback(
-    (text: string) => {
+    (text: string, opts?: { suppressNavigation?: boolean }) => {
       const userMsg: ChatMessage = {
         id: Date.now(),
         chat_id: 0,
@@ -77,7 +84,9 @@ export function useChat() {
         (event) => {
           if (event.type === "start" && event.session_id) {
             setActiveSessionId(event.session_id);
-            navigate(`/chat/${event.session_id}`, { replace: true });
+            if (!opts?.suppressNavigation) {
+              navigate(`/chat/${event.session_id}`, { replace: true });
+            }
           } else if (event.type === "token" && event.content) {
             if (event.content.startsWith("[Error:")) {
               hasError = true;
@@ -197,6 +206,7 @@ export function useChat() {
     loadCredits,
     loadChat,
     startNewChat,
+    resetChat,
     sendMessage,
     deleteChat,
     stopStreaming,
