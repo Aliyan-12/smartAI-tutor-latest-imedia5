@@ -61,6 +61,25 @@ export function useChat() {
     setQuizOffer(null);
   }, []);
 
+  const initSessionChat = useCallback(async (appointmentId: number) => {
+    try {
+      const data = await chatApi.getOrCreateSessionChat(appointmentId);
+      setActiveSessionId(data.session_id);
+      setStreamContent("");
+      setQuizOffer(null);
+      const loaded: ChatMessage[] = data.messages.map((m) => ({
+        id: m.id,
+        chat_id: m.chat_id,
+        role: m.role as ChatMessage["role"],
+        content: m.content,
+        timestamp: m.timestamp,
+      }));
+      setMessages(loaded);
+    } catch (err) {
+      console.error("Failed to init session chat:", err);
+    }
+  }, []);
+
   const sendMessage = useCallback(
     (text: string, opts?: { suppressNavigation?: boolean }) => {
       const userMsg: ChatMessage = {
@@ -207,6 +226,7 @@ export function useChat() {
     loadChat,
     startNewChat,
     resetChat,
+    initSessionChat,
     sendMessage,
     deleteChat,
     stopStreaming,

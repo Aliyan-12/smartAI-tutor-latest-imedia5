@@ -5,6 +5,7 @@ from typing import List
 from fastapi import APIRouter, Depends, HTTPException, status, WebSocket, WebSocketDisconnect
 from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 from app.db.session import get_db, async_session_factory
 from app.middleware.auth import get_current_user
@@ -80,6 +81,82 @@ async def delete_chat(
     deleted = await chat_service.delete_chat_by_session(db, session_id, current_user.id)
     if not deleted:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Chat not found")
+
+
+@router.post("/for-appointment/{appointment_id}")
+async def get_or_create_session_chat(
+    appointment_id: int,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    _ensure_student(current_user)
+
+    from app.models.chat import Chat as ChatModel
+    from sqlalchemy import select as sa_select
+
+    # The session chat title is a stable key used to find the right chat later
+    session_title_key = f"[session:{appointment_id}]"
+
+    # Look up by stable title key + user — no migration dependency
+    result = await db.execute(
+        sa_select(ChatModel)
+        .options(selectinload(ChatModel.messages))
+        .where(
+            ChatModel.user_id == current_user.id,
+            ChatModel.title.like(f"{session_title_key}%"),
+        )
+        .order_by(ChatModel.id.desc())
+        .limit(1)
+    )
+    chat = result.scalar_one_or_none()
+
+    if not chat:
+        from app.services import appointment_service
+        appt = await appointment_service.get_appointment(db, appointment_id)
+        if not appt:
+            raise HTTPException(status_code=404, detail="Appointment not found")
+
+        logger.info(
+            f"Session chat init: appt_id={appointment_id} "
+            f"appt.student_id={appt.student_id} current_user.id={current_user.id}"
+        )
+
+        if appt.student_id != current_user.id:
+            raise HTTPException(status_code=403, detail="This appointment does not belong to you")
+
+        display_title = appt.title or f"{appt.subject} Session"
+        full_title = f"{session_title_key} {display_title}"
+        chat = await chat_service.create_chat(db, current_user.id, title=full_title)
+
+        # Also try to set appointment_id FK if the column exists (non-fatal)
+        try:
+            chat.appointment_id = appointment_id
+        except Exception:
+            pass
+
+        await db.commit()
+        await db.refresh(chat)
+
+        # Reload with messages
+        result2 = await db.execute(
+            sa_select(ChatModel)
+            .options(selectinload(ChatModel.messages))
+            .where(ChatModel.id == chat.id)
+        )
+        chat = result2.scalar_one()
+
+    messages_out = [
+        {
+            "id": m.id,
+            "chat_id": chat.id,
+            "role": m.role,
+            "content": m.content,
+            "timestamp": m.timestamp.isoformat(),
+        }
+        for m in sorted(chat.messages, key=lambda m: m.timestamp)
+    ]
+
+    return {"session_id": chat.session_id, "messages": messages_out}
 
 
 @router.post("/stream")

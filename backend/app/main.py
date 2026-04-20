@@ -1,4 +1,5 @@
 import logging
+from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -15,10 +16,22 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    logger.info("=== SmartAI Tutor starting up — running DB init ===")
+    from app.db.init_db import init_database
+    await init_database()
+    logger.info("=== SmartAI Tutor ready ===")
+    yield
+    yield
+
+
 app = FastAPI(
     title=settings.app_name,
     version="1.0.0",
     description="AI-powered tutoring platform API",
+    lifespan=lifespan,
 )
 
 app.add_middleware(

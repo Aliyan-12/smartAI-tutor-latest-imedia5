@@ -48,6 +48,18 @@ async def run_setup(fresh: bool = False):
         await conn.run_sync(Base.metadata.create_all)
 
     logger.info("All tables created successfully")
+
+    # Column migrations (idempotent — safe to re-run)
+    _migrations = [
+        "ALTER TABLE chats ADD COLUMN IF NOT EXISTS appointment_id INTEGER REFERENCES appointments(id)",
+    ]
+    async with engine.begin() as conn:
+        for sql in _migrations:
+            try:
+                await conn.execute(text(sql))
+                logger.info(f"Migration applied: {sql[:70]}")
+            except Exception as e:
+                logger.warning(f"Migration skipped (already applied?): {e}")
     await engine.dispose()
 
 

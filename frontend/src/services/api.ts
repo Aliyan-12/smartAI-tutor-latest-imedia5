@@ -82,6 +82,14 @@ export const chatApi = {
     return handleResponse(res);
   },
 
+  async getOrCreateSessionChat(appointmentId: number) {
+    const res = await fetch(`${API_BASE}/chat/for-appointment/${appointmentId}`, {
+      method: "POST",
+      headers: authHeaders(),
+    });
+    return handleResponse<{ session_id: string; messages: Array<{ id: number; chat_id: number; role: string; content: string; timestamp: string }> }>(res);
+  },
+
   streamMessage(
     message: string,
     sessionId: string | null,

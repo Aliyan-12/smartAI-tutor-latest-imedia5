@@ -220,13 +220,13 @@ const styles: Record<string, React.CSSProperties> = {
     fontSize: 26,
     fontWeight: 800,
     margin: "0 0 8px",
-    color: "white",
+    color: "black",
   },
   subtitle: {
     fontSize: 15,
     opacity: 0.9,
     margin: 0,
-    color: "white",
+    color: "black",
   },
   statsRow: {
     display: "flex",

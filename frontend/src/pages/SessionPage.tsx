@@ -37,10 +37,11 @@ export default function SessionPage() {
 
   const {
     messages, streaming, streamContent, sendMessage, stopStreaming,
-    resetChat, activeSessionId, quizOffer, clearQuizOffer,
+    initSessionChat, activeSessionId, quizOffer, clearQuizOffer,
   } = useChat();
 
-  const { voiceStatus, speakText } = useVoice();
+  const { voiceStatus, speakText, connectVoice, disconnectVoice, isVoiceActive } = useVoice();
+  const [voiceMessages, setVoiceMessages] = useState<{ role: string; content: string }[]>([]);
 
   const apptId = appointmentId ? parseInt(appointmentId) : 0;
 
@@ -54,7 +55,7 @@ export default function SessionPage() {
       setSessionTitle(result.title);
       setSessionSubject(result.subject);
       setSessionState("active");
-      resetChat();
+      initSessionChat(parseInt(appointmentId));
     } catch (err: any) {
       setJoinError(err.message || "Invalid passcode");
     }
@@ -104,6 +105,37 @@ export default function SessionPage() {
     (text: string) => sendMessage(text, { suppressNavigation: true }),
     [sendMessage]
   );
+
+  const handleVoiceToggle = useCallback(() => {
+    if (isVoiceActive) {
+      disconnectVoice();
+    } else {
+      connectVoice(activeSessionId, {
+        onUserTranscript: (chunk) => {
+          setVoiceMessages((prev) => {
+            const last = prev[prev.length - 1];
+            if (last && last.role === "user") {
+              return [...prev.slice(0, -1), { role: "user", content: last.content + chunk }];
+            }
+            return [...prev, { role: "user", content: chunk }];
+          });
+        },
+        onAiTranscriptChunk: (chunk) => {
+          setVoiceMessages((prev) => {
+            const last = prev[prev.length - 1];
+            if (last && last.role === "assistant") {
+              return [...prev.slice(0, -1), { role: "assistant", content: last.content + chunk }];
+            }
+            return [...prev, { role: "assistant", content: chunk }];
+          });
+        },
+        onTurnComplete: () => {},
+        onCreditsUpdate: () => {},
+        onSessionCreated: () => {},
+        onError: (msg) => console.error("Voice error:", msg),
+      });
+    }
+  }, [isVoiceActive, connectVoice, disconnectVoice, activeSessionId]);
 
   if (sessionState === "passcode") {
     return (
@@ -337,8 +369,8 @@ export default function SessionPage() {
               streaming={streaming}
               onStop={stopStreaming}
               voiceStatus={voiceStatus}
-              onVoiceStart={() => {}}
-              onVoiceEnd={() => {}}
+              onVoiceStart={handleVoiceToggle}
+              onVoiceEnd={disconnectVoice}
             />
           </div>
         </div>
