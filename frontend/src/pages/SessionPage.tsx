@@ -12,7 +12,7 @@ import { useAuth } from "../context/AuthContext";
 import type { Assessment } from "../types";
 
 type SessionState = "passcode" | "active" | "ended";
-type LearnTab = "learn" | "practice" | "test";
+type LearnTab = "learn" | "test";
 
 const SUBJECTS = [
   "Maths","Science","English","History","Geography",
@@ -46,7 +46,15 @@ export default function SessionPage() {
   const [practiceError, setPracticeError] = useState<string | null>(null);
   const [testError, setTestError] = useState<string | null>(null);
   const [practiceResult, setPracticeResult] = useState<{ score: number; weak: string[]; strong: string[]; report: string } | null>(null);
-  const [testResult, setTestResult] = useState<{ score: number; weak: string[]; strong: string[]; report: string } | null>(null);
+  const [testResult, setTestResult] = useState<{
+    score: number;
+    weak: string[];
+    strong: string[];
+    report: string;
+    questions: Array<{ question_text: string; is_correct: boolean | null }>;
+    totalCorrect: number;
+    topic: string;
+  } | null>(null);
   const [practiceCurrentQ, setPracticeCurrentQ] = useState(0);
   const [testCurrentQ, setTestCurrentQ] = useState(0);
   const [practiceFeedback, setPracticeFeedback] = useState<{ selectedAnswer: number; isCorrect: boolean; explanation: string | null; correctAnswer: number | null } | null>(null);
@@ -101,6 +109,14 @@ export default function SessionPage() {
   useEffect(() => {
     gamificationApi.getProfile().then((p: any) => setXp(p?.xp_total ?? 0)).catch(() => {});
   }, []);
+
+  useEffect(() => {
+    if (!quizOffer) return;
+    if (testAssessment || testLoading || testResult) return;
+    if (sessionState !== "active" || isPaused) return;
+    setLearnTab("test");
+    handleStartTest();
+  }, [quizOffer]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     if (sessionState !== "active" || !sessionStartedAt || isPaused) return;
@@ -263,15 +279,23 @@ export default function SessionPage() {
       setTestFeedback(null);
     } else {
       try {
+        const capturedQuestions = testAssessment.questions;
         const completed = await assessmentsApi.complete(testAssessment.id) as Assessment;
         setTestResult({
           score: completed.score_percent ?? 0,
           weak: completed.weak_topics ?? [],
           strong: completed.strong_topics ?? [],
           report: completed.report_text ?? "",
+          questions: capturedQuestions.map((q) => ({
+            question_text: q.question_text,
+            is_correct: q.is_correct ?? null,
+          })),
+          totalCorrect: capturedQuestions.filter((q) => q.is_correct === true).length,
+          topic: quizOffer?.topic || sessionSubject,
         });
         setTestAssessment(null);
         setTestFeedback(null);
+        clearQuizOffer();
       } catch (err: any) {
         setTestError(err.message || "Failed to complete test");
       }
@@ -446,7 +470,7 @@ export default function SessionPage() {
       <div style={styles.panels}>
         <div style={styles.learnPanel}>
           <div style={styles.tabs}>
-            {(["learn", "practice", "test"] as LearnTab[]).map((tab) => (
+            {(["learn", "test"] as LearnTab[]).map((tab) => (
               <button
                 key={tab}
                 style={{
@@ -472,173 +496,70 @@ export default function SessionPage() {
               </div>
             )}
 
-            {learnTab === "practice" && (
-              <div style={{ padding: "16px" }}>
-                {quizOffer ? (
-                  <AssessmentMode
-                    quizOffer={quizOffer}
-                    onComplete={() => clearQuizOffer()}
-                    onDecline={() => clearQuizOffer()}
-                  />
-                ) : practiceResult ? (
-                  <div style={styles.assessCard}>
-                    <div style={{ textAlign: "center", marginBottom: 16 }}>
-                      <div style={{ fontSize: 42, fontWeight: 800, color: practiceResult.score >= 60 ? "var(--accent-green, #10b981)" : "#d97706", lineHeight: 1, marginBottom: 4 }}>
-                        {Math.round(practiceResult.score)}%
-                      </div>
-                      <p style={{ fontSize: 14, fontWeight: 700, color: "var(--text-primary)", margin: 0 }}>Practice Complete!</p>
-                    </div>
-                    <div style={{ height: 6, background: "var(--border-color)", borderRadius: 99, overflow: "hidden", marginBottom: 14 }}>
-                      <div style={{ height: "100%", width: `${practiceResult.score}%`, background: practiceResult.score >= 60 ? "var(--accent-green, #10b981)" : "#d97706", borderRadius: 99, transition: "width 0.6s ease" }} />
-                    </div>
-                    {practiceResult.weak.length > 0 && (
-                      <div style={{ marginBottom: 10 }}>
-                        <p style={styles.chipLabel}>Areas to improve</p>
-                        <div style={styles.chipRow}>
-                          {practiceResult.weak.map((t) => <span key={t} style={styles.weakChip}>{t}</span>)}
-                        </div>
-                      </div>
-                    )}
-                    {practiceResult.strong.length > 0 && (
-                      <div style={{ marginBottom: 10 }}>
-                        <p style={styles.chipLabel}>Strong areas</p>
-                        <div style={styles.chipRow}>
-                          {practiceResult.strong.map((t) => <span key={t} style={styles.strongChip}>{t}</span>)}
-                        </div>
-                      </div>
-                    )}
-                    {practiceResult.report && (
-                      <div style={styles.reportBox}>
-                        <p style={{ fontSize: 12, color: "var(--text-secondary)", lineHeight: 1.6, margin: 0 }}>{practiceResult.report}</p>
-                      </div>
-                    )}
-                    <button
-                      style={{ ...styles.generateBtn, marginTop: 14 }}
-                      onClick={() => { setPracticeResult(null); setPracticeAssessment(null); setPracticeCurrentQ(0); setPracticeFeedback(null); }}
-                    >
-                      Try Another Practice
-                    </button>
-                  </div>
-                ) : practiceAssessment ? (
-                  <div style={styles.assessCard}>
-                    <div style={{ marginBottom: 12 }}>
-                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
-                        <span style={{ fontSize: 11, fontWeight: 700, color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: "0.5px" }}>
-                          Question {practiceCurrentQ + 1} of {practiceAssessment.questions.length}
-                        </span>
-                        <span style={{ fontSize: 11, color: "var(--text-muted)" }}>Practice</span>
-                      </div>
-                      <div style={{ height: 3, background: "var(--border-color)", borderRadius: 99, overflow: "hidden" }}>
-                        <div style={{ height: "100%", width: `${(practiceCurrentQ / practiceAssessment.questions.length) * 100}%`, background: "var(--accent-blue, var(--accent))", borderRadius: 99, transition: "width 0.4s ease" }} />
-                      </div>
-                    </div>
-                    <p style={{ fontSize: 13, fontWeight: 600, color: "var(--text-primary)", lineHeight: 1.55, marginBottom: 12 }}>
-                      {practiceAssessment.questions[practiceCurrentQ].question_text}
-                    </p>
-                    <div style={{ display: "flex", flexDirection: "column", gap: 7, marginBottom: 12 }}>
-                      {practiceAssessment.questions[practiceCurrentQ].options.map((opt, idx) => {
-                        let optStyle: React.CSSProperties = { ...styles.optionBtn };
-                        if (practiceFeedback) {
-                          if (practiceFeedback.correctAnswer !== null && idx === practiceFeedback.correctAnswer) {
-                            optStyle = { ...optStyle, background: "rgba(16,185,129,0.1)", borderColor: "#10b981", color: "#10b981" };
-                          } else if (idx === practiceFeedback.selectedAnswer && !practiceFeedback.isCorrect) {
-                            optStyle = { ...optStyle, background: "rgba(239,68,68,0.1)", borderColor: "#ef4444", color: "#ef4444" };
-                          } else {
-                            optStyle = { ...optStyle, opacity: 0.45 };
-                          }
-                        }
-                        return (
-                          <button
-                            key={idx}
-                            disabled={!!practiceFeedback || practiceAnswering}
-                            onClick={() => handlePracticeAnswer(idx)}
-                            style={optStyle}
-                          >
-                            <span style={styles.optionLabel}>{["A","B","C","D"][idx]}</span>
-                            {opt}
-                          </button>
-                        );
-                      })}
-                    </div>
-                    {practiceFeedback && (
-                      <div style={{ ...styles.feedbackBox, background: practiceFeedback.isCorrect ? "rgba(16,185,129,0.08)" : "rgba(239,68,68,0.08)", borderColor: practiceFeedback.isCorrect ? "rgba(16,185,129,0.25)" : "rgba(239,68,68,0.25)" }}>
-                        <p style={{ fontSize: 12, fontWeight: 700, color: practiceFeedback.isCorrect ? "#10b981" : "#ef4444", marginBottom: practiceFeedback.explanation ? 4 : 0 }}>
-                          {practiceFeedback.isCorrect ? "Correct!" : "Not quite."}
-                        </p>
-                        {practiceFeedback.explanation && <p style={{ fontSize: 12, color: "var(--text-secondary)", lineHeight: 1.5, margin: 0 }}>{practiceFeedback.explanation}</p>}
-                      </div>
-                    )}
-                    {practiceFeedback && (
-                      <button style={{ ...styles.generateBtn, marginTop: 10 }} onClick={handlePracticeNext}>
-                        {practiceCurrentQ + 1 < practiceAssessment.questions.length ? "Next Question" : "See Results"}
-                      </button>
-                    )}
-                    {practiceError && <p style={styles.errorText}>{practiceError}</p>}
-                  </div>
-                ) : (
-                  <div style={styles.assessCard}>
-                    <div style={{ textAlign: "center", marginBottom: 14 }}>
-                      <span style={{ fontSize: 32 }}>🎯</span>
-                    </div>
-                    <p style={{ fontSize: 14, fontWeight: 700, color: "var(--text-primary)", marginBottom: 6, textAlign: "center" }}>Practice Questions</p>
-                    <p style={{ fontSize: 12, color: "var(--text-muted)", lineHeight: 1.6, textAlign: "center", marginBottom: 14 }}>
-                      Test your understanding with 5 AI-generated questions based on this session's topic.
-                    </p>
-                    {practiceError && <p style={{ ...styles.errorText, marginBottom: 10 }}>{practiceError}</p>}
-                    {isPaused ? (
-                      <p style={{ fontSize: 12, color: "var(--text-muted)", textAlign: "center" }}>Resume session to access practice</p>
-                    ) : (
-                      <button
-                        style={styles.generateBtn}
-                        onClick={handleStartPractice}
-                        disabled={practiceLoading}
-                      >
-                        {practiceLoading ? "Generating..." : "Generate Practice Questions"}
-                      </button>
-                    )}
-                  </div>
-                )}
-              </div>
-            )}
-
             {learnTab === "test" && (
               <div style={{ padding: "16px" }}>
                 {testResult ? (
-                  <div style={styles.assessCard}>
-                    <div style={{ textAlign: "center", marginBottom: 16 }}>
-                      <div style={{ fontSize: 42, fontWeight: 800, color: testResult.score >= 60 ? "var(--accent-green, #10b981)" : "#d97706", lineHeight: 1, marginBottom: 4 }}>
+                  <div>
+                    {/* Header */}
+                    <div style={{ textAlign: "center", marginBottom: 14 }}>
+                      <span style={{ fontSize: 40 }}>🏅</span>
+                      <p style={{ fontSize: 16, fontWeight: 800, color: "var(--text-primary)", margin: "6px 0 4px" }}>Quiz Complete!</p>
+                      <div style={{ fontSize: 40, fontWeight: 800, color: testResult.score >= 60 ? "#10b981" : "#f97316", lineHeight: 1, margin: "2px 0 6px" }}>
                         {Math.round(testResult.score)}%
                       </div>
-                      <p style={{ fontSize: 14, fontWeight: 700, color: "var(--text-primary)", margin: "0 0 4px" }}>Test Complete!</p>
+                      <p style={{ fontSize: 12, color: "var(--text-muted)", margin: 0 }}>
+                        {testResult.totalCorrect} of {testResult.questions.length} correct on <strong style={{ color: "var(--text-primary)" }}>{testResult.topic}</strong>
+                      </p>
                     </div>
+                    {/* Score bar */}
                     <div style={{ height: 6, background: "var(--border-color)", borderRadius: 99, overflow: "hidden", marginBottom: 14 }}>
-                      <div style={{ height: "100%", width: `${testResult.score}%`, background: testResult.score >= 60 ? "var(--accent-green, #10b981)" : "#d97706", borderRadius: 99, transition: "width 0.6s ease" }} />
+                      <div style={{ height: "100%", width: `${testResult.score}%`, background: testResult.score >= 60 ? "#10b981" : "#f97316", borderRadius: 99, transition: "width 0.6s ease" }} />
                     </div>
-                    {testResult.weak.length > 0 && (
-                      <div style={{ marginBottom: 10 }}>
-                        <p style={styles.chipLabel}>Areas to improve</p>
-                        <div style={styles.chipRow}>
-                          {testResult.weak.map((t) => <span key={t} style={styles.weakChip}>{t}</span>)}
+                    {/* Areas */}
+                    <div style={{ display: "flex", gap: 10, marginBottom: 14 }}>
+                      {testResult.weak.length > 0 && (
+                        <div style={{ flex: 1 }}>
+                          <p style={styles.chipLabel}>Areas to Improve</p>
+                          <div style={styles.chipRow}>
+                            {testResult.weak.map((t) => <span key={t} style={styles.weakChip}>{t}</span>)}
+                          </div>
+                        </div>
+                      )}
+                      {testResult.strong.length > 0 && (
+                        <div style={{ flex: 1 }}>
+                          <p style={styles.chipLabel}>Strong Areas</p>
+                          <div style={styles.chipRow}>
+                            {testResult.strong.map((t) => <span key={t} style={styles.strongChip}>{t}</span>)}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                    {/* Question breakdown */}
+                    {testResult.questions.length > 0 && (
+                      <div style={{ marginBottom: 14 }}>
+                        <p style={styles.chipLabel}>Question Breakdown</p>
+                        <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                          {testResult.questions.map((q, i) => (
+                            <div key={i} style={{
+                              padding: "8px 10px",
+                              borderRadius: 8,
+                              border: `1px solid ${q.is_correct ? "rgba(16,185,129,0.25)" : "rgba(239,68,68,0.25)"}`,
+                              background: q.is_correct ? "rgba(16,185,129,0.05)" : "rgba(239,68,68,0.05)",
+                              display: "flex",
+                              alignItems: "flex-start",
+                              gap: 8,
+                            }}>
+                              <span style={{ fontSize: 13, flexShrink: 0, marginTop: 1 }}>{q.is_correct ? "✅" : "❌"}</span>
+                              <p style={{ fontSize: 11, fontWeight: 600, color: "var(--text-primary)", margin: 0, lineHeight: 1.45 }}>
+                                Q{i + 1}. {q.question_text}
+                              </p>
+                            </div>
+                          ))}
                         </div>
                       </div>
                     )}
-                    {testResult.strong.length > 0 && (
-                      <div style={{ marginBottom: 10 }}>
-                        <p style={styles.chipLabel}>Strong areas</p>
-                        <div style={styles.chipRow}>
-                          {testResult.strong.map((t) => <span key={t} style={styles.strongChip}>{t}</span>)}
-                        </div>
-                      </div>
-                    )}
-                    {testResult.report && (
-                      <div style={styles.reportBox}>
-                        <p style={{ fontSize: 12, color: "var(--text-secondary)", lineHeight: 1.6, margin: 0 }}>{testResult.report}</p>
-                      </div>
-                    )}
-                    <div style={styles.testSavedNote}>
-                      Your results have been saved and are visible to your teacher and parent.
-                    </div>
-                    <div style={{ display: "flex", flexDirection: "column", gap: 8, marginTop: 14 }}>
+                    <div style={styles.testSavedNote}>Your results have been saved and are visible to your teacher and parent.</div>
+                    <div style={{ display: "flex", flexDirection: "column", gap: 8, marginTop: 12 }}>
                       <button style={styles.generateBtn} onClick={() => navigate("/progress")}>View My Progress</button>
                       <button
                         style={{ ...styles.generateBtn, background: "transparent", color: "var(--text-secondary)", border: "1px solid var(--border-color)" }}
@@ -649,64 +570,74 @@ export default function SessionPage() {
                     </div>
                   </div>
                 ) : testAssessment ? (
-                  <div style={{ ...styles.assessCard, borderColor: "rgba(99,102,241,0.3)" }}>
+                  <div>
+                    {/* Progress header */}
                     <div style={{ marginBottom: 12 }}>
                       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
-                        <span style={{ fontSize: 13, fontWeight: 800, color: "var(--text-primary)" }}>
-                          Question {testCurrentQ + 1}
-                          <span style={{ fontSize: 11, fontWeight: 600, color: "var(--text-muted)" }}> / {testAssessment.questions.length}</span>
+                        <span style={{ fontSize: 12, fontWeight: 700, color: "var(--text-muted)" }}>
+                          Question {testCurrentQ + 1} of {testAssessment.questions.length}
                         </span>
-                        <span style={{ fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.5px", color: "var(--accent-blue, var(--accent))", background: "rgba(99,102,241,0.1)", padding: "2px 8px", borderRadius: 99 }}>Formal Test</span>
+                        {quizOffer?.topic && (
+                          <span style={{ fontSize: 11, color: "var(--text-muted)", fontStyle: "italic" }}>{quizOffer.topic}</span>
+                        )}
                       </div>
                       <div style={{ height: 4, background: "var(--border-color)", borderRadius: 99, overflow: "hidden" }}>
                         <div style={{ height: "100%", width: `${(testCurrentQ / testAssessment.questions.length) * 100}%`, background: "var(--accent-blue, var(--accent))", borderRadius: 99, transition: "width 0.4s ease" }} />
                       </div>
                     </div>
-                    <p style={{ fontSize: 13, fontWeight: 600, color: "var(--text-primary)", lineHeight: 1.55, marginBottom: 12 }}>
+                    {/* Question text */}
+                    <p style={{ fontSize: 14, fontWeight: 700, color: "var(--text-primary)", lineHeight: 1.55, marginBottom: 14 }}>
                       {testAssessment.questions[testCurrentQ].question_text}
                     </p>
-                    <div style={{ display: "flex", flexDirection: "column", gap: 7, marginBottom: 12 }}>
+                    {/* Options */}
+                    <div style={{ display: "flex", flexDirection: "column", gap: 8, marginBottom: 12 }}>
                       {testAssessment.questions[testCurrentQ].options.map((opt, idx) => {
-                        let optStyle: React.CSSProperties = { ...styles.optionBtn };
+                        let optStyle: React.CSSProperties = { ...styles.quizOptionBtn };
                         if (testFeedback) {
                           if (testFeedback.correctAnswer !== null && idx === testFeedback.correctAnswer) {
-                            optStyle = { ...optStyle, background: "rgba(16,185,129,0.1)", borderColor: "#10b981", color: "#10b981" };
+                            optStyle = { ...optStyle, background: "rgba(16,185,129,0.08)", borderColor: "#10b981", color: "#10b981", fontWeight: 700 };
                           } else if (idx === testFeedback.selectedAnswer && !testFeedback.isCorrect) {
-                            optStyle = { ...optStyle, background: "rgba(239,68,68,0.1)", borderColor: "#ef4444", color: "#ef4444" };
+                            optStyle = { ...optStyle, background: "rgba(239,68,68,0.08)", borderColor: "#ef4444", color: "#ef4444" };
                           } else {
-                            optStyle = { ...optStyle, opacity: 0.45 };
+                            optStyle = { ...optStyle, opacity: 0.4 };
                           }
                         }
                         return (
-                          <button
-                            key={idx}
-                            disabled={!!testFeedback || testAnswering}
-                            onClick={() => handleTestAnswer(idx)}
-                            style={optStyle}
-                          >
-                            <span style={styles.optionLabel}>{["A","B","C","D"][idx]}</span>
+                          <button key={idx} disabled={!!testFeedback || testAnswering} onClick={() => handleTestAnswer(idx)} style={optStyle}>
+                            <span style={{ ...styles.optionLabel, borderColor: testFeedback && testFeedback.correctAnswer === idx ? "#10b981" : testFeedback && testFeedback.selectedAnswer === idx && !testFeedback.isCorrect ? "#ef4444" : "var(--border-color)" }}>
+                              {["A","B","C","D"][idx]}
+                            </span>
                             {opt}
                           </button>
                         );
                       })}
                     </div>
+                    {/* Feedback */}
                     {testFeedback && (
-                      <div style={{ ...styles.feedbackBox, background: testFeedback.isCorrect ? "rgba(16,185,129,0.08)" : "rgba(239,68,68,0.08)", borderColor: testFeedback.isCorrect ? "rgba(16,185,129,0.25)" : "rgba(239,68,68,0.25)" }}>
-                        <p style={{ fontSize: 12, fontWeight: 700, color: testFeedback.isCorrect ? "#10b981" : "#ef4444", marginBottom: testFeedback.explanation ? 4 : 0 }}>
-                          {testFeedback.isCorrect ? "Correct!" : "Not quite."}
-                        </p>
+                      <div style={{ ...styles.feedbackBox, background: testFeedback.isCorrect ? "rgba(16,185,129,0.08)" : "rgba(239,68,68,0.08)", borderColor: testFeedback.isCorrect ? "rgba(16,185,129,0.3)" : "rgba(239,68,68,0.3)", marginBottom: 10 }}>
+                        <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: testFeedback.explanation ? 4 : 0 }}>
+                          <span style={{ fontSize: 14 }}>{testFeedback.isCorrect ? "✅" : "❌"}</span>
+                          <p style={{ fontSize: 13, fontWeight: 700, color: testFeedback.isCorrect ? "#10b981" : "#ef4444", margin: 0 }}>
+                            {testFeedback.isCorrect ? "Correct!" : "Not quite."}
+                          </p>
+                        </div>
                         {testFeedback.explanation && <p style={{ fontSize: 12, color: "var(--text-secondary)", lineHeight: 1.5, margin: 0 }}>{testFeedback.explanation}</p>}
                       </div>
                     )}
                     {testFeedback && (
-                      <button style={{ ...styles.generateBtn, marginTop: 10 }} onClick={handleTestNext}>
-                        {testCurrentQ + 1 < testAssessment.questions.length ? "Next Question" : "See Results"}
+                      <button style={styles.generateBtn} onClick={handleTestNext}>
+                        {testCurrentQ + 1 < testAssessment.questions.length ? "Next Question →" : "See Results"}
                       </button>
                     )}
-                    {testError && <p style={styles.errorText}>{testError}</p>}
+                    {testError && <p style={{ ...styles.errorText, marginTop: 8 }}>{testError}</p>}
                   </div>
                 ) : (
                   <div style={styles.assessCard}>
+                    {quizOffer && (
+                      <div style={{ padding: "8px 12px", background: "rgba(99,102,241,0.1)", border: "1px solid rgba(99,102,241,0.25)", borderRadius: 8, marginBottom: 12, fontSize: 12, color: "var(--accent-blue, var(--accent))", fontWeight: 600, textAlign: "center" }}>
+                        🤖 Your AI tutor suggested a quiz on <em>{quizOffer.topic}</em>
+                      </div>
+                    )}
                     <div style={{ textAlign: "center", marginBottom: 14 }}>
                       <span style={{ fontSize: 32 }}>📝</span>
                     </div>
@@ -1208,6 +1139,22 @@ const styles: Record<string, React.CSSProperties> = {
     textAlign: "left" as const,
     cursor: "pointer",
     transition: "all 0.15s",
+  },
+  quizOptionBtn: {
+    display: "flex",
+    alignItems: "center",
+    gap: 12,
+    width: "100%",
+    padding: "11px 14px",
+    background: "var(--bg-primary)",
+    border: "1.5px solid var(--border-color)",
+    borderRadius: 10,
+    fontSize: 13,
+    color: "var(--text-primary)",
+    textAlign: "left" as const,
+    cursor: "pointer",
+    transition: "all 0.15s",
+    fontWeight: 500,
   },
   optionLabel: {
     width: 22,

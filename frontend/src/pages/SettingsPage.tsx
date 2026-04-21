@@ -69,17 +69,18 @@ export default function SettingsPage() {
   const [showNewPw, setShowNewPw] = useState(false);
 
   useEffect(() => {
-    settingsApi.getLearningPreferences().then((data: LearningPreferences) => {
-      setPrefs(data);
-      setLearningStyles(data.learning_style ?? []);
-      setPace(data.teaching_pace ?? "just_right");
-      setTeachPrefs(data.teaching_preferences ?? teachPrefs);
-      setInterests(data.interests ?? []);
-      setLearningGoals(data.learning_goals ?? "");
-      setYearGroup(data.year_group ?? "");
-      setVoiceResponses(data.voice_responses ?? true);
-      if (data.notification_prefs) {
-        setNotifPrefs({ ...notifPrefs, ...data.notification_prefs });
+    settingsApi.getLearningPreferences().then((data) => {
+      const d = data as LearningPreferences;
+      setPrefs(d);
+      setLearningStyles(d.learning_style ?? []);
+      setPace(d.teaching_pace ?? "just_right");
+      setTeachPrefs(d.teaching_preferences ?? teachPrefs);
+      setInterests(d.interests ?? []);
+      setLearningGoals(d.learning_goals ?? "");
+      setYearGroup(d.year_group ?? "");
+      setVoiceResponses(d.voice_responses ?? true);
+      if (d.notification_prefs) {
+        setNotifPrefs({ ...notifPrefs, ...d.notification_prefs });
       }
     }).catch(() => {});
   }, []);

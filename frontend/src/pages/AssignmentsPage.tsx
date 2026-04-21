@@ -43,7 +43,7 @@ export default function AssignmentsPage() {
   useEffect(() => {
     assignmentsApi
       .getMy()
-      .then((data: MyAssignment[]) => setAssignments(data))
+      .then((data) => setAssignments(data as MyAssignment[]))
       .catch((e: Error) => setError(e.message))
       .finally(() => setLoading(false));
   }, []);
