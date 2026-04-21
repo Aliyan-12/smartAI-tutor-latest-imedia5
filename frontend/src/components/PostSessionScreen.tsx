@@ -24,11 +24,29 @@ export default function PostSessionScreen({
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    appointmentsApi
-      .getReport(appointmentId)
-      .then((data: any) => setReport((data?.report ?? data) as SessionReport))
-      .catch((e) => setError(e.message))
-      .finally(() => setLoading(false));
+    let cancelled = false;
+    const fetchWithRetry = async () => {
+      for (let attempt = 0; attempt < 8; attempt++) {
+        if (cancelled) return;
+        try {
+          const data: any = await appointmentsApi.getReport(appointmentId);
+          if (!cancelled) {
+            setReport((data?.report ?? data) as SessionReport);
+            setLoading(false);
+          }
+          return;
+        } catch {
+          if (attempt < 7) {
+            await new Promise((r) => setTimeout(r, 2500));
+          } else if (!cancelled) {
+            setError("Could not load session report. Your progress has still been saved.");
+            setLoading(false);
+          }
+        }
+      }
+    };
+    fetchWithRetry();
+    return () => { cancelled = true; };
   }, [appointmentId]);
 
   const firstName = user?.name?.split(" ")[0] ?? "Student";

@@ -18,6 +18,7 @@ import ParentReportsPage from "./pages/ParentReportsPage";
 import ParentSettingsPage from "./pages/ParentSettingsPage";
 import TeacherReportsPage from "./pages/TeacherReportsPage";
 import TeacherSettingsPage from "./pages/TeacherSettingsPage";
+import SessionReportPage from "./pages/SessionReportPage";
 import type { ReactNode } from "react";
 
 function ProtectedRoute({ children, allowedRoles }: { children: ReactNode; allowedRoles?: string[] }) {
@@ -124,6 +125,14 @@ export default function App() {
             element={
               <ProtectedRoute allowedRoles={["student"]}>
                 <SessionPage />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/session/:appointmentId/report"
+            element={
+              <ProtectedRoute allowedRoles={["student"]}>
+                <SessionReportPage />
               </ProtectedRoute>
             }
           />

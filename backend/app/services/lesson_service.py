@@ -597,9 +597,29 @@ Generate a structured session report as JSON (raw JSON only, no markdown):
             "encouragement": "Well done for completing your session!",
         }
 
-    # Save to lesson_plan.session_summary as JSON string
-    if lesson_plan is not None:
-        lesson_plan.session_summary = json.dumps(report)
+    # Save to lesson_plan.session_summary as JSON string.
+    # If no lesson plan exists for this appointment, create a stub so the report is persisted.
+    report_json = json.dumps(report)
+    if lesson_plan is None:
+        lesson_plan = LessonPlan(
+            appointment_id=appointment.id,
+            student_id=appointment.student_id,
+            created_by=appointment.teacher_id or appointment.student_id,
+            subject=appointment.subject,
+            key_stage=appointment.key_stage or "KS4",
+            exam_board="None",
+            tier="None",
+            unit_name=appointment.title or appointment.subject,
+            ability_level="intermediate",
+            goal="session",
+            status="completed",
+            session_summary=report_json,
+        )
+        db.add(lesson_plan)
+        await db.flush()
+        logger.info(f"Created stub LessonPlan for appointment_id={appointment.id}")
+    else:
+        lesson_plan.session_summary = report_json
         lesson_plan.updated_at = datetime.now(timezone.utc)
         await db.flush()
         await db.refresh(lesson_plan)

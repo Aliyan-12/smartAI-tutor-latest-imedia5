@@ -220,13 +220,71 @@ async def get_appointment_report(
         if not student or student.parent_id != current_user.id:
             raise HTTPException(status_code=403, detail="Not your child's appointment")
 
-    from app.services.lesson_service import get_appointment_report
-    report = await get_appointment_report(db, appointment_id)
-    if report is None:
+    if appt.status not in ("completed", "terminated"):
         raise HTTPException(
-            status_code=404,
-            detail="No session report found. The session may not have completed yet."
+            status_code=400,
+            detail="Session report is only available for completed or terminated sessions."
         )
+
+    from app.services.lesson_service import get_appointment_report, generate_session_report
+    from app.models.lesson_plan import LessonPlan
+    from app.models.assessment import Assessment
+
+    report = await get_appointment_report(db, appointment_id)
+
+    if report is None:
+        try:
+            lp_res = await db.execute(select(LessonPlan).where(LessonPlan.appointment_id == appointment_id))
+            lesson_plan = lp_res.scalar_one_or_none()
+
+            # Prefer assessments linked to this appointment, fallback to subject-level
+            asmt_res = await db.execute(
+                select(Assessment)
+                .where(Assessment.appointment_id == appointment_id)
+                .order_by(Assessment.created_at.desc())
+                .limit(20)
+            )
+            assessments = list(asmt_res.scalars().all())
+            if not assessments:
+                asmt_res = await db.execute(
+                    select(Assessment)
+                    .where(
+                        Assessment.student_id == appt.student_id,
+                        Assessment.subject == appt.subject,
+                    )
+                    .order_by(Assessment.created_at.desc())
+                    .limit(10)
+                )
+                assessments = list(asmt_res.scalars().all())
+
+            student = await get_user_by_id(db, appt.student_id)
+            report = await generate_session_report(
+                db, appt, lesson_plan, assessments,
+                student_name=student.name if student else None
+            )
+            await db.commit()
+        except Exception as exc:
+            import logging
+            logging.getLogger(__name__).error(
+                f"On-demand report generation failed for appointment {appointment_id}: {exc}",
+                exc_info=True,
+            )
+            try:
+                await db.rollback()
+            except Exception:
+                pass
+            # Return a minimal fallback so the frontend doesn't show a hard error
+            report = {
+                "summary": f"Session completed — report is being processed.",
+                "topics_covered": [appt.subject],
+                "quiz_score_percent": None,
+                "weak_areas": [],
+                "strong_areas": [],
+                "understanding_level": "Good",
+                "next_session_recommendation": f"Continue practising {appt.subject}.",
+                "time_spent_minutes": appt.duration_minutes,
+                "encouragement": "Well done for completing your session!",
+            }
 
     return {
         "appointment_id": appointment_id,

@@ -54,6 +54,8 @@ async def run_setup(fresh: bool = False):
         "ALTER TABLE chats ADD COLUMN IF NOT EXISTS appointment_id INTEGER REFERENCES appointments(id)",
         "ALTER TABLE appointments ADD COLUMN IF NOT EXISTS paused_at TIMESTAMP WITH TIME ZONE",
         "ALTER TABLE appointments ADD COLUMN IF NOT EXISTS total_paused_seconds INTEGER DEFAULT 0",
+        "ALTER TABLE assessments ADD COLUMN IF NOT EXISTS appointment_id INTEGER REFERENCES appointments(id)",
+        "ALTER TABLE assessments ADD COLUMN IF NOT EXISTS assessment_type VARCHAR(20)",
     ]
     async with engine.begin() as conn:
         for sql in _migrations:

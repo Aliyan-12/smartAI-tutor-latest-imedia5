@@ -217,73 +217,212 @@ function StudentDetail({ student, onBack }: StudentDetailProps) {
 }
 
 // ── Students list view ────────────────────────────────────────────────────────
-function StudentsView({ students, onSelectStudent }: { students: User[]; onSelectStudent: (s: User) => void }) {
+function StudentsView({
+  students,
+  onSelectStudent,
+  onLinked,
+}: {
+  students: User[];
+  onSelectStudent: (s: User) => void;
+  onLinked: () => void;
+}) {
+  const [showLinkModal, setShowLinkModal] = useState(false);
+  const [linkCode, setLinkCode] = useState("");
+  const [linkLoading, setLinkLoading] = useState(false);
+  const [linkError, setLinkError] = useState("");
+  const [linkSuccess, setLinkSuccess] = useState("");
+
+  const openLinkModal = () => {
+    setLinkCode("");
+    setLinkError("");
+    setLinkSuccess("");
+    setShowLinkModal(true);
+  };
+
+  const closeLinkModal = () => {
+    setShowLinkModal(false);
+    setLinkSuccess("");
+    setLinkError("");
+  };
+
+  const handleLink = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!linkCode.trim()) return;
+    setLinkLoading(true);
+    setLinkError("");
+    setLinkSuccess("");
+    try {
+      const result = (await parentApi.linkStudent(linkCode.trim())) as { student?: { name: string } };
+      const studentName = result?.student?.name || "Student";
+      setLinkSuccess(`${studentName} has been linked to your account!`);
+      onLinked();
+    } catch (err: any) {
+      setLinkError(err.message || "Invalid invite code. Please check and try again.");
+    } finally {
+      setLinkLoading(false);
+    }
+  };
+
   return (
-    <div className="dashboard-section">
-      <div className="section-header">
-        <h2>Your Children</h2>
-      </div>
-      {students.length === 0 ? (
-        <p style={{ fontSize: 13, color: "var(--text-muted)" }}>
-          No children linked yet. Use an invite code below to link a student account.
-        </p>
-      ) : (
-        <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-          {students.map((s) => (
-            <div
-              key={s.id}
-              style={{
-                display: "flex",
-                alignItems: "center",
-                gap: 12,
-                padding: "12px 16px",
-                background: "var(--bg-primary)",
-                border: "1px solid var(--border)",
-                borderRadius: "var(--radius)",
-                cursor: "pointer",
-                transition: "border-color 0.15s",
-              }}
-              onClick={() => onSelectStudent(s)}
-              onMouseEnter={(e) => (e.currentTarget.style.borderColor = "var(--accent)")}
-              onMouseLeave={(e) => (e.currentTarget.style.borderColor = "var(--border)")}
-            >
-              <div
-                style={{
-                  width: 36,
-                  height: 36,
-                  borderRadius: "50%",
-                  background: "var(--accent-light)",
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  fontWeight: 700,
-                  color: "var(--accent)",
-                  fontSize: 15,
-                  flexShrink: 0,
-                }}
-              >
-                {s.name.charAt(0).toUpperCase()}
+    <>
+      {showLinkModal && (
+        <div
+          style={{
+            position: "fixed",
+            inset: 0,
+            background: "rgba(0,0,0,0.4)",
+            zIndex: 1000,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+          }}
+          onClick={(e) => { if (e.target === e.currentTarget) closeLinkModal(); }}
+        >
+          <div
+            style={{
+              background: "#fff",
+              borderRadius: 12,
+              padding: 28,
+              maxWidth: 420,
+              width: "calc(100% - 48px)",
+              boxShadow: "0 8px 32px rgba(0,0,0,0.18)",
+            }}
+          >
+            {linkSuccess ? (
+              <div style={{ textAlign: "center" }}>
+                <div style={{ fontSize: 38, marginBottom: 8 }}>✓</div>
+                <h2 style={{ fontSize: 18, fontWeight: 700, marginBottom: 10, color: "#1a1a2e" }}>
+                  Child linked!
+                </h2>
+                <p style={{ fontSize: 14, color: "#555", marginBottom: 20 }}>{linkSuccess}</p>
+                <button className="btn-primary" onClick={closeLinkModal} style={{ width: "100%" }}>
+                  Done
+                </button>
               </div>
-              <div style={{ flex: 1 }}>
-                <p style={{ fontSize: 14, fontWeight: 600, marginBottom: 2 }}>{s.name}</p>
-                <p style={{ fontSize: 12, color: "var(--text-muted)" }}>{s.email}</p>
-              </div>
-              <span
-                style={{
-                  fontSize: 12,
-                  color: s.is_active ? "var(--success)" : "var(--text-muted)",
-                  fontWeight: 600,
-                  marginRight: 6,
-                }}
-              >
-                {s.is_active ? "Active" : "Inactive"}
-              </span>
-              <ChevronRight size={15} style={{ color: "var(--text-muted)" }} />
-            </div>
-          ))}
+            ) : (
+              <>
+                <h2 style={{ fontSize: 17, fontWeight: 700, marginBottom: 6, color: "#1a1a2e" }}>
+                  Link a Child
+                </h2>
+                <p style={{ fontSize: 13, color: "#666", marginBottom: 16 }}>
+                  Enter the invite code provided by your child's teacher to link their account.
+                </p>
+                <form onSubmit={handleLink}>
+                  <div style={{ marginBottom: 12 }}>
+                    <label style={{ fontSize: 12, fontWeight: 600, color: "#555", display: "block", marginBottom: 4 }}>
+                      Invite Code
+                    </label>
+                    <input
+                      type="text"
+                      required
+                      value={linkCode}
+                      onChange={(e) => setLinkCode(e.target.value)}
+                      placeholder="e.g. ABC123"
+                      style={{ width: "100%", boxSizing: "border-box", fontFamily: "monospace", fontSize: 15 }}
+                    />
+                  </div>
+                  {linkError && (
+                    <p style={{ fontSize: 13, color: "var(--danger)", marginBottom: 8 }}>{linkError}</p>
+                  )}
+                  <div style={{ display: "flex", gap: 8, marginTop: 14 }}>
+                    <button
+                      type="button"
+                      className="btn-secondary"
+                      onClick={closeLinkModal}
+                      style={{ flex: 1 }}
+                      disabled={linkLoading}
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      type="submit"
+                      className="btn-primary"
+                      style={{ flex: 1 }}
+                      disabled={linkLoading || !linkCode.trim()}
+                    >
+                      {linkLoading ? "Linking…" : "Link Student"}
+                    </button>
+                  </div>
+                </form>
+              </>
+            )}
+          </div>
         </div>
       )}
-    </div>
+
+      <div className="dashboard-section">
+        <div className="section-header">
+          <h2>Your Children</h2>
+          <button
+            className="btn-primary"
+            style={{ fontSize: 13, padding: "6px 14px", borderRadius: 6 }}
+            onClick={openLinkModal}
+          >
+            + Link Child
+          </button>
+        </div>
+        {students.length === 0 ? (
+          <p style={{ fontSize: 13, color: "var(--text-muted)" }}>
+            No children linked yet. Click "Link Child" above to add a student using an invite code.
+          </p>
+        ) : (
+          <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+            {students.map((s) => (
+              <div
+                key={s.id}
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 12,
+                  padding: "12px 16px",
+                  background: "var(--bg-primary)",
+                  border: "1px solid var(--border)",
+                  borderRadius: "var(--radius)",
+                  cursor: "pointer",
+                  transition: "border-color 0.15s",
+                }}
+                onClick={() => onSelectStudent(s)}
+                onMouseEnter={(e) => (e.currentTarget.style.borderColor = "var(--accent)")}
+                onMouseLeave={(e) => (e.currentTarget.style.borderColor = "var(--border)")}
+              >
+                <div
+                  style={{
+                    width: 36,
+                    height: 36,
+                    borderRadius: "50%",
+                    background: "var(--accent-light)",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    fontWeight: 700,
+                    color: "var(--accent)",
+                    fontSize: 15,
+                    flexShrink: 0,
+                  }}
+                >
+                  {s.name.charAt(0).toUpperCase()}
+                </div>
+                <div style={{ flex: 1 }}>
+                  <p style={{ fontSize: 14, fontWeight: 600, marginBottom: 2 }}>{s.name}</p>
+                  <p style={{ fontSize: 12, color: "var(--text-muted)" }}>{s.email}</p>
+                </div>
+                <span
+                  style={{
+                    fontSize: 12,
+                    color: s.is_active ? "var(--success)" : "var(--text-muted)",
+                    fontWeight: 600,
+                    marginRight: 6,
+                  }}
+                >
+                  {s.is_active ? "Active" : "Inactive"}
+                </span>
+                <ChevronRight size={15} style={{ color: "var(--text-muted)" }} />
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    </>
   );
 }
 
@@ -418,24 +557,16 @@ export default function ParentDashboard() {
           {currentView === "dashboard" && (
             <>
               <DashboardView data={dashboardData} />
-              <div style={{ marginTop: 8 }}>
-                <InviteCodeSection onLinked={loadData} />
-              </div>
-              {students.length > 0 && (
-                <div style={{ marginTop: 0 }}>
-                  <StudentsView
-                    students={students}
-                    onSelectStudent={(s) => {
-                      setSelectedStudent(s);
-                    }}
-                  />
-                  {selectedStudent && (
-                    <StudentDetail
-                      student={selectedStudent}
-                      onBack={() => setSelectedStudent(null)}
-                    />
-                  )}
-                </div>
+              <StudentsView
+                students={students}
+                onSelectStudent={(s) => setSelectedStudent(s)}
+                onLinked={loadData}
+              />
+              {selectedStudent && (
+                <StudentDetail
+                  student={selectedStudent}
+                  onBack={() => setSelectedStudent(null)}
+                />
               )}
             </>
           )}
@@ -448,13 +579,11 @@ export default function ParentDashboard() {
                   onBack={() => setSelectedStudent(null)}
                 />
               ) : (
-                <>
-                  <StudentsView
-                    students={students}
-                    onSelectStudent={setSelectedStudent}
-                  />
-                  <InviteCodeSection onLinked={loadStudents} />
-                </>
+                <StudentsView
+                  students={students}
+                  onSelectStudent={setSelectedStudent}
+                  onLinked={loadStudents}
+                />
               )}
             </>
           )}

@@ -482,51 +482,6 @@ function BookingForm({ userRole, userId, onBooked }: BookingFormProps) {
 
       {open && (
         <form onSubmit={handleSubmit}>
-          {/* Availability banner */}
-          {form.student_id && (
-            <div
-              style={{
-                padding: "9px 14px",
-                borderRadius: "var(--radius)",
-                background: loadingAvailability
-                  ? "var(--bg-tertiary)"
-                  : availability
-                  ? availability.used >= availability.limit
-                    ? "var(--danger-light)"
-                    : "var(--success-light)"
-                  : "var(--bg-tertiary)",
-                border: `1px solid ${
-                  loadingAvailability
-                    ? "var(--border)"
-                    : availability
-                    ? availability.used >= availability.limit
-                      ? "rgba(217,48,37,0.2)"
-                      : "rgba(24,128,56,0.2)"
-                    : "var(--border)"
-                }`,
-                display: "flex",
-                alignItems: "center",
-                gap: 8,
-                fontSize: 13,
-                fontWeight: 600,
-                color: loadingAvailability
-                  ? "var(--text-muted)"
-                  : availability
-                  ? availability.used >= availability.limit
-                    ? "var(--danger)"
-                    : "var(--success)"
-                  : "var(--text-muted)",
-                marginBottom: 14,
-              }}
-            >
-              <AlertCircle size={14} />
-              {loadingAvailability
-                ? "Checking availability…"
-                : availability
-                ? `${availability.used} of ${availability.limit} weekly slots used`
-                : "Availability unknown"}
-            </div>
-          )}
 
           <div className="form-row">
             <select
@@ -721,7 +676,7 @@ function BookingForm({ userRole, userId, onBooked }: BookingFormProps) {
             <button
               type="submit"
               className="btn-primary"
-              disabled={submitting || !!(availability && availability.used >= availability.limit)}
+              disabled={submitting}
             >
               <Calendar size={14} />
               {submitting ? "Booking…" : "Book Appointment"}

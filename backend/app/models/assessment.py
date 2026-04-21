@@ -20,6 +20,12 @@ class Assessment(Base):
     chat_session_id: Mapped[Optional[str]] = mapped_column(
         String(36), nullable=True, index=True
     )
+    appointment_id: Mapped[Optional[int]] = mapped_column(
+        Integer, ForeignKey("appointments.id"), nullable=True, index=True
+    )
+    assessment_type: Mapped[Optional[str]] = mapped_column(
+        String(20), nullable=True, index=True
+    )
     subject: Mapped[str] = mapped_column(String(100), nullable=False)
     key_stage: Mapped[str] = mapped_column(String(10), nullable=False)
     topic: Mapped[str] = mapped_column(String(255), nullable=False)

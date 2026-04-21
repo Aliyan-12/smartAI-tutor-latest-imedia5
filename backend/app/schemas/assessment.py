@@ -33,6 +33,8 @@ class AssessmentResponse(BaseModel):
     id: int
     student_id: int
     chat_session_id: Optional[str] = None
+    appointment_id: Optional[int] = None
+    assessment_type: Optional[str] = None
     subject: str
     key_stage: str
     topic: str

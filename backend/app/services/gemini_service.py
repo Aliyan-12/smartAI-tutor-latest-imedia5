@@ -189,12 +189,15 @@ def stream_response(
     user_message: str,
     rag_chunks: Optional[List["RetrievedChunk"]] = None,
     student_preferences: Optional[dict] = None,
+    system_prompt_override: Optional[str] = None,
 ):
-    system_prompt = (
-        build_personalised_system_prompt(student_preferences)
-        if student_preferences
-        else SYSTEM_PROMPT
-    )
+    if system_prompt_override:
+        system_prompt = system_prompt_override
+    elif student_preferences:
+        system_prompt = build_personalised_system_prompt(student_preferences)
+    else:
+        system_prompt = SYSTEM_PROMPT
+
     last_error = None
     for attempt in range(MAX_RETRIES + 1):
         try:
@@ -224,8 +227,11 @@ async def stream_response_async(
     user_message: str,
     rag_chunks: Optional[List["RetrievedChunk"]] = None,
     student_preferences: Optional[dict] = None,
+    system_prompt_override: Optional[str] = None,
 ) -> AsyncGenerator[str, None]:
-    for token in stream_response(history, user_message, rag_chunks, student_preferences):
+    for token in stream_response(
+        history, user_message, rag_chunks, student_preferences, system_prompt_override
+    ):
         yield token
 
 

@@ -275,6 +275,23 @@ export const teacherApi = {
     const res = await fetch(`${API_BASE}/teacher/activity?limit=${limit}`, { headers: authHeaders() });
     return handleResponse(res);
   },
+
+  async createStudent(data: { name: string; email: string; password: string; year_group?: string }) {
+    const res = await fetch(`${API_BASE}/teacher/students`, {
+      method: "POST",
+      headers: authHeaders(),
+      body: JSON.stringify(data),
+    });
+    return handleResponse(res);
+  },
+
+  async generateInviteCode(studentId: number) {
+    const res = await fetch(`${API_BASE}/teacher/students/${studentId}/invite-code`, {
+      method: "POST",
+      headers: authHeaders(),
+    });
+    return handleResponse(res);
+  },
 };
 
 export const documentsApi = {
@@ -387,6 +404,15 @@ export const parentApi = {
     return handleResponse(res);
   },
   async linkWithCode(code: string) {
+    const res = await fetch(`${API_BASE}/parent/link`, {
+      method: "POST",
+      headers: authHeaders(),
+      body: JSON.stringify({ code }),
+    });
+    return handleResponse(res);
+  },
+
+  async linkStudent(code: string) {
     const res = await fetch(`${API_BASE}/parent/link`, {
       method: "POST",
       headers: authHeaders(),
@@ -582,6 +608,39 @@ export const lessonsApi = {
   },
   async get(id: number) {
     const res = await fetch(`${API_BASE}/lessons/${id}`, { headers: authHeaders() });
+    return handleResponse(res);
+  },
+};
+
+export const sessionsApi = {
+  async startPractice(appointmentId: number): Promise<import("../types").Assessment> {
+    const res = await fetch(`${API_BASE}/sessions/${appointmentId}/practice`, {
+      method: "POST",
+      headers: authHeaders(),
+      body: JSON.stringify({}),
+    });
+    return handleResponse(res);
+  },
+  async startTest(appointmentId: number): Promise<import("../types").Assessment> {
+    const res = await fetch(`${API_BASE}/sessions/${appointmentId}/test`, {
+      method: "POST",
+      headers: authHeaders(),
+      body: JSON.stringify({}),
+    });
+    return handleResponse(res);
+  },
+  async getLatestPractice(appointmentId: number): Promise<import("../types").Assessment | null> {
+    const res = await fetch(`${API_BASE}/sessions/${appointmentId}/practice/latest`, {
+      headers: authHeaders(),
+    });
+    if (res.status === 404) return null;
+    return handleResponse(res);
+  },
+  async getLatestTest(appointmentId: number): Promise<import("../types").Assessment | null> {
+    const res = await fetch(`${API_BASE}/sessions/${appointmentId}/test/latest`, {
+      headers: authHeaders(),
+    });
+    if (res.status === 404) return null;
     return handleResponse(res);
   },
 };

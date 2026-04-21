@@ -49,14 +49,6 @@ async def book_appointment(
     notes: Optional[str] = None,
     passcode: Optional[str] = None,
 ) -> Appointment:
-    weekly_count = await count_weekly_appointments(db, student_id, scheduled_at)
-    max_per_week = settings.max_appointments_per_week
-
-    if weekly_count >= max_per_week:
-        raise ValueError(
-            f"Student already has {weekly_count} classes this week (max {max_per_week})"
-        )
-
     appointment = Appointment(
         student_id=student_id,
         teacher_id=teacher_id,
@@ -127,53 +119,52 @@ async def update_status(db: AsyncSession, appointment: Appointment, new_status: 
 
 async def _run_post_session_pipeline(db: AsyncSession, appointment: Appointment) -> None:
     """
-    Run the full post-session data loop when an appointment is marked completed:
-    1. Load lesson plan, student, parent, and assessments
-    2. Generate AI session report and save to lesson_plan.session_summary
-    3. Award XP via gamification service
-    4. Update TopicMastery for topics covered
-    5. Email report to parent
+    Post-session pipeline: generate report first (committed immediately),
+    then run gamification/email in a separate phase so a gamification failure
+    never prevents the report from being saved.
     """
     from app.models.lesson_plan import LessonPlan
     from app.models.assessment import Assessment
     from app.services import lesson_service, gamification_service, email_service
 
+    key_stage = appointment.key_stage or "KS4"
+
+    # ── Phase 1: load data + generate report ────────────────────────────────
+    report: Optional[dict] = None
+    student = None
+    lesson_plan = None
     try:
-        # 1a. Load lesson plan for this appointment
         lp_result = await db.execute(
             select(LessonPlan).where(LessonPlan.appointment_id == appointment.id)
         )
         lesson_plan = lp_result.scalar_one_or_none()
 
-        # 1b. Load student user
         student_result = await db.execute(
             select(User).where(User.id == appointment.student_id)
         )
         student = student_result.scalar_one_or_none()
 
-        # 1c. Load parent user (if student has one)
-        parent = None
-        if student and student.parent_id:
-            parent_result = await db.execute(
-                select(User).where(User.id == student.parent_id)
-            )
-            parent = parent_result.scalar_one_or_none()
-
-        # 1d. Load all assessments for this student linked to the appointment's subject/key_stage
-        # We load by student_id; further filtering by created_at proximity could be added
-        assessments_result = await db.execute(
+        # Load assessments linked to this appointment (by appointment_id first, fallback by subject)
+        asmt_result = await db.execute(
             select(Assessment)
-            .where(
-                Assessment.student_id == appointment.student_id,
-                Assessment.subject == appointment.subject,
-                Assessment.key_stage == appointment.key_stage,
-            )
+            .where(Assessment.appointment_id == appointment.id)
             .order_by(Assessment.created_at.desc())
-            .limit(10)
+            .limit(20)
         )
-        assessments = list(assessments_result.scalars().all())
+        assessments = list(asmt_result.scalars().all())
+        if not assessments:
+            # Fallback: recent assessments for this student+subject
+            asmt_result = await db.execute(
+                select(Assessment)
+                .where(
+                    Assessment.student_id == appointment.student_id,
+                    Assessment.subject == appointment.subject,
+                )
+                .order_by(Assessment.created_at.desc())
+                .limit(10)
+            )
+            assessments = list(asmt_result.scalars().all())
 
-        # 2. Generate AI session report
         report = await lesson_service.generate_session_report(
             db=db,
             appointment=appointment,
@@ -182,59 +173,80 @@ async def _run_post_session_pipeline(db: AsyncSession, appointment: Appointment)
             student_name=student.name if student else "Student",
         )
 
-        # 3. Award XP based on quiz score
-        score_percent = report.get("quiz_score_percent", 70.0)
+        if lesson_plan and lesson_plan.status != "completed":
+            lesson_plan.status = "completed"
+            lesson_plan.updated_at = datetime.now(timezone.utc)
+            await db.flush()
+
+        # Commit report immediately so it survives even if gamification fails
+        await db.commit()
+        logger.info(f"Report saved for appointment_id={appointment.id}")
+
+    except Exception as exc:
+        logger.error(
+            f"Report generation failed for appointment_id={appointment.id}: {exc}",
+            exc_info=True,
+        )
+        try:
+            await db.rollback()
+        except Exception:
+            pass
+        return  # Can't continue without a report
+
+    # ── Phase 2: gamification (XP, mastery, streak) ──────────────────────────
+    try:
+        score_percent = float(report.get("quiz_score_percent") or 70.0)
         xp_amount = _calculate_session_xp(score_percent, appointment.duration_minutes)
         await gamification_service.award_xp(
             db, appointment.student_id, xp_amount, reason="session_completed"
         )
         await gamification_service.check_and_update_streak(db, appointment.student_id)
 
-        # 4. Update TopicMastery for topics covered
-        topics_covered = report.get("topics_covered", [])
+        topics_covered = report.get("topics_covered") or []
         if not topics_covered:
-            topics_covered = [lesson_plan.unit_name or lesson_plan.subtopic or appointment.subject] if lesson_plan else [appointment.subject]
+            topics_covered = (
+                [lesson_plan.unit_name or lesson_plan.subtopic or appointment.subject]
+                if lesson_plan else [appointment.subject]
+            )
         for topic in topics_covered:
             await gamification_service.update_topic_mastery(
                 db=db,
                 student_id=appointment.student_id,
                 subject=appointment.subject,
-                key_stage=appointment.key_stage,
+                key_stage=key_stage,
                 topic=topic,
                 score=score_percent,
             )
 
-        # 5. Update lesson plan status to completed
-        if lesson_plan and lesson_plan.status != "completed":
-            lesson_plan.status = "completed"
-            lesson_plan.updated_at = datetime.now(timezone.utc)
-            await db.flush()
-
-        # 6. Email report to parent (and student)
-        parent_email = parent.email if parent else None
-        student_email = student.email if student else None
-        student_name = student.name if student else "Student"
-
-        email_service.send_session_report(
-            to_email=parent_email,
-            student_name=student_name,
-            subject=appointment.subject,
-            report_dict=report,
-            student_email=student_email,
-        )
-
         await db.commit()
         logger.info(
-            f"Post-session pipeline completed for appointment_id={appointment.id}, "
-            f"student_id={appointment.student_id}, xp_awarded={xp_amount}"
+            f"Gamification updated for appointment_id={appointment.id}, xp={xp_amount}"
         )
-
     except Exception as exc:
         logger.error(
-            f"Post-session pipeline failed for appointment_id={appointment.id}: {exc}",
+            f"Gamification phase failed for appointment_id={appointment.id}: {exc}",
             exc_info=True,
         )
-        # Don't re-raise — the status update already succeeded; pipeline failure is non-fatal
+        try:
+            await db.rollback()
+        except Exception:
+            pass
+
+    # ── Phase 3: email (non-fatal) ───────────────────────────────────────────
+    try:
+        parent = None
+        if student and student.parent_id:
+            p_result = await db.execute(select(User).where(User.id == student.parent_id))
+            parent = p_result.scalar_one_or_none()
+        email_service.send_session_report(
+            to_email=parent.email if parent else None,
+            student_name=student.name if student else "Student",
+            subject=appointment.subject,
+            report_dict=report,
+            student_email=student.email if student else None,
+        )
+    except Exception as exc:
+        logger.warning(f"Email failed for appointment_id={appointment.id}: {exc}")
 
 
 def _calculate_session_xp(score_percent: float, duration_minutes: int) -> int:

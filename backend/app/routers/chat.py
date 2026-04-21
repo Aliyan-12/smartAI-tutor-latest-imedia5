@@ -12,7 +12,7 @@ from app.middleware.auth import get_current_user
 from app.core.security import decode_access_token
 from app.models.user import User, ROLE_STUDENT
 from app.schemas.chat import MessageCreate, ChatResponse, ChatListItem, MessageResponse
-from app.services import chat_service, gemini_service, credit_service
+from app.services import chat_service, gemini_service, credit_service, session_agent_service
 
 logger = logging.getLogger(__name__)
 
@@ -178,11 +178,28 @@ async def stream_message(
     await chat_service.add_message(db, chat.id, "user", payload.message)
     history, rag_chunks = await chat_service.build_context(db, chat.id, user_query=payload.message)
 
+    # Build a session-specific system prompt when this chat belongs to an appointment
+    session_system_prompt: str | None = None
+    if getattr(chat, "appointment_id", None):
+        try:
+            session_system_prompt = await session_agent_service.build_session_system_prompt(
+                db, chat.appointment_id, current_user.id
+            )
+        except Exception:
+            logger.warning(
+                f"Failed to build session prompt for appointment {chat.appointment_id}, using default"
+            )
+
     async def event_stream():
         full_response = []
         yield f"data: {json.dumps({'type': 'start', 'session_id': chat.session_id})}\n\n"
 
-        async for token in gemini_service.stream_response_async(history[:-1], payload.message, rag_chunks=rag_chunks):
+        async for token in gemini_service.stream_response_async(
+            history[:-1],
+            payload.message,
+            rag_chunks=rag_chunks,
+            system_prompt_override=session_system_prompt,
+        ):
             full_response.append(token)
             yield f"data: {json.dumps({'type': 'token', 'content': token})}\n\n"
 

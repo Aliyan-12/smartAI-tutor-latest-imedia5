@@ -1,9 +1,9 @@
 import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import Sidebar from "../components/Sidebar";
-import { gamificationApi, assessmentsApi } from "../services/api";
+import { gamificationApi, assessmentsApi, appointmentsApi } from "../services/api";
 import { useAuth } from "../context/AuthContext";
-import type { TopicMastery, StudentProfile, Assessment } from "../types";
+import type { TopicMastery, StudentProfile, Assessment, Appointment } from "../types";
 
 interface SubjectStats {
   subject: string;
@@ -72,6 +72,7 @@ export default function ProgressPage() {
   const [profile, setProfile] = useState<StudentProfile | null>(null);
   const [mastery, setMastery] = useState<TopicMastery[]>([]);
   const [assessments, setAssessments] = useState<Assessment[]>([]);
+  const [sessions, setSessions] = useState<Appointment[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [showAllSubjects, setShowAllSubjects] = useState(false);
@@ -86,14 +87,18 @@ export default function ProgressPage() {
         setProfile(profileData);
         setMastery(masteryData);
 
-        if (user) {
-          try {
-            const assessData = await assessmentsApi.listForStudent(user.id) as Assessment[];
-            setAssessments(assessData);
-          } catch {
-            // assessments might not be available — not fatal
-          }
-        }
+        // Load sessions and assessments in parallel (non-fatal)
+        await Promise.allSettled([
+          user
+            ? assessmentsApi.listForStudent(user.id).then((d) => setAssessments(d as Assessment[])).catch(() => {})
+            : Promise.resolve(),
+          appointmentsApi.list().then((d) => {
+            const done = (d as Appointment[]).filter((a) =>
+              ["completed", "terminated"].includes(a.status)
+            );
+            setSessions(done);
+          }).catch(() => {}),
+        ]);
       } catch (e: any) {
         setError(e.message);
       } finally {
@@ -116,29 +121,22 @@ export default function ProgressPage() {
     .slice(0, 4);
 
   const completedAssessments = assessments.filter((a) => a.status === "completed");
-  const avgScore =
-    completedAssessments.length > 0
-      ? Math.round(
-          completedAssessments.reduce((sum, a) => sum + (a.score_percent ?? 0), 0) /
-            completedAssessments.length
-        )
-      : null;
 
+  // Top-level stats from actual session appointments
+  const totalStudyMinutes = sessions.reduce((sum, s) => sum + (s.duration_minutes ?? 0), 0);
+  const sessionsDone = sessions.length;
   const totalTopics = mastery.length;
 
-  const totalStudyMinutes = completedAssessments.length * 20;
-
-  const totalQuestionsCorrect =
-    completedAssessments.reduce((sum, a) => sum + (a.correct_answers ?? 0), 0);
-  const totalQuestionsAttempted =
-    completedAssessments.reduce((sum, a) => sum + (a.total_questions ?? 0), 0);
+  // Quiz accuracy from assessments
+  const totalQuestionsCorrect = completedAssessments.reduce((sum, a) => sum + (a.correct_answers ?? 0), 0);
+  const totalQuestionsAttempted = completedAssessments.reduce((sum, a) => sum + (a.total_questions ?? 0), 0);
   const accuracyPercent =
     totalQuestionsAttempted > 0
       ? Math.round((totalQuestionsCorrect / totalQuestionsAttempted) * 100)
       : null;
 
+  // Weekly chart — based on assessments quiz scores by week
   const weeklyScores: number[] = (() => {
-    if (completedAssessments.length === 0) return [0, 0, 0, 0];
     const now = Date.now();
     const weeks = [0, 1, 2, 3].map((w) => {
       const start = now - (w + 1) * 7 * 24 * 3600 * 1000;
@@ -148,12 +146,9 @@ export default function ProgressPage() {
         return t >= start && t < end;
       });
       if (weekAsm.length === 0) return null;
-      return Math.round(
-        weekAsm.reduce((s, a) => s + (a.score_percent ?? 0), 0) / weekAsm.length
-      );
+      return Math.round(weekAsm.reduce((s, a) => s + (a.score_percent ?? 0), 0) / weekAsm.length);
     });
-    const filled = weeks.reverse();
-    return filled.map((v) => v ?? 0);
+    return weeks.reverse().map((v) => v ?? 0);
   })();
 
   const weakestSubject = subjectStats.find((s) => s.needsFocus)?.subject ?? "your weaker topics";
@@ -162,7 +157,7 @@ export default function ProgressPage() {
     profile && profile.current_streak >= 5 ? { icon: "🔥", label: `${profile.current_streak}-day streak` } : null,
     profile && profile.xp_total >= 100 ? { icon: "⭐", label: `${profile.xp_total} XP` } : null,
     totalTopics >= 5 ? { icon: "📚", label: "Topic Explorer" } : null,
-    completedAssessments.length >= 3 ? { icon: "⚡", label: "Quiz Streak" } : null,
+    completedAssessments.length >= 3 ? { icon: "⚡", label: `${completedAssessments.length} Quizzes Done` } : null,
   ].filter(Boolean) as { icon: string; label: string }[];
 
   if (loading) {
@@ -211,7 +206,7 @@ export default function ProgressPage() {
           >
             {[
               { icon: "📚", value: formatStudyTime(totalStudyMinutes), label: "Total Study Time" },
-              { icon: "✅", value: String(completedAssessments.length), label: "Sessions Done" },
+              { icon: "✅", value: String(sessionsDone), label: "Sessions Done" },
               {
                 icon: "❓",
                 value: accuracyPercent !== null ? `${accuracyPercent}%` : "—",

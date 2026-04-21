@@ -46,23 +46,7 @@ SEED_USERS = [
 ]
 
 
-async def run_migrations():
-    from sqlalchemy import text
-    from app.db.session import engine
-    _migrations = [
-        "ALTER TABLE chats ADD COLUMN IF NOT EXISTS appointment_id INTEGER REFERENCES appointments(id)",
-    ]
-    async with engine.begin() as conn:
-        for sql in _migrations:
-            try:
-                await conn.execute(text(sql))
-                logger.info(f"Migration applied: {sql[:70]}")
-            except Exception as e:
-                logger.warning(f"Migration skipped: {e}")
-
-
 async def run_seed():
-    # await run_migrations()
     from app.db.session import async_session_factory
     from app.services.user_service import get_user_by_email, create_user
     from app.models.parent_student import InviteCode

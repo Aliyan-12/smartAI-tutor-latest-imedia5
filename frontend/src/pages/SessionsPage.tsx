@@ -202,6 +202,15 @@ function SessionCard({ appointment: a, expanded, onToggle }: SessionCardProps) {
               {a.status === "started" ? "Rejoin Session" : a.status === "paused" ? "Resume Session" : "Join Session"}
             </button>
           )}
+          {["terminated", "completed"].includes(a.status) && (
+            <button
+              className="btn-primary"
+              style={{ fontSize: 13 }}
+              onClick={() => navigate(`/session/${a.id}/report`)}
+            >
+              📊 View Session Report
+            </button>
+          )}
         </div>
       )}
     </div>

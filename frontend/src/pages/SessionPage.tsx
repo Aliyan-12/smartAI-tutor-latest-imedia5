@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { Lock, X, Pause, Play } from "lucide-react";
-import { appointmentsApi } from "../services/api";
+import { appointmentsApi, assessmentsApi, sessionsApi, gamificationApi } from "../services/api";
 import ChatWindow from "../components/ChatWindow";
 import ChatInput from "../components/ChatInput";
 import AssessmentMode from "../components/AssessmentMode";
@@ -9,6 +9,7 @@ import PostSessionScreen from "../components/PostSessionScreen";
 import { useChat } from "../hooks/useChat";
 import { useVoice } from "../hooks/useVoice";
 import { useAuth } from "../context/AuthContext";
+import type { Assessment } from "../types";
 
 type SessionState = "passcode" | "active" | "ended";
 type LearnTab = "learn" | "practice" | "test";
@@ -35,8 +36,23 @@ export default function SessionPage() {
   const [sessionTitle, setSessionTitle] = useState("");
   const [sessionSubject, setSessionSubject] = useState("");
   const [learnTab, setLearnTab] = useState<LearnTab>("learn");
-  const [xp] = useState(125);
+  const [xp, setXp] = useState(0);
   const timerRef = useRef<number | null>(null);
+
+  const [practiceAssessment, setPracticeAssessment] = useState<Assessment | null>(null);
+  const [testAssessment, setTestAssessment] = useState<Assessment | null>(null);
+  const [practiceLoading, setPracticeLoading] = useState(false);
+  const [testLoading, setTestLoading] = useState(false);
+  const [practiceError, setPracticeError] = useState<string | null>(null);
+  const [testError, setTestError] = useState<string | null>(null);
+  const [practiceResult, setPracticeResult] = useState<{ score: number; weak: string[]; strong: string[]; report: string } | null>(null);
+  const [testResult, setTestResult] = useState<{ score: number; weak: string[]; strong: string[]; report: string } | null>(null);
+  const [practiceCurrentQ, setPracticeCurrentQ] = useState(0);
+  const [testCurrentQ, setTestCurrentQ] = useState(0);
+  const [practiceFeedback, setPracticeFeedback] = useState<{ selectedAnswer: number; isCorrect: boolean; explanation: string | null; correctAnswer: number | null } | null>(null);
+  const [testFeedback, setTestFeedback] = useState<{ selectedAnswer: number; isCorrect: boolean; explanation: string | null; correctAnswer: number | null } | null>(null);
+  const [practiceAnswering, setPracticeAnswering] = useState(false);
+  const [testAnswering, setTestAnswering] = useState(false);
 
   const {
     messages, streaming, streamContent, sendMessage, stopStreaming,
@@ -83,6 +99,10 @@ export default function SessionPage() {
   };
 
   useEffect(() => {
+    gamificationApi.getProfile().then((p: any) => setXp(p?.xp_total ?? 0)).catch(() => {});
+  }, []);
+
+  useEffect(() => {
     if (sessionState !== "active" || !sessionStartedAt || isPaused) return;
 
     const updateTimer = () => {
@@ -126,6 +146,136 @@ export default function SessionPage() {
     if (timerRef.current) clearInterval(timerRef.current);
     await appointmentsApi.updateStatus(apptId, "terminated").catch(() => {});
     setSessionState("ended");
+  };
+
+  const handleStartPractice = async () => {
+    if (!apptId) return;
+    setPracticeLoading(true);
+    setPracticeError(null);
+    try {
+      const a = await sessionsApi.startPractice(apptId);
+      setPracticeAssessment(a);
+      setPracticeCurrentQ(0);
+      setPracticeFeedback(null);
+    } catch (err: any) {
+      setPracticeError(err.message || "Failed to generate practice questions");
+    } finally {
+      setPracticeLoading(false);
+    }
+  };
+
+  const handleStartTest = async () => {
+    if (!apptId) return;
+    setTestLoading(true);
+    setTestError(null);
+    try {
+      const a = await sessionsApi.startTest(apptId);
+      setTestAssessment(a);
+      setTestCurrentQ(0);
+      setTestFeedback(null);
+    } catch (err: any) {
+      setTestError(err.message || "Failed to generate test");
+    } finally {
+      setTestLoading(false);
+    }
+  };
+
+  const handlePracticeAnswer = async (answerIndex: number) => {
+    if (!practiceAssessment || practiceAnswering) return;
+    setPracticeAnswering(true);
+    try {
+      const q = practiceAssessment.questions[practiceCurrentQ];
+      const updated = await assessmentsApi.submitAnswer(practiceAssessment.id, {
+        question_index: q.question_index,
+        student_answer: answerIndex,
+      }) as import("../types").AssessmentQuestion;
+      setPracticeFeedback({
+        selectedAnswer: answerIndex,
+        isCorrect: updated.is_correct ?? false,
+        explanation: updated.explanation,
+        correctAnswer: updated.correct_answer,
+      });
+      setPracticeAssessment((prev) => {
+        if (!prev) return prev;
+        return { ...prev, questions: prev.questions.map((q2, i) => i === practiceCurrentQ ? { ...q2, ...updated } : q2) };
+      });
+    } catch (err: any) {
+      setPracticeError(err.message || "Failed to submit answer");
+    } finally {
+      setPracticeAnswering(false);
+    }
+  };
+
+  const handlePracticeNext = async () => {
+    if (!practiceAssessment) return;
+    const next = practiceCurrentQ + 1;
+    if (next < practiceAssessment.questions.length) {
+      setPracticeCurrentQ(next);
+      setPracticeFeedback(null);
+    } else {
+      try {
+        const completed = await assessmentsApi.complete(practiceAssessment.id) as Assessment;
+        setPracticeResult({
+          score: completed.score_percent ?? 0,
+          weak: completed.weak_topics ?? [],
+          strong: completed.strong_topics ?? [],
+          report: completed.report_text ?? "",
+        });
+        setPracticeAssessment(null);
+        setPracticeFeedback(null);
+      } catch (err: any) {
+        setPracticeError(err.message || "Failed to complete practice");
+      }
+    }
+  };
+
+  const handleTestAnswer = async (answerIndex: number) => {
+    if (!testAssessment || testAnswering) return;
+    setTestAnswering(true);
+    try {
+      const q = testAssessment.questions[testCurrentQ];
+      const updated = await assessmentsApi.submitAnswer(testAssessment.id, {
+        question_index: q.question_index,
+        student_answer: answerIndex,
+      }) as import("../types").AssessmentQuestion;
+      setTestFeedback({
+        selectedAnswer: answerIndex,
+        isCorrect: updated.is_correct ?? false,
+        explanation: updated.explanation,
+        correctAnswer: updated.correct_answer,
+      });
+      setTestAssessment((prev) => {
+        if (!prev) return prev;
+        return { ...prev, questions: prev.questions.map((q2, i) => i === testCurrentQ ? { ...q2, ...updated } : q2) };
+      });
+    } catch (err: any) {
+      setTestError(err.message || "Failed to submit answer");
+    } finally {
+      setTestAnswering(false);
+    }
+  };
+
+  const handleTestNext = async () => {
+    if (!testAssessment) return;
+    const next = testCurrentQ + 1;
+    if (next < testAssessment.questions.length) {
+      setTestCurrentQ(next);
+      setTestFeedback(null);
+    } else {
+      try {
+        const completed = await assessmentsApi.complete(testAssessment.id) as Assessment;
+        setTestResult({
+          score: completed.score_percent ?? 0,
+          weak: completed.weak_topics ?? [],
+          strong: completed.strong_topics ?? [],
+          report: completed.report_text ?? "",
+        });
+        setTestAssessment(null);
+        setTestFeedback(null);
+      } catch (err: any) {
+        setTestError(err.message || "Failed to complete test");
+      }
+    }
   };
 
   const formatTime = (seconds: number) => {
@@ -323,30 +473,264 @@ export default function SessionPage() {
             )}
 
             {learnTab === "practice" && (
-              <div>
+              <div style={{ padding: "16px" }}>
                 {quizOffer ? (
                   <AssessmentMode
                     quizOffer={quizOffer}
                     onComplete={() => clearQuizOffer()}
                     onDecline={() => clearQuizOffer()}
                   />
-                ) : (
-                  <div style={styles.emptyTab}>
-                    <span style={{ fontSize: 36 }}>🎯</span>
-                    <p style={styles.emptyTabText}>
-                      Practice questions will appear here when your AI tutor suggests a quiz.
+                ) : practiceResult ? (
+                  <div style={styles.assessCard}>
+                    <div style={{ textAlign: "center", marginBottom: 16 }}>
+                      <div style={{ fontSize: 42, fontWeight: 800, color: practiceResult.score >= 60 ? "var(--accent-green, #10b981)" : "#d97706", lineHeight: 1, marginBottom: 4 }}>
+                        {Math.round(practiceResult.score)}%
+                      </div>
+                      <p style={{ fontSize: 14, fontWeight: 700, color: "var(--text-primary)", margin: 0 }}>Practice Complete!</p>
+                    </div>
+                    <div style={{ height: 6, background: "var(--border-color)", borderRadius: 99, overflow: "hidden", marginBottom: 14 }}>
+                      <div style={{ height: "100%", width: `${practiceResult.score}%`, background: practiceResult.score >= 60 ? "var(--accent-green, #10b981)" : "#d97706", borderRadius: 99, transition: "width 0.6s ease" }} />
+                    </div>
+                    {practiceResult.weak.length > 0 && (
+                      <div style={{ marginBottom: 10 }}>
+                        <p style={styles.chipLabel}>Areas to improve</p>
+                        <div style={styles.chipRow}>
+                          {practiceResult.weak.map((t) => <span key={t} style={styles.weakChip}>{t}</span>)}
+                        </div>
+                      </div>
+                    )}
+                    {practiceResult.strong.length > 0 && (
+                      <div style={{ marginBottom: 10 }}>
+                        <p style={styles.chipLabel}>Strong areas</p>
+                        <div style={styles.chipRow}>
+                          {practiceResult.strong.map((t) => <span key={t} style={styles.strongChip}>{t}</span>)}
+                        </div>
+                      </div>
+                    )}
+                    {practiceResult.report && (
+                      <div style={styles.reportBox}>
+                        <p style={{ fontSize: 12, color: "var(--text-secondary)", lineHeight: 1.6, margin: 0 }}>{practiceResult.report}</p>
+                      </div>
+                    )}
+                    <button
+                      style={{ ...styles.generateBtn, marginTop: 14 }}
+                      onClick={() => { setPracticeResult(null); setPracticeAssessment(null); setPracticeCurrentQ(0); setPracticeFeedback(null); }}
+                    >
+                      Try Another Practice
+                    </button>
+                  </div>
+                ) : practiceAssessment ? (
+                  <div style={styles.assessCard}>
+                    <div style={{ marginBottom: 12 }}>
+                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
+                        <span style={{ fontSize: 11, fontWeight: 700, color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: "0.5px" }}>
+                          Question {practiceCurrentQ + 1} of {practiceAssessment.questions.length}
+                        </span>
+                        <span style={{ fontSize: 11, color: "var(--text-muted)" }}>Practice</span>
+                      </div>
+                      <div style={{ height: 3, background: "var(--border-color)", borderRadius: 99, overflow: "hidden" }}>
+                        <div style={{ height: "100%", width: `${(practiceCurrentQ / practiceAssessment.questions.length) * 100}%`, background: "var(--accent-blue, var(--accent))", borderRadius: 99, transition: "width 0.4s ease" }} />
+                      </div>
+                    </div>
+                    <p style={{ fontSize: 13, fontWeight: 600, color: "var(--text-primary)", lineHeight: 1.55, marginBottom: 12 }}>
+                      {practiceAssessment.questions[practiceCurrentQ].question_text}
                     </p>
+                    <div style={{ display: "flex", flexDirection: "column", gap: 7, marginBottom: 12 }}>
+                      {practiceAssessment.questions[practiceCurrentQ].options.map((opt, idx) => {
+                        let optStyle: React.CSSProperties = { ...styles.optionBtn };
+                        if (practiceFeedback) {
+                          if (practiceFeedback.correctAnswer !== null && idx === practiceFeedback.correctAnswer) {
+                            optStyle = { ...optStyle, background: "rgba(16,185,129,0.1)", borderColor: "#10b981", color: "#10b981" };
+                          } else if (idx === practiceFeedback.selectedAnswer && !practiceFeedback.isCorrect) {
+                            optStyle = { ...optStyle, background: "rgba(239,68,68,0.1)", borderColor: "#ef4444", color: "#ef4444" };
+                          } else {
+                            optStyle = { ...optStyle, opacity: 0.45 };
+                          }
+                        }
+                        return (
+                          <button
+                            key={idx}
+                            disabled={!!practiceFeedback || practiceAnswering}
+                            onClick={() => handlePracticeAnswer(idx)}
+                            style={optStyle}
+                          >
+                            <span style={styles.optionLabel}>{["A","B","C","D"][idx]}</span>
+                            {opt}
+                          </button>
+                        );
+                      })}
+                    </div>
+                    {practiceFeedback && (
+                      <div style={{ ...styles.feedbackBox, background: practiceFeedback.isCorrect ? "rgba(16,185,129,0.08)" : "rgba(239,68,68,0.08)", borderColor: practiceFeedback.isCorrect ? "rgba(16,185,129,0.25)" : "rgba(239,68,68,0.25)" }}>
+                        <p style={{ fontSize: 12, fontWeight: 700, color: practiceFeedback.isCorrect ? "#10b981" : "#ef4444", marginBottom: practiceFeedback.explanation ? 4 : 0 }}>
+                          {practiceFeedback.isCorrect ? "Correct!" : "Not quite."}
+                        </p>
+                        {practiceFeedback.explanation && <p style={{ fontSize: 12, color: "var(--text-secondary)", lineHeight: 1.5, margin: 0 }}>{practiceFeedback.explanation}</p>}
+                      </div>
+                    )}
+                    {practiceFeedback && (
+                      <button style={{ ...styles.generateBtn, marginTop: 10 }} onClick={handlePracticeNext}>
+                        {practiceCurrentQ + 1 < practiceAssessment.questions.length ? "Next Question" : "See Results"}
+                      </button>
+                    )}
+                    {practiceError && <p style={styles.errorText}>{practiceError}</p>}
+                  </div>
+                ) : (
+                  <div style={styles.assessCard}>
+                    <div style={{ textAlign: "center", marginBottom: 14 }}>
+                      <span style={{ fontSize: 32 }}>🎯</span>
+                    </div>
+                    <p style={{ fontSize: 14, fontWeight: 700, color: "var(--text-primary)", marginBottom: 6, textAlign: "center" }}>Practice Questions</p>
+                    <p style={{ fontSize: 12, color: "var(--text-muted)", lineHeight: 1.6, textAlign: "center", marginBottom: 14 }}>
+                      Test your understanding with 5 AI-generated questions based on this session's topic.
+                    </p>
+                    {practiceError && <p style={{ ...styles.errorText, marginBottom: 10 }}>{practiceError}</p>}
+                    {isPaused ? (
+                      <p style={{ fontSize: 12, color: "var(--text-muted)", textAlign: "center" }}>Resume session to access practice</p>
+                    ) : (
+                      <button
+                        style={styles.generateBtn}
+                        onClick={handleStartPractice}
+                        disabled={practiceLoading}
+                      >
+                        {practiceLoading ? "Generating..." : "Generate Practice Questions"}
+                      </button>
+                    )}
                   </div>
                 )}
               </div>
             )}
 
             {learnTab === "test" && (
-              <div style={styles.emptyTab}>
-                <span style={{ fontSize: 36 }}>📝</span>
-                <p style={styles.emptyTabText}>
-                  Test mode — coming soon. Complete the lesson first!
-                </p>
+              <div style={{ padding: "16px" }}>
+                {testResult ? (
+                  <div style={styles.assessCard}>
+                    <div style={{ textAlign: "center", marginBottom: 16 }}>
+                      <div style={{ fontSize: 42, fontWeight: 800, color: testResult.score >= 60 ? "var(--accent-green, #10b981)" : "#d97706", lineHeight: 1, marginBottom: 4 }}>
+                        {Math.round(testResult.score)}%
+                      </div>
+                      <p style={{ fontSize: 14, fontWeight: 700, color: "var(--text-primary)", margin: "0 0 4px" }}>Test Complete!</p>
+                    </div>
+                    <div style={{ height: 6, background: "var(--border-color)", borderRadius: 99, overflow: "hidden", marginBottom: 14 }}>
+                      <div style={{ height: "100%", width: `${testResult.score}%`, background: testResult.score >= 60 ? "var(--accent-green, #10b981)" : "#d97706", borderRadius: 99, transition: "width 0.6s ease" }} />
+                    </div>
+                    {testResult.weak.length > 0 && (
+                      <div style={{ marginBottom: 10 }}>
+                        <p style={styles.chipLabel}>Areas to improve</p>
+                        <div style={styles.chipRow}>
+                          {testResult.weak.map((t) => <span key={t} style={styles.weakChip}>{t}</span>)}
+                        </div>
+                      </div>
+                    )}
+                    {testResult.strong.length > 0 && (
+                      <div style={{ marginBottom: 10 }}>
+                        <p style={styles.chipLabel}>Strong areas</p>
+                        <div style={styles.chipRow}>
+                          {testResult.strong.map((t) => <span key={t} style={styles.strongChip}>{t}</span>)}
+                        </div>
+                      </div>
+                    )}
+                    {testResult.report && (
+                      <div style={styles.reportBox}>
+                        <p style={{ fontSize: 12, color: "var(--text-secondary)", lineHeight: 1.6, margin: 0 }}>{testResult.report}</p>
+                      </div>
+                    )}
+                    <div style={styles.testSavedNote}>
+                      Your results have been saved and are visible to your teacher and parent.
+                    </div>
+                    <div style={{ display: "flex", flexDirection: "column", gap: 8, marginTop: 14 }}>
+                      <button style={styles.generateBtn} onClick={() => navigate("/progress")}>View My Progress</button>
+                      <button
+                        style={{ ...styles.generateBtn, background: "transparent", color: "var(--text-secondary)", border: "1px solid var(--border-color)" }}
+                        onClick={() => { setTestResult(null); setTestAssessment(null); setTestCurrentQ(0); setTestFeedback(null); }}
+                      >
+                        Back to Learning
+                      </button>
+                    </div>
+                  </div>
+                ) : testAssessment ? (
+                  <div style={{ ...styles.assessCard, borderColor: "rgba(99,102,241,0.3)" }}>
+                    <div style={{ marginBottom: 12 }}>
+                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
+                        <span style={{ fontSize: 13, fontWeight: 800, color: "var(--text-primary)" }}>
+                          Question {testCurrentQ + 1}
+                          <span style={{ fontSize: 11, fontWeight: 600, color: "var(--text-muted)" }}> / {testAssessment.questions.length}</span>
+                        </span>
+                        <span style={{ fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.5px", color: "var(--accent-blue, var(--accent))", background: "rgba(99,102,241,0.1)", padding: "2px 8px", borderRadius: 99 }}>Formal Test</span>
+                      </div>
+                      <div style={{ height: 4, background: "var(--border-color)", borderRadius: 99, overflow: "hidden" }}>
+                        <div style={{ height: "100%", width: `${(testCurrentQ / testAssessment.questions.length) * 100}%`, background: "var(--accent-blue, var(--accent))", borderRadius: 99, transition: "width 0.4s ease" }} />
+                      </div>
+                    </div>
+                    <p style={{ fontSize: 13, fontWeight: 600, color: "var(--text-primary)", lineHeight: 1.55, marginBottom: 12 }}>
+                      {testAssessment.questions[testCurrentQ].question_text}
+                    </p>
+                    <div style={{ display: "flex", flexDirection: "column", gap: 7, marginBottom: 12 }}>
+                      {testAssessment.questions[testCurrentQ].options.map((opt, idx) => {
+                        let optStyle: React.CSSProperties = { ...styles.optionBtn };
+                        if (testFeedback) {
+                          if (testFeedback.correctAnswer !== null && idx === testFeedback.correctAnswer) {
+                            optStyle = { ...optStyle, background: "rgba(16,185,129,0.1)", borderColor: "#10b981", color: "#10b981" };
+                          } else if (idx === testFeedback.selectedAnswer && !testFeedback.isCorrect) {
+                            optStyle = { ...optStyle, background: "rgba(239,68,68,0.1)", borderColor: "#ef4444", color: "#ef4444" };
+                          } else {
+                            optStyle = { ...optStyle, opacity: 0.45 };
+                          }
+                        }
+                        return (
+                          <button
+                            key={idx}
+                            disabled={!!testFeedback || testAnswering}
+                            onClick={() => handleTestAnswer(idx)}
+                            style={optStyle}
+                          >
+                            <span style={styles.optionLabel}>{["A","B","C","D"][idx]}</span>
+                            {opt}
+                          </button>
+                        );
+                      })}
+                    </div>
+                    {testFeedback && (
+                      <div style={{ ...styles.feedbackBox, background: testFeedback.isCorrect ? "rgba(16,185,129,0.08)" : "rgba(239,68,68,0.08)", borderColor: testFeedback.isCorrect ? "rgba(16,185,129,0.25)" : "rgba(239,68,68,0.25)" }}>
+                        <p style={{ fontSize: 12, fontWeight: 700, color: testFeedback.isCorrect ? "#10b981" : "#ef4444", marginBottom: testFeedback.explanation ? 4 : 0 }}>
+                          {testFeedback.isCorrect ? "Correct!" : "Not quite."}
+                        </p>
+                        {testFeedback.explanation && <p style={{ fontSize: 12, color: "var(--text-secondary)", lineHeight: 1.5, margin: 0 }}>{testFeedback.explanation}</p>}
+                      </div>
+                    )}
+                    {testFeedback && (
+                      <button style={{ ...styles.generateBtn, marginTop: 10 }} onClick={handleTestNext}>
+                        {testCurrentQ + 1 < testAssessment.questions.length ? "Next Question" : "See Results"}
+                      </button>
+                    )}
+                    {testError && <p style={styles.errorText}>{testError}</p>}
+                  </div>
+                ) : (
+                  <div style={styles.assessCard}>
+                    <div style={{ textAlign: "center", marginBottom: 14 }}>
+                      <span style={{ fontSize: 32 }}>📝</span>
+                    </div>
+                    <p style={{ fontSize: 14, fontWeight: 700, color: "var(--text-primary)", marginBottom: 6, textAlign: "center" }}>Formal Test</p>
+                    <p style={{ fontSize: 12, color: "var(--text-muted)", lineHeight: 1.6, textAlign: "center", marginBottom: 12 }}>
+                      Complete a 10-question test on this session's topic. Results will be saved to your progress record.
+                    </p>
+                    <div style={styles.testWarning}>
+                      Your score will be recorded and shared with your teacher.
+                    </div>
+                    {testError && <p style={{ ...styles.errorText, marginBottom: 10 }}>{testError}</p>}
+                    {isPaused ? (
+                      <p style={{ fontSize: 12, color: "var(--text-muted)", textAlign: "center", marginTop: 10 }}>Resume session to access the test</p>
+                    ) : (
+                      <button
+                        style={{ ...styles.generateBtn, marginTop: 12 }}
+                        onClick={handleStartTest}
+                        disabled={testLoading}
+                      >
+                        {testLoading ? "Generating..." : "Start Test"}
+                      </button>
+                    )}
+                  </div>
+                )}
               </div>
             )}
           </div>
@@ -791,5 +1175,121 @@ const styles: Record<string, React.CSSProperties> = {
   },
   chatInputWrap: {
     flexShrink: 0,
+  },
+  assessCard: {
+    background: "var(--bg-primary)",
+    border: "1px solid var(--border-color)",
+    borderRadius: 10,
+    padding: "16px",
+  },
+  generateBtn: {
+    width: "100%",
+    padding: "10px 16px",
+    background: "var(--accent-blue, var(--accent))",
+    color: "white",
+    border: "none",
+    borderRadius: 8,
+    fontSize: 13,
+    fontWeight: 700,
+    cursor: "pointer",
+    textAlign: "center" as const,
+  },
+  optionBtn: {
+    display: "flex",
+    alignItems: "center",
+    gap: 10,
+    width: "100%",
+    padding: "9px 12px",
+    background: "var(--bg-secondary)",
+    border: "1px solid var(--border-color)",
+    borderRadius: 8,
+    fontSize: 12,
+    color: "var(--text-primary)",
+    textAlign: "left" as const,
+    cursor: "pointer",
+    transition: "all 0.15s",
+  },
+  optionLabel: {
+    width: 22,
+    height: 22,
+    borderRadius: "50%",
+    background: "var(--bg-primary)",
+    border: "1px solid var(--border-color)",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    fontSize: 11,
+    fontWeight: 700,
+    flexShrink: 0 as const,
+    color: "inherit",
+  },
+  feedbackBox: {
+    padding: "10px 12px",
+    borderRadius: 8,
+    border: "1px solid",
+  },
+  reportBox: {
+    padding: "10px 12px",
+    background: "var(--bg-secondary)",
+    border: "1px solid var(--border-color)",
+    borderRadius: 8,
+    marginBottom: 4,
+  },
+  chipLabel: {
+    fontSize: 10,
+    fontWeight: 700,
+    textTransform: "uppercase" as const,
+    letterSpacing: "0.5px",
+    color: "var(--text-muted)",
+    marginBottom: 6,
+  },
+  chipRow: {
+    display: "flex",
+    flexWrap: "wrap" as const,
+    gap: 5,
+  },
+  weakChip: {
+    padding: "2px 8px",
+    borderRadius: 99,
+    fontSize: 11,
+    fontWeight: 600,
+    background: "rgba(239,68,68,0.1)",
+    color: "#ef4444",
+    border: "1px solid rgba(239,68,68,0.2)",
+  },
+  strongChip: {
+    padding: "2px 8px",
+    borderRadius: 99,
+    fontSize: 11,
+    fontWeight: 600,
+    background: "rgba(16,185,129,0.1)",
+    color: "#10b981",
+    border: "1px solid rgba(16,185,129,0.2)",
+  },
+  testWarning: {
+    padding: "8px 12px",
+    background: "rgba(245,158,11,0.1)",
+    border: "1px solid rgba(245,158,11,0.3)",
+    borderRadius: 8,
+    fontSize: 12,
+    color: "#92400e",
+    fontWeight: 600,
+    textAlign: "center" as const,
+  },
+  testSavedNote: {
+    padding: "8px 12px",
+    background: "rgba(99,102,241,0.08)",
+    border: "1px solid rgba(99,102,241,0.2)",
+    borderRadius: 8,
+    fontSize: 12,
+    color: "var(--text-secondary)",
+    textAlign: "center" as const,
+    marginTop: 10,
+  },
+  errorText: {
+    fontSize: 12,
+    color: "#ef4444",
+    textAlign: "center" as const,
+    margin: 0,
   },
 };
