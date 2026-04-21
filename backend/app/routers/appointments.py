@@ -149,7 +149,7 @@ async def join_session(
     if current_user.role == ROLE_STUDENT and appt.student_id != current_user.id:
         raise HTTPException(status_code=403, detail="Not your appointment")
 
-    if appt.status != "confirmed":
+    if appt.status not in ("confirmed", "started", "paused"):
         raise HTTPException(status_code=400, detail="Appointment must be confirmed before joining")
 
     if appt.passcode:
@@ -158,8 +158,13 @@ async def join_session(
 
     if not appt.session_started_at:
         appt.session_started_at = datetime.now(timezone.utc)
-        await db.flush()
-        await db.refresh(appt)
+
+    # Always transition confirmed → started on join (regardless of session_started_at)
+    if appt.status == "confirmed":
+        appt.status = "started"
+
+    await db.flush()
+    await db.refresh(appt)
 
     return {
         "appointment_id": appt.id,
@@ -167,6 +172,9 @@ async def join_session(
         "duration_minutes": appt.duration_minutes,
         "subject": appt.subject,
         "title": appt.title,
+        "status": appt.status,
+        "total_paused_seconds": appt.total_paused_seconds or 0,
+        "paused_at": appt.paused_at.isoformat() if appt.paused_at else None,
     }
 
 

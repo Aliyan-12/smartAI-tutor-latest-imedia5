@@ -17,7 +17,7 @@ import type { Appointment, User } from "../types";
 
 // ── Status helpers ────────────────────────────────────────────────────────────
 const STATUS_STYLES: Record<
-  Appointment["status"],
+  string,
   { bg: string; color: string; border: string; label: string }
 > = {
   booked: {
@@ -31,6 +31,24 @@ const STATUS_STYLES: Record<
     color: "var(--success)",
     border: "rgba(24,128,56,0.2)",
     label: "Confirmed",
+  },
+  started: {
+    bg: "rgba(99,102,241,0.1)",
+    color: "#6366f1",
+    border: "rgba(99,102,241,0.25)",
+    label: "In Progress",
+  },
+  paused: {
+    bg: "rgba(217,119,6,0.1)",
+    color: "#d97706",
+    border: "rgba(217,119,6,0.25)",
+    label: "Paused",
+  },
+  terminated: {
+    bg: "var(--bg-tertiary)",
+    color: "var(--text-secondary)",
+    border: "var(--border)",
+    label: "Terminated",
   },
   completed: {
     bg: "var(--bg-tertiary)",

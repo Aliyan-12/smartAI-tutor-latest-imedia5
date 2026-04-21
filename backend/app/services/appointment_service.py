@@ -81,10 +81,13 @@ async def book_appointment(
 
 async def update_status(db: AsyncSession, appointment: Appointment, new_status: str) -> Appointment:
     valid_transitions = {
-        "booked": ["confirmed", "cancelled"],
-        "confirmed": ["completed", "cancelled"],
-        "completed": [],
-        "cancelled": [],
+        "booked":     ["confirmed", "cancelled"],
+        "confirmed":  ["started", "cancelled"],
+        "started":    ["paused", "terminated", "completed"],
+        "paused":     ["started", "terminated", "completed"],
+        "terminated": [],
+        "completed":  [],
+        "cancelled":  [],
     }
     allowed = valid_transitions.get(appointment.status, [])
     if new_status not in allowed:
@@ -92,8 +95,23 @@ async def update_status(db: AsyncSession, appointment: Appointment, new_status: 
             f"Cannot transition from '{appointment.status}' to '{new_status}'"
         )
 
+    from datetime import datetime, timezone as tz
+    now = datetime.now(tz.utc)
+
     appointment.status = new_status
-    if new_status == "completed":
+
+    if new_status == "paused":
+        appointment.paused_at = now
+    elif new_status == "started":
+        if appointment.paused_at:
+            paused_secs = int((now - appointment.paused_at).total_seconds())
+            appointment.total_paused_seconds = (appointment.total_paused_seconds or 0) + paused_secs
+            appointment.paused_at = None
+    elif new_status in ("completed", "terminated"):
+        if appointment.paused_at:
+            paused_secs = int((now - appointment.paused_at).total_seconds())
+            appointment.total_paused_seconds = (appointment.total_paused_seconds or 0) + paused_secs
+            appointment.paused_at = None
         appointment.payment_status = "paid"
     elif new_status == "cancelled":
         appointment.payment_status = "refunded"
@@ -101,8 +119,7 @@ async def update_status(db: AsyncSession, appointment: Appointment, new_status: 
     await db.flush()
     await db.refresh(appointment)
 
-    # Post-session pipeline: trigger report generation when session completes
-    if new_status == "completed":
+    if new_status in ("completed", "terminated"):
         await _run_post_session_pipeline(db, appointment)
 
     return appointment

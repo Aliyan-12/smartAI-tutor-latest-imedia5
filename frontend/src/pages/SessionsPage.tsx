@@ -27,10 +27,13 @@ const STATUS_CONFIG: Record<
   string,
   { label: string; bg: string; color: string }
 > = {
-  booked: { label: "BOOKED", bg: "#fff7ed", color: "#ea580c" },
-  confirmed: { label: "CONFIRMED", bg: "#f0fdf4", color: "#16a34a" },
-  completed: { label: "COMPLETED", bg: "#f8fafc", color: "#64748b" },
-  cancelled: { label: "CANCELLED", bg: "#fef2f2", color: "#dc2626" },
+  booked:     { label: "BOOKED",      bg: "#fff7ed", color: "#ea580c" },
+  confirmed:  { label: "CONFIRMED",   bg: "#f0fdf4", color: "#16a34a" },
+  started:    { label: "IN PROGRESS", bg: "#eef2ff", color: "#6366f1" },
+  paused:     { label: "PAUSED",      bg: "#fffbeb", color: "#d97706" },
+  terminated: { label: "TERMINATED",  bg: "#f8fafc", color: "#64748b" },
+  completed:  { label: "COMPLETED",   bg: "#f8fafc", color: "#64748b" },
+  cancelled:  { label: "CANCELLED",   bg: "#fef2f2", color: "#dc2626" },
 };
 
 function formatDateUK(isoString: string): string {
@@ -58,7 +61,7 @@ function SessionCard({ appointment: a, expanded, onToggle }: SessionCardProps) {
   const icon = getSubjectIcon(a.subject);
   const st = STATUS_CONFIG[a.status] ?? { label: a.status.toUpperCase(), bg: "#f8fafc", color: "#64748b" };
   const score = getScorePercent(a);
-  const isActive = a.status === "confirmed" || a.status === "booked";
+  const isActive = ["confirmed", "started", "paused"].includes(a.status);
 
   return (
     <div
@@ -190,13 +193,13 @@ function SessionCard({ appointment: a, expanded, onToggle }: SessionCardProps) {
               No session summary available yet.
             </p>
           )}
-          {(a.status === "confirmed" || a.status === "booked") && (
+          {["confirmed", "started", "paused"].includes(a.status) && (
             <button
               className="btn-primary"
               style={{ fontSize: 13 }}
               onClick={() => navigate(`/session/${a.id}`)}
             >
-              Join Session
+              {a.status === "started" ? "Rejoin Session" : a.status === "paused" ? "Resume Session" : "Join Session"}
             </button>
           )}
         </div>
@@ -227,7 +230,7 @@ export default function SessionsPage() {
   const subjects = Array.from(new Set(appointments.map((a) => a.subject))).sort();
 
   const continueLearning = appointments.find(
-    (a) => a.status === "confirmed" || a.status === "booked"
+    (a) => ["confirmed", "started", "paused"].includes(a.status)
   );
 
   const filtered = appointments.filter((a) => {

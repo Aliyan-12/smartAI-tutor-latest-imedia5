@@ -1,21 +1,12 @@
 import { useEffect, useState, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
-import { gamificationApi } from "../services/api";
-import type { DashboardData } from "../types";
+import { gamificationApi, appointmentsApi, assignmentsApi } from "../services/api";
+import type { DashboardData, Appointment, MyAssignment } from "../types";
 
 interface Props {
   onPromptClick: (text: string) => void;
 }
-
-const SUBJECTS = [
-  { emoji: "🔢", label: "Maths" },
-  { emoji: "🔬", label: "Science" },
-  { emoji: "📖", label: "English" },
-  { emoji: "🏛️", label: "History" },
-  { emoji: "🌍", label: "Geography" },
-  { emoji: "➕", label: "More" },
-];
 
 function getGreeting(): string {
   const h = new Date().getHours();
@@ -24,7 +15,7 @@ function getGreeting(): string {
   return "Good evening";
 }
 
-function formatSessionDate(iso: string): string {
+function formatDate(iso: string): string {
   return new Date(iso).toLocaleDateString("en-GB", {
     weekday: "short",
     day: "numeric",
@@ -34,12 +25,26 @@ function formatSessionDate(iso: string): string {
   });
 }
 
+function formatDueDate(iso: string): string {
+  const d = new Date(iso);
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  d.setHours(0, 0, 0, 0);
+  const diffDays = Math.round((d.getTime() - today.getTime()) / 86400000);
+  if (diffDays === 0) return "Due today";
+  if (diffDays === 1) return "Due tomorrow";
+  if (diffDays < 0) return `Overdue by ${-diffDays}d`;
+  return `Due in ${diffDays}d`;
+}
+
 const XP_PER_LEVEL = 500;
 
 export default function WelcomeScreen({ onPromptClick }: Props) {
   const { user } = useAuth();
   const navigate = useNavigate();
-  const [data, setData] = useState<DashboardData | null>(null);
+  const [dashData, setDashData] = useState<DashboardData | null>(null);
+  const [appointments, setAppointments] = useState<Appointment[]>([]);
+  const [assignments, setAssignments] = useState<MyAssignment[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -47,8 +52,14 @@ export default function WelcomeScreen({ onPromptClick }: Props) {
     setLoading(true);
     setError(null);
     try {
-      const d = (await gamificationApi.getDashboard()) as DashboardData;
-      setData(d);
+      const [dash, appts, assgns] = await Promise.all([
+        gamificationApi.getDashboard() as Promise<DashboardData>,
+        appointmentsApi.list() as Promise<Appointment[]>,
+        assignmentsApi.getMy() as Promise<MyAssignment[]>,
+      ]);
+      setDashData(dash);
+      setAppointments(appts ?? []);
+      setAssignments(assgns ?? []);
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : "Failed to load dashboard");
     } finally {
@@ -71,7 +82,7 @@ export default function WelcomeScreen({ onPromptClick }: Props) {
     );
   }
 
-  if (error || !data) {
+  if (error || !dashData) {
     return (
       <div className="ws-root ws-error">
         <div style={{ fontSize: 32 }}>⚠</div>
@@ -83,12 +94,28 @@ export default function WelcomeScreen({ onPromptClick }: Props) {
     );
   }
 
-  const { profile, daily_plan, continue_learning, xp_to_next_level } = data;
+  const { profile, daily_plan, continue_learning, xp_to_next_level } = dashData;
 
   const xpEarned = XP_PER_LEVEL - xp_to_next_level;
   const xpPct = Math.min(100, Math.max(0, (xpEarned / XP_PER_LEVEL) * 100));
 
-  const weakSpots = daily_plan.weak_spots.slice(0, 2);
+  const activeSessions = appointments.filter((a) =>
+    ["started", "paused"].includes(a.status)
+  );
+  const upcomingSessions = appointments.filter((a) => a.status === "confirmed");
+  const completedSessions = appointments.filter((a) =>
+    ["completed", "terminated"].includes(a.status)
+  );
+  const totalTimeStudied = completedSessions.reduce(
+    (sum, a) => sum + (a.duration_minutes || 0),
+    0
+  );
+
+  const pendingAssignments = assignments.filter(
+    (a) => a.status === "assigned" || a.status === "started"
+  );
+
+  const hasSessions = activeSessions.length > 0 || upcomingSessions.length > 0;
 
   return (
     <>
@@ -101,8 +128,7 @@ export default function WelcomeScreen({ onPromptClick }: Props) {
           font-family: "DM Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
         }
 
-        .ws-loading,
-        .ws-error {
+        .ws-loading, .ws-error {
           flex: 1;
           display: flex;
           flex-direction: column;
@@ -128,7 +154,6 @@ export default function WelcomeScreen({ onPromptClick }: Props) {
           to { transform: rotate(360deg); }
         }
 
-        /* ── Greeting banner ── */
         .ws-greeting-banner {
           background: #fff;
           border: 1px solid #e2e8f0;
@@ -150,9 +175,7 @@ export default function WelcomeScreen({ onPromptClick }: Props) {
           margin: 0 0 4px;
         }
 
-        .ws-greeting-left h1 span {
-          color: #1a73e8;
-        }
+        .ws-greeting-left h1 span { color: #1a73e8; }
 
         .ws-greeting-left p {
           font-size: 14px;
@@ -181,9 +204,7 @@ export default function WelcomeScreen({ onPromptClick }: Props) {
           white-space: nowrap;
         }
 
-        .ws-stat-chip .ws-chip-icon {
-          font-size: 16px;
-        }
+        .ws-stat-chip .ws-chip-icon { font-size: 16px; }
 
         .ws-xp-block {
           display: flex;
@@ -220,6 +241,87 @@ export default function WelcomeScreen({ onPromptClick }: Props) {
           font-size: 11px;
           color: #94a3b8;
           text-align: right;
+        }
+
+        /* ── Stats summary row ── */
+        .ws-study-stats {
+          display: grid;
+          grid-template-columns: repeat(4, 1fr);
+          gap: 12px;
+          margin-bottom: 20px;
+        }
+
+        .ws-study-stat-card {
+          background: #fff;
+          border: 1px solid #e2e8f0;
+          border-radius: 12px;
+          padding: 16px 18px;
+          box-shadow: 0 1px 4px rgba(0,0,0,0.04);
+        }
+
+        .ws-stat-label {
+          font-size: 11px;
+          font-weight: 700;
+          text-transform: uppercase;
+          letter-spacing: 0.5px;
+          color: #94a3b8;
+          margin-bottom: 8px;
+        }
+
+        .ws-stat-value {
+          font-size: 26px;
+          font-weight: 800;
+          color: #0f172a;
+          line-height: 1;
+        }
+
+        .ws-stat-sub {
+          font-size: 12px;
+          color: #64748b;
+          margin-top: 4px;
+        }
+
+        /* ── Active session alert ── */
+        .ws-active-session-alert {
+          background: linear-gradient(135deg, #ecfdf5, #d1fae5);
+          border: 1.5px solid #6ee7b7;
+          border-left: 5px solid #10b981;
+          border-radius: 14px;
+          padding: 16px 20px;
+          margin-bottom: 20px;
+          display: flex;
+          align-items: center;
+          gap: 14px;
+          flex-wrap: wrap;
+        }
+
+        .ws-active-pulse {
+          width: 12px;
+          height: 12px;
+          border-radius: 50%;
+          background: #10b981;
+          flex-shrink: 0;
+          animation: ws-pulse 1.5s ease-in-out infinite;
+        }
+
+        @keyframes ws-pulse {
+          0%, 100% { box-shadow: 0 0 0 0 rgba(16,185,129,0.4); }
+          50% { box-shadow: 0 0 0 8px rgba(16,185,129,0); }
+        }
+
+        .ws-active-info { flex: 1; min-width: 0; }
+
+        .ws-active-info strong {
+          font-size: 15px;
+          font-weight: 800;
+          color: #064e3b;
+          display: block;
+          margin-bottom: 2px;
+        }
+
+        .ws-active-info span {
+          font-size: 12px;
+          color: #065f46;
         }
 
         /* ── Continue learning ── */
@@ -351,7 +453,7 @@ export default function WelcomeScreen({ onPromptClick }: Props) {
           line-height: 1.5;
         }
 
-        /* ── Two-column lower grid ── */
+        /* ── Two-column grid ── */
         .ws-grid {
           display: grid;
           grid-template-columns: 1fr 1fr;
@@ -377,6 +479,105 @@ export default function WelcomeScreen({ onPromptClick }: Props) {
           margin-bottom: 14px;
         }
 
+        /* ── Session list items ── */
+        .ws-session-item {
+          display: flex;
+          align-items: center;
+          gap: 10px;
+          padding: 10px 12px;
+          border-radius: 10px;
+          margin-bottom: 8px;
+          background: #f8fafc;
+          border: 1px solid #e2e8f0;
+        }
+
+        .ws-session-item:last-child { margin-bottom: 0; }
+
+        .ws-session-dot {
+          width: 10px;
+          height: 10px;
+          border-radius: 50%;
+          flex-shrink: 0;
+        }
+
+        .ws-session-info { flex: 1; min-width: 0; }
+
+        .ws-session-title {
+          font-size: 13px;
+          font-weight: 700;
+          color: #0f172a;
+          margin: 0 0 2px;
+          white-space: nowrap;
+          overflow: hidden;
+          text-overflow: ellipsis;
+        }
+
+        .ws-session-meta {
+          font-size: 11px;
+          color: #64748b;
+          margin: 0;
+        }
+
+        .ws-session-badge {
+          font-size: 10px;
+          font-weight: 700;
+          padding: 2px 8px;
+          border-radius: 999px;
+          white-space: nowrap;
+          flex-shrink: 0;
+        }
+
+        .ws-badge--started { background: #d1fae5; color: #065f46; }
+        .ws-badge--paused { background: #fef3c7; color: #92400e; }
+        .ws-badge--confirmed { background: #dbeafe; color: #1e40af; }
+
+        /* ── Assignment items ── */
+        .ws-assign-item {
+          display: flex;
+          align-items: flex-start;
+          gap: 10px;
+          padding: 10px 12px;
+          border-radius: 10px;
+          margin-bottom: 8px;
+          background: #f8fafc;
+          border-left: 3px solid #f59e0b;
+          border-top: 1px solid #e2e8f0;
+          border-right: 1px solid #e2e8f0;
+          border-bottom: 1px solid #e2e8f0;
+        }
+
+        .ws-assign-item:last-child { margin-bottom: 0; }
+
+        .ws-assign-icon { font-size: 18px; flex-shrink: 0; }
+
+        .ws-assign-info { flex: 1; min-width: 0; }
+
+        .ws-assign-title {
+          font-size: 13px;
+          font-weight: 700;
+          color: #0f172a;
+          margin: 0 0 2px;
+          white-space: nowrap;
+          overflow: hidden;
+          text-overflow: ellipsis;
+        }
+
+        .ws-assign-meta {
+          font-size: 11px;
+          color: #64748b;
+          margin: 0;
+        }
+
+        .ws-assign-due {
+          font-size: 11px;
+          font-weight: 700;
+          color: #d97706;
+          white-space: nowrap;
+          flex-shrink: 0;
+        }
+
+        .ws-assign-due--overdue { color: #dc2626; }
+
         /* ── Daily plan items ── */
         .ws-plan-item {
           display: flex;
@@ -391,29 +592,15 @@ export default function WelcomeScreen({ onPromptClick }: Props) {
           background: #f8fafc;
         }
 
-        .ws-plan-item:last-child {
-          margin-bottom: 0;
-        }
+        .ws-plan-item:last-child { margin-bottom: 0; }
 
-        .ws-plan-item--weak {
-          border-left-color: #ef4444;
-          background: #fff5f5;
-        }
-
+        .ws-plan-item--weak { border-left-color: #ef4444; background: #fff5f5; }
         .ws-plan-item--weak:hover { background: #fee2e2; }
 
-        .ws-plan-item--review {
-          border-left-color: #3b82f6;
-          background: #f0f6ff;
-        }
-
+        .ws-plan-item--review { border-left-color: #3b82f6; background: #f0f6ff; }
         .ws-plan-item--review:hover { background: #dbeafe; }
 
-        .ws-plan-item--boost {
-          border-left-color: #22c55e;
-          background: #f0faf4;
-        }
-
+        .ws-plan-item--boost { border-left-color: #22c55e; background: #f0faf4; }
         .ws-plan-item--boost:hover { background: #dcfce7; }
 
         .ws-plan-icon { font-size: 16px; flex-shrink: 0; }
@@ -480,98 +667,6 @@ export default function WelcomeScreen({ onPromptClick }: Props) {
           box-shadow: 0 2px 6px rgba(59,130,246,0.1);
         }
 
-        /* ── Recommended cards ── */
-        .ws-rec-list {
-          display: flex;
-          flex-direction: column;
-          gap: 10px;
-          margin-bottom: 20px;
-        }
-
-        .ws-rec-card {
-          background: #fff;
-          border: 1px solid #e2e8f0;
-          border-radius: 12px;
-          padding: 14px 18px;
-          display: flex;
-          align-items: center;
-          gap: 14px;
-          box-shadow: 0 1px 3px rgba(0,0,0,0.04);
-        }
-
-        .ws-rec-dot {
-          width: 10px;
-          height: 10px;
-          border-radius: 50%;
-          background: #1a73e8;
-          flex-shrink: 0;
-        }
-
-        .ws-rec-info {
-          flex: 1;
-          min-width: 0;
-        }
-
-        .ws-rec-topic {
-          font-size: 14px;
-          font-weight: 700;
-          color: #0f172a;
-          margin: 0 0 3px;
-          white-space: nowrap;
-          overflow: hidden;
-          text-overflow: ellipsis;
-        }
-
-        .ws-rec-meta {
-          font-size: 12px;
-          color: #64748b;
-          margin: 0;
-        }
-
-        /* ── Subject grid ── */
-        .ws-subjects-section {
-          margin-bottom: 20px;
-        }
-
-        .ws-subjects-title {
-          font-size: 11px;
-          font-weight: 800;
-          text-transform: uppercase;
-          letter-spacing: 0.5px;
-          color: #94a3b8;
-          margin-bottom: 12px;
-        }
-
-        .ws-subjects-grid {
-          display: flex;
-          flex-wrap: wrap;
-          gap: 10px;
-        }
-
-        .ws-subject-chip {
-          display: flex;
-          align-items: center;
-          gap: 7px;
-          padding: 9px 16px;
-          background: #fff;
-          border: 1.5px solid #e2e8f0;
-          border-radius: 999px;
-          font-size: 13px;
-          font-weight: 700;
-          color: #0f172a;
-          cursor: pointer;
-          transition: border-color 0.15s, background 0.15s, box-shadow 0.15s;
-          font-family: inherit;
-        }
-
-        .ws-subject-chip:hover {
-          border-color: #1a73e8;
-          background: #eff6ff;
-          box-shadow: 0 2px 8px rgba(26,115,232,0.1);
-        }
-
-        .ws-subject-icon { font-size: 18px; }
-
         /* ── Buttons ── */
         .ws-btn {
           display: inline-flex;
@@ -589,68 +684,36 @@ export default function WelcomeScreen({ onPromptClick }: Props) {
           white-space: nowrap;
         }
 
-        .ws-btn--primary {
-          background: #3b82f6;
-          color: #fff;
+        .ws-btn--primary { background: #3b82f6; color: #fff; }
+        .ws-btn--primary:hover { background: #2563eb; }
+
+        .ws-btn--green { background: #10b981; color: #fff; }
+        .ws-btn--green:hover { background: #059669; }
+
+        .ws-btn--orange { background: #1a73e8; color: #fff; box-shadow: 0 2px 10px rgba(26,115,232,0.3); }
+        .ws-btn--orange:hover { background: #1557b0; }
+
+        .ws-btn--ghost { background: #f1f5f9; color: #374151; border: 1px solid #e2e8f0; }
+        .ws-btn--ghost:hover { background: #e2e8f0; }
+
+        .ws-btn--outline { background: transparent; color: #3b82f6; border: 1.5px solid #3b82f6; }
+        .ws-btn--outline:hover { background: #eff6ff; }
+
+        .ws-btn--sm { padding: 7px 12px; font-size: 12px; }
+
+        @media (max-width: 900px) {
+          .ws-study-stats { grid-template-columns: repeat(2, 1fr); }
         }
 
-        .ws-btn--primary:hover {
-          background: #2563eb;
-        }
-
-        .ws-btn--orange {
-          background: #1a73e8;
-          color: #fff;
-          box-shadow: 0 2px 10px rgba(26,115,232,0.3);
-        }
-
-        .ws-btn--orange:hover {
-          background: #1557b0;
-          opacity: 1;
-        }
-
-        .ws-btn--ghost {
-          background: #f1f5f9;
-          color: #374151;
-          border: 1px solid #e2e8f0;
-        }
-
-        .ws-btn--ghost:hover {
-          background: #e2e8f0;
-        }
-
-        .ws-btn--outline {
-          background: transparent;
-          color: #3b82f6;
-          border: 1.5px solid #3b82f6;
-        }
-
-        .ws-btn--outline:hover {
-          background: #eff6ff;
-        }
-
-        .ws-btn--sm {
-          padding: 7px 12px;
-          font-size: 12px;
-        }
-
-        /* Responsive */
         @media (max-width: 720px) {
-          .ws-grid {
-            grid-template-columns: 1fr;
-          }
+          .ws-grid { grid-template-columns: 1fr; }
+          .ws-study-stats { grid-template-columns: repeat(2, 1fr); }
+          .ws-continue-actions { flex-direction: row; flex-wrap: wrap; min-width: unset; width: 100%; }
+          .ws-greeting-banner { flex-direction: column; align-items: flex-start; }
+        }
 
-          .ws-continue-actions {
-            flex-direction: row;
-            flex-wrap: wrap;
-            min-width: unset;
-            width: 100%;
-          }
-
-          .ws-greeting-banner {
-            flex-direction: column;
-            align-items: flex-start;
-          }
+        @media (max-width: 480px) {
+          .ws-study-stats { grid-template-columns: 1fr 1fr; }
         }
       `}</style>
 
@@ -688,6 +751,58 @@ export default function WelcomeScreen({ onPromptClick }: Props) {
           </div>
         </div>
 
+        {/* Study Stats Row */}
+        <div className="ws-study-stats">
+          <div className="ws-study-stat-card">
+            <div className="ws-stat-label">Sessions Done</div>
+            <div className="ws-stat-value">{completedSessions.length}</div>
+            <div className="ws-stat-sub">all time</div>
+          </div>
+          <div className="ws-study-stat-card">
+            <div className="ws-stat-label">Time Studied</div>
+            <div className="ws-stat-value">
+              {totalTimeStudied >= 60
+                ? `${Math.floor(totalTimeStudied / 60)}h ${totalTimeStudied % 60}m`
+                : `${totalTimeStudied}m`}
+            </div>
+            <div className="ws-stat-sub">total minutes</div>
+          </div>
+          <div className="ws-study-stat-card">
+            <div className="ws-stat-label">Assignments</div>
+            <div className="ws-stat-value">{pendingAssignments.length}</div>
+            <div className="ws-stat-sub">pending</div>
+          </div>
+          <div className="ws-study-stat-card">
+            <div className="ws-stat-label">Upcoming</div>
+            <div className="ws-stat-value">{upcomingSessions.length}</div>
+            <div className="ws-stat-sub">confirmed sessions</div>
+          </div>
+        </div>
+
+        {/* Active session alert */}
+        {activeSessions.length > 0 && (
+          <div className="ws-active-session-alert">
+            <div className="ws-active-pulse" />
+            <div className="ws-active-info">
+              <strong>
+                {activeSessions[0].status === "paused" ? "⏸ Paused" : "▶ Live"}: {activeSessions[0].title}
+              </strong>
+              <span>
+                {activeSessions[0].subject} ·{" "}
+                {activeSessions[0].status === "paused"
+                  ? "Session is paused — resume where you left off"
+                  : "Session is in progress"}
+              </span>
+            </div>
+            <button
+              className="ws-btn ws-btn--green"
+              onClick={() => navigate(`/session/${activeSessions[0].id}`)}
+            >
+              {activeSessions[0].status === "paused" ? "Resume" : "Rejoin"} →
+            </button>
+          </div>
+        )}
+
         {/* Continue learning / Start CTA */}
         {continue_learning ? (
           <div className="ws-continue-card">
@@ -701,13 +816,20 @@ export default function WelcomeScreen({ onPromptClick }: Props) {
                 </p>
                 <div className="ws-continue-progress">
                   <div className="ws-prog-track">
-                    <div className="ws-prog-fill" style={{ width: `${continue_learning.mastery}%` }} />
+                    <div
+                      className="ws-prog-fill"
+                      style={{ width: `${Math.max(continue_learning.mastery, 2)}%` }}
+                    />
                   </div>
-                  <span className="ws-prog-pct">{continue_learning.mastery}% complete</span>
+                  <span className="ws-prog-pct">
+                    {continue_learning.mastery > 0
+                      ? `${continue_learning.mastery}% mastery`
+                      : "Just started"}
+                  </span>
                 </div>
                 {continue_learning.last_mistake && (
                   <p className="ws-continue-last">
-                    Last message: "{continue_learning.last_mistake}"
+                    Last note: "{continue_learning.last_mistake}"
                   </p>
                 )}
               </div>
@@ -763,18 +885,134 @@ export default function WelcomeScreen({ onPromptClick }: Props) {
           </div>
         )}
 
+        {/* Two-column: Sessions + Assignments */}
+        {(hasSessions || pendingAssignments.length > 0) && (
+          <div className="ws-grid" style={{ marginBottom: 20 }}>
+            {/* Upcoming / Active Sessions */}
+            <div className="ws-card">
+              <div className="ws-card-title">Your Sessions</div>
+
+              {activeSessions.length === 0 && upcomingSessions.length === 0 ? (
+                <p className="ws-empty-plan">No active or upcoming sessions.</p>
+              ) : (
+                <>
+                  {activeSessions.map((a) => (
+                    <div key={a.id} className="ws-session-item">
+                      <div
+                        className="ws-session-dot"
+                        style={{ background: a.status === "paused" ? "#f59e0b" : "#10b981" }}
+                      />
+                      <div className="ws-session-info">
+                        <p className="ws-session-title">{a.title}</p>
+                        <p className="ws-session-meta">
+                          {a.subject} · {a.teacher_name ?? "Teacher"}
+                        </p>
+                      </div>
+                      <span className={`ws-session-badge ws-badge--${a.status}`}>
+                        {a.status === "paused" ? "Paused" : "Live"}
+                      </span>
+                      <button
+                        className="ws-btn ws-btn--green ws-btn--sm"
+                        onClick={() => navigate(`/session/${a.id}`)}
+                      >
+                        {a.status === "paused" ? "Resume" : "Rejoin"}
+                      </button>
+                    </div>
+                  ))}
+
+                  {upcomingSessions.slice(0, 3).map((a) => (
+                    <div key={a.id} className="ws-session-item">
+                      <div className="ws-session-dot" style={{ background: "#3b82f6" }} />
+                      <div className="ws-session-info">
+                        <p className="ws-session-title">{a.title}</p>
+                        <p className="ws-session-meta">
+                          {a.subject} · {formatDate(a.scheduled_at)}
+                        </p>
+                      </div>
+                      <span className="ws-session-badge ws-badge--confirmed">Confirmed</span>
+                      <button
+                        className="ws-btn ws-btn--primary ws-btn--sm"
+                        onClick={() => navigate(`/session/${a.id}`)}
+                      >
+                        Join
+                      </button>
+                    </div>
+                  ))}
+                </>
+              )}
+
+              <button
+                className="ws-btn ws-btn--ghost ws-btn--sm"
+                style={{ width: "100%", marginTop: 10 }}
+                onClick={() => navigate("/sessions")}
+              >
+                View All Sessions →
+              </button>
+            </div>
+
+            {/* Assignments */}
+            <div className="ws-card">
+              <div className="ws-card-title">Assignments Due</div>
+
+              {pendingAssignments.length === 0 ? (
+                <p className="ws-empty-plan">No pending assignments. You're all caught up!</p>
+              ) : (
+                pendingAssignments.slice(0, 4).map((a) => {
+                  const isOverdue =
+                    a.homework.due_date && new Date(a.homework.due_date) < new Date();
+                  return (
+                    <div key={a.id} className="ws-assign-item">
+                      <span className="ws-assign-icon">
+                        {a.homework.assignment_type === "reading"
+                          ? "📖"
+                          : a.homework.assignment_type === "revision"
+                          ? "📝"
+                          : a.homework.assignment_type === "prep"
+                          ? "🎯"
+                          : "📚"}
+                      </span>
+                      <div className="ws-assign-info">
+                        <p className="ws-assign-title">{a.homework.title}</p>
+                        <p className="ws-assign-meta">
+                          {a.homework.subject} · {a.homework.estimated_minutes}min ·{" "}
+                          {a.status === "started" ? "In progress" : "Not started"}
+                        </p>
+                      </div>
+                      {a.homework.due_date && (
+                        <span
+                          className={`ws-assign-due${isOverdue ? " ws-assign-due--overdue" : ""}`}
+                        >
+                          {formatDueDate(a.homework.due_date)}
+                        </span>
+                      )}
+                    </div>
+                  );
+                })
+              )}
+
+              <button
+                className="ws-btn ws-btn--ghost ws-btn--sm"
+                style={{ width: "100%", marginTop: 10 }}
+                onClick={() => navigate("/assignments")}
+              >
+                View All Assignments →
+              </button>
+            </div>
+          </div>
+        )}
+
         {/* Two-column: Today's Plan + Quick Actions */}
         <div className="ws-grid">
           <div className="ws-card">
-            <div className="ws-card-title">Today's Plan</div>
+            <div className="ws-card-title">Today's Study Plan</div>
 
             {daily_plan.weak_spots.length === 0 &&
               daily_plan.spaced_review.length === 0 &&
-              daily_plan.confidence_boost.length === 0 && (
+              daily_plan.confidence_boost.length === 0 ? (
                 <p className="ws-empty-plan">
                   No recommendations yet. Complete a lesson to unlock your personalised plan.
                 </p>
-              )}
+              ) : null}
 
             {daily_plan.weak_spots.map((ws, i) => (
               <div
@@ -789,7 +1027,7 @@ export default function WelcomeScreen({ onPromptClick }: Props) {
                 <span className="ws-plan-icon">🔧</span>
                 <div className="ws-plan-body">
                   <p className="ws-plan-topic">{ws.topic}</p>
-                  <p className="ws-plan-sub">Start 5-question repair set</p>
+                  <p className="ws-plan-sub">{ws.subject} · Needs practice</p>
                 </div>
                 <span className="ws-plan-arrow">›</span>
               </div>
@@ -809,7 +1047,7 @@ export default function WelcomeScreen({ onPromptClick }: Props) {
                 <div className="ws-plan-body">
                   <p className="ws-plan-topic">{sr.topic}</p>
                   <p className="ws-plan-sub">
-                    Last practised {sr.days_since} day{sr.days_since !== 1 ? "s" : ""} ago
+                    {sr.subject} · Last practised {sr.days_since}d ago
                   </p>
                 </div>
                 <span className="ws-plan-arrow">›</span>
@@ -829,7 +1067,7 @@ export default function WelcomeScreen({ onPromptClick }: Props) {
                 <span className="ws-plan-icon">⚡</span>
                 <div className="ws-plan-body">
                   <p className="ws-plan-topic">{cb.topic}</p>
-                  <p className="ws-plan-sub">Build momentum</p>
+                  <p className="ws-plan-sub">{cb.subject} · Build momentum</p>
                 </div>
                 <span className="ws-plan-arrow">›</span>
               </div>
@@ -841,10 +1079,14 @@ export default function WelcomeScreen({ onPromptClick }: Props) {
             <div className="ws-quick-grid">
               <button
                 className="ws-quick-btn"
-                onClick={() => navigate("/lesson/setup")}
+                onClick={() =>
+                  onPromptClick(
+                    "Let's start a new topic. What subjects do you have materials for?"
+                  )
+                }
               >
-                <span className="ws-q-icon">🎯</span>
-                New Topic
+                <span className="ws-q-icon">🤖</span>
+                Ask AI Tutor
               </button>
               <button
                 className="ws-quick-btn"
@@ -855,106 +1097,23 @@ export default function WelcomeScreen({ onPromptClick }: Props) {
                 }
               >
                 <span className="ws-q-icon">⚡</span>
-                Quiz Me
+                Quick Quiz
               </button>
               <button
                 className="ws-quick-btn"
-                onClick={() => navigate("/appointments")}
+                onClick={() => navigate("/sessions")}
               >
-                <span className="ws-q-icon">📖</span>
-                Book Session
+                <span className="ws-q-icon">📅</span>
+                My Sessions
               </button>
               <button
                 className="ws-quick-btn"
                 onClick={() => navigate("/progress")}
               >
                 <span className="ws-q-icon">📊</span>
-                My Reports
+                My Progress
               </button>
             </div>
-          </div>
-        </div>
-
-        {/* Recommended for You (weak spots) */}
-        {weakSpots.length > 0 && (
-          <>
-            <div className="ws-card-title" style={{ marginBottom: 10 }}>
-              Recommended for You
-            </div>
-            <div className="ws-rec-list">
-              {weakSpots.map((ws, i) => (
-                <div className="ws-rec-card" key={i}>
-                  <div className="ws-rec-dot" />
-                  <div className="ws-rec-info">
-                    <p className="ws-rec-topic">{ws.topic}</p>
-                    <p className="ws-rec-meta">
-                      {ws.subject} · Needs attention · ~{i === 0 ? "1hr" : "30m"}
-                    </p>
-                  </div>
-                  <button
-                    className="ws-btn ws-btn--primary ws-btn--sm"
-                    onClick={() =>
-                      onPromptClick(
-                        `Let's work on ${ws.topic} in ${ws.subject}. Please start a session on this topic.`
-                      )
-                    }
-                  >
-                    Start Session →
-                  </button>
-                </div>
-              ))}
-            </div>
-          </>
-        )}
-
-        {/* Upcoming sessions */}
-        {daily_plan.upcoming_sessions.length > 0 && (
-          <>
-            <div className="ws-card-title" style={{ marginBottom: 10 }}>
-              Upcoming AI Sessions
-            </div>
-            <div className="ws-rec-list">
-              {daily_plan.upcoming_sessions.slice(0, 3).map((s) => (
-                <div className="ws-rec-card" key={s.id}>
-                  <div className="ws-rec-dot" style={{ background: "#22c55e" }} />
-                  <div className="ws-rec-info">
-                    <p className="ws-rec-topic">{s.title}</p>
-                    <p className="ws-rec-meta">
-                      {s.subject} · {formatSessionDate(s.scheduled_at)}
-                    </p>
-                  </div>
-                  <button
-                    className="ws-btn ws-btn--ghost ws-btn--sm"
-                    onClick={() => navigate(`/session/${s.id}`)}
-                  >
-                    Join →
-                  </button>
-                </div>
-              ))}
-            </div>
-          </>
-        )}
-
-        {/* Pick a Subject */}
-        <div className="ws-subjects-section">
-          <div className="ws-subjects-title">Pick a Subject</div>
-          <div className="ws-subjects-grid">
-            {SUBJECTS.map((s) => (
-              <button
-                key={s.label}
-                className="ws-subject-chip"
-                onClick={() => {
-                  if (s.label === "More") {
-                    onPromptClick("What subjects do you have materials for?");
-                  } else {
-                    navigate(`/lesson/setup?subject=${encodeURIComponent(s.label)}`);
-                  }
-                }}
-              >
-                <span className="ws-subject-icon">{s.emoji}</span>
-                {s.label}
-              </button>
-            ))}
           </div>
         </div>
       </div>

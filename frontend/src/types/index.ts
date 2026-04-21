@@ -138,11 +138,13 @@ export interface Appointment {
   description: string | null;
   scheduled_at: string;
   duration_minutes: number;
-  status: "booked" | "confirmed" | "completed" | "cancelled";
+  status: "booked" | "confirmed" | "started" | "paused" | "terminated" | "completed" | "cancelled";
   payment_status: "pending" | "paid" | "refunded";
   payment_amount: number | null;
   passcode: string | null;
   session_started_at: string | null;
+  paused_at: string | null;
+  total_paused_seconds: number;
   meeting_link: string | null;
   notes: string | null;
   student_name?: string | null;

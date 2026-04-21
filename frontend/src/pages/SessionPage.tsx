@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { useParams, useNavigate } from "react-router-dom";
-import { Lock, X } from "lucide-react";
+import { Lock, X, Pause, Play } from "lucide-react";
 import { appointmentsApi } from "../services/api";
 import ChatWindow from "../components/ChatWindow";
 import ChatInput from "../components/ChatInput";
@@ -29,6 +29,9 @@ export default function SessionPage() {
   const [durationMinutes, setDurationMinutes] = useState(60);
   const [sessionStartedAt, setSessionStartedAt] = useState<string | null>(null);
   const [timeRemaining, setTimeRemaining] = useState(0);
+  const [isPaused, setIsPaused] = useState(false);
+  const [pausedAt, setPausedAt] = useState<number | null>(null);
+  const [totalPausedMs, setTotalPausedMs] = useState(0);
   const [sessionTitle, setSessionTitle] = useState("");
   const [sessionSubject, setSessionSubject] = useState("");
   const [learnTab, setLearnTab] = useState<LearnTab>("learn");
@@ -54,23 +57,42 @@ export default function SessionPage() {
       setDurationMinutes(result.duration_minutes);
       setSessionTitle(result.title);
       setSessionSubject(result.subject);
+
+      // Restore persisted pause state
+      const savedPausedSeconds: number = result.total_paused_seconds || 0;
+      setTotalPausedMs(savedPausedSeconds * 1000);
+
+      if (result.status === "paused" && result.paused_at) {
+        // Session was paused — restore frozen timer position
+        const pausedAtMs = new Date(result.paused_at).getTime();
+        // Add time elapsed since last pause to total, so timer stays frozen at paused position
+        const extraSinceLastPause = Date.now() - pausedAtMs;
+        setTotalPausedMs((savedPausedSeconds * 1000) + extraSinceLastPause);
+        setIsPaused(true);
+        setPausedAt(Date.now()); // mark as currently paused from now
+      } else {
+        setIsPaused(false);
+        setPausedAt(null);
+      }
+
       setSessionState("active");
       initSessionChat(parseInt(appointmentId));
     } catch (err: any) {
-      setJoinError(err.message || "Invalid passcode");
+      setJoinError(err.message || "Invalid passcode or session unavailable");
     }
   };
 
   useEffect(() => {
-    if (sessionState !== "active" || !sessionStartedAt) return;
+    if (sessionState !== "active" || !sessionStartedAt || isPaused) return;
 
     const updateTimer = () => {
       const start = new Date(sessionStartedAt).getTime();
-      const end = start + durationMinutes * 60 * 1000;
+      const end = start + durationMinutes * 60 * 1000 + totalPausedMs;
       const now = Date.now();
       const remaining = Math.max(0, Math.floor((end - now) / 1000));
       setTimeRemaining(remaining);
       if (remaining <= 0) {
+        appointmentsApi.updateStatus(apptId, "terminated").catch(() => {});
         setSessionState("ended");
         if (timerRef.current) clearInterval(timerRef.current);
       }
@@ -79,7 +101,32 @@ export default function SessionPage() {
     updateTimer();
     timerRef.current = window.setInterval(updateTimer, 1000);
     return () => { if (timerRef.current) clearInterval(timerRef.current); };
-  }, [sessionState, sessionStartedAt, durationMinutes]);
+  }, [sessionState, sessionStartedAt, durationMinutes, isPaused, totalPausedMs, apptId]);
+
+  const handlePause = async () => {
+    if (isPaused) {
+      // Resume — credit all time since local pausedAt into totalPausedMs
+      const now = Date.now();
+      const localPauseDuration = pausedAt ? now - pausedAt : 0;
+      setTotalPausedMs((p) => p + localPauseDuration);
+      setPausedAt(null);
+      setIsPaused(false);
+      await appointmentsApi.updateStatus(apptId, "started").catch(() => {});
+    } else {
+      // Pause — disconnect voice if active
+      if (isVoiceActive) disconnectVoice();
+      if (timerRef.current) clearInterval(timerRef.current);
+      setPausedAt(Date.now());
+      setIsPaused(true);
+      await appointmentsApi.updateStatus(apptId, "paused").catch(() => {});
+    }
+  };
+
+  const handleEndSession = async () => {
+    if (timerRef.current) clearInterval(timerRef.current);
+    await appointmentsApi.updateStatus(apptId, "terminated").catch(() => {});
+    setSessionState("ended");
+  };
 
   const formatTime = (seconds: number) => {
     const m = Math.floor(seconds / 60);
@@ -216,15 +263,28 @@ export default function SessionPage() {
           </span>
         </div>
         <div style={styles.topBarCenter}>
-          <span style={styles.timerEmoji}>⏱</span>
-          <span style={styles.timerText}>{formatTime(timeRemaining)}</span>
-          <span style={styles.timerLabel}>left</span>
+          <span style={styles.timerEmoji}>{isPaused ? "⏸" : "⏱"}</span>
+          <span style={{ ...styles.timerText, opacity: isPaused ? 0.6 : 1 }}>{formatTime(timeRemaining)}</span>
+          <span style={styles.timerLabel}>{isPaused ? "paused" : "left"}</span>
         </div>
         <div style={styles.topBarRight}>
           <span style={styles.xpChip}>🔥 {xp} XP</span>
+          {isPaused && (
+            <span style={{ fontSize: 11, fontWeight: 700, letterSpacing: "0.5px", background: "rgba(255,255,255,0.2)", borderRadius: 99, padding: "3px 10px" }}>
+              ⏸ PAUSED
+            </span>
+          )}
+          <button
+            style={{ ...styles.endBtn, background: isPaused ? "rgba(255,255,255,0.25)" : "rgba(255,255,255,0.15)" }}
+            onClick={handlePause}
+            title={isPaused ? "Resume session" : "Pause session"}
+          >
+            {isPaused ? <Play size={14} style={{ marginRight: 4 }} /> : <Pause size={14} style={{ marginRight: 4 }} />}
+            {isPaused ? "Resume" : "Pause"}
+          </button>
           <button
             style={styles.endBtn}
-            onClick={() => setSessionState("ended")}
+            onClick={handleEndSession}
             title="End session"
           >
             <X size={14} style={{ marginRight: 4 }} />
@@ -253,23 +313,12 @@ export default function SessionPage() {
           <div style={styles.learnContent}>
             {learnTab === "learn" && (
               <div style={styles.learnMessagesWrap}>
-                {messages.length === 0 && !streaming ? (
-                  <div style={styles.emptyLearn}>
-                    <span style={{ fontSize: 36 }}>📖</span>
-                    <p style={styles.emptyLearnText}>
-                      Your lesson on <strong>{sessionSubject}</strong> will appear here as the AI tutor teaches.
-                    </p>
-                  </div>
-                ) : (
-                  <div style={styles.learnMessages}>
-                    <ChatWindow
-                      messages={messages}
-                      streaming={streaming}
-                      streamContent={streamContent}
-                      onSpeak={speakText}
-                    />
-                  </div>
-                )}
+                <div style={styles.emptyLearn}>
+                  <span style={{ fontSize: 36 }}>📄</span>
+                  <p style={styles.emptyLearnText}>
+                    Lesson content will be shown here.
+                  </p>
+                </div>
               </div>
             )}
 
@@ -326,41 +375,46 @@ export default function SessionPage() {
           </div>
 
           <div style={styles.quickActions}>
-            <button
-              style={styles.quickBtn}
-              onClick={() => sessionSend("I need help with this")}
-            >
-              🙋 I need help
-            </button>
-            <button
-              style={styles.quickBtn}
-              onClick={() => sessionSend("Can you explain that again?")}
-            >
-              🔄 Explain again
-            </button>
-            <button
-              style={styles.quickBtn}
-              onClick={() => sessionSend("Please go slower")}
-            >
-              🐢 Go slower
-            </button>
+            {(["I need help with this", "Can you explain that again?", "Please go slower"] as const).map((text, i) => (
+              <button
+                key={i}
+                style={{
+                  ...styles.quickBtn,
+                  ...(isPaused ? styles.quickBtnDisabled : {}),
+                }}
+                onClick={() => !isPaused && sessionSend(text)}
+                disabled={isPaused}
+              >
+                {["🙋 I need help", "🔄 Explain again", "🐢 Go slower"][i]}
+              </button>
+            ))}
           </div>
 
           <div style={styles.chatMessages}>
-            {messages.length === 0 && !streaming ? (
+            {isPaused && (
+              <div style={styles.pausedOverlay}>
+                <span style={{ fontSize: 32 }}>⏸</span>
+                <p style={styles.pausedOverlayText}>Session is paused</p>
+                <p style={styles.pausedOverlaySub}>Resume the session to continue chatting with your AI tutor.</p>
+                <button style={styles.pausedResumeBtn} onClick={handlePause}>
+                  ▶ Resume Session
+                </button>
+              </div>
+            )}
+            {!isPaused && messages.length === 0 && !streaming ? (
               <div style={styles.chatEmpty}>
                 <p style={{ fontSize: 13, color: "var(--text-muted)", textAlign: "center" }}>
                   Session is active — ask your AI tutor anything!
                 </p>
               </div>
-            ) : (
+            ) : !isPaused ? (
               <ChatWindow
                 messages={messages}
                 streaming={streaming}
                 streamContent={streamContent}
                 onSpeak={speakText}
               />
-            )}
+            ) : null}
           </div>
 
           <div style={styles.chatInputWrap}>
@@ -371,6 +425,7 @@ export default function SessionPage() {
               voiceStatus={voiceStatus}
               onVoiceStart={handleVoiceToggle}
               onVoiceEnd={disconnectVoice}
+              disabled={isPaused}
             />
           </div>
         </div>
@@ -695,6 +750,44 @@ const styles: Record<string, React.CSSProperties> = {
     alignItems: "center",
     justifyContent: "center",
     padding: 24,
+  },
+  pausedOverlay: {
+    display: "flex",
+    flexDirection: "column",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 10,
+    padding: "40px 24px",
+    textAlign: "center",
+    flex: 1,
+  },
+  pausedOverlayText: {
+    fontSize: 16,
+    fontWeight: 700,
+    color: "#374151",
+    margin: 0,
+  },
+  pausedOverlaySub: {
+    fontSize: 13,
+    color: "#94a3b8",
+    margin: 0,
+    maxWidth: 240,
+    lineHeight: 1.5,
+  },
+  pausedResumeBtn: {
+    marginTop: 8,
+    background: "#10b981",
+    color: "#fff",
+    border: "none",
+    borderRadius: 8,
+    padding: "8px 20px",
+    fontSize: 13,
+    fontWeight: 700,
+    cursor: "pointer",
+  },
+  quickBtnDisabled: {
+    opacity: 0.4,
+    cursor: "not-allowed",
   },
   chatInputWrap: {
     flexShrink: 0,

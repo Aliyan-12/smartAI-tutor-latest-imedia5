@@ -10,6 +10,7 @@ interface Props {
   voiceStatus: VoiceStatus;
   onVoiceStart: () => void;
   onVoiceEnd: () => void;
+  disabled?: boolean;
 }
 
 const STATUS_LABELS: Record<VoiceStatus, string> = {
@@ -27,12 +28,13 @@ export default function ChatInput({
   voiceStatus,
   onVoiceStart,
   onVoiceEnd,
+  disabled = false,
 }: Props) {
   const [input, setInput] = useState("");
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   const inVoiceMode = voiceStatus !== "idle";
-  const busy = streaming || voiceStatus === "connecting";
+  const busy = disabled || streaming || voiceStatus === "connecting";
 
   const handleSend = useCallback(() => {
     const trimmed = input.trim();
@@ -89,7 +91,7 @@ export default function ChatInput({
           value={input}
           onChange={handleInput}
           onKeyDown={handleKeyDown}
-          placeholder="Ask me anything about your studies..."
+          placeholder={disabled ? "Session is paused — resume to continue chatting..." : "Ask me anything about your studies..."}
           rows={1}
           disabled={busy}
         />
