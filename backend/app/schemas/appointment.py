@@ -18,7 +18,7 @@ class AppointmentCreate(BaseModel):
 
 
 class AppointmentStatusUpdate(BaseModel):
-    status: Literal["booked", "confirmed", "completed", "cancelled"]
+    status: Literal["booked", "confirmed", "started", "paused", "terminated", "completed", "cancelled"]
 
 
 class SessionJoinRequest(BaseModel):

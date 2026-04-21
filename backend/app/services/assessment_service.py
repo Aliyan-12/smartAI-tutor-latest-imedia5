@@ -18,6 +18,8 @@ async def create_assessment(
     topic: str,
     questions_data: list,
     chat_session_id: Optional[str] = None,
+    appointment_id: Optional[int] = None,
+    assessment_type: Optional[str] = None,
 ) -> Assessment:
     assessment = Assessment(
         student_id=student_id,
@@ -25,6 +27,8 @@ async def create_assessment(
         key_stage=key_stage,
         topic=topic,
         chat_session_id=chat_session_id,
+        appointment_id=appointment_id,
+        assessment_type=assessment_type,
         total_questions=len(questions_data),
         status="in_progress",
     )

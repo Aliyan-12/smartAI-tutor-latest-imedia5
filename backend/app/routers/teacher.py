@@ -1,5 +1,7 @@
 from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException, status, Query
+from pydantic import BaseModel
+from passlib.context import CryptContext
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func, desc
 from sqlalchemy.orm import selectinload
@@ -8,8 +10,18 @@ from app.db.session import get_db
 from app.middleware.auth import require_teacher
 from app.models.user import User, ROLE_STUDENT
 from app.models.chat import Chat, Message
+from app.models.parent_student import InviteCode
 from app.schemas.user import UserResponse
 from app.schemas.chat import ChatResponse, ChatListItem
+
+_pwd_ctx = CryptContext(schemes=["bcrypt"], deprecated="auto")
+
+
+class TeacherCreateStudent(BaseModel):
+    name: str
+    email: str
+    password: str
+    year_group: Optional[str] = None
 
 router = APIRouter(prefix="/api/teacher", tags=["teacher"])
 
@@ -126,3 +138,69 @@ async def recent_activity(
             "timestamp": msg.timestamp.isoformat(),
         })
     return items
+
+
+@router.post("/students", status_code=status.HTTP_201_CREATED)
+async def create_student(
+    payload: TeacherCreateStudent,
+    teacher: User = Depends(require_teacher),
+    db: AsyncSession = Depends(get_db),
+):
+    existing = await db.execute(select(User).where(User.email == payload.email))
+    if existing.scalar_one_or_none():
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="A user with this email already exists",
+        )
+
+    user = User(
+        name=payload.name,
+        email=payload.email,
+        password_hash=_pwd_ctx.hash(payload.password),
+        role=ROLE_STUDENT,
+        is_active=True,
+        credits=100.0,
+    )
+    db.add(user)
+    await db.flush()
+    await db.refresh(user)
+
+    invite = InviteCode(
+        code=InviteCode.generate_code(),
+        student_id=user.id,
+        used=False,
+    )
+    db.add(invite)
+    await db.flush()
+
+    return {
+        "student": UserResponse.model_validate(user),
+        "invite_code": invite.code,
+    }
+
+
+@router.post("/students/{student_id}/invite-code", status_code=status.HTTP_201_CREATED)
+async def generate_invite_code(
+    student_id: int,
+    teacher: User = Depends(require_teacher),
+    db: AsyncSession = Depends(get_db),
+):
+    result = await db.execute(
+        select(User).where(User.id == student_id, User.role == ROLE_STUDENT)
+    )
+    student = result.scalar_one_or_none()
+    if not student:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Student not found")
+
+    invite = InviteCode(
+        code=InviteCode.generate_code(),
+        student_id=student.id,
+        used=False,
+    )
+    db.add(invite)
+    await db.flush()
+
+    return {
+        "invite_code": invite.code,
+        "student_name": student.name,
+    }

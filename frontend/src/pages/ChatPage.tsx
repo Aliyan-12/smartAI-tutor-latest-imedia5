@@ -4,7 +4,7 @@ import { X } from "lucide-react";
 import Sidebar from "../components/Sidebar";
 import ChatWindow from "../components/ChatWindow";
 import ChatInput from "../components/ChatInput";
-import StudentDashboard from "../components/StudentDashboard";
+import WelcomeScreen from "../components/WelcomeScreen";
 import AssessmentMode from "../components/AssessmentMode";
 import { useChat } from "../hooks/useChat";
 import { useVoice } from "../hooks/useVoice";
@@ -154,11 +154,10 @@ export default function ChatPage() {
       <div className="main-content">
         <div className="chat-container">
           {showWelcome ? (
-            <StudentDashboard
-              onStartChat={(topic) => {
+            <WelcomeScreen
+              onPromptClick={(topic) => {
                 if (topic) sendMessage(topic);
               }}
-              onNavigate={(path) => navigate(path)}
             />
           ) : (
             <ChatWindow

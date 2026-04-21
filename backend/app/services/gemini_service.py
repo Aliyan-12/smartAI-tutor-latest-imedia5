@@ -30,6 +30,67 @@ SYSTEM_PROMPT = (
     "Do not include the marker if you have already offered a quiz recently in this conversation."
 )
 
+
+def build_personalised_system_prompt(student_preferences: dict) -> str:
+    """
+    Build a personalised system prompt by injecting the student's learning preferences
+    on top of the base SYSTEM_PROMPT.
+    """
+    if not student_preferences:
+        return SYSTEM_PROMPT
+
+    additions = []
+
+    teaching_pace = student_preferences.get("teaching_pace", "just_right")
+    if teaching_pace == "slower":
+        additions.append(
+            "PACE: Explain concepts slowly and simply. "
+            "Break every idea into small, easy steps. Check understanding frequently."
+        )
+    elif teaching_pace == "faster":
+        additions.append(
+            "PACE: This student prefers a faster pace. Be concise and move on once a concept is understood."
+        )
+
+    learning_style = student_preferences.get("learning_style") or []
+    if "visual" in learning_style:
+        additions.append(
+            "STYLE: Use visual examples — describe diagrams, tables, and charts in words. "
+            "Use ASCII representations when helpful."
+        )
+    if "step_by_step" in learning_style:
+        additions.append("STYLE: Always structure explanations as numbered steps.")
+
+    teaching_prefs = student_preferences.get("teaching_preferences") or {}
+    if teaching_prefs.get("real_life_examples"):
+        additions.append("Always use real-world examples to illustrate concepts.")
+    if teaching_prefs.get("step_by_step"):
+        additions.append("Always break explanations into numbered, sequential steps.")
+    if teaching_prefs.get("practice_as_we_go"):
+        additions.append(
+            "After explaining each concept, immediately give a small practice problem "
+            "before moving on."
+        )
+    if teaching_prefs.get("short_summaries"):
+        additions.append("End each explanation with a 1-2 sentence summary in bold.")
+    if teaching_prefs.get("analogies"):
+        additions.append("Use analogies and comparisons to familiar concepts whenever possible.")
+
+    interests = student_preferences.get("interests") or []
+    if interests:
+        interests_str = ", ".join(interests)
+        additions.append(
+            f"PERSONALISATION: When giving examples, relate them to the student's interests: {interests_str}."
+        )
+
+    if not additions:
+        return SYSTEM_PROMPT
+
+    preference_block = "\n\nSTUDENT PREFERENCES (follow these carefully):\n" + "\n".join(
+        f"- {a}" for a in additions
+    )
+    return SYSTEM_PROMPT + preference_block
+
 MAX_RETRIES = 2
 RETRY_DELAY = 1.5
 
@@ -95,7 +156,13 @@ def generate_response(
     history: List[dict],
     user_message: str,
     rag_chunks: Optional[List["RetrievedChunk"]] = None,
+    student_preferences: Optional[dict] = None,
 ) -> str:
+    system_prompt = (
+        build_personalised_system_prompt(student_preferences)
+        if student_preferences
+        else SYSTEM_PROMPT
+    )
     last_error = None
     for attempt in range(MAX_RETRIES + 1):
         try:
@@ -103,7 +170,7 @@ def generate_response(
             response = client.models.generate_content(
                 model=settings.gemini_model,
                 contents=_build_contents(history, user_message, rag_chunks),
-                config=types.GenerateContentConfig(system_instruction=SYSTEM_PROMPT),
+                config=types.GenerateContentConfig(system_instruction=system_prompt),
             )
             return response.text
         except Exception as e:
@@ -121,7 +188,16 @@ def stream_response(
     history: List[dict],
     user_message: str,
     rag_chunks: Optional[List["RetrievedChunk"]] = None,
+    student_preferences: Optional[dict] = None,
+    system_prompt_override: Optional[str] = None,
 ):
+    if system_prompt_override:
+        system_prompt = system_prompt_override
+    elif student_preferences:
+        system_prompt = build_personalised_system_prompt(student_preferences)
+    else:
+        system_prompt = SYSTEM_PROMPT
+
     last_error = None
     for attempt in range(MAX_RETRIES + 1):
         try:
@@ -129,7 +205,7 @@ def stream_response(
             response = client.models.generate_content_stream(
                 model=settings.gemini_model,
                 contents=_build_contents(history, user_message, rag_chunks),
-                config=types.GenerateContentConfig(system_instruction=SYSTEM_PROMPT),
+                config=types.GenerateContentConfig(system_instruction=system_prompt),
             )
             for chunk in response:
                 if chunk.text:
@@ -150,8 +226,12 @@ async def stream_response_async(
     history: List[dict],
     user_message: str,
     rag_chunks: Optional[List["RetrievedChunk"]] = None,
+    student_preferences: Optional[dict] = None,
+    system_prompt_override: Optional[str] = None,
 ) -> AsyncGenerator[str, None]:
-    for token in stream_response(history, user_message, rag_chunks):
+    for token in stream_response(
+        history, user_message, rag_chunks, student_preferences, system_prompt_override
+    ):
         yield token
 
 

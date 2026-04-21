@@ -54,8 +54,34 @@ export function useChat() {
     navigate("/chat", { replace: true });
   }, [navigate]);
 
+  const resetChat = useCallback(() => {
+    setMessages([]);
+    setActiveSessionId(null);
+    setStreamContent("");
+    setQuizOffer(null);
+  }, []);
+
+  const initSessionChat = useCallback(async (appointmentId: number) => {
+    try {
+      const data = await chatApi.getOrCreateSessionChat(appointmentId);
+      setActiveSessionId(data.session_id);
+      setStreamContent("");
+      setQuizOffer(null);
+      const loaded: ChatMessage[] = data.messages.map((m) => ({
+        id: m.id,
+        chat_id: m.chat_id,
+        role: m.role as ChatMessage["role"],
+        content: m.content,
+        timestamp: m.timestamp,
+      }));
+      setMessages(loaded);
+    } catch (err) {
+      console.error("Failed to init session chat:", err);
+    }
+  }, []);
+
   const sendMessage = useCallback(
-    (text: string) => {
+    (text: string, opts?: { suppressNavigation?: boolean }) => {
       const userMsg: ChatMessage = {
         id: Date.now(),
         chat_id: 0,
@@ -77,7 +103,9 @@ export function useChat() {
         (event) => {
           if (event.type === "start" && event.session_id) {
             setActiveSessionId(event.session_id);
-            navigate(`/chat/${event.session_id}`, { replace: true });
+            if (!opts?.suppressNavigation) {
+              navigate(`/chat/${event.session_id}`, { replace: true });
+            }
           } else if (event.type === "token" && event.content) {
             if (event.content.startsWith("[Error:")) {
               hasError = true;
@@ -197,6 +225,8 @@ export function useChat() {
     loadCredits,
     loadChat,
     startNewChat,
+    resetChat,
+    initSessionChat,
     sendMessage,
     deleteChat,
     stopStreaming,

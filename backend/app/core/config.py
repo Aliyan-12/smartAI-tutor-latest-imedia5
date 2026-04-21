@@ -14,7 +14,7 @@ class Settings(BaseSettings):
 
     postgres_user: str = ""
     postgres_password: str = ""
-    postgres_db: str = ""
+    postgres_db: str = "smartai_tutor"
     postgres_host: str = "localhost"
     postgres_port: int = 5432
 
@@ -48,7 +48,7 @@ class Settings(BaseSettings):
     email_smtp_password: str = ""
     email_from_address: str = "noreply@smartai.com"
 
-    max_appointments_per_week: int = 2
+    max_appointments_per_week: int = 100
     default_class_price: float = 25.00
 
     @property

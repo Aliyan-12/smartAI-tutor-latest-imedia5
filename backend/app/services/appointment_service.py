@@ -4,6 +4,7 @@ from typing import List, Optional
 
 from sqlalchemy import select, func, and_
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 from app.models.appointment import Appointment
 from app.models.user import User
@@ -48,14 +49,6 @@ async def book_appointment(
     notes: Optional[str] = None,
     passcode: Optional[str] = None,
 ) -> Appointment:
-    weekly_count = await count_weekly_appointments(db, student_id, scheduled_at)
-    max_per_week = settings.max_appointments_per_week
-
-    if weekly_count >= max_per_week:
-        raise ValueError(
-            f"Student already has {weekly_count} classes this week (max {max_per_week})"
-        )
-
     appointment = Appointment(
         student_id=student_id,
         teacher_id=teacher_id,
@@ -80,10 +73,13 @@ async def book_appointment(
 
 async def update_status(db: AsyncSession, appointment: Appointment, new_status: str) -> Appointment:
     valid_transitions = {
-        "booked": ["confirmed", "cancelled"],
-        "confirmed": ["completed", "cancelled"],
-        "completed": [],
-        "cancelled": [],
+        "booked":     ["confirmed", "cancelled"],
+        "confirmed":  ["started", "cancelled"],
+        "started":    ["paused", "terminated", "completed"],
+        "paused":     ["started", "terminated", "completed"],
+        "terminated": [],
+        "completed":  [],
+        "cancelled":  [],
     }
     allowed = valid_transitions.get(appointment.status, [])
     if new_status not in allowed:
@@ -91,15 +87,174 @@ async def update_status(db: AsyncSession, appointment: Appointment, new_status: 
             f"Cannot transition from '{appointment.status}' to '{new_status}'"
         )
 
+    from datetime import datetime, timezone as tz
+    now = datetime.now(tz.utc)
+
     appointment.status = new_status
-    if new_status == "completed":
+
+    if new_status == "paused":
+        appointment.paused_at = now
+    elif new_status == "started":
+        if appointment.paused_at:
+            paused_secs = int((now - appointment.paused_at).total_seconds())
+            appointment.total_paused_seconds = (appointment.total_paused_seconds or 0) + paused_secs
+            appointment.paused_at = None
+    elif new_status in ("completed", "terminated"):
+        if appointment.paused_at:
+            paused_secs = int((now - appointment.paused_at).total_seconds())
+            appointment.total_paused_seconds = (appointment.total_paused_seconds or 0) + paused_secs
+            appointment.paused_at = None
         appointment.payment_status = "paid"
     elif new_status == "cancelled":
         appointment.payment_status = "refunded"
 
     await db.flush()
     await db.refresh(appointment)
+
+    if new_status in ("completed", "terminated"):
+        await _run_post_session_pipeline(db, appointment)
+
     return appointment
+
+
+async def _run_post_session_pipeline(db: AsyncSession, appointment: Appointment) -> None:
+    """
+    Post-session pipeline: generate report first (committed immediately),
+    then run gamification/email in a separate phase so a gamification failure
+    never prevents the report from being saved.
+    """
+    from app.models.lesson_plan import LessonPlan
+    from app.models.assessment import Assessment
+    from app.services import lesson_service, gamification_service, email_service
+
+    key_stage = appointment.key_stage or "KS4"
+
+    # ── Phase 1: load data + generate report ────────────────────────────────
+    report: Optional[dict] = None
+    student = None
+    lesson_plan = None
+    try:
+        lp_result = await db.execute(
+            select(LessonPlan).where(LessonPlan.appointment_id == appointment.id)
+        )
+        lesson_plan = lp_result.scalar_one_or_none()
+
+        student_result = await db.execute(
+            select(User).where(User.id == appointment.student_id)
+        )
+        student = student_result.scalar_one_or_none()
+
+        # Load assessments linked to this appointment (by appointment_id first, fallback by subject)
+        asmt_result = await db.execute(
+            select(Assessment)
+            .where(Assessment.appointment_id == appointment.id)
+            .order_by(Assessment.created_at.desc())
+            .limit(20)
+        )
+        assessments = list(asmt_result.scalars().all())
+        if not assessments:
+            # Fallback: recent assessments for this student+subject
+            asmt_result = await db.execute(
+                select(Assessment)
+                .where(
+                    Assessment.student_id == appointment.student_id,
+                    Assessment.subject == appointment.subject,
+                )
+                .order_by(Assessment.created_at.desc())
+                .limit(10)
+            )
+            assessments = list(asmt_result.scalars().all())
+
+        report = await lesson_service.generate_session_report(
+            db=db,
+            appointment=appointment,
+            lesson_plan=lesson_plan,
+            assessments=assessments,
+            student_name=student.name if student else "Student",
+        )
+
+        if lesson_plan and lesson_plan.status != "completed":
+            lesson_plan.status = "completed"
+            lesson_plan.updated_at = datetime.now(timezone.utc)
+            await db.flush()
+
+        # Commit report immediately so it survives even if gamification fails
+        await db.commit()
+        logger.info(f"Report saved for appointment_id={appointment.id}")
+
+    except Exception as exc:
+        logger.error(
+            f"Report generation failed for appointment_id={appointment.id}: {exc}",
+            exc_info=True,
+        )
+        try:
+            await db.rollback()
+        except Exception:
+            pass
+        return  # Can't continue without a report
+
+    # ── Phase 2: gamification (XP, mastery, streak) ──────────────────────────
+    try:
+        score_percent = float(report.get("quiz_score_percent") or 70.0)
+        xp_amount = _calculate_session_xp(score_percent, appointment.duration_minutes)
+        await gamification_service.award_xp(
+            db, appointment.student_id, xp_amount, reason="session_completed"
+        )
+        await gamification_service.check_and_update_streak(db, appointment.student_id)
+
+        topics_covered = report.get("topics_covered") or []
+        if not topics_covered:
+            topics_covered = (
+                [lesson_plan.unit_name or lesson_plan.subtopic or appointment.subject]
+                if lesson_plan else [appointment.subject]
+            )
+        for topic in topics_covered:
+            await gamification_service.update_topic_mastery(
+                db=db,
+                student_id=appointment.student_id,
+                subject=appointment.subject,
+                key_stage=key_stage,
+                topic=topic,
+                score=score_percent,
+            )
+
+        await db.commit()
+        logger.info(
+            f"Gamification updated for appointment_id={appointment.id}, xp={xp_amount}"
+        )
+    except Exception as exc:
+        logger.error(
+            f"Gamification phase failed for appointment_id={appointment.id}: {exc}",
+            exc_info=True,
+        )
+        try:
+            await db.rollback()
+        except Exception:
+            pass
+
+    # ── Phase 3: email (non-fatal) ───────────────────────────────────────────
+    try:
+        parent = None
+        if student and student.parent_id:
+            p_result = await db.execute(select(User).where(User.id == student.parent_id))
+            parent = p_result.scalar_one_or_none()
+        email_service.send_session_report(
+            to_email=parent.email if parent else None,
+            student_name=student.name if student else "Student",
+            subject=appointment.subject,
+            report_dict=report,
+            student_email=student.email if student else None,
+        )
+    except Exception as exc:
+        logger.warning(f"Email failed for appointment_id={appointment.id}: {exc}")
+
+
+def _calculate_session_xp(score_percent: float, duration_minutes: int) -> int:
+    """Calculate XP to award based on session score and duration."""
+    base_xp = 50  # Base for completing a session
+    score_bonus = int(score_percent * 0.5)  # Up to 50 extra XP for 100% score
+    duration_bonus = min(25, duration_minutes // 4)  # Up to 25 extra XP for long sessions
+    return base_xp + score_bonus + duration_bonus
 
 
 async def list_appointments(

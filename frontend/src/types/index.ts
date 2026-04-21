@@ -138,11 +138,13 @@ export interface Appointment {
   description: string | null;
   scheduled_at: string;
   duration_minutes: number;
-  status: "booked" | "confirmed" | "completed" | "cancelled";
+  status: "booked" | "confirmed" | "started" | "paused" | "terminated" | "completed" | "cancelled";
   payment_status: "pending" | "paid" | "refunded";
   payment_amount: number | null;
   passcode: string | null;
   session_started_at: string | null;
+  paused_at: string | null;
+  total_paused_seconds: number;
   meeting_link: string | null;
   notes: string | null;
   student_name?: string | null;
@@ -226,4 +228,68 @@ export interface DashboardData {
     last_mistake?: string;
   } | null;
   xp_to_next_level: number;
+}
+
+export interface LessonBlock {
+  type: string;
+  title: string;
+  duration_minutes: number;
+  description: string;
+}
+
+export interface GeneratedLessonPlan {
+  lesson_title: string;
+  preview_summary: string;
+  blocks: LessonBlock[];
+  personalisation_notes: string;
+}
+
+export interface SessionReport {
+  appointment_id: number;
+  summary: string;
+  topics_covered: string[];
+  quiz_score_percent: number | null;
+  weak_areas: string[];
+  strong_areas: string[];
+  understanding_level: string;
+  next_session_recommendation: string;
+  time_spent_minutes: number;
+  xp_earned: number;
+}
+
+export interface HomeworkItem {
+  id: number;
+  teacher_id: number;
+  title: string;
+  subject: string;
+  key_stage: string;
+  topic: string;
+  instructions: string | null;
+  due_date: string | null;
+  estimated_minutes: number;
+  assignment_type: "homework" | "reading" | "prep" | "revision";
+  status: string;
+}
+
+export interface MyAssignment {
+  id: number;
+  homework_id: number;
+  status: "assigned" | "started" | "completed";
+  started_at: string | null;
+  completed_at: string | null;
+  homework: HomeworkItem;
+}
+
+export interface LearningPreferences {
+  learning_style: string[] | null;
+  teaching_pace: string;
+  teaching_preferences: Record<string, boolean> | null;
+  interests: string[] | null;
+  learning_goals: string | null;
+  year_group: string | null;
+  default_session_length: number;
+  voice_responses: boolean;
+  show_hints: boolean;
+  auto_start_next_topic: boolean;
+  notification_prefs: Record<string, boolean> | null;
 }

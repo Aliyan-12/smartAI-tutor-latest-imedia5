@@ -82,6 +82,14 @@ export const chatApi = {
     return handleResponse(res);
   },
 
+  async getOrCreateSessionChat(appointmentId: number) {
+    const res = await fetch(`${API_BASE}/chat/for-appointment/${appointmentId}`, {
+      method: "POST",
+      headers: authHeaders(),
+    });
+    return handleResponse<{ session_id: string; messages: Array<{ id: number; chat_id: number; role: string; content: string; timestamp: string }> }>(res);
+  },
+
   streamMessage(
     message: string,
     sessionId: string | null,
@@ -267,6 +275,23 @@ export const teacherApi = {
     const res = await fetch(`${API_BASE}/teacher/activity?limit=${limit}`, { headers: authHeaders() });
     return handleResponse(res);
   },
+
+  async createStudent(data: { name: string; email: string; password: string; year_group?: string }) {
+    const res = await fetch(`${API_BASE}/teacher/students`, {
+      method: "POST",
+      headers: authHeaders(),
+      body: JSON.stringify(data),
+    });
+    return handleResponse(res);
+  },
+
+  async generateInviteCode(studentId: number) {
+    const res = await fetch(`${API_BASE}/teacher/students/${studentId}/invite-code`, {
+      method: "POST",
+      headers: authHeaders(),
+    });
+    return handleResponse(res);
+  },
 };
 
 export const documentsApi = {
@@ -386,6 +411,15 @@ export const parentApi = {
     });
     return handleResponse(res);
   },
+
+  async linkStudent(code: string) {
+    const res = await fetch(`${API_BASE}/parent/link`, {
+      method: "POST",
+      headers: authHeaders(),
+      body: JSON.stringify({ code }),
+    });
+    return handleResponse(res);
+  },
 };
 
 export const assessmentsApi = {
@@ -444,6 +478,90 @@ export const gamificationApi = {
   },
 };
 
+export const lessonApi = {
+  async generatePlan(data: {
+    subject: string;
+    topic: string;
+    subtopic?: string;
+    goal: string;
+    duration_minutes: number;
+    appointment_id?: number;
+  }) {
+    const res = await fetch(`${API_BASE}/lessons/generate-plan`, {
+      method: "POST",
+      headers: authHeaders(),
+      body: JSON.stringify(data),
+    });
+    return handleResponse(res);
+  },
+};
+
+export const assignmentsApi = {
+  async getMy() {
+    const res = await fetch(`${API_BASE}/assignments/my`, { headers: authHeaders() });
+    return handleResponse(res);
+  },
+  async startAssignment(id: number): Promise<void> {
+    const res = await fetch(`${API_BASE}/assignments/my/${id}/start`, {
+      method: "PATCH",
+      headers: authHeaders(),
+    });
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      throw new Error(body.detail || "Failed to start assignment");
+    }
+  },
+  async completeAssignment(id: number): Promise<void> {
+    const res = await fetch(`${API_BASE}/assignments/my/${id}/complete`, {
+      method: "PATCH",
+      headers: authHeaders(),
+    });
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      throw new Error(body.detail || "Failed to complete assignment");
+    }
+  },
+};
+
+export const settingsApi = {
+  async getLearningPreferences() {
+    const res = await fetch(`${API_BASE}/settings/learning-preferences`, { headers: authHeaders() });
+    return handleResponse(res);
+  },
+  async updateLearningPreferences(data: Record<string, unknown>) {
+    const res = await fetch(`${API_BASE}/settings/learning-preferences`, {
+      method: "PATCH",
+      headers: authHeaders(),
+      body: JSON.stringify(data),
+    });
+    return handleResponse(res);
+  },
+  async updateProfile(data: { name?: string; year_group?: string }) {
+    const res = await fetch(`${API_BASE}/settings/profile`, {
+      method: "PATCH",
+      headers: authHeaders(),
+      body: JSON.stringify(data),
+    });
+    return handleResponse(res);
+  },
+  async updateNotifications(data: Record<string, boolean>) {
+    const res = await fetch(`${API_BASE}/settings/notifications`, {
+      method: "PATCH",
+      headers: authHeaders(),
+      body: JSON.stringify(data),
+    });
+    return handleResponse(res);
+  },
+  async changePassword(data: { current_password: string; new_password: string }) {
+    const res = await fetch(`${API_BASE}/settings/change-password`, {
+      method: "POST",
+      headers: authHeaders(),
+      body: JSON.stringify(data),
+    });
+    return handleResponse(res);
+  },
+};
+
 export const lessonsApi = {
   async getAvailableFilters() {
     const res = await fetch(`${API_BASE}/lessons/available-filters`, { headers: authHeaders() });
@@ -494,6 +612,39 @@ export const lessonsApi = {
   },
 };
 
+export const sessionsApi = {
+  async startPractice(appointmentId: number): Promise<import("../types").Assessment> {
+    const res = await fetch(`${API_BASE}/sessions/${appointmentId}/practice`, {
+      method: "POST",
+      headers: authHeaders(),
+      body: JSON.stringify({}),
+    });
+    return handleResponse(res);
+  },
+  async startTest(appointmentId: number): Promise<import("../types").Assessment> {
+    const res = await fetch(`${API_BASE}/sessions/${appointmentId}/test`, {
+      method: "POST",
+      headers: authHeaders(),
+      body: JSON.stringify({}),
+    });
+    return handleResponse(res);
+  },
+  async getLatestPractice(appointmentId: number): Promise<import("../types").Assessment | null> {
+    const res = await fetch(`${API_BASE}/sessions/${appointmentId}/practice/latest`, {
+      headers: authHeaders(),
+    });
+    if (res.status === 404) return null;
+    return handleResponse(res);
+  },
+  async getLatestTest(appointmentId: number): Promise<import("../types").Assessment | null> {
+    const res = await fetch(`${API_BASE}/sessions/${appointmentId}/test/latest`, {
+      headers: authHeaders(),
+    });
+    if (res.status === 404) return null;
+    return handleResponse(res);
+  },
+};
+
 export const appointmentsApi = {
   async getTeachers() {
     const res = await fetch(`${API_BASE}/appointments/teachers`, { headers: authHeaders() });
@@ -538,6 +689,10 @@ export const appointmentsApi = {
       headers: authHeaders(),
       body: JSON.stringify({ passcode }),
     });
+    return handleResponse(res);
+  },
+  async getReport(id: number) {
+    const res = await fetch(`${API_BASE}/appointments/${id}/report`, { headers: authHeaders() });
     return handleResponse(res);
   },
 };

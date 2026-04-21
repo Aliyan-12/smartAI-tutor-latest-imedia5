@@ -7,6 +7,7 @@ from app.models.assessment import Assessment, AssessmentQuestion
 from app.models.appointment import Appointment
 from app.models.student_profile import StudentProfile, TopicMastery
 from app.models.lesson_plan import LessonPlan
+from app.models.assignment import Homework, HomeworkAssignment
 
 __all__ = [
     "User", "Chat", "Message",
@@ -17,4 +18,5 @@ __all__ = [
     "Appointment",
     "StudentProfile", "TopicMastery",
     "LessonPlan",
+    "Homework", "HomeworkAssignment",
 ]

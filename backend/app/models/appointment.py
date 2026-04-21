@@ -33,6 +33,8 @@ class Appointment(Base):
     payment_amount: Mapped[Optional[float]] = mapped_column(NUMERIC(10, 2), nullable=True, default=25.00)
     passcode: Mapped[Optional[str]] = mapped_column(String(16), nullable=True)
     session_started_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    paused_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    total_paused_seconds: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
     meeting_link: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
