@@ -54,21 +54,6 @@ export default function PostSessionScreen({
   const quizScore = report?.quiz_score_percent;
   const xpEarned = report?.xp_earned ?? 120;
 
-  const goToContinue = () => {
-    navigate("/lesson/setup", { state: { subject: sessionSubject } });
-  };
-
-  const goToPracticeWeak = () => {
-    const weakTopic = report?.weak_areas?.[0] ?? "";
-    navigate("/lesson/setup", {
-      state: { subject: sessionSubject, goal: "practice", topic: weakTopic },
-    });
-  };
-
-  const goToNextTopic = () => {
-    navigate("/lesson/setup", { state: { subject: sessionSubject } });
-  };
-
   return (
     <div style={styles.overlay}>
       <div style={styles.card}>
@@ -113,17 +98,17 @@ export default function PostSessionScreen({
         <div style={styles.section}>
           <p style={styles.sectionHeading}>What do you want to do next?</p>
           <div style={styles.actionRow}>
-            <button style={styles.actionBtn} onClick={goToContinue}>
-              <span style={styles.actionBtnIcon}>↩</span>
-              <span style={styles.actionBtnText}>Continue where left off</span>
+            <button style={{ ...styles.actionBtn, borderColor: "var(--accent-blue)", background: "rgba(26,115,232,0.05)" }} onClick={() => navigate("/progress")}>
+              <span style={styles.actionBtnIcon}>📊</span>
+              <span style={styles.actionBtnText}>View My Progress</span>
             </button>
-            <button style={styles.actionBtn} onClick={goToPracticeWeak}>
-              <span style={styles.actionBtnIcon}>🎯</span>
-              <span style={styles.actionBtnText}>Practice Weak Areas</span>
+            <button style={styles.actionBtn} onClick={() => navigate("/chat")}>
+              <span style={styles.actionBtnIcon}>🤖</span>
+              <span style={styles.actionBtnText}>Ask AI Tutor</span>
             </button>
-            <button style={styles.actionBtn} onClick={goToNextTopic}>
-              <span style={styles.actionBtnIcon}>▶</span>
-              <span style={styles.actionBtnText}>Next Topic</span>
+            <button style={styles.actionBtn} onClick={() => navigate("/sessions")}>
+              <span style={styles.actionBtnIcon}>📅</span>
+              <span style={styles.actionBtnText}>My Sessions</span>
             </button>
           </div>
         </div>

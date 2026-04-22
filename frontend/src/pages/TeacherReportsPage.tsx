@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import Sidebar from "../components/Sidebar";
 import { appointmentsApi } from "../services/api";
 import type { Appointment } from "../types";
@@ -8,12 +8,15 @@ interface ReportData {
   status: string;
   subject: string;
   report: {
-    overall_performance: string;
-    strengths: string[];
-    areas_for_improvement: string[];
-    recommendations: string;
-    engagement_level: string;
+    summary: string;
     topics_covered: string[];
+    quiz_score_percent: number | null;
+    weak_areas: string[];
+    strong_areas: string[];
+    understanding_level: string;
+    next_session_recommendation: string;
+    time_spent_minutes: number;
+    encouragement?: string;
   } | null;
 }
 
@@ -28,91 +31,115 @@ const SUBJECT_CONFIG: Record<string, { emoji: string; color: string; bg: string 
   physics:   { emoji: "⚛️", color: "#0284c7", bg: "#f0f9ff" },
   chemistry: { emoji: "🧪", color: "#059669", bg: "#ecfdf5" },
   biology:   { emoji: "🧬", color: "#15803d", bg: "#f0fdf4" },
+  music:     { emoji: "🎵", color: "#db2777", bg: "#fdf2f8" },
+  art:       { emoji: "🎨", color: "#ea580c", bg: "#fff7ed" },
+  default:   { emoji: "📚", color: "#475569", bg: "#f8fafc" },
 };
 
-function getSubjectConfig(subject: string) {
-  const key = subject?.toLowerCase() ?? "";
-  return SUBJECT_CONFIG[key] ?? { emoji: "📚", color: "#64748b", bg: "#f8fafc" };
+const STATUS_CONFIG: Record<string, { label: string; color: string; bg: string; icon: string }> = {
+  completed:  { label: "Completed",   color: "#15803d", bg: "#dcfce7", icon: "✓" },
+  terminated: { label: "Terminated",  color: "#6b7280", bg: "#f3f4f6", icon: "✕" },
+  started:    { label: "In Progress", color: "#2563eb", bg: "#dbeafe", icon: "▶" },
+  paused:     { label: "Paused",      color: "#d97706", bg: "#fef3c7", icon: "⏸" },
+  confirmed:  { label: "Confirmed",   color: "#7c3aed", bg: "#f5f3ff", icon: "✔" },
+  booked:     { label: "Booked",      color: "#0891b2", bg: "#ecfeff", icon: "📅" },
+  cancelled:  { label: "Cancelled",   color: "#dc2626", bg: "#fee2e2", icon: "✕" },
+};
+
+const STATUS_FILTER_OPTIONS = [
+  { value: "all",        label: "All" },
+  { value: "completed",  label: "Completed" },
+  { value: "terminated", label: "Terminated" },
+  { value: "started",    label: "In Progress" },
+  { value: "paused",     label: "Paused" },
+  { value: "confirmed",  label: "Confirmed" },
+];
+
+function getSubjectCfg(subject: string) {
+  return SUBJECT_CONFIG[subject?.toLowerCase()] ?? SUBJECT_CONFIG.default;
 }
 
-function getEngagementStyle(level: string): { label: string; color: string; bg: string } {
-  switch (level?.toLowerCase()) {
-    case "excellent": return { label: "Excellent", color: "#15803d", bg: "#f0fdf4" };
-    case "good":      return { label: "Good",      color: "#1d4ed8", bg: "#eff6ff" };
-    case "fair":      return { label: "Needs Support", color: "#d97706", bg: "#fffbeb" };
-    case "poor":      return { label: "Struggling", color: "#dc2626", bg: "#fef2f2" };
-    default:          return { label: level ?? "—", color: "#64748b", bg: "#f8fafc" };
-  }
+function getStatusCfg(status: string) {
+  return STATUS_CONFIG[status?.toLowerCase()] ?? { label: status, color: "#475569", bg: "#f1f5f9", icon: "" };
 }
 
-function formatDate(iso: string) {
-  return new Date(iso).toLocaleDateString("en-GB", {
-    day: "numeric", month: "short", year: "numeric",
-    hour: "2-digit", minute: "2-digit",
-  });
+function formatDate(iso: string): string {
+  return new Date(iso).toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" });
 }
+
+function formatTime(iso: string): string {
+  return new Date(iso).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" });
+}
+
+const canViewReport = (status: string) => ["completed", "terminated"].includes(status);
 
 export default function TeacherReportsPage() {
   const [appointments, setAppointments] = useState<Appointment[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [activeStatus, setActiveStatus] = useState<string>("all");
+  const [activeSubject, setActiveSubject] = useState<string>("All");
+  const [filterStudent, setFilterStudent] = useState<string>("All");
   const [expanded, setExpanded] = useState<Record<number, boolean>>({});
-  const [reports, setReports] = useState<Record<number, ReportData | null>>({});
+  const [reportData, setReportData] = useState<Record<number, ReportData | null>>({});
   const [reportLoading, setReportLoading] = useState<Record<number, boolean>>({});
-  const [filterStudent, setFilterStudent] = useState<string>("all");
 
   useEffect(() => {
     appointmentsApi
-      .list("completed")
+      .list()
       .then((data) => setAppointments((data as Appointment[]) ?? []))
       .catch((e: Error) => setError(e.message))
       .finally(() => setLoading(false));
   }, []);
 
-  const studentNames = Array.from(
-    new Set(appointments.map((a) => a.student_name ?? `Student #${a.student_id}`))
-  );
+  const subjects = ["All", ...Array.from(new Set(appointments.map((a) => a.subject))).sort()];
+  const studentNames = ["All", ...Array.from(new Set(appointments.map((a) => a.student_name ?? `Student #${a.student_id}`))).sort()];
 
-  const displayed = filterStudent === "all"
-    ? appointments
-    : appointments.filter((a) => (a.student_name ?? `Student #${a.student_id}`) === filterStudent);
+  const displayed = appointments.filter((a) => {
+    const statusMatch = activeStatus === "all" || a.status === activeStatus;
+    const subjMatch = activeSubject === "All" || a.subject === activeSubject;
+    const studentMatch = filterStudent === "All" || (a.student_name ?? `Student #${a.student_id}`) === filterStudent;
+    return statusMatch && subjMatch && studentMatch;
+  });
 
-  const completedThisWeek = appointments.filter((a) => {
-    const t = new Date(a.scheduled_at).getTime();
-    return Date.now() - t < 7 * 24 * 3600 * 1000;
-  }).length;
+  const completedCount = appointments.filter((a) => a.status === "completed" || a.status === "terminated").length;
+  const thisWeekCount = appointments.filter((a) => Date.now() - new Date(a.scheduled_at).getTime() < 7 * 24 * 3600 * 1000).length;
+  const studentCount = new Set(appointments.map((a) => a.student_id)).size;
 
-  const toggleExpand = async (appt: Appointment) => {
-    const id = appt.id;
-    const nowExpanded = !expanded[id];
-    setExpanded((prev) => ({ ...prev, [id]: nowExpanded }));
-    if (nowExpanded && reports[id] === undefined) {
+  const loadReport = useCallback(
+    async (id: number) => {
+      if (reportData[id] !== undefined) return;
       setReportLoading((prev) => ({ ...prev, [id]: true }));
       try {
-        const data = await appointmentsApi.getReport(id) as ReportData;
-        setReports((prev) => ({ ...prev, [id]: data }));
+        const data = await appointmentsApi.getReport(id);
+        setReportData((prev) => ({ ...prev, [id]: data as ReportData }));
       } catch {
-        setReports((prev) => ({ ...prev, [id]: null }));
+        setReportData((prev) => ({ ...prev, [id]: null }));
       } finally {
         setReportLoading((prev) => ({ ...prev, [id]: false }));
       }
-    }
+    },
+    [reportData]
+  );
+
+  const handleToggle = (id: number) => {
+    const nowOpen = !expanded[id];
+    setExpanded((prev) => ({ ...prev, [id]: nowOpen }));
+    if (nowOpen) loadReport(id);
   };
 
   return (
     <>
       <style>{`
-        .tr-page  { display: flex; height: 100vh; background: #f5f5f0; }
-        .tr-main  { flex: 1; display: flex; flex-direction: column; overflow-y: auto; }
-        .tr-inner { padding: 32px 40px; flex: 1; }
-
-        .tr-header { margin-bottom: 24px; }
-        .tr-header h1 { font-size: 24px; font-weight: 800; color: #0f172a; margin: 0 0 4px; }
-        .tr-header p  { font-size: 14px; color: #64748b; margin: 0; }
+        .tr-page { display: flex; height: 100vh; background: #f8fafc; font-family: "DM Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+        .tr-main { flex: 1; display: flex; flex-direction: column; overflow-y: auto; }
+        .tr-header { padding: 32px 40px 0; }
+        .tr-title { font-size: 26px; font-weight: 800; color: #0f172a; margin: 0 0 4px; }
+        .tr-subtitle { font-size: 14px; color: #64748b; margin: 0; }
 
         .tr-stats {
           display: grid; grid-template-columns: repeat(3,1fr);
-          gap: 12px; margin-bottom: 24px;
+          gap: 12px; margin: 20px 40px 0;
         }
         .tr-stat {
           background: white; border: 1px solid #e2e8f0;
@@ -122,172 +149,176 @@ export default function TeacherReportsPage() {
         .tr-stat-val { font-size: 26px; font-weight: 800; color: #0f172a; margin: 0 0 3px; }
         .tr-stat-lbl { font-size: 12px; color: #64748b; }
 
-        .tr-filters {
-          display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 20px;
-        }
+        .tr-filter-group { padding: 16px 40px 0; display: flex; flex-direction: column; gap: 10px; }
+        .tr-filter-label { font-size: 11px; font-weight: 700; color: #94a3b8; text-transform: uppercase; letter-spacing: .5px; margin: 0 0 6px; }
+        .tr-filters { display: flex; gap: 8px; flex-wrap: wrap; }
         .tr-chip {
-          padding: 6px 14px; border-radius: 999px;
-          font-size: 13px; font-weight: 600;
-          border: 1.5px solid #e2e8f0;
-          background: white; color: #475569;
-          cursor: pointer; transition: all .15s;
+          padding: 6px 16px; border-radius: 999px; font-size: 13px; font-weight: 600;
+          cursor: pointer; border: 1.5px solid #e2e8f0; background: white; color: #475569;
+          transition: all .15s;
         }
-        .tr-chip:hover, .tr-chip.active {
-          background: #1a73e8; color: white; border-color: #1a73e8;
-        }
+        .tr-chip:hover { border-color: #1a73e8; color: #1a73e8; }
+        .tr-chip.active { background: #1a73e8; color: white; border-color: #1a73e8; }
 
-        .tr-list { display: flex; flex-direction: column; gap: 12px; }
-
+        .tr-body { flex: 1; padding: 20px 40px 40px; display: flex; flex-direction: column; gap: 14px; }
         .tr-card {
-          background: white; border: 1.5px solid #e2e8f0;
-          border-radius: 12px; overflow: hidden;
-          box-shadow: 0 1px 3px rgba(0,0,0,.04);
-          transition: box-shadow .15s;
+          background: white; border-radius: 12px; border: 1.5px solid #e2e8f0;
+          overflow: hidden; transition: box-shadow .15s;
         }
-        .tr-card:hover { box-shadow: 0 4px 16px rgba(0,0,0,.08); }
-
-        .tr-card-top {
-          padding: 18px 20px;
-          display: flex; align-items: flex-start; gap: 14px;
+        .tr-card:hover { box-shadow: 0 4px 16px rgba(0,0,0,.07); }
+        .tr-card-top { display: flex; align-items: flex-start; gap: 16px; padding: 18px 24px; }
+        .tr-subject-icon {
+          width: 44px; height: 44px; border-radius: 10px; display: flex;
+          align-items: center; justify-content: center; font-size: 20px; flex-shrink: 0;
         }
-        .tr-subj-icon {
-          width: 44px; height: 44px; border-radius: 10px;
-          display: flex; align-items: center; justify-content: center;
-          font-size: 20px; flex-shrink: 0;
-        }
-        .tr-card-body { flex: 1; min-width: 0; }
-        .tr-card-meta { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 4px; }
-        .tr-student-chip {
-          font-size: 11px; font-weight: 700; color: #1a73e8;
-          background: #eff6ff; padding: 2px 8px; border-radius: 999px;
-        }
-        .tr-subj-badge {
-          font-size: 11px; font-weight: 700; padding: 2px 8px; border-radius: 999px;
-        }
-        .tr-card-title { font-size: 15px; font-weight: 700; color: #0f172a; margin: 0 0 4px; }
-        .tr-card-date  { font-size: 12px; color: #64748b; }
-
-        .tr-card-right { display: flex; align-items: center; gap: 10px; flex-shrink: 0; }
-        .tr-eng-badge {
-          font-size: 11px; font-weight: 700;
-          padding: 4px 10px; border-radius: 999px;
-        }
+        .tr-card-info { flex: 1; min-width: 0; }
+        .tr-card-meta-row { display: flex; align-items: center; gap: 8px; margin-bottom: 5px; flex-wrap: wrap; }
+        .tr-badge { padding: 3px 10px; border-radius: 999px; font-size: 11px; font-weight: 700; letter-spacing: .3px; }
+        .tr-student-chip { font-size: 11px; font-weight: 700; color: #1a73e8; background: #eff6ff; padding: 2px 8px; border-radius: 999px; }
+        .tr-card-title { font-size: 15px; font-weight: 700; color: #0f172a; margin: 0 0 5px; }
+        .tr-card-details { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; }
+        .tr-detail-item { font-size: 12px; color: #64748b; display: flex; align-items: center; gap: 4px; }
+        .tr-card-actions { display: flex; flex-direction: column; align-items: flex-end; gap: 8px; flex-shrink: 0; }
         .tr-view-btn {
-          padding: 8px 16px; border-radius: 8px;
-          background: #1a73e8; color: white;
-          border: none; font-size: 13px; font-weight: 700;
-          cursor: pointer; white-space: nowrap;
-          transition: background .15s; font-family: inherit;
+          padding: 8px 16px; border-radius: 8px; font-size: 13px; font-weight: 700;
+          background: #1a73e8; color: white; border: none; cursor: pointer;
+          transition: background .15s; white-space: nowrap;
         }
         .tr-view-btn:hover { background: #1557b0; }
-        .tr-view-btn.open  { background: #f1f5f9; color: #64748b; }
-
-        .tr-report {
-          border-top: 1px solid #f1f5f9;
-          padding: 20px;
-          background: #fafafa;
+        .tr-view-btn.open { background: #f1f5f9; color: #475569; border: 1.5px solid #e2e8f0; }
+        .tr-view-btn.open:hover { background: #e2e8f0; }
+        .tr-no-report-btn {
+          padding: 8px 16px; border-radius: 8px; font-size: 12px; font-weight: 600;
+          background: #f8fafc; color: #94a3b8; border: 1.5px solid #e2e8f0; cursor: default; white-space: nowrap;
         }
-        .tr-report-grid {
-          display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 16px;
+        .tr-report-panel {
+          border-top: 1.5px solid #f1f5f9; background: #fafafa;
+          padding: 22px 24px; display: flex; flex-direction: column; gap: 16px;
         }
-        .tr-report-section h4 {
-          font-size: 12px; font-weight: 700; text-transform: uppercase;
-          letter-spacing: .4px; color: #64748b; margin: 0 0 8px;
+        .tr-section-title { font-size: 11px; font-weight: 700; color: #94a3b8; text-transform: uppercase; letter-spacing: .5px; margin: 0 0 8px; }
+        .tr-perf-text { font-size: 14px; color: #374151; line-height: 1.7; margin: 0; }
+        .tr-list { margin: 0; padding-left: 0; list-style: none; display: flex; flex-direction: column; gap: 5px; }
+        .tr-list-item { display: flex; align-items: flex-start; gap: 8px; font-size: 13px; line-height: 1.5; color: #374151; }
+        .tr-bullet { width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; margin-top: 4px; }
+        .tr-recs-box { background: #eff6ff; border: 1.5px solid #bfdbfe; border-radius: 10px; padding: 12px 14px; }
+        .tr-recs-text { font-size: 13px; color: #1e40af; line-height: 1.6; margin: 0; }
+        .tr-topics-row { display: flex; gap: 6px; flex-wrap: wrap; }
+        .tr-topic-chip {
+          padding: 3px 10px; border-radius: 999px; background: #f1f5f9;
+          border: 1px solid #e2e8f0; font-size: 12px; font-weight: 600; color: #475569;
         }
-        .tr-report-section p {
-          font-size: 13px; color: #475569; line-height: 1.55; margin: 0;
-        }
-        .tr-bullet-list { margin: 0; padding: 0; list-style: none; }
-        .tr-bullet-list li {
-          font-size: 13px; color: #475569; margin-bottom: 5px;
-          padding-left: 14px; position: relative; line-height: 1.4;
-        }
-        .tr-bullet-list li::before { content: "•"; position: absolute; left: 0; }
-        .tr-bullet-list.green li::before { color: #16a34a; }
-        .tr-bullet-list.amber li::before { color: #d97706; }
-        .tr-rec-box {
-          padding: 12px 14px; background: #eff6ff;
-          border-radius: 8px; border-left: 3px solid #1a73e8; margin-bottom: 14px;
-        }
-        .tr-rec-box h4 { font-size: 12px; font-weight: 700; color: #1e40af; margin: 0 0 5px; }
-        .tr-rec-box p  { font-size: 13px; color: #1e3a8a; margin: 0; line-height: 1.5; }
-        .tr-topics { display: flex; flex-wrap: wrap; gap: 6px; }
-        .tr-topic  {
-          font-size: 11px; font-weight: 600; color: #374151;
-          background: #f1f5f9; border: 1px solid #e2e8f0;
-          border-radius: 999px; padding: 3px 10px;
-        }
+        .tr-report-row { display: flex; gap: 24px; flex-wrap: wrap; }
+        .tr-report-col { flex: 1; min-width: 200px; }
+        .tr-quiz-score-row { display: flex; align-items: center; gap: 10px; }
+        .tr-quiz-score-val { font-size: 28px; font-weight: 800; color: #0f172a; }
+        .tr-quiz-score-label { font-size: 12px; color: #64748b; }
+        .tr-eng-badge { padding: 4px 12px; border-radius: 999px; font-size: 12px; font-weight: 700; }
+        .tr-no-report { text-align: center; padding: 16px; color: #94a3b8; font-size: 13px; font-style: italic; }
         .tr-spinner {
-          width: 28px; height: 28px; border: 3px solid #e2e8f0;
-          border-top-color: #1a73e8; border-radius: 50%;
-          animation: tr-spin .8s linear infinite; margin: 16px auto;
+          width: 26px; height: 26px; border: 3px solid #e2e8f0;
+          border-top-color: #1a73e8; border-radius: 50%; animation: tr-spin .8s linear infinite; margin: 16px auto;
+        }
+        .tr-empty {
+          flex: 1; display: flex; flex-direction: column; align-items: center;
+          justify-content: center; gap: 10px; padding: 80px 20px; text-align: center;
+        }
+        .tr-empty-icon { font-size: 52px; }
+        .tr-empty h3 { margin: 0; font-size: 20px; font-weight: 700; color: #0f172a; }
+        .tr-empty p { margin: 0; font-size: 14px; color: #64748b; max-width: 380px; }
+        .tr-loading {
+          flex: 1; display: flex; align-items: center; justify-content: center; gap: 12px;
+          color: #64748b; font-size: 14px;
+        }
+        .tr-page-spinner {
+          width: 32px; height: 32px; border: 3px solid #e2e8f0;
+          border-top-color: #1a73e8; border-radius: 50%; animation: tr-spin .8s linear infinite;
         }
         @keyframes tr-spin { to { transform: rotate(360deg); } }
-
-        .tr-empty {
-          text-align: center; padding: 80px 24px;
-          display: flex; flex-direction: column; align-items: center; gap: 10px;
-        }
-        .tr-empty-icon { font-size: 48px; }
-        .tr-empty h3   { font-size: 18px; font-weight: 700; color: #0f172a; margin: 0; }
-        .tr-empty p    { font-size: 14px; color: #64748b; margin: 0; max-width: 360px; }
       `}</style>
 
       <div className="tr-page">
         <Sidebar />
+
         <div className="tr-main">
-          <div className="tr-inner">
-            <div className="tr-header">
-              <h1>Session Reports</h1>
-              <p>AI-generated summaries for completed student sessions.</p>
+          <div className="tr-header">
+            <h1 className="tr-title">Session Reports</h1>
+            <p className="tr-subtitle">AI-generated summaries for your students' sessions.</p>
+          </div>
+
+          <div className="tr-stats">
+            <div className="tr-stat">
+              <div className="tr-stat-val">{completedCount}</div>
+              <div className="tr-stat-lbl">Completed Sessions</div>
             </div>
-
-            {/* Stats */}
-            <div className="tr-stats">
-              <div className="tr-stat">
-                <div className="tr-stat-val">{appointments.length}</div>
-                <div className="tr-stat-lbl">Total Completed Sessions</div>
-              </div>
-              <div className="tr-stat">
-                <div className="tr-stat-val">{completedThisWeek}</div>
-                <div className="tr-stat-lbl">Sessions This Week</div>
-              </div>
-              <div className="tr-stat">
-                <div className="tr-stat-val">{studentNames.length}</div>
-                <div className="tr-stat-lbl">Students With Reports</div>
-              </div>
+            <div className="tr-stat">
+              <div className="tr-stat-val">{thisWeekCount}</div>
+              <div className="tr-stat-lbl">Sessions This Week</div>
             </div>
+            <div className="tr-stat">
+              <div className="tr-stat-val">{studentCount}</div>
+              <div className="tr-stat-lbl">Students With Sessions</div>
+            </div>
+          </div>
 
-            {/* Filters */}
-            {studentNames.length > 0 && (
-              <div className="tr-filters">
-                <button
-                  className={`tr-chip${filterStudent === "all" ? " active" : ""}`}
-                  onClick={() => setFilterStudent("all")}
-                >
-                  All Students
-                </button>
-                {studentNames.map((name) => (
-                  <button
-                    key={name}
-                    className={`tr-chip${filterStudent === name ? " active" : ""}`}
-                    onClick={() => setFilterStudent(name)}
-                  >
-                    {name}
-                  </button>
-                ))}
+          {!loading && !error && (
+            <div className="tr-filter-group">
+              <div>
+                <p className="tr-filter-label">Status</p>
+                <div className="tr-filters">
+                  {STATUS_FILTER_OPTIONS.map((opt) => (
+                    <button
+                      key={opt.value}
+                      className={`tr-chip${activeStatus === opt.value ? " active" : ""}`}
+                      onClick={() => setActiveStatus(opt.value)}
+                    >
+                      {opt.label}
+                    </button>
+                  ))}
+                </div>
               </div>
-            )}
+              {subjects.length > 1 && (
+                <div>
+                  <p className="tr-filter-label">Subject</p>
+                  <div className="tr-filters">
+                    {subjects.map((s) => (
+                      <button
+                        key={s}
+                        className={`tr-chip${activeSubject === s ? " active" : ""}`}
+                        onClick={() => setActiveSubject(s)}
+                      >
+                        {s}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+              {studentNames.length > 2 && (
+                <div>
+                  <p className="tr-filter-label">Student</p>
+                  <div className="tr-filters">
+                    {studentNames.map((name) => (
+                      <button
+                        key={name}
+                        className={`tr-chip${filterStudent === name ? " active" : ""}`}
+                        onClick={() => setFilterStudent(name)}
+                      >
+                        {name}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
 
-            {/* Loading */}
+          <div className="tr-body">
             {loading && (
-              <div className="tr-empty">
-                <div className="tr-spinner" />
-                <p>Loading session reports…</p>
+              <div className="tr-loading">
+                <div className="tr-page-spinner" />
+                <span>Loading sessions...</span>
               </div>
             )}
 
-            {/* Error */}
             {!loading && error && (
               <div className="tr-empty">
                 <div className="tr-empty-icon">⚠️</div>
@@ -296,138 +327,183 @@ export default function TeacherReportsPage() {
               </div>
             )}
 
-            {/* Empty */}
             {!loading && !error && displayed.length === 0 && (
               <div className="tr-empty">
                 <div className="tr-empty-icon">📋</div>
-                <h3>No completed sessions yet</h3>
-                <p>Session reports will appear here once students complete their AI tutoring sessions.</p>
+                <h3>No sessions found</h3>
+                <p>Sessions will appear here once students have booked or completed AI tutoring sessions.</p>
               </div>
             )}
 
-            {/* Cards */}
-            {!loading && !error && displayed.length > 0 && (
-              <div className="tr-list">
-                {displayed.map((appt) => {
-                  const cfg = getSubjectConfig(appt.subject);
-                  const isOpen = !!expanded[appt.id];
-                  const report = reports[appt.id];
-                  const loadingReport = !!reportLoading[appt.id];
-                  const studentLabel = appt.student_name ?? `Student #${appt.student_id}`;
-                  const engStyle = report?.report?.engagement_level
-                    ? getEngagementStyle(report.report.engagement_level)
-                    : null;
+            {!loading && !error && displayed.map((appt) => {
+              const cfg = getSubjectCfg(appt.subject);
+              const stCfg = getStatusCfg(appt.status);
+              const isOpen = !!expanded[appt.id];
+              const isLoadingReport = !!reportLoading[appt.id];
+              const report = reportData[appt.id];
+              const reportable = canViewReport(appt.status);
+              const studentLabel = appt.student_name ?? `Student #${appt.student_id}`;
 
-                  return (
-                    <div key={appt.id} className="tr-card">
-                      <div className="tr-card-top">
-                        <div className="tr-subj-icon" style={{ background: cfg.bg }}>
-                          {cfg.emoji}
-                        </div>
-                        <div className="tr-card-body">
-                          <div className="tr-card-meta">
-                            <span className="tr-student-chip">{studentLabel}</span>
-                            <span
-                              className="tr-subj-badge"
-                              style={{ background: cfg.bg, color: cfg.color }}
-                            >
-                              {appt.subject}
-                            </span>
-                            {engStyle && (
-                              <span
-                                className="tr-eng-badge"
-                                style={{ background: engStyle.bg, color: engStyle.color }}
-                              >
-                                {engStyle.label}
-                              </span>
-                            )}
-                          </div>
-                          <div className="tr-card-title">{appt.title}</div>
-                          <div className="tr-card-date">{formatDate(appt.scheduled_at)}</div>
-                        </div>
-                        <div className="tr-card-right">
-                          <button
-                            className={`tr-view-btn${isOpen ? " open" : ""}`}
-                            onClick={() => toggleExpand(appt)}
-                          >
-                            {isOpen ? "Hide Report" : "View Report →"}
-                          </button>
-                        </div>
+              return (
+                <div key={appt.id} className="tr-card">
+                  <div className="tr-card-top">
+                    <div className="tr-subject-icon" style={{ background: cfg.bg }}>
+                      {cfg.emoji}
+                    </div>
+
+                    <div className="tr-card-info">
+                      <div className="tr-card-meta-row">
+                        <span className="tr-student-chip">{studentLabel}</span>
+                        <span className="tr-badge" style={{ background: cfg.bg, color: cfg.color }}>
+                          {appt.subject}
+                        </span>
+                        <span className="tr-badge" style={{ background: stCfg.bg, color: stCfg.color }}>
+                          {stCfg.icon} {stCfg.label}
+                        </span>
                       </div>
+                      <p className="tr-card-title">{appt.title}</p>
+                      <div className="tr-card-details">
+                        <span className="tr-detail-item">📅 {formatDate(appt.scheduled_at)}</span>
+                        <span className="tr-detail-item">🕐 {formatTime(appt.scheduled_at)}</span>
+                        <span className="tr-detail-item">⏱ {appt.duration_minutes} min</span>
+                        {appt.key_stage && <span className="tr-detail-item">🎓 {appt.key_stage}</span>}
+                      </div>
+                    </div>
 
-                      {isOpen && (
-                        <div className="tr-report">
-                          {loadingReport && <div className="tr-spinner" />}
-
-                          {!loadingReport && report === null && (
-                            <p style={{ fontSize: 13, color: "#94a3b8", textAlign: "center", margin: 0 }}>
-                              Report not yet generated for this session.
-                            </p>
-                          )}
-
-                          {!loadingReport && report?.report && (() => {
-                            const r = report.report;
-                            return (
-                              <>
-                                {r.overall_performance && (
-                                  <div style={{ marginBottom: 16 }}>
-                                    <h4 style={{ fontSize: 12, fontWeight: 700, textTransform: "uppercase", letterSpacing: ".4px", color: "#64748b", margin: "0 0 8px" }}>
-                                      Overall Performance
-                                    </h4>
-                                    <p style={{ fontSize: 13, color: "#475569", lineHeight: 1.55, margin: 0 }}>
-                                      {r.overall_performance}
-                                    </p>
-                                  </div>
-                                )}
-
-                                <div className="tr-report-grid">
-                                  {r.strengths?.length > 0 && (
-                                    <div className="tr-report-section">
-                                      <h4>✅ Strengths</h4>
-                                      <ul className="tr-bullet-list green">
-                                        {r.strengths.map((s, i) => <li key={i}>{s}</li>)}
-                                      </ul>
-                                    </div>
-                                  )}
-                                  {r.areas_for_improvement?.length > 0 && (
-                                    <div className="tr-report-section">
-                                      <h4>⚠️ Areas for Improvement</h4>
-                                      <ul className="tr-bullet-list amber">
-                                        {r.areas_for_improvement.map((s, i) => <li key={i}>{s}</li>)}
-                                      </ul>
-                                    </div>
-                                  )}
-                                </div>
-
-                                {r.recommendations && (
-                                  <div className="tr-rec-box">
-                                    <h4>🤖 AI Recommendations for Teacher</h4>
-                                    <p>{r.recommendations}</p>
-                                  </div>
-                                )}
-
-                                {r.topics_covered?.length > 0 && (
-                                  <div>
-                                    <h4 style={{ fontSize: 12, fontWeight: 700, textTransform: "uppercase", letterSpacing: ".4px", color: "#64748b", margin: "0 0 8px" }}>
-                                      Topics Covered
-                                    </h4>
-                                    <div className="tr-topics">
-                                      {r.topics_covered.map((t, i) => (
-                                        <span key={i} className="tr-topic">{t}</span>
-                                      ))}
-                                    </div>
-                                  </div>
-                                )}
-                              </>
-                            );
-                          })()}
-                        </div>
+                    <div className="tr-card-actions">
+                      {reportable ? (
+                        <button
+                          className={`tr-view-btn${isOpen ? " open" : ""}`}
+                          onClick={() => handleToggle(appt.id)}
+                        >
+                          {isOpen ? "Hide Report ▲" : "View Report ▼"}
+                        </button>
+                      ) : (
+                        <span className="tr-no-report-btn">
+                          {appt.status === "started" ? "Session in progress" :
+                           appt.status === "paused" ? "Session paused" :
+                           appt.status === "confirmed" ? "Not started yet" :
+                           appt.status === "booked" ? "Not confirmed yet" : "No report"}
+                        </span>
                       )}
                     </div>
-                  );
-                })}
-              </div>
-            )}
+                  </div>
+
+                  {isOpen && reportable && (
+                    <div className="tr-report-panel">
+                      {isLoadingReport && <div className="tr-spinner" />}
+
+                      {!isLoadingReport && (report === null || (report && report.report === null)) && (
+                        <p className="tr-no-report">
+                          Report not yet generated for this session. Check back after processing.
+                        </p>
+                      )}
+
+                      {!isLoadingReport && report && report.report && (() => {
+                        const r = report.report;
+                        const understandingColor =
+                          r.understanding_level?.toLowerCase() === "excellent" ? { color: "#15803d", bg: "#dcfce7" } :
+                          r.understanding_level?.toLowerCase() === "good" ? { color: "#2563eb", bg: "#dbeafe" } :
+                          r.understanding_level?.toLowerCase() === "developing" ? { color: "#d97706", bg: "#fef3c7" } :
+                          { color: "#dc2626", bg: "#fee2e2" };
+
+                        return (
+                          <>
+                            {r.summary && (
+                              <div>
+                                <p className="tr-section-title">Session Summary</p>
+                                <p className="tr-perf-text">{r.summary}</p>
+                              </div>
+                            )}
+
+                            <div className="tr-report-row">
+                              {r.quiz_score_percent != null && (
+                                <div className="tr-report-col" style={{ flex: "0 0 auto" }}>
+                                  <p className="tr-section-title">Quiz Score</p>
+                                  <div className="tr-quiz-score-row">
+                                    <span className="tr-quiz-score-val">{Math.round(r.quiz_score_percent)}%</span>
+                                    <span className="tr-quiz-score-label">correct</span>
+                                  </div>
+                                </div>
+                              )}
+                              {r.understanding_level && (
+                                <div className="tr-report-col" style={{ flex: "0 0 auto" }}>
+                                  <p className="tr-section-title">Understanding Level</p>
+                                  <span
+                                    className="tr-eng-badge"
+                                    style={{ background: understandingColor.bg, color: understandingColor.color }}
+                                  >
+                                    {r.understanding_level}
+                                  </span>
+                                </div>
+                              )}
+                              {r.topics_covered && r.topics_covered.length > 0 && (
+                                <div className="tr-report-col">
+                                  <p className="tr-section-title">Topics Covered</p>
+                                  <div className="tr-topics-row">
+                                    {r.topics_covered.map((t, i) => (
+                                      <span key={i} className="tr-topic-chip">{t}</span>
+                                    ))}
+                                  </div>
+                                </div>
+                              )}
+                            </div>
+
+                            <div className="tr-report-row">
+                              <div className="tr-report-col">
+                                <p className="tr-section-title">Strong Areas</p>
+                                <ul className="tr-list">
+                                  {(r.strong_areas ?? []).map((s, i) => (
+                                    <li key={i} className="tr-list-item">
+                                      <span className="tr-bullet" style={{ background: "#16a34a" }} />
+                                      {s}
+                                    </li>
+                                  ))}
+                                  {(!r.strong_areas || r.strong_areas.length === 0) && (
+                                    <li className="tr-list-item" style={{ color: "#94a3b8" }}>None recorded</li>
+                                  )}
+                                </ul>
+                              </div>
+                              <div className="tr-report-col">
+                                <p className="tr-section-title">Areas to Improve</p>
+                                <ul className="tr-list">
+                                  {(r.weak_areas ?? []).map((s, i) => (
+                                    <li key={i} className="tr-list-item">
+                                      <span className="tr-bullet" style={{ background: "#d97706" }} />
+                                      {s}
+                                    </li>
+                                  ))}
+                                  {(!r.weak_areas || r.weak_areas.length === 0) && (
+                                    <li className="tr-list-item" style={{ color: "#94a3b8" }}>None recorded</li>
+                                  )}
+                                </ul>
+                              </div>
+                            </div>
+
+                            {r.next_session_recommendation && (
+                              <div>
+                                <p className="tr-section-title">Next Session Recommendation</p>
+                                <div className="tr-recs-box">
+                                  <p className="tr-recs-text">{r.next_session_recommendation}</p>
+                                </div>
+                              </div>
+                            )}
+
+                            {r.encouragement && (
+                              <div style={{ background: "#f0fdf4", border: "1.5px solid #bbf7d0", borderRadius: 10, padding: "10px 14px" }}>
+                                <p style={{ fontSize: 13, color: "#15803d", margin: 0, fontWeight: 600 }}>
+                                  💬 {r.encouragement}
+                                </p>
+                              </div>
+                            )}
+                          </>
+                        );
+                      })()}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
           </div>
         </div>
       </div>
