@@ -3,16 +3,15 @@ Session Agent Service — builds personalised AI tutor prompts for booked AI ses
 and generates practice/test assessments scoped to a specific appointment.
 """
 import logging
+import re as _re
 from typing import Optional
 
 from sqlalchemy import select, desc
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import selectinload
-
 from app.models.appointment import Appointment
-from app.models.assessment import Assessment, AssessmentQuestion
+from app.models.assessment import Assessment
 from app.models.student_profile import StudentProfile, TopicMastery
-from app.services import gemini_service, assessment_service
+from app.services import gemini_service, assessment_service, retrieval_service
 
 logger = logging.getLogger(__name__)
 
@@ -64,6 +63,65 @@ async def _load_recent_scores(
         .limit(limit)
     )
     return [row[0] for row in result.fetchall()]
+
+
+def _parse_unit_names(description: str) -> list[str]:
+    """Extract unit names from 'Topics: X, Y, Z' in appointment description."""
+    if not description:
+        return []
+    match = _re.search(r"Topics:\s*(.+)", description, _re.IGNORECASE)
+    if not match:
+        return []
+    raw = match.group(1).split("\n")[0]
+    return [u.strip() for u in raw.split(",") if u.strip()]
+
+
+async def _fetch_unit_kb_content_rag(
+    db: AsyncSession,
+    unit_names: list[str],
+    subject: str,
+    key_stage: str,
+    top_k_per_unit: int = 8,
+    max_chars: int = 6000,
+) -> str:
+    """Retrieve curriculum content for the session's assigned units via RAG (vector search).
+
+    For each unit name, runs a cosine similarity search against embedded DocumentChunks
+    filtered by subject and key_stage. Deduplicates by chunk_id and returns the
+    concatenated content up to max_chars.
+    """
+    if not unit_names:
+        return ""
+
+    seen_ids: set[int] = set()
+    all_content: list[str] = []
+
+    for unit_name in unit_names:
+        query = unit_name.replace("-", " ").strip()
+        chunks = await retrieval_service.retrieve_relevant_chunks(
+            db=db,
+            query=query,
+            subject=subject,
+            key_stage=key_stage,
+            top_k=top_k_per_unit,
+        )
+        for chunk in chunks:
+            if chunk.chunk_id not in seen_ids:
+                seen_ids.add(chunk.chunk_id)
+                all_content.append(chunk.content.strip())
+
+    if all_content:
+        logger.info(
+            f"RAG retrieved {len(all_content)} unique chunks for units={unit_names}, "
+            f"subject={subject}, key_stage={key_stage}"
+        )
+    else:
+        logger.warning(
+            f"RAG: NO chunks retrieved for units={unit_names}, subject={subject}, "
+            f"key_stage={key_stage}. Quiz will use unit names as hard constraint only."
+        )
+
+    return "\n\n".join(all_content)[:max_chars]
 
 
 async def build_session_system_prompt(
@@ -170,11 +228,11 @@ async def generate_session_practice(
     student_id: int,
     n_questions: int = 5,
     assessment_type: str = "practice",
+    topic_override: Optional[str] = None,
 ) -> Assessment:
     """
     Generate an MCQ assessment (practice or test) scoped to a specific appointment.
-    Creates Assessment + AssessmentQuestion rows and returns the Assessment object
-    with questions loaded.
+    Grounds questions in KB DocumentChunk content when available.
     """
     appointment = await _load_appointment(db, appointment_id)
     if not appointment:
@@ -182,7 +240,27 @@ async def generate_session_practice(
 
     subject = appointment.subject
     key_stage = appointment.key_stage
-    topic = appointment.title or f"{subject} Topic"
+
+    unit_names = _parse_unit_names(appointment.description or "")
+
+    # Derive topic and RAG query together so they always match:
+    # • topic_override → query KB for that exact topic (avoids AI-content / bacteria-label mismatch)
+    # • unit_names → query KB for the booked units
+    # • fallback → no KB retrieval, Gemini uses general knowledge
+    if topic_override:
+        topic = topic_override
+        kb_content = await _fetch_unit_kb_content_rag(db, [topic_override], subject, key_stage)
+        # If the specific topic isn't in the KB, don't contaminate with unrelated unit content
+        if not kb_content and unit_names:
+            logger.info(
+                f"topic_override '{topic_override}' not in KB; generating from general knowledge"
+            )
+    elif unit_names:
+        topic = ", ".join(unit_names)
+        kb_content = await _fetch_unit_kb_content_rag(db, unit_names, subject, key_stage)
+    else:
+        topic = appointment.title or f"{subject} Topic"
+        kb_content = ""
 
     try:
         questions_data = gemini_service.generate_mcq_questions(
@@ -190,10 +268,12 @@ async def generate_session_practice(
             subject=subject,
             key_stage=key_stage,
             num_questions=n_questions,
+            kb_content=kb_content,
+            unit_names=unit_names if not topic_override else [],
         )
     except Exception as e:
         logger.error(f"MCQ generation failed for appointment {appointment_id}: {e}")
-        raise
+        raise RuntimeError(f"Quiz generation error: {e}") from e
 
     assessment = await assessment_service.create_assessment(
         db=db,

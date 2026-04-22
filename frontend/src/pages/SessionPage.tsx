@@ -101,6 +101,19 @@ export default function SessionPage() {
 
       setSessionState("active");
       initSessionChat(parseInt(appointmentId));
+
+      // Restore any in-progress test so a page refresh doesn't lose quiz state
+      try {
+        const latestTest = await sessionsApi.getLatestTest(parseInt(appointmentId));
+        if (latestTest && latestTest.status === "in_progress" && latestTest.questions?.length > 0) {
+          setTestAssessment(latestTest);
+          const firstUnanswered = latestTest.questions.findIndex(
+            (q) => q.student_answer == null
+          );
+          setTestCurrentQ(firstUnanswered >= 0 ? firstUnanswered : latestTest.questions.length - 1);
+          setLearnTab("test");
+        }
+      } catch {}
     } catch (err: any) {
       setJoinError(err.message || "Invalid passcode or session unavailable");
     }
@@ -421,6 +434,13 @@ export default function SessionPage() {
     <div style={styles.root}>
       <div style={{ ...styles.topBar, background: topBarBg }}>
         <div style={styles.topBarLeft}>
+          <button
+            style={styles.dashboardBtn}
+            onClick={() => navigate("/chat")}
+            title="Back to Dashboard"
+          >
+            ← Dashboard
+          </button>
           <div style={styles.dotProgress}>
             {Array.from({ length: totalDots }).map((_, i) => (
               <span
@@ -485,7 +505,17 @@ export default function SessionPage() {
           </div>
 
           <div style={styles.learnContent}>
-            {learnTab === "learn" && (
+            {isPaused ? (
+              <div style={styles.pausedOverlay}>
+                <span style={{ fontSize: 32 }}>⏸</span>
+                <p style={styles.pausedOverlayText}>Session is paused</p>
+                <p style={styles.pausedOverlaySub}>Resume the session to continue learning.</p>
+                <button style={styles.pausedResumeBtn} onClick={handlePause}>
+                  ▶ Resume Session
+                </button>
+              </div>
+            ) : null}
+            {!isPaused && learnTab === "learn" && (
               <div style={styles.learnMessagesWrap}>
                 <div style={styles.emptyLearn}>
                   <span style={{ fontSize: 36 }}>📄</span>
@@ -496,7 +526,7 @@ export default function SessionPage() {
               </div>
             )}
 
-            {learnTab === "test" && (
+            {!isPaused && learnTab === "test" && (
               <div style={{ padding: "16px" }}>
                 {testResult ? (
                   <div>
@@ -783,6 +813,20 @@ const styles: Record<string, React.CSSProperties> = {
     gap: 10,
     flex: 1,
     minWidth: 0,
+  },
+  dashboardBtn: {
+    display: "flex",
+    alignItems: "center",
+    background: "rgba(255,255,255,0.15)",
+    border: "1px solid rgba(255,255,255,0.3)",
+    borderRadius: 8,
+    color: "white",
+    padding: "4px 10px",
+    fontSize: 11,
+    fontWeight: 600,
+    cursor: "pointer",
+    whiteSpace: "nowrap",
+    flexShrink: 0,
   },
   dotProgress: {
     display: "flex",

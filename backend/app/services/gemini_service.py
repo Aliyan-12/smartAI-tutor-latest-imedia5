@@ -250,36 +250,118 @@ def strip_quiz_offer(text: str) -> str:
     return QUIZ_OFFER_RE.sub("", text).rstrip()
 
 
+def _extract_json_array(raw: str) -> str:
+    """Extract the first complete JSON array from raw text, ignoring trailing content."""
+    start = raw.find("[")
+    if start == -1:
+        return raw
+    depth = 0
+    in_string = False
+    escape_next = False
+    for i, ch in enumerate(raw[start:], start):
+        if escape_next:
+            escape_next = False
+            continue
+        if ch == "\\" and in_string:
+            escape_next = True
+            continue
+        if ch == '"':
+            in_string = not in_string
+            continue
+        if in_string:
+            continue
+        if ch == "[":
+            depth += 1
+        elif ch == "]":
+            depth -= 1
+            if depth == 0:
+                return raw[start : i + 1]
+    return raw[start:]
+
+
 def generate_mcq_questions(
     topic: str,
     subject: str,
     key_stage: str,
     chat_history_summary: str = "",
     num_questions: int = 5,
+    kb_content: str = "",
+    unit_names: Optional[List[str]] = None,
 ) -> List[dict]:
-    prompt = f"""Generate exactly {num_questions} multiple-choice questions for a {key_stage} {subject} student on the topic: "{topic}".
+    item_schema = (
+        '{"question_index": 0, "question_text": "...", '
+        '"options": ["A) ...", "B) ...", "C) ...", "D) ..."], '
+        '"correct_answer": 0, "explanation": "...", "topic_tag": "..."}'
+    )
 
-{f"Recent context: {chat_history_summary}" if chat_history_summary else ""}
+    units_line = ""
+    if unit_names:
+        quoted = ", ".join(f'"{u}"' for u in unit_names)
+        units_line = (
+            f"\nSTRICT SCOPE: Questions MUST be about these specific biology topics "
+            f"ONLY: {quoted}. "
+            f"Do NOT include questions about AI, technology, or any topic not listed above.\n"
+        )
 
-Return ONLY a valid JSON array. No markdown fences, no explanation.
-
-Each item must have this exact structure:
-{{"question_index": 0, "question_text": "...", "options": ["A) ...", "B) ...", "C) ...", "D) ..."], "correct_answer": 0, "explanation": "...", "topic_tag": "..."}}
-
-Rules:
-- correct_answer is the 0-based index (0-3)
-- topic_tag is a short sub-topic label
-- explanation is 1-2 sentences
-- question_index starts at 0
-- All 4 options must be plausible"""
+    if kb_content:
+        prompt = (
+            f"CURRICULUM MATERIAL — use ONLY this content to write questions:\n"
+            f"{kb_content[:4500]}\n\n"
+            f"Generate exactly {num_questions} multiple-choice questions for a "
+            f"{key_stage} {subject} student on the topic: \"{topic}\".\n"
+            f"{units_line}"
+            f"Every question MUST be directly answerable from the curriculum material above. "
+            f"Do NOT draw on outside knowledge.\n\n"
+            f"Return ONLY a valid JSON array — no markdown, no explanation, no text after the closing ].\n"
+            f"Each item: {item_schema}\n"
+            f"Rules: correct_answer is 0-based index; topic_tag is a sub-topic from the material; "
+            f"explanation cites the material; all 4 options plausible."
+        )
+        system_instruction = (
+            "You generate quiz questions exclusively from the provided curriculum text. "
+            "Output only a valid JSON array. No text before or after the array."
+        )
+    elif unit_names:
+        # No KB text available but we know exactly which topics to test
+        units_str = ", ".join(unit_names)
+        prompt = (
+            f"Generate exactly {num_questions} multiple-choice questions for a "
+            f"{key_stage} {subject} student.\n"
+            f"MANDATORY SCOPE: Questions MUST cover ONLY these specific topics: {units_str}.\n"
+            f"Do NOT write questions about AI, technology, advanced research, or any topic "
+            f"not explicitly listed above. Every question must be clearly about one of the "
+            f"listed topics.\n\n"
+            f"Return ONLY a valid JSON array — no markdown, no explanation, no text after ].\n"
+            f"Each item: {item_schema}\n"
+            f"Rules: correct_answer is 0-based index; topic_tag must be one of the listed "
+            f"topics; explanation is 1-2 sentences; all 4 options plausible."
+        )
+        system_instruction = (
+            f"You are a quiz generator for {key_stage} {subject}. "
+            f"Output only a valid JSON array. "
+            f"Every question MUST be about the explicitly listed topics only. "
+            f"No text before or after the array."
+        )
+    else:
+        prompt = (
+            f'Generate exactly {num_questions} multiple-choice questions for a '
+            f'{key_stage} {subject} student on the topic: "{topic}".\n'
+            + (f"Recent context: {chat_history_summary}\n\n" if chat_history_summary else "\n")
+            + f"Return ONLY a valid JSON array. No markdown fences, no explanation, no text after ].\n"
+            f"Each item: {item_schema}\n"
+            f"Rules: correct_answer is 0-based index; topic_tag is a short sub-topic label; "
+            f"explanation is 1-2 sentences; all 4 options plausible."
+        )
+        system_instruction = (
+            "You are a quiz generator. Output only a valid JSON array. "
+            "No text before or after the array."
+        )
 
     client = _get_client()
     response = client.models.generate_content(
         model=settings.gemini_model,
         contents=prompt,
-        config=types.GenerateContentConfig(
-            system_instruction="You are a quiz generator. Output only valid JSON.",
-        ),
+        config=types.GenerateContentConfig(system_instruction=system_instruction),
     )
 
     raw = response.text.strip()
@@ -290,6 +372,7 @@ Rules:
             raw = raw[4:]
         raw = raw.strip()
 
+    raw = _extract_json_array(raw)
     return json_module.loads(raw)
 
 

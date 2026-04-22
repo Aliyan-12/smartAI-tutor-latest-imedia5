@@ -4,8 +4,10 @@ Sessions router — practice and test assessments scoped to a booked AI session
 retrieve the most recent attempt.
 """
 import logging
+from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Body, Depends, HTTPException, status
+from pydantic import BaseModel
 from sqlalchemy import select, desc
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -21,6 +23,10 @@ from app.services import session_agent_service
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/sessions", tags=["sessions"])
+
+
+class StartQuizBody(BaseModel):
+    topic: Optional[str] = None
 
 
 async def _verify_appointment_access(
@@ -84,6 +90,7 @@ async def _latest_assessment(
 @router.post("/{appointment_id}/practice", response_model=AssessmentResponse)
 async def start_practice(
     appointment_id: int,
+    body: StartQuizBody = Body(default=StartQuizBody()),
     current_user: User = Depends(require_any_authenticated),
     db: AsyncSession = Depends(get_db),
 ):
@@ -98,6 +105,7 @@ async def start_practice(
             student_id=student_id,
             n_questions=5,
             assessment_type="practice",
+            topic_override=body.topic,
         )
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc))
@@ -148,6 +156,7 @@ async def get_latest_practice(
 @router.post("/{appointment_id}/test", response_model=AssessmentResponse)
 async def start_test(
     appointment_id: int,
+    body: StartQuizBody = Body(default=StartQuizBody()),
     current_user: User = Depends(require_any_authenticated),
     db: AsyncSession = Depends(get_db),
 ):
@@ -162,6 +171,7 @@ async def start_test(
             student_id=student_id,
             n_questions=10,
             assessment_type="test",
+            topic_override=body.topic,
         )
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc))
