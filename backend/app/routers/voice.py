@@ -97,7 +97,7 @@ async def voice_websocket(websocket: WebSocket):
 
         chat_id_local = chat.id
         session_id = chat.session_id  # ensure we have the actual session_id
-        history = await chat_service.build_context(db, chat.id)
+        history, _ = await chat_service.build_context(db, chat.id)
 
     system_text = SYSTEM_PROMPT
     if history:
