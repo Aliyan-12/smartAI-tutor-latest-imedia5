@@ -67,7 +67,7 @@ export default function SessionPage() {
     initSessionChat, activeSessionId, quizOffer, clearQuizOffer,
   } = useChat();
 
-  const { voiceStatus, speakText, connectVoice, disconnectVoice, isVoiceActive } = useVoice();
+  const { voiceStatus, playing, speakText, connectVoice, disconnectVoice, isVoiceActive, startStreamTTS, feedStreamTTS, endStreamTTS } = useVoice();
   const [voiceMessages, setVoiceMessages] = useState<{ role: string; content: string }[]>([]);
   const voiceAiTurnRef = useRef("");
   const [voiceQuizTopic, setVoiceQuizTopic] = useState<string | null>(null);
@@ -382,8 +382,13 @@ export default function SessionPage() {
     : "var(--accent-blue, var(--accent))";
 
   const sessionSend = useCallback(
-    (text: string) => sendMessage(text, { suppressNavigation: true, onStreamComplete: speakText }),
-    [sendMessage]
+    (text: string) => sendMessage(text, {
+      suppressNavigation: true,
+      onStreamStart: startStreamTTS,
+      onToken: feedStreamTTS,
+      onStreamComplete: endStreamTTS,
+    }),
+    [sendMessage, startStreamTTS, feedStreamTTS, endStreamTTS]
   );
 
   const handleVoiceToggle = useCallback(() => {
@@ -593,7 +598,7 @@ export default function SessionPage() {
             )}
 
             {!isPaused && learnTab === "test" && (
-              <div style={{ padding: "16px" }}>
+              <div style={{ padding: "16px", position: "relative" }}>
                 {testResult ? (
                   <div>
                     {/* Header */}
@@ -756,6 +761,13 @@ export default function SessionPage() {
                         {testLoading ? "Generating..." : "Start Test"}
                       </button>
                     )}
+                  </div>
+                )}
+                {playing && (
+                  <div style={styles.ttsOverlay}>
+                    <span style={{ fontSize: 36 }}>🔊</span>
+                    <p style={styles.pausedOverlayText}>AI Tutor is speaking...</p>
+                    <p style={styles.pausedOverlaySub}>Wait for the lecture to end before taking the test.</p>
                   </div>
                 )}
               </div>
@@ -1348,5 +1360,20 @@ const styles: Record<string, React.CSSProperties> = {
     color: "#ef4444",
     textAlign: "center" as const,
     margin: 0,
+  },
+  ttsOverlay: {
+    position: "absolute" as const,
+    inset: 0,
+    display: "flex",
+    flexDirection: "column" as const,
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 10,
+    padding: "40px 24px",
+    textAlign: "center" as const,
+    background: "rgba(248, 250, 252, 0.88)",
+    backdropFilter: "blur(8px)",
+    WebkitBackdropFilter: "blur(8px)",
+    zIndex: 10,
   },
 };

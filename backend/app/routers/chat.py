@@ -217,6 +217,10 @@ async def stream_message(
         quiz_topic = gemini_service.extract_quiz_offer(complete_text)
         clean_text = gemini_service.strip_quiz_offer(complete_text)
 
+        if "[Error:" in clean_text:
+            yield f"data: {json.dumps({'type': 'end'})}\n\n"
+            return
+
         async with async_session_factory() as save_session:
             await chat_service.add_message(save_session, chat.id, "assistant", clean_text)
 

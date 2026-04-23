@@ -29,6 +29,12 @@ export function useVoice() {
   const playingRef = useRef(false);
   const audioRef = useRef<HTMLAudioElement | null>(null);
 
+  // Streaming TTS state
+  const sentenceBufRef = useRef<string>("");
+  const ttsQueueRef = useRef<string[]>([]);
+  const ttsActiveRef = useRef(false);
+  const ttsProcessingRef = useRef(false);
+
   const isVoiceActive = voiceStatus !== "idle";
 
   const clearVoiceError = useCallback(() => setVoiceError(null), []);
@@ -305,9 +311,127 @@ export function useVoice() {
     setVoiceStatus("idle");
   }, [cleanupAudio]);
 
+  // ── Streaming TTS pipeline ──────────────────────────────────────────────────
+
+  // Sequential audio queue processor — one instance runs at a time
+  const _processTTSQueue = useCallback(async () => {
+    if (ttsProcessingRef.current) return;
+    ttsProcessingRef.current = true;
+
+    while (ttsQueueRef.current.length > 0 && ttsActiveRef.current) {
+      const sentence = ttsQueueRef.current.shift()!;
+      try {
+        const blob = await voiceApi.speak(sentence);
+        if (!ttsActiveRef.current) { break; }
+        const url = URL.createObjectURL(blob);
+        const audio = new Audio(url);
+        audioRef.current = audio;
+        setPlaying(true);
+        await new Promise<void>((resolve) => {
+          audio.onended = () => { URL.revokeObjectURL(url); if (audioRef.current === audio) audioRef.current = null; resolve(); };
+          audio.onerror = () => { URL.revokeObjectURL(url); if (audioRef.current === audio) audioRef.current = null; resolve(); };
+          audio.play().catch(() => resolve());
+        });
+      } catch {
+        // skip failed chunks silently
+      }
+    }
+
+    ttsProcessingRef.current = false;
+    if (!ttsActiveRef.current || ttsQueueRef.current.length === 0) setPlaying(false);
+  }, []);
+
+  // Buffer incoming text token, enqueue complete sentences for TTS
+  const feedStreamTTS = useCallback((chunk: string) => {
+    if (!ttsActiveRef.current) return;
+    sentenceBufRef.current += chunk;
+
+    const buf = sentenceBufRef.current;
+    let start = 0;
+    let i = 0;
+
+    while (i < buf.length) {
+      const ch = buf[i];
+      if (ch === "." || ch === "!" || ch === "?") {
+        const next = buf[i + 1];
+        const isEnd = next === undefined || next === " " || next === "\n";
+        if (isEnd) {
+          const sentence = buf.slice(start, i + 1).trim();
+          if (sentence.length >= 8) {
+            ttsQueueRef.current.push(sentence);
+            _processTTSQueue();
+          }
+          start = i + 1;
+          while (start < buf.length && (buf[start] === " " || buf[start] === "\n")) start++;
+          i = start;
+          continue;
+        }
+      } else if (ch === "\n" && buf[i + 1] === "\n") {
+        const sentence = buf.slice(start, i).trim();
+        if (sentence.length >= 8) {
+          ttsQueueRef.current.push(sentence);
+          _processTTSQueue();
+        }
+        start = i + 2;
+        i = start;
+        continue;
+      }
+      i++;
+    }
+
+    // Force-flush if buffer grows very large (code blocks, lists, etc.)
+    if (buf.length - start > 250) {
+      const segment = buf.slice(start, start + 200);
+      const cutAt = segment.lastIndexOf(" ");
+      if (cutAt > 30) {
+        const sentence = segment.slice(0, cutAt).trim();
+        if (sentence.length >= 8) {
+          ttsQueueRef.current.push(sentence);
+          _processTTSQueue();
+        }
+        start += cutAt + 1;
+      }
+    }
+
+    sentenceBufRef.current = buf.slice(start);
+  }, [_processTTSQueue]);
+
+  const startStreamTTS = useCallback(() => {
+    // Stop any existing audio and reset all streaming TTS state
+    if (audioRef.current) { audioRef.current.pause(); audioRef.current = null; }
+    ttsActiveRef.current = true;
+    ttsQueueRef.current = [];
+    sentenceBufRef.current = "";
+    ttsProcessingRef.current = false;
+    setPlaying(false);
+  }, []);
+
+  const endStreamTTS = useCallback(() => {
+    // Flush any text left in the buffer when streaming ends
+    const remaining = sentenceBufRef.current.trim();
+    sentenceBufRef.current = "";
+    if (remaining.length >= 4) {
+      ttsQueueRef.current.push(remaining);
+      _processTTSQueue();
+    }
+  }, [_processTTSQueue]);
+
+  const cancelStreamTTS = useCallback(() => {
+    ttsActiveRef.current = false;
+    ttsQueueRef.current = [];
+    sentenceBufRef.current = "";
+    if (audioRef.current) { audioRef.current.pause(); audioRef.current = null; }
+    setPlaying(false);
+  }, []);
+
+  // ── Single-shot TTS (Listen button / quiz) ────────────────────────────────
+
   const speakText = useCallback(async (text: string) => {
     setVoiceError(null);
-    // Stop and release any currently playing audio (singleton)
+    // Cancel streaming TTS and stop any currently playing audio
+    ttsActiveRef.current = false;
+    ttsQueueRef.current = [];
+    sentenceBufRef.current = "";
     if (audioRef.current) {
       audioRef.current.pause();
       audioRef.current.currentTime = 0;
@@ -356,5 +480,9 @@ export function useVoice() {
     disconnectVoice,
     speakText,
     stopSpeaking,
+    startStreamTTS,
+    feedStreamTTS,
+    endStreamTTS,
+    cancelStreamTTS,
   };
 }

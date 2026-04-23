@@ -81,7 +81,12 @@ export function useChat() {
   }, []);
 
   const sendMessage = useCallback(
-    (text: string, opts?: { suppressNavigation?: boolean; onStreamComplete?: (text: string) => void }) => {
+    (text: string, opts?: {
+      suppressNavigation?: boolean;
+      onStreamStart?: () => void;
+      onToken?: (chunk: string) => void;
+      onStreamComplete?: (text: string) => void;
+    }) => {
       const userMsg: ChatMessage = {
         id: Date.now(),
         chat_id: 0,
@@ -106,6 +111,7 @@ export function useChat() {
             if (!opts?.suppressNavigation) {
               navigate(`/chat/${event.session_id}`, { replace: true });
             }
+            opts?.onStreamStart?.();
           } else if (event.type === "token" && event.content) {
             if (event.content.startsWith("[Error:")) {
               hasError = true;
@@ -126,6 +132,7 @@ export function useChat() {
             }
             accumulated += event.content;
             setStreamContent(accumulated);
+            opts?.onToken?.(event.content);
           } else if (event.type === "title") {
             loadChats();
           } else if (event.type === "credits" && event.content) {

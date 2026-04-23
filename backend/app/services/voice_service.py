@@ -46,10 +46,7 @@ def text_to_speech(text: str, lang: str = "en") -> tuple[bytes, str]:
         client = _get_client()
         response = client.models.generate_content(
             model=TTS_MODEL,
-            contents=types.Content(
-                parts=[types.Part(text=clean_text)],
-                role="user",
-            ),
+            contents=clean_text,
             config=types.GenerateContentConfig(
                 response_modalities=["AUDIO"],
                 speech_config=types.SpeechConfig(
