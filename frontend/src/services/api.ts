@@ -621,11 +621,11 @@ export const sessionsApi = {
     });
     return handleResponse(res);
   },
-  async startTest(appointmentId: number): Promise<import("../types").Assessment> {
+  async startTest(appointmentId: number, body?: { topic?: string }): Promise<import("../types").Assessment> {
     const res = await fetch(`${API_BASE}/sessions/${appointmentId}/test`, {
       method: "POST",
       headers: authHeaders(),
-      body: JSON.stringify({}),
+      body: JSON.stringify(body || {}),
     });
     return handleResponse(res);
   },

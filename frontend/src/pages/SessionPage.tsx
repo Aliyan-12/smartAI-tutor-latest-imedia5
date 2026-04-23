@@ -9,7 +9,7 @@ import PostSessionScreen from "../components/PostSessionScreen";
 import { useChat } from "../hooks/useChat";
 import { useVoice } from "../hooks/useVoice";
 import { useAuth } from "../context/AuthContext";
-import type { Assessment } from "../types";
+import type { Assessment, ChatMessage } from "../types";
 
 type SessionState = "passcode" | "active" | "ended";
 type LearnTab = "learn" | "test";
@@ -69,6 +69,8 @@ export default function SessionPage() {
 
   const { voiceStatus, speakText, connectVoice, disconnectVoice, isVoiceActive } = useVoice();
   const [voiceMessages, setVoiceMessages] = useState<{ role: string; content: string }[]>([]);
+  const voiceAiTurnRef = useRef("");
+  const [voiceQuizTopic, setVoiceQuizTopic] = useState<string | null>(null);
 
   const apptId = appointmentId ? parseInt(appointmentId) : 0;
 
@@ -131,6 +133,15 @@ export default function SessionPage() {
     handleStartTest();
   }, [quizOffer]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Voice quiz trigger: when AI voice response contains a quiz offer
+  useEffect(() => {
+    if (!voiceQuizTopic) return;
+    if (testAssessment || testLoading || testResult) { setVoiceQuizTopic(null); return; }
+    setLearnTab("test");
+    handleStartTest(voiceQuizTopic);
+    setVoiceQuizTopic(null);
+  }, [voiceQuizTopic]); // eslint-disable-line react-hooks/exhaustive-deps
+
   useEffect(() => {
     if (sessionState !== "active" || !sessionStartedAt || isPaused) return;
 
@@ -151,6 +162,29 @@ export default function SessionPage() {
     timerRef.current = window.setInterval(updateTimer, 1000);
     return () => { if (timerRef.current) clearInterval(timerRef.current); };
   }, [sessionState, sessionStartedAt, durationMinutes, isPaused, totalPausedMs, apptId]);
+
+  // Auto-read test question via TTS when voice is active
+  useEffect(() => {
+    if (!isVoiceActive || !testAssessment) return;
+    const q = testAssessment.questions[testCurrentQ];
+    if (!q) return;
+    const opts = q.options.map((o, i) => `${["A", "B", "C", "D"][i]}: ${o}`).join(". ");
+    speakText(`Question ${testCurrentQ + 1}: ${q.question_text}. Options: ${opts}`);
+  }, [testCurrentQ, testAssessment?.id]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Auto-read feedback via TTS when voice is active
+  useEffect(() => {
+    if (!isVoiceActive || !testFeedback) return;
+    const result = testFeedback.isCorrect ? "Correct!" : "Not quite.";
+    const explanation = testFeedback.explanation ? ` ${testFeedback.explanation}` : "";
+    speakText(`${result}${explanation}`);
+  }, [testFeedback]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Auto-read final test score via TTS when voice is active
+  useEffect(() => {
+    if (!isVoiceActive || !testResult) return;
+    speakText(`Quiz complete! You scored ${Math.round(testResult.score)} percent. ${testResult.weak.length > 0 ? `Areas to review: ${testResult.weak.join(", ")}.` : "Great job on all topics!"}`);
+  }, [testResult]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const handlePause = async () => {
     if (isPaused) {
@@ -193,12 +227,12 @@ export default function SessionPage() {
     }
   };
 
-  const handleStartTest = async () => {
+  const handleStartTest = async (topicOverride?: string) => {
     if (!apptId) return;
     setTestLoading(true);
     setTestError(null);
     try {
-      const a = await sessionsApi.startTest(apptId);
+      const a = await sessionsApi.startTest(apptId, topicOverride ? { topic: topicOverride } : undefined);
       setTestAssessment(a);
       setTestCurrentQ(0);
       setTestFeedback(null);
@@ -321,6 +355,18 @@ export default function SessionPage() {
     return `${m.toString().padStart(2, "0")}:${s.toString().padStart(2, "0")}`;
   };
 
+  // Merge DB messages with live voice transcripts so they stream in real-time
+  const voiceChatMessages: ChatMessage[] = voiceMessages.map((m, i) => ({
+    id: -(i + 1),
+    chat_id: 0,
+    role: m.role as "user" | "assistant",
+    content: m.content,
+    timestamp: new Date().toISOString(),
+  }));
+  const displayMessages = voiceChatMessages.length > 0
+    ? [...messages, ...voiceChatMessages]
+    : messages;
+
   const totalSeconds = durationMinutes * 60;
   const elapsedSeconds = totalSeconds - timeRemaining;
   const progressFraction = totalSeconds > 0 ? elapsedSeconds / totalSeconds : 0;
@@ -343,6 +389,9 @@ export default function SessionPage() {
   const handleVoiceToggle = useCallback(() => {
     if (isVoiceActive) {
       disconnectVoice();
+      // Clear live voice transcripts and reload DB-saved messages after a short delay
+      setVoiceMessages([]);
+      setTimeout(() => { if (apptId) initSessionChat(apptId); }, 1200);
     } else {
       connectVoice(activeSessionId, {
         onUserTranscript: (chunk) => {
@@ -355,21 +404,38 @@ export default function SessionPage() {
           });
         },
         onAiTranscriptChunk: (chunk) => {
+          // Accumulate for QUIZ_OFFER detection on turn complete
+          voiceAiTurnRef.current += chunk;
+          // Strip marker from visible transcript
+          const cleanChunk = chunk.replace(/\[QUIZ_OFFER:\s*topic="[^"]*"\]/gi, "");
           setVoiceMessages((prev) => {
             const last = prev[prev.length - 1];
             if (last && last.role === "assistant") {
-              return [...prev.slice(0, -1), { role: "assistant", content: last.content + chunk }];
+              return [...prev.slice(0, -1), { role: "assistant", content: last.content + cleanChunk }];
             }
-            return [...prev, { role: "assistant", content: chunk }];
+            return cleanChunk ? [...prev, { role: "assistant", content: cleanChunk }] : prev;
           });
         },
-        onTurnComplete: () => {},
+        onTurnComplete: () => {
+          const fullAi = voiceAiTurnRef.current;
+          voiceAiTurnRef.current = "";
+          const match = fullAi.match(/\[QUIZ_OFFER:\s*topic="([^"]+)"\]/i);
+          if (match) {
+            setVoiceQuizTopic(match[1]);
+          }
+        },
+        onTurnSaved: () => {
+          // DB commit confirmed — swap live transcripts into the unified message list
+          setVoiceMessages([]);
+          if (apptId) initSessionChat(apptId);
+        },
         onCreditsUpdate: () => {},
         onSessionCreated: () => {},
         onError: (msg) => console.error("Voice error:", msg),
-      });
+        onQuizOffer: (topic) => { setVoiceQuizTopic(topic); },
+      }, apptId);
     }
-  }, [isVoiceActive, connectVoice, disconnectVoice, activeSessionId]);
+  }, [isVoiceActive, connectVoice, disconnectVoice, activeSessionId, apptId, initSessionChat]);
 
   if (sessionState === "passcode") {
     return (
@@ -754,7 +820,7 @@ export default function SessionPage() {
               </div>
             ) : !isPaused ? (
               <ChatWindow
-                messages={messages}
+                messages={displayMessages}
                 streaming={streaming}
                 streamContent={streamContent}
                 onSpeak={speakText}

@@ -166,7 +166,7 @@ async def stream_message(
     db: AsyncSession = Depends(get_db),
 ):
     _ensure_student(current_user)
-    await _ensure_credits(db, current_user)
+    # await _ensure_credits(db, current_user)
 
     if payload.session_id:
         chat = await chat_service.get_chat_by_session(db, payload.session_id, current_user.id)
@@ -178,16 +178,25 @@ async def stream_message(
     await chat_service.add_message(db, chat.id, "user", payload.message)
     history, rag_chunks = await chat_service.build_context(db, chat.id, user_query=payload.message)
 
+    # Resolve appointment_id: prefer the FK column, fall back to parsing the chat title
+    # (title format: "[session:<id>] <display title>" set by get_or_create_session_chat)
+    import re as _re
+    _appt_id: int | None = getattr(chat, "appointment_id", None)
+    if not _appt_id and chat.title:
+        _m = _re.match(r"\[session:(\d+)\]", chat.title)
+        if _m:
+            _appt_id = int(_m.group(1))
+
     # Build a session-specific system prompt when this chat belongs to an appointment
     session_system_prompt: str | None = None
-    if getattr(chat, "appointment_id", None):
+    if _appt_id:
         try:
             session_system_prompt = await session_agent_service.build_session_system_prompt(
-                db, chat.appointment_id, current_user.id
+                db, _appt_id, current_user.id
             )
         except Exception:
             logger.warning(
-                f"Failed to build session prompt for appointment {chat.appointment_id}, using default"
+                f"Failed to build session prompt for appointment {_appt_id}, using default"
             )
 
     async def event_stream():

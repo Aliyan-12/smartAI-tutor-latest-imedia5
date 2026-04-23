@@ -7,9 +7,11 @@ interface VoiceCallbacks {
   onUserTranscript: (chunk: string) => void;
   onAiTranscriptChunk: (chunk: string) => void;
   onTurnComplete: () => void;
+  onTurnSaved?: () => void;
   onCreditsUpdate: (credits: number) => void;
   onSessionCreated: (sessionId: string) => void;
   onError: (msg: string) => void;
+  onQuizOffer?: (topic: string) => void;
 }
 
 export function useVoice() {
@@ -68,7 +70,7 @@ export function useVoice() {
     setPlaying(false);
   }, []);
 
-  const connectVoice = useCallback(async (sessionId: string | null, callbacks: VoiceCallbacks) => {
+  const connectVoice = useCallback(async (sessionId: string | null, callbacks: VoiceCallbacks, appointmentId?: number) => {
     callbacksRef.current = callbacks;
     setVoiceError(null);
     setVoiceStatus("connecting");
@@ -120,16 +122,46 @@ export function useVoice() {
     const host = window.location.host;
     let wsUrl = `${protocol}//${host}/api/voice/ws?token=${token}`;
     if (sessionId) wsUrl += `&session_id=${sessionId}`;
+    if (appointmentId) wsUrl += `&appointment_id=${appointmentId}`;
 
     const ws = new WebSocket(wsUrl);
     wsRef.current = ws;
+    let connectionEstablished = false;
 
     ws.onopen = async () => {
-      // Start mic
+      let stream: MediaStream | null = null;
       try {
-        const stream = await navigator.mediaDevices.getUserMedia({
-          audio: { sampleRate: 16000, channelCount: 1, echoCancellation: true, noiseSuppression: true },
-        });
+        // Try with preferred constraints first; fall back to basic audio if browser rejects them
+        try {
+          stream = await navigator.mediaDevices.getUserMedia({
+            audio: { sampleRate: 16000, channelCount: 1, echoCancellation: true, noiseSuppression: true },
+          });
+        } catch {
+          stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        }
+      } catch (err: any) {
+        const name = err?.name ?? "";
+        const msg =
+          name === "NotAllowedError" || name === "PermissionDeniedError"
+            ? "Microphone permission denied — please allow microphone access in your browser and try again."
+            : name === "NotFoundError"
+            ? "No microphone found — please connect a microphone and try again."
+            : name === "NotReadableError"
+            ? "Microphone is already in use by another application."
+            : "Microphone access failed — please check your browser settings.";
+        setVoiceError(msg);
+        ws.close();
+        setVoiceStatus("idle");
+        return;
+      }
+
+      try {
+        // Guard: backend may have closed the WS while getUserMedia was pending
+        if (ws.readyState !== WebSocket.OPEN) {
+          stream.getTracks().forEach((t) => t.stop());
+          return;
+        }
+
         streamRef.current = stream;
 
         const source = audioCtx.createMediaStreamSource(stream);
@@ -149,7 +181,7 @@ export function useVoice() {
 
         setVoiceStatus("listening");
       } catch {
-        setVoiceError("Microphone access denied");
+        setVoiceError("Audio processing setup failed.");
         ws.close();
         setVoiceStatus("idle");
       }
@@ -162,7 +194,10 @@ export function useVoice() {
 
         switch (data.type) {
           case "status":
-            if (data.content === "connected") setVoiceStatus("listening");
+            if (data.content === "connected") {
+              connectionEstablished = true;
+              setVoiceStatus("listening");
+            }
             break;
 
           case "session":
@@ -196,6 +231,14 @@ export function useVoice() {
             setVoiceStatus("listening");
             break;
 
+          case "turn_saved":
+            cb?.onTurnSaved?.();
+            break;
+
+          case "quiz_offer":
+            if (data.content) cb?.onQuizOffer?.(data.content);
+            break;
+
           case "credits":
             if (data.content) cb?.onCreditsUpdate(parseFloat(data.content));
             break;
@@ -214,9 +257,17 @@ export function useVoice() {
       setVoiceStatus("idle");
     };
 
-    ws.onclose = () => {
+    ws.onclose = (ev) => {
       cleanupAudio();
       setVoiceStatus("idle");
+      if (!connectionEstablished) {
+        setVoiceError((prev) => {
+          if (prev) return prev;
+          if (ev.code === 4002) return "Insufficient credits — please subscribe to continue.";
+          if (ev.code === 4003) return "Voice is only available to students.";
+          return "Voice server unavailable — please try again or check server logs.";
+        });
+      }
     };
   }, [playNextChunk]);
 

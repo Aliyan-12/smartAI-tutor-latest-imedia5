@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useCallback } from "react";
 import ReactMarkdown from "react-markdown";
 import { Volume2 } from "lucide-react";
 import type { ChatMessage } from "../types";
@@ -17,9 +17,27 @@ export default function ChatWindow({
   onSpeak,
 }: Props) {
   const bottomRef = useRef<HTMLDivElement>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
+  const userScrolledUpRef = useRef(false);
+
+  const handleScroll = useCallback(() => {
+    const el = containerRef.current?.parentElement;
+    if (!el) return;
+    const distanceFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
+    userScrolledUpRef.current = distanceFromBottom > 80;
+  }, []);
 
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
+    const el = containerRef.current?.parentElement;
+    if (!el) return;
+    el.addEventListener("scroll", handleScroll, { passive: true });
+    return () => el.removeEventListener("scroll", handleScroll);
+  }, [handleScroll]);
+
+  useEffect(() => {
+    if (!userScrolledUpRef.current) {
+      bottomRef.current?.scrollIntoView({ behavior: "smooth" });
+    }
   }, [messages, streamContent]);
 
   if (messages.length === 0 && !streaming) {
@@ -27,7 +45,7 @@ export default function ChatWindow({
   }
 
   return (
-    <>
+    <div ref={containerRef} style={{ display: "contents" }}>
       {messages.map((msg) => {
         if (msg.role === "system") {
           return (
@@ -93,6 +111,6 @@ export default function ChatWindow({
       )}
 
       <div ref={bottomRef} />
-    </>
+    </div>
   );
 }
