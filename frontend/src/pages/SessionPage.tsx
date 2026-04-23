@@ -750,7 +750,7 @@ export default function SessionPage() {
                     ) : (
                       <button
                         style={{ ...styles.generateBtn, marginTop: 12 }}
-                        onClick={handleStartTest}
+                        onClick={() => handleStartTest()}
                         disabled={testLoading}
                       >
                         {testLoading ? "Generating..." : "Start Test"}
