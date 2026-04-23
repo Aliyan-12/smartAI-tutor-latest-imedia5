@@ -43,8 +43,8 @@ async def speak(
     current_user: User = Depends(get_current_user),
 ):
     try:
-        audio_data = text_to_speech(payload.text, payload.lang)
-        return Response(content=audio_data, media_type="audio/mpeg")
+        audio_data, mime_type = text_to_speech(payload.text, payload.lang)
+        return Response(content=audio_data, media_type=mime_type)
     except Exception as e:
         logger.error(f"TTS error: {e}")
         raise HTTPException(

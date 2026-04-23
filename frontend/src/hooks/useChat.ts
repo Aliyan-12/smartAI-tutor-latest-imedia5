@@ -81,7 +81,7 @@ export function useChat() {
   }, []);
 
   const sendMessage = useCallback(
-    (text: string, opts?: { suppressNavigation?: boolean }) => {
+    (text: string, opts?: { suppressNavigation?: boolean; onStreamComplete?: (text: string) => void }) => {
       const userMsg: ChatMessage = {
         id: Date.now(),
         chat_id: 0,
@@ -156,6 +156,7 @@ export function useChat() {
           setStreamContent("");
           setStreaming(false);
           loadChats();
+          opts?.onStreamComplete?.(accumulated);
         },
         (err) => {
           console.error("Stream error:", err);

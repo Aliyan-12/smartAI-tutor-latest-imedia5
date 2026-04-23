@@ -1,5 +1,6 @@
 import io
 import logging
+import struct
 import tempfile
 import os
 from typing import Optional
@@ -14,6 +15,8 @@ logger = logging.getLogger(__name__)
 
 _client = None
 
+TTS_MODEL = "gemini-2.5-flash-preview-tts"
+
 
 def _get_client() -> genai.Client:
     global _client
@@ -22,15 +25,49 @@ def _get_client() -> genai.Client:
     return _client
 
 
-def text_to_speech(text: str, lang: str = "en") -> bytes:
+def _pcm_to_wav(pcm_data: bytes, sample_rate: int = 24000, num_channels: int = 1, bits_per_sample: int = 16) -> bytes:
+    data_size = len(pcm_data)
+    header = struct.pack(
+        '<4sI4s4sIHHIIHH4sI',
+        b'RIFF', 36 + data_size, b'WAVE',
+        b'fmt ', 16, 1, num_channels, sample_rate,
+        sample_rate * num_channels * bits_per_sample // 8,
+        num_channels * bits_per_sample // 8, bits_per_sample,
+        b'data', data_size,
+    )
+    return header + pcm_data
+
+
+def text_to_speech(text: str, lang: str = "en") -> tuple[bytes, str]:
     clean_text = text.strip()
     if not clean_text or clean_text.startswith("[Error"):
         raise ValueError("Cannot generate speech for empty or error text")
-    tts = gTTS(text=clean_text, lang=lang, slow=False)
-    buffer = io.BytesIO()
-    tts.write_to_fp(buffer)
-    buffer.seek(0)
-    return buffer.read()
+    try:
+        client = _get_client()
+        response = client.models.generate_content(
+            model=TTS_MODEL,
+            contents=types.Content(
+                parts=[types.Part(text=clean_text)],
+                role="user",
+            ),
+            config=types.GenerateContentConfig(
+                response_modalities=["AUDIO"],
+                speech_config=types.SpeechConfig(
+                    voice_config=types.VoiceConfig(
+                        prebuilt_voice_config=types.PrebuiltVoiceConfig(voice_name="Puck")
+                    )
+                ),
+            ),
+        )
+        pcm = response.candidates[0].content.parts[0].inline_data.data
+        return _pcm_to_wav(pcm), "audio/wav"
+    except Exception as e:
+        logger.warning(f"Gemini TTS failed, falling back to gTTS: {e}")
+        tts = gTTS(text=clean_text, lang=lang, slow=False)
+        buf = io.BytesIO()
+        tts.write_to_fp(buf)
+        buf.seek(0)
+        return buf.read(), "audio/mpeg"
 
 
 def speech_to_text(audio_bytes: bytes, filename: str = "audio.webm") -> Optional[str]:

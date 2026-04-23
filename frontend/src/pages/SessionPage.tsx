@@ -382,7 +382,7 @@ export default function SessionPage() {
     : "var(--accent-blue, var(--accent))";
 
   const sessionSend = useCallback(
-    (text: string) => sendMessage(text, { suppressNavigation: true }),
+    (text: string) => sendMessage(text, { suppressNavigation: true, onStreamComplete: speakText }),
     [sendMessage]
   );
 

@@ -307,14 +307,29 @@ export function useVoice() {
 
   const speakText = useCallback(async (text: string) => {
     setVoiceError(null);
+    // Stop and release any currently playing audio (singleton)
+    if (audioRef.current) {
+      audioRef.current.pause();
+      audioRef.current.currentTime = 0;
+      audioRef.current = null;
+    }
+    setPlaying(false);
     try {
       setPlaying(true);
       const blobData = await voiceApi.speak(text);
       const url = URL.createObjectURL(blobData);
       const audio = new Audio(url);
       audioRef.current = audio;
-      audio.onended = () => { setPlaying(false); URL.revokeObjectURL(url); };
-      audio.onerror = () => { setPlaying(false); URL.revokeObjectURL(url); };
+      audio.onended = () => {
+        setPlaying(false);
+        URL.revokeObjectURL(url);
+        if (audioRef.current === audio) audioRef.current = null;
+      };
+      audio.onerror = () => {
+        setPlaying(false);
+        URL.revokeObjectURL(url);
+        if (audioRef.current === audio) audioRef.current = null;
+      };
       await audio.play();
     } catch {
       setPlaying(false);
@@ -326,6 +341,7 @@ export function useVoice() {
     if (audioRef.current) {
       audioRef.current.pause();
       audioRef.current.currentTime = 0;
+      audioRef.current = null;
     }
     setPlaying(false);
   }, []);
