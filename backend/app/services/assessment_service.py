@@ -66,6 +66,7 @@ async def list_student_assessments(
 ) -> List[Assessment]:
     result = await db.execute(
         select(Assessment)
+        .options(selectinload(Assessment.questions))
         .where(Assessment.student_id == student_id)
         .order_by(desc(Assessment.created_at))
         .limit(limit)
