@@ -91,8 +91,8 @@ def build_personalised_system_prompt(student_preferences: dict) -> str:
     )
     return SYSTEM_PROMPT + preference_block
 
-MAX_RETRIES = 2
-RETRY_DELAY = 1.5
+MAX_RETRIES = 5
+RETRY_DELAY = 1.0  # base delay; doubles each attempt (1s, 2s, 4s, 8s, 16s)
 
 _client = None
 
@@ -149,7 +149,32 @@ def _friendly_error(exc: Exception) -> str:
 
 def _is_retryable(exc: Exception) -> bool:
     msg = str(exc).lower()
-    return "429" in msg or "resource_exhausted" in msg or "unavailable" in msg
+    return any(kw in msg for kw in (
+        "429", "503", "500",
+        "resource_exhausted", "unavailable", "service unavailable",
+        "overloaded", "quota", "rate limit", "too many requests",
+        "internal", "deadline", "timeout",
+    ))
+
+
+def _call_with_retry(fn, *args, **kwargs):
+    """Call a synchronous Gemini SDK function with exponential-backoff retry on transient errors."""
+    last_error = None
+    for attempt in range(MAX_RETRIES + 1):
+        try:
+            return fn(*args, **kwargs)
+        except Exception as e:
+            last_error = e
+            if _is_retryable(e) and attempt < MAX_RETRIES:
+                delay = RETRY_DELAY * (2 ** attempt)
+                logger.warning(
+                    f"Gemini transient error (attempt {attempt + 1}/{MAX_RETRIES + 1}), "
+                    f"retrying in {delay:.1f}s: {type(e).__name__}: {e}"
+                )
+                time.sleep(delay)
+                continue
+            break
+    raise last_error
 
 
 def generate_response(
@@ -163,25 +188,18 @@ def generate_response(
         if student_preferences
         else SYSTEM_PROMPT
     )
-    last_error = None
-    for attempt in range(MAX_RETRIES + 1):
-        try:
-            client = _get_client()
-            response = client.models.generate_content(
-                model=settings.gemini_model,
-                contents=_build_contents(history, user_message, rag_chunks),
-                config=types.GenerateContentConfig(system_instruction=system_prompt),
-            )
-            return response.text
-        except Exception as e:
-            last_error = e
-            if _is_retryable(e) and attempt < MAX_RETRIES:
-                time.sleep(RETRY_DELAY * (attempt + 1))
-                continue
-            break
-
-    logger.error(f"Gemini generate error after {MAX_RETRIES + 1} attempts: {last_error}")
-    return f"[Error: {_friendly_error(last_error)}]"
+    try:
+        client = _get_client()
+        response = _call_with_retry(
+            client.models.generate_content,
+            model=settings.gemini_model,
+            contents=_build_contents(history, user_message, rag_chunks),
+            config=types.GenerateContentConfig(system_instruction=system_prompt),
+        )
+        return response.text
+    except Exception as e:
+        logger.error(f"Gemini generate_response failed: {e}")
+        return f"[Error: {_friendly_error(e)}]"
 
 
 def stream_response(
@@ -198,28 +216,20 @@ def stream_response(
     else:
         system_prompt = SYSTEM_PROMPT
 
-    last_error = None
-    for attempt in range(MAX_RETRIES + 1):
-        try:
-            client = _get_client()
-            response = client.models.generate_content_stream(
-                model=settings.gemini_model,
-                contents=_build_contents(history, user_message, rag_chunks),
-                config=types.GenerateContentConfig(system_instruction=system_prompt),
-            )
-            for chunk in response:
-                if chunk.text:
-                    yield chunk.text
-            return
-        except Exception as e:
-            last_error = e
-            if _is_retryable(e) and attempt < MAX_RETRIES:
-                time.sleep(RETRY_DELAY * (attempt + 1))
-                continue
-            break
-
-    logger.error(f"Gemini stream error after {MAX_RETRIES + 1} attempts: {last_error}")
-    yield f"[Error: {_friendly_error(last_error)}]"
+    try:
+        client = _get_client()
+        response = _call_with_retry(
+            client.models.generate_content_stream,
+            model=settings.gemini_model,
+            contents=_build_contents(history, user_message, rag_chunks),
+            config=types.GenerateContentConfig(system_instruction=system_prompt),
+        )
+        for chunk in response:
+            if chunk.text:
+                yield chunk.text
+    except Exception as e:
+        logger.error(f"Gemini stream_response failed: {e}")
+        yield f"[Error: {_friendly_error(e)}]"
 
 
 async def stream_response_async(
@@ -358,7 +368,8 @@ def generate_mcq_questions(
         )
 
     client = _get_client()
-    response = client.models.generate_content(
+    response = _call_with_retry(
+        client.models.generate_content,
         model=settings.gemini_model,
         contents=prompt,
         config=types.GenerateContentConfig(system_instruction=system_instruction),
@@ -392,7 +403,8 @@ Write a brief, encouraging report (3-4 sentences) summarizing their performance.
 Mention specific strong and weak areas. Suggest what to review next. Keep it warm and motivating."""
 
     client = _get_client()
-    response = client.models.generate_content(
+    response = _call_with_retry(
+        client.models.generate_content,
         model=settings.gemini_model,
         contents=prompt,
         config=types.GenerateContentConfig(
@@ -405,7 +417,8 @@ Mention specific strong and weak areas. Suggest what to review next. Keep it war
 def generate_chat_title(user_message: str) -> str:
     try:
         client = _get_client()
-        response = client.models.generate_content(
+        response = _call_with_retry(
+            client.models.generate_content,
             model=settings.gemini_model,
             contents=user_message,
             config=types.GenerateContentConfig(
