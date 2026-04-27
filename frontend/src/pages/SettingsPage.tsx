@@ -162,11 +162,11 @@ export default function SettingsPage() {
     <>
       <style>{`
         .sett-page { display: flex; height: 100vh; background: #f8fafc; }
-        .sett-main { flex: 1; display: flex; flex-direction: column; overflow-y: auto; }
-        .sett-header { padding: 32px 40px 0; }
+        .sett-main { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
+        .sett-header { padding: 32px 40px 0; flex-shrink: 0; }
         .sett-header h1 { font-size: 26px; font-weight: 800; color: #0f172a; margin: 0 0 4px; }
         .sett-header p { font-size: 14px; color: #64748b; margin: 0; }
-        .sett-tabs { display: flex; gap: 2px; padding: 20px 40px 0; border-bottom: 2px solid #e2e8f0; overflow-x: auto; }
+        .sett-tabs { display: flex; gap: 2px; padding: 20px 40px 0; border-bottom: 2px solid #e2e8f0; overflow-x: auto; flex-shrink: 0; }
         .sett-tab {
           display: flex; align-items: center; gap: 6px; padding: 10px 16px;
           font-size: 13px; font-weight: 600; cursor: pointer; color: #64748b;
@@ -176,7 +176,7 @@ export default function SettingsPage() {
         }
         .sett-tab.active { color: #3b82f6; border-bottom-color: #3b82f6; }
         .sett-tab:hover:not(.active) { color: #374151; }
-        .sett-body { flex: 1; padding: 28px 40px; max-width: 860px; }
+        .sett-body { flex: 1; padding: 28px 40px; max-width: 860px; overflow-y: auto; }
         .sett-card { background: white; border: 1.5px solid #e2e8f0; border-radius: 12px; padding: 24px; margin-bottom: 16px; }
         .sett-card-title { font-size: 15px; font-weight: 700; color: #0f172a; margin: 0 0 18px; display: flex; align-items: center; gap: 8px; }
         .sett-row { display: flex; align-items: center; justify-content: space-between; padding: 12px 0; border-bottom: 1px solid #f1f5f9; }

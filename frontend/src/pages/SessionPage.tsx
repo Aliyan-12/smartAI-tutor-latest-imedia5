@@ -36,6 +36,8 @@ export default function SessionPage() {
   const [sessionTitle, setSessionTitle] = useState("");
   const [sessionSubject, setSessionSubject] = useState("");
   const [learnTab, setLearnTab] = useState<LearnTab>("learn");
+  const [isMobile, setIsMobile] = useState(false);
+  const [mobilePanelView, setMobilePanelView] = useState<"chat" | "learn">("chat");
   const [xp, setXp] = useState(0);
   const timerRef = useRef<number | null>(null);
 
@@ -185,6 +187,13 @@ export default function SessionPage() {
     if (!isVoiceActive || !testResult) return;
     speakText(`Quiz complete! You scored ${Math.round(testResult.score)} percent. ${testResult.weak.length > 0 ? `Areas to review: ${testResult.weak.join(", ")}.` : "Great job on all topics!"}`);
   }, [testResult]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    const check = () => setIsMobile(window.innerWidth < 1024);
+    check();
+    window.addEventListener("resize", check);
+    return () => window.removeEventListener("resize", check);
+  }, []);
 
   const handlePause = async () => {
     if (isPaused) {
@@ -501,6 +510,306 @@ export default function SessionPage() {
     );
   }
 
+  const learnPanelInner = (
+    <>
+      <div style={styles.tabs}>
+        {(["learn", "test"] as LearnTab[]).map((tab) => (
+          <button
+            key={tab}
+            style={{
+              ...styles.tabBtn,
+              ...(learnTab === tab ? styles.tabBtnActive : {}),
+            }}
+            onClick={() => setLearnTab(tab)}
+          >
+            {tab.charAt(0).toUpperCase() + tab.slice(1)}
+          </button>
+        ))}
+      </div>
+
+      <div style={styles.learnContent}>
+        {isPaused ? (
+          <div style={styles.pausedOverlay}>
+            <span style={{ fontSize: 32 }}>⏸</span>
+            <p style={styles.pausedOverlayText}>Session is paused</p>
+            <p style={styles.pausedOverlaySub}>Resume the session to continue learning.</p>
+            <button style={styles.pausedResumeBtn} onClick={handlePause}>
+              ▶ Resume Session
+            </button>
+          </div>
+        ) : null}
+        {!isPaused && learnTab === "learn" && (
+          <div style={styles.learnMessagesWrap}>
+            <div style={styles.emptyLearn}>
+              <span style={{ fontSize: 36 }}>📄</span>
+              <p style={styles.emptyLearnText}>
+                Lesson content will be shown here.
+              </p>
+            </div>
+          </div>
+        )}
+
+        {!isPaused && learnTab === "test" && (
+          <div style={{ padding: "16px", position: "relative" }}>
+            {testResult ? (
+              <div>
+                {/* Header */}
+                <div style={{ textAlign: "center", marginBottom: 14 }}>
+                  <span style={{ fontSize: 40 }}>🏅</span>
+                  <p style={{ fontSize: 16, fontWeight: 800, color: "var(--text-primary)", margin: "6px 0 4px" }}>Quiz Complete!</p>
+                  <div style={{ fontSize: 40, fontWeight: 800, color: testResult.score >= 60 ? "#10b981" : "#f97316", lineHeight: 1, margin: "2px 0 6px" }}>
+                    {Math.round(testResult.score)}%
+                  </div>
+                  <p style={{ fontSize: 12, color: "var(--text-muted)", margin: 0 }}>
+                    {testResult.totalCorrect} of {testResult.questions.length} correct on <strong style={{ color: "var(--text-primary)" }}>{testResult.topic}</strong>
+                  </p>
+                </div>
+                {/* Score bar */}
+                <div style={{ height: 6, background: "var(--border-color)", borderRadius: 99, overflow: "hidden", marginBottom: 14 }}>
+                  <div style={{ height: "100%", width: `${testResult.score}%`, background: testResult.score >= 60 ? "#10b981" : "#f97316", borderRadius: 99, transition: "width 0.6s ease" }} />
+                </div>
+                {/* Areas */}
+                <div style={{ display: "flex", gap: 10, marginBottom: 14 }}>
+                  {testResult.weak.length > 0 && (
+                    <div style={{ flex: 1 }}>
+                      <p style={styles.chipLabel}>Areas to Improve</p>
+                      <div style={styles.chipRow}>
+                        {testResult.weak.map((t) => <span key={t} style={styles.weakChip}>{t}</span>)}
+                      </div>
+                    </div>
+                  )}
+                  {testResult.strong.length > 0 && (
+                    <div style={{ flex: 1 }}>
+                      <p style={styles.chipLabel}>Strong Areas</p>
+                      <div style={styles.chipRow}>
+                        {testResult.strong.map((t) => <span key={t} style={styles.strongChip}>{t}</span>)}
+                      </div>
+                    </div>
+                  )}
+                </div>
+                {/* Question breakdown */}
+                {testResult.questions.length > 0 && (
+                  <div style={{ marginBottom: 14 }}>
+                    <p style={styles.chipLabel}>Question Breakdown</p>
+                    <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                      {testResult.questions.map((q, i) => (
+                        <div key={i} style={{
+                          padding: "8px 10px",
+                          borderRadius: 8,
+                          border: `1px solid ${q.is_correct ? "rgba(16,185,129,0.25)" : "rgba(239,68,68,0.25)"}`,
+                          background: q.is_correct ? "rgba(16,185,129,0.05)" : "rgba(239,68,68,0.05)",
+                          display: "flex",
+                          alignItems: "flex-start",
+                          gap: 8,
+                        }}>
+                          <span style={{ fontSize: 13, flexShrink: 0, marginTop: 1 }}>{q.is_correct ? "✅" : "❌"}</span>
+                          <p style={{ fontSize: 11, fontWeight: 600, color: "var(--text-primary)", margin: 0, lineHeight: 1.45 }}>
+                            Q{i + 1}. {q.question_text}
+                          </p>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+                <div style={styles.testSavedNote}>Your results have been saved and are visible to your teacher and parent.</div>
+                <div style={{ display: "flex", flexDirection: "column", gap: 8, marginTop: 12 }}>
+                  <button style={styles.generateBtn} onClick={() => navigate("/progress")}>View My Progress</button>
+                  <button
+                    style={{ ...styles.generateBtn, background: "transparent", color: "var(--text-secondary)", border: "1px solid var(--border-color)" }}
+                    onClick={() => { setTestResult(null); setTestAssessment(null); setTestCurrentQ(0); setTestFeedback(null); }}
+                  >
+                    Back to Learning
+                  </button>
+                </div>
+              </div>
+            ) : testAssessment ? (
+              <div>
+                {/* Progress header */}
+                <div style={{ marginBottom: 12 }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
+                    <span style={{ fontSize: 12, fontWeight: 700, color: "var(--text-muted)" }}>
+                      Question {testCurrentQ + 1} of {testAssessment.questions.length}
+                    </span>
+                    {quizOffer?.topic && (
+                      <span style={{ fontSize: 11, color: "var(--text-muted)", fontStyle: "italic" }}>{quizOffer.topic}</span>
+                    )}
+                  </div>
+                  <div style={{ height: 4, background: "var(--border-color)", borderRadius: 99, overflow: "hidden" }}>
+                    <div style={{ height: "100%", width: `${(testCurrentQ / testAssessment.questions.length) * 100}%`, background: "var(--accent-blue, var(--accent))", borderRadius: 99, transition: "width 0.4s ease" }} />
+                  </div>
+                </div>
+                {/* Question text */}
+                <p style={{ fontSize: 14, fontWeight: 700, color: "var(--text-primary)", lineHeight: 1.55, marginBottom: 14 }}>
+                  {testAssessment.questions[testCurrentQ].question_text}
+                </p>
+                {/* Options */}
+                <div style={{ display: "flex", flexDirection: "column", gap: 8, marginBottom: 12 }}>
+                  {testAssessment.questions[testCurrentQ].options.map((opt, idx) => {
+                    let optStyle: React.CSSProperties = { ...styles.quizOptionBtn };
+                    if (testFeedback) {
+                      if (testFeedback.correctAnswer !== null && idx === testFeedback.correctAnswer) {
+                        optStyle = { ...optStyle, background: "rgba(16,185,129,0.08)", borderColor: "#10b981", color: "#10b981", fontWeight: 700 };
+                      } else if (idx === testFeedback.selectedAnswer && !testFeedback.isCorrect) {
+                        optStyle = { ...optStyle, background: "rgba(239,68,68,0.08)", borderColor: "#ef4444", color: "#ef4444" };
+                      } else {
+                        optStyle = { ...optStyle, opacity: 0.4 };
+                      }
+                    }
+                    return (
+                      <button key={idx} disabled={!!testFeedback || testAnswering} onClick={() => handleTestAnswer(idx)} style={optStyle}>
+                        <span style={{ ...styles.optionLabel, borderColor: testFeedback && testFeedback.correctAnswer === idx ? "#10b981" : testFeedback && testFeedback.selectedAnswer === idx && !testFeedback.isCorrect ? "#ef4444" : "var(--border-color)" }}>
+                          {["A","B","C","D"][idx]}
+                        </span>
+                        {opt}
+                      </button>
+                    );
+                  })}
+                </div>
+                {/* Feedback */}
+                {testFeedback && (
+                  <div style={{ ...styles.feedbackBox, background: testFeedback.isCorrect ? "rgba(16,185,129,0.08)" : "rgba(239,68,68,0.08)", borderColor: testFeedback.isCorrect ? "rgba(16,185,129,0.3)" : "rgba(239,68,68,0.3)", marginBottom: 10 }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: testFeedback.explanation ? 4 : 0 }}>
+                      <span style={{ fontSize: 14 }}>{testFeedback.isCorrect ? "✅" : "❌"}</span>
+                      <p style={{ fontSize: 13, fontWeight: 700, color: testFeedback.isCorrect ? "#10b981" : "#ef4444", margin: 0 }}>
+                        {testFeedback.isCorrect ? "Correct!" : "Not quite."}
+                      </p>
+                    </div>
+                    {testFeedback.explanation && <p style={{ fontSize: 12, color: "var(--text-secondary)", lineHeight: 1.5, margin: 0 }}>{testFeedback.explanation}</p>}
+                  </div>
+                )}
+                {testFeedback && (
+                  <button style={styles.generateBtn} onClick={handleTestNext}>
+                    {testCurrentQ + 1 < testAssessment.questions.length ? "Next Question →" : "See Results"}
+                  </button>
+                )}
+                {testError && <p style={{ ...styles.errorText, marginTop: 8 }}>{testError}</p>}
+              </div>
+            ) : (
+              <div style={styles.assessCard}>
+                {quizOffer && (
+                  <div style={{ padding: "8px 12px", background: "rgba(99,102,241,0.1)", border: "1px solid rgba(99,102,241,0.25)", borderRadius: 8, marginBottom: 12, fontSize: 12, color: "var(--accent-blue, var(--accent))", fontWeight: 600, textAlign: "center" }}>
+                    🤖 Your AI tutor suggested a quiz on <em>{quizOffer.topic}</em>
+                  </div>
+                )}
+                <div style={{ textAlign: "center", marginBottom: 14 }}>
+                  <span style={{ fontSize: 32 }}>📝</span>
+                </div>
+                <p style={{ fontSize: 14, fontWeight: 700, color: "var(--text-primary)", marginBottom: 6, textAlign: "center" }}>Formal Test</p>
+                <p style={{ fontSize: 12, color: "var(--text-muted)", lineHeight: 1.6, textAlign: "center", marginBottom: 12 }}>
+                  Complete a 10-question test on this session's topic. Results will be saved to your progress record.
+                </p>
+                <div style={styles.testWarning}>
+                  Your score will be recorded and shared with your teacher.
+                </div>
+                {testError && <p style={{ ...styles.errorText, marginBottom: 10 }}>{testError}</p>}
+                {isPaused ? (
+                  <p style={{ fontSize: 12, color: "var(--text-muted)", textAlign: "center", marginTop: 10 }}>Resume session to access the test</p>
+                ) : (
+                  <button
+                    style={{ ...styles.generateBtn, marginTop: 12 }}
+                    onClick={() => handleStartTest()}
+                    disabled={testLoading}
+                  >
+                    {testLoading ? "Generating..." : "Start Test"}
+                  </button>
+                )}
+              </div>
+            )}
+            {playing && (
+              <div style={styles.ttsOverlay}>
+                <span style={{ fontSize: 36 }}>🔊</span>
+                <p style={styles.pausedOverlayText}>AI Tutor is speaking...</p>
+                <p style={styles.pausedOverlaySub}>Wait for the lecture to end before taking the test.</p>
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+    </>
+  );
+
+  const avatarInner = (
+    <>
+      <div style={styles.avatarBox}>
+        <div style={styles.avatarPulse} className={voiceStatus !== "idle" ? "avatar-pulse-anim" : ""}>
+          <span style={styles.avatarEmoji}>🤖</span>
+        </div>
+        <p style={styles.avatarCaption}>AI Tutor Avatar</p>
+        <p style={styles.avatarSub}>Coming Soon</p>
+      </div>
+      {voiceStatus !== "idle" && (
+        <div style={styles.speakingBadge}>
+          <span style={styles.speakingDot} />
+          AI Tutor is speaking...
+        </div>
+      )}
+    </>
+  );
+
+  const chatPanelInner = (
+    <>
+      <div style={styles.chatPanelHeader}>
+        <span style={styles.chatPanelTitle}>Classroom Chat</span>
+        <span style={styles.handRaise}>✋ Raise Hand</span>
+      </div>
+
+      <div style={styles.quickActions}>
+        {(["I need help with this", "Can you explain that again?", "Please go slower"] as const).map((text, i) => (
+          <button
+            key={i}
+            style={{
+              ...styles.quickBtn,
+              ...(isPaused ? styles.quickBtnDisabled : {}),
+            }}
+            onClick={() => !isPaused && sessionSend(text)}
+            disabled={isPaused}
+          >
+            {["🙋 I need help", "🔄 Explain again", "🐢 Go slower"][i]}
+          </button>
+        ))}
+      </div>
+
+      <div style={styles.chatMessages}>
+        {isPaused && (
+          <div style={styles.pausedOverlay}>
+            <span style={{ fontSize: 32 }}>⏸</span>
+            <p style={styles.pausedOverlayText}>Session is paused</p>
+            <p style={styles.pausedOverlaySub}>Resume the session to continue chatting with your AI tutor.</p>
+            <button style={styles.pausedResumeBtn} onClick={handlePause}>
+              ▶ Resume Session
+            </button>
+          </div>
+        )}
+        {!isPaused && messages.length === 0 && !streaming ? (
+          <div style={styles.chatEmpty}>
+            <p style={{ fontSize: 13, color: "var(--text-muted)", textAlign: "center" }}>
+              Session is active — ask your AI tutor anything!
+            </p>
+          </div>
+        ) : !isPaused ? (
+          <ChatWindow
+            messages={displayMessages}
+            streaming={streaming}
+            streamContent={streamContent}
+            onSpeak={speakText}
+          />
+        ) : null}
+      </div>
+
+      <div style={styles.chatInputWrap}>
+        <ChatInput
+          onSend={sessionSend}
+          streaming={streaming}
+          onStop={stopStreaming}
+          voiceStatus={voiceStatus}
+          onVoiceStart={handleVoiceToggle}
+          onVoiceEnd={disconnectVoice}
+          disabled={isPaused}
+        />
+      </div>
+    </>
+  );
+
   return (
     <div style={styles.root}>
       <div style={{ ...styles.topBar, background: topBarBg }}>
@@ -559,299 +868,109 @@ export default function SessionPage() {
       </div>
 
       <div style={styles.panels}>
-        <div style={styles.learnPanel}>
-          <div style={styles.tabs}>
-            {(["learn", "test"] as LearnTab[]).map((tab) => (
-              <button
-                key={tab}
-                style={{
-                  ...styles.tabBtn,
-                  ...(learnTab === tab ? styles.tabBtnActive : {}),
-                }}
-                onClick={() => setLearnTab(tab)}
-              >
-                {tab.charAt(0).toUpperCase() + tab.slice(1)}
-              </button>
-            ))}
-          </div>
-
-          <div style={styles.learnContent}>
-            {isPaused ? (
-              <div style={styles.pausedOverlay}>
-                <span style={{ fontSize: 32 }}>⏸</span>
-                <p style={styles.pausedOverlayText}>Session is paused</p>
-                <p style={styles.pausedOverlaySub}>Resume the session to continue learning.</p>
-                <button style={styles.pausedResumeBtn} onClick={handlePause}>
-                  ▶ Resume Session
-                </button>
+        {isMobile ? (
+          <>
+            {/* Compact avatar strip */}
+            <div style={{
+              width: 110,
+              flexShrink: 0,
+              borderRight: "1px solid var(--border-color)",
+              background: "var(--bg-primary)",
+              display: "flex",
+              flexDirection: "column",
+              alignItems: "center",
+              justifyContent: "center",
+              gap: 10,
+              padding: "14px 8px",
+            }}>
+              <div style={{
+                width: 72,
+                height: 72,
+                borderRadius: "50%",
+                background: "rgba(99,102,241,0.1)",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+              }} className={voiceStatus !== "idle" ? "avatar-pulse-anim" : ""}>
+                <span style={{ fontSize: 34 }}>🤖</span>
               </div>
-            ) : null}
-            {!isPaused && learnTab === "learn" && (
-              <div style={styles.learnMessagesWrap}>
-                <div style={styles.emptyLearn}>
-                  <span style={{ fontSize: 36 }}>📄</span>
-                  <p style={styles.emptyLearnText}>
-                    Lesson content will be shown here.
-                  </p>
+              <p style={{ fontSize: 10, fontWeight: 700, color: "#334155", textAlign: "center", margin: 0, lineHeight: 1.3 }}>
+                AI Tutor
+              </p>
+              <span style={{ fontSize: 9, background: "#fef3c7", color: "#92400e", borderRadius: 99, padding: "2px 7px", fontWeight: 600 }}>
+                Avatar
+              </span>
+              {voiceStatus !== "idle" && (
+                <div style={{
+                  width: 8, height: 8, borderRadius: "50%",
+                  background: "var(--accent-blue, #3b82f6)",
+                  animation: "avatarPulse 1.2s ease-in-out infinite",
+                  flexShrink: 0,
+                }} />
+              )}
+            </div>
+
+            {/* Switching content panel */}
+            <div style={{ flex: 1, display: "flex", flexDirection: "column", overflow: "hidden" }}>
+              {/* Mini panel switcher */}
+              <div style={{
+                display: "flex",
+                borderBottom: "2px solid var(--border-color)",
+                background: "var(--bg-secondary)",
+                flexShrink: 0,
+              }}>
+                {([
+                  { id: "chat", label: "💬 Chat" },
+                  { id: "learn", label: "📖 Learn" },
+                ] as { id: "chat" | "learn"; label: string }[]).map((tab) => (
+                  <button
+                    key={tab.id}
+                    style={{
+                      flex: 1,
+                      padding: "9px 0",
+                      border: "none",
+                      background: "transparent",
+                      fontSize: 12,
+                      fontWeight: 700,
+                      cursor: "pointer",
+                      color: mobilePanelView === tab.id ? "var(--accent-blue, #3b82f6)" : "var(--text-muted)",
+                      borderBottom: mobilePanelView === tab.id ? "2px solid var(--accent-blue, #3b82f6)" : "2px solid transparent",
+                      marginBottom: -2,
+                      transition: "color 0.15s, border-color 0.15s",
+                      fontFamily: "inherit",
+                    }}
+                    onClick={() => setMobilePanelView(tab.id)}
+                  >
+                    {tab.label}
+                  </button>
+                ))}
+              </div>
+
+              {/* Panel content */}
+              {mobilePanelView === "chat" ? (
+                <div style={{ ...styles.chatPanel, flex: 1 }}>
+                  {chatPanelInner}
                 </div>
-              </div>
-            )}
-
-            {!isPaused && learnTab === "test" && (
-              <div style={{ padding: "16px", position: "relative" }}>
-                {testResult ? (
-                  <div>
-                    {/* Header */}
-                    <div style={{ textAlign: "center", marginBottom: 14 }}>
-                      <span style={{ fontSize: 40 }}>🏅</span>
-                      <p style={{ fontSize: 16, fontWeight: 800, color: "var(--text-primary)", margin: "6px 0 4px" }}>Quiz Complete!</p>
-                      <div style={{ fontSize: 40, fontWeight: 800, color: testResult.score >= 60 ? "#10b981" : "#f97316", lineHeight: 1, margin: "2px 0 6px" }}>
-                        {Math.round(testResult.score)}%
-                      </div>
-                      <p style={{ fontSize: 12, color: "var(--text-muted)", margin: 0 }}>
-                        {testResult.totalCorrect} of {testResult.questions.length} correct on <strong style={{ color: "var(--text-primary)" }}>{testResult.topic}</strong>
-                      </p>
-                    </div>
-                    {/* Score bar */}
-                    <div style={{ height: 6, background: "var(--border-color)", borderRadius: 99, overflow: "hidden", marginBottom: 14 }}>
-                      <div style={{ height: "100%", width: `${testResult.score}%`, background: testResult.score >= 60 ? "#10b981" : "#f97316", borderRadius: 99, transition: "width 0.6s ease" }} />
-                    </div>
-                    {/* Areas */}
-                    <div style={{ display: "flex", gap: 10, marginBottom: 14 }}>
-                      {testResult.weak.length > 0 && (
-                        <div style={{ flex: 1 }}>
-                          <p style={styles.chipLabel}>Areas to Improve</p>
-                          <div style={styles.chipRow}>
-                            {testResult.weak.map((t) => <span key={t} style={styles.weakChip}>{t}</span>)}
-                          </div>
-                        </div>
-                      )}
-                      {testResult.strong.length > 0 && (
-                        <div style={{ flex: 1 }}>
-                          <p style={styles.chipLabel}>Strong Areas</p>
-                          <div style={styles.chipRow}>
-                            {testResult.strong.map((t) => <span key={t} style={styles.strongChip}>{t}</span>)}
-                          </div>
-                        </div>
-                      )}
-                    </div>
-                    {/* Question breakdown */}
-                    {testResult.questions.length > 0 && (
-                      <div style={{ marginBottom: 14 }}>
-                        <p style={styles.chipLabel}>Question Breakdown</p>
-                        <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-                          {testResult.questions.map((q, i) => (
-                            <div key={i} style={{
-                              padding: "8px 10px",
-                              borderRadius: 8,
-                              border: `1px solid ${q.is_correct ? "rgba(16,185,129,0.25)" : "rgba(239,68,68,0.25)"}`,
-                              background: q.is_correct ? "rgba(16,185,129,0.05)" : "rgba(239,68,68,0.05)",
-                              display: "flex",
-                              alignItems: "flex-start",
-                              gap: 8,
-                            }}>
-                              <span style={{ fontSize: 13, flexShrink: 0, marginTop: 1 }}>{q.is_correct ? "✅" : "❌"}</span>
-                              <p style={{ fontSize: 11, fontWeight: 600, color: "var(--text-primary)", margin: 0, lineHeight: 1.45 }}>
-                                Q{i + 1}. {q.question_text}
-                              </p>
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-                    )}
-                    <div style={styles.testSavedNote}>Your results have been saved and are visible to your teacher and parent.</div>
-                    <div style={{ display: "flex", flexDirection: "column", gap: 8, marginTop: 12 }}>
-                      <button style={styles.generateBtn} onClick={() => navigate("/progress")}>View My Progress</button>
-                      <button
-                        style={{ ...styles.generateBtn, background: "transparent", color: "var(--text-secondary)", border: "1px solid var(--border-color)" }}
-                        onClick={() => { setTestResult(null); setTestAssessment(null); setTestCurrentQ(0); setTestFeedback(null); }}
-                      >
-                        Back to Learning
-                      </button>
-                    </div>
-                  </div>
-                ) : testAssessment ? (
-                  <div>
-                    {/* Progress header */}
-                    <div style={{ marginBottom: 12 }}>
-                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
-                        <span style={{ fontSize: 12, fontWeight: 700, color: "var(--text-muted)" }}>
-                          Question {testCurrentQ + 1} of {testAssessment.questions.length}
-                        </span>
-                        {quizOffer?.topic && (
-                          <span style={{ fontSize: 11, color: "var(--text-muted)", fontStyle: "italic" }}>{quizOffer.topic}</span>
-                        )}
-                      </div>
-                      <div style={{ height: 4, background: "var(--border-color)", borderRadius: 99, overflow: "hidden" }}>
-                        <div style={{ height: "100%", width: `${(testCurrentQ / testAssessment.questions.length) * 100}%`, background: "var(--accent-blue, var(--accent))", borderRadius: 99, transition: "width 0.4s ease" }} />
-                      </div>
-                    </div>
-                    {/* Question text */}
-                    <p style={{ fontSize: 14, fontWeight: 700, color: "var(--text-primary)", lineHeight: 1.55, marginBottom: 14 }}>
-                      {testAssessment.questions[testCurrentQ].question_text}
-                    </p>
-                    {/* Options */}
-                    <div style={{ display: "flex", flexDirection: "column", gap: 8, marginBottom: 12 }}>
-                      {testAssessment.questions[testCurrentQ].options.map((opt, idx) => {
-                        let optStyle: React.CSSProperties = { ...styles.quizOptionBtn };
-                        if (testFeedback) {
-                          if (testFeedback.correctAnswer !== null && idx === testFeedback.correctAnswer) {
-                            optStyle = { ...optStyle, background: "rgba(16,185,129,0.08)", borderColor: "#10b981", color: "#10b981", fontWeight: 700 };
-                          } else if (idx === testFeedback.selectedAnswer && !testFeedback.isCorrect) {
-                            optStyle = { ...optStyle, background: "rgba(239,68,68,0.08)", borderColor: "#ef4444", color: "#ef4444" };
-                          } else {
-                            optStyle = { ...optStyle, opacity: 0.4 };
-                          }
-                        }
-                        return (
-                          <button key={idx} disabled={!!testFeedback || testAnswering} onClick={() => handleTestAnswer(idx)} style={optStyle}>
-                            <span style={{ ...styles.optionLabel, borderColor: testFeedback && testFeedback.correctAnswer === idx ? "#10b981" : testFeedback && testFeedback.selectedAnswer === idx && !testFeedback.isCorrect ? "#ef4444" : "var(--border-color)" }}>
-                              {["A","B","C","D"][idx]}
-                            </span>
-                            {opt}
-                          </button>
-                        );
-                      })}
-                    </div>
-                    {/* Feedback */}
-                    {testFeedback && (
-                      <div style={{ ...styles.feedbackBox, background: testFeedback.isCorrect ? "rgba(16,185,129,0.08)" : "rgba(239,68,68,0.08)", borderColor: testFeedback.isCorrect ? "rgba(16,185,129,0.3)" : "rgba(239,68,68,0.3)", marginBottom: 10 }}>
-                        <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: testFeedback.explanation ? 4 : 0 }}>
-                          <span style={{ fontSize: 14 }}>{testFeedback.isCorrect ? "✅" : "❌"}</span>
-                          <p style={{ fontSize: 13, fontWeight: 700, color: testFeedback.isCorrect ? "#10b981" : "#ef4444", margin: 0 }}>
-                            {testFeedback.isCorrect ? "Correct!" : "Not quite."}
-                          </p>
-                        </div>
-                        {testFeedback.explanation && <p style={{ fontSize: 12, color: "var(--text-secondary)", lineHeight: 1.5, margin: 0 }}>{testFeedback.explanation}</p>}
-                      </div>
-                    )}
-                    {testFeedback && (
-                      <button style={styles.generateBtn} onClick={handleTestNext}>
-                        {testCurrentQ + 1 < testAssessment.questions.length ? "Next Question →" : "See Results"}
-                      </button>
-                    )}
-                    {testError && <p style={{ ...styles.errorText, marginTop: 8 }}>{testError}</p>}
-                  </div>
-                ) : (
-                  <div style={styles.assessCard}>
-                    {quizOffer && (
-                      <div style={{ padding: "8px 12px", background: "rgba(99,102,241,0.1)", border: "1px solid rgba(99,102,241,0.25)", borderRadius: 8, marginBottom: 12, fontSize: 12, color: "var(--accent-blue, var(--accent))", fontWeight: 600, textAlign: "center" }}>
-                        🤖 Your AI tutor suggested a quiz on <em>{quizOffer.topic}</em>
-                      </div>
-                    )}
-                    <div style={{ textAlign: "center", marginBottom: 14 }}>
-                      <span style={{ fontSize: 32 }}>📝</span>
-                    </div>
-                    <p style={{ fontSize: 14, fontWeight: 700, color: "var(--text-primary)", marginBottom: 6, textAlign: "center" }}>Formal Test</p>
-                    <p style={{ fontSize: 12, color: "var(--text-muted)", lineHeight: 1.6, textAlign: "center", marginBottom: 12 }}>
-                      Complete a 10-question test on this session's topic. Results will be saved to your progress record.
-                    </p>
-                    <div style={styles.testWarning}>
-                      Your score will be recorded and shared with your teacher.
-                    </div>
-                    {testError && <p style={{ ...styles.errorText, marginBottom: 10 }}>{testError}</p>}
-                    {isPaused ? (
-                      <p style={{ fontSize: 12, color: "var(--text-muted)", textAlign: "center", marginTop: 10 }}>Resume session to access the test</p>
-                    ) : (
-                      <button
-                        style={{ ...styles.generateBtn, marginTop: 12 }}
-                        onClick={() => handleStartTest()}
-                        disabled={testLoading}
-                      >
-                        {testLoading ? "Generating..." : "Start Test"}
-                      </button>
-                    )}
-                  </div>
-                )}
-                {playing && (
-                  <div style={styles.ttsOverlay}>
-                    <span style={{ fontSize: 36 }}>🔊</span>
-                    <p style={styles.pausedOverlayText}>AI Tutor is speaking...</p>
-                    <p style={styles.pausedOverlaySub}>Wait for the lecture to end before taking the test.</p>
-                  </div>
-                )}
-              </div>
-            )}
-          </div>
-        </div>
-
-        <div style={styles.avatarPanel}>
-          <div style={styles.avatarBox}>
-            <div style={styles.avatarPulse}>
-              <span style={styles.avatarEmoji}>🤖</span>
+              ) : (
+                <div style={{ ...styles.learnPanel, width: "auto", flex: 1, borderRight: "none" }}>
+                  {learnPanelInner}
+                </div>
+              )}
             </div>
-            <p style={styles.avatarCaption}>AI Tutor Avatar</p>
-            <p style={styles.avatarSub}>Coming Soon</p>
-          </div>
-          {voiceStatus !== "idle" && (
-            <div style={styles.speakingBadge}>
-              <span style={styles.speakingDot} />
-              AI Tutor is speaking...
+          </>
+        ) : (
+          <>
+            <div style={styles.learnPanel}>
+              {learnPanelInner}
             </div>
-          )}
-        </div>
-
-        <div style={styles.chatPanel}>
-          <div style={styles.chatPanelHeader}>
-            <span style={styles.chatPanelTitle}>Classroom Chat</span>
-            <span style={styles.handRaise}>✋ Raise Hand</span>
-          </div>
-
-          <div style={styles.quickActions}>
-            {(["I need help with this", "Can you explain that again?", "Please go slower"] as const).map((text, i) => (
-              <button
-                key={i}
-                style={{
-                  ...styles.quickBtn,
-                  ...(isPaused ? styles.quickBtnDisabled : {}),
-                }}
-                onClick={() => !isPaused && sessionSend(text)}
-                disabled={isPaused}
-              >
-                {["🙋 I need help", "🔄 Explain again", "🐢 Go slower"][i]}
-              </button>
-            ))}
-          </div>
-
-          <div style={styles.chatMessages}>
-            {isPaused && (
-              <div style={styles.pausedOverlay}>
-                <span style={{ fontSize: 32 }}>⏸</span>
-                <p style={styles.pausedOverlayText}>Session is paused</p>
-                <p style={styles.pausedOverlaySub}>Resume the session to continue chatting with your AI tutor.</p>
-                <button style={styles.pausedResumeBtn} onClick={handlePause}>
-                  ▶ Resume Session
-                </button>
-              </div>
-            )}
-            {!isPaused && messages.length === 0 && !streaming ? (
-              <div style={styles.chatEmpty}>
-                <p style={{ fontSize: 13, color: "var(--text-muted)", textAlign: "center" }}>
-                  Session is active — ask your AI tutor anything!
-                </p>
-              </div>
-            ) : !isPaused ? (
-              <ChatWindow
-                messages={displayMessages}
-                streaming={streaming}
-                streamContent={streamContent}
-                onSpeak={speakText}
-              />
-            ) : null}
-          </div>
-
-          <div style={styles.chatInputWrap}>
-            <ChatInput
-              onSend={sessionSend}
-              streaming={streaming}
-              onStop={stopStreaming}
-              voiceStatus={voiceStatus}
-              onVoiceStart={handleVoiceToggle}
-              onVoiceEnd={disconnectVoice}
-              disabled={isPaused}
-            />
-          </div>
-        </div>
+            <div style={styles.avatarPanel}>
+              {avatarInner}
+            </div>
+            <div style={styles.chatPanel}>
+              {chatPanelInner}
+            </div>
+          </>
+        )}
       </div>
 
       <style>{`

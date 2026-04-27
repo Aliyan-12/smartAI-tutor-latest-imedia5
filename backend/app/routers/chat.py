@@ -199,6 +199,22 @@ async def stream_message(
                 f"Failed to build session prompt for appointment {_appt_id}, using default"
             )
 
+    # Load student learning preferences for non-session chats (session prompt already includes them)
+    student_prefs: dict | None = None
+    if not session_system_prompt:
+        try:
+            from app.services.settings_service import get_student_settings
+            _profile = await get_student_settings(db, current_user.id)
+            student_prefs = {
+                "teaching_pace": _profile.teaching_pace,
+                "learning_style": _profile.learning_style or [],
+                "teaching_preferences": _profile.teaching_preferences or {},
+                "interests": _profile.interests or [],
+                "learning_goals": _profile.learning_goals,
+            }
+        except Exception:
+            pass
+
     async def event_stream():
         full_response = []
         yield f"data: {json.dumps({'type': 'start', 'session_id': chat.session_id})}\n\n"
@@ -207,6 +223,7 @@ async def stream_message(
             history[:-1],
             payload.message,
             rag_chunks=rag_chunks,
+            student_preferences=student_prefs,
             system_prompt_override=session_system_prompt,
         ):
             full_response.append(token)

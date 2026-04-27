@@ -6,6 +6,7 @@ import {
   Home, BarChart2, ClipboardList,
   MessageCircle, Clock, GraduationCap, Bell,
   ShieldCheck, Database, MessageSquare, BarChart,
+  Menu, X,
 } from "lucide-react";
 import { useAuth } from "../context/AuthContext";
 import type { ChatListItem, Appointment } from "../types";
@@ -31,6 +32,7 @@ const SHARED_STYLES = `
     height: 100vh;
     overflow: hidden;
     font-family: "DM Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    transition: transform 0.27s cubic-bezier(0.4, 0, 0.2, 1);
   }
 
   .sb-header {
@@ -42,6 +44,7 @@ const SHARED_STYLES = `
     display: flex;
     align-items: center;
     gap: 10px;
+    width: 100%;
   }
 
   .sb-brand-icon {
@@ -57,7 +60,7 @@ const SHARED_STYLES = `
     box-shadow: 0 2px 8px rgba(26,115,232,0.35);
   }
 
-  .sb-brand-text { min-width: 0; }
+  .sb-brand-text { min-width: 0; flex: 1; }
 
   .sb-brand-name {
     font-size: 14px;
@@ -82,6 +85,7 @@ const SHARED_STYLES = `
     padding: 12px 10px 8px;
     display: flex;
     flex-direction: column;
+    overflow-y: scroll;
     gap: 1px;
   }
 
@@ -306,6 +310,85 @@ const SHARED_STYLES = `
     border: 1px solid rgba(255,255,255,0.08);
     white-space: nowrap;
   }
+
+  /* ── Hamburger trigger (mobile / tablet) ── */
+  .sb-hamburger {
+    display: none;
+    position: fixed;
+    top: 12px;
+    left: 12px;
+    z-index: 1001;
+    background: #1e1e1e;
+    border: 1px solid rgba(255,255,255,0.12);
+    border-radius: 9px;
+    padding: 8px 11px;
+    color: #e2e8f0;
+    cursor: pointer;
+    align-items: center;
+    justify-content: center;
+    gap: 7px;
+    font-size: 12px;
+    font-weight: 700;
+    font-family: "DM Sans", sans-serif;
+    box-shadow: 0 2px 14px rgba(0,0,0,0.45);
+    transition: background 0.15s, border-color 0.15s;
+  }
+  .sb-hamburger:hover { background: #292929; border-color: rgba(255,255,255,0.2); }
+
+  /* ── Backdrop overlay ── */
+  .sb-backdrop {
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,0.62);
+    z-index: 998;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.25s ease;
+    backdrop-filter: blur(3px);
+    -webkit-backdrop-filter: blur(3px);
+  }
+  .sb-backdrop.open { opacity: 1; pointer-events: auto; }
+
+  /* ── Close button inside sidebar header ── */
+  .sb-close-btn {
+    display: none;
+    background: none;
+    border: none;
+    color: rgba(255,255,255,0.35);
+    cursor: pointer;
+    padding: 5px;
+    border-radius: 6px;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    margin-left: auto;
+    transition: color 0.15s, background 0.15s;
+  }
+  .sb-close-btn:hover { color: #fff; background: rgba(255,255,255,0.08); }
+
+  /* ── Responsive breakpoints ── */
+  @media (max-width: 1023px) {
+    .sb-hamburger { display: flex; }
+    .sb-close-btn { display: flex; }
+    .sb {
+      position: fixed;
+      top: 0;
+      left: 0;
+      height: 100dvh;
+      z-index: 999;
+      transform: translateX(-100%);
+      box-shadow: 6px 0 40px rgba(0,0,0,0.55);
+      border-right: 1px solid rgba(255,255,255,0.05);
+    }
+    .sb.sb-open { transform: translateX(0); }
+  }
+
+  @media (min-width: 1024px) {
+    .sb-hamburger { display: none !important; }
+    .sb-backdrop { display: none !important; }
+    .sb-close-btn { display: none !important; }
+    .sb { position: relative; transform: none !important; box-shadow: none; }
+  }
 `;
 
 export default function Sidebar({
@@ -321,10 +404,26 @@ export default function Sidebar({
   const navigate = useNavigate();
   const location = useLocation();
   const [buyToast, setBuyToast] = useState(false);
+  const [mobileOpen, setMobileOpen] = useState(false);
 
   useEffect(() => {
     if (onLoadChats) onLoadChats();
   }, [onLoadChats]);
+
+  // Auto-close sidebar when route changes (e.g. browser back/forward)
+  useEffect(() => {
+    setMobileOpen(false);
+  }, [location.pathname]);
+
+  // Prevent body scroll when sidebar is open on mobile
+  useEffect(() => {
+    if (mobileOpen) {
+      document.body.style.overflow = "hidden";
+    } else {
+      document.body.style.overflow = "";
+    }
+    return () => { document.body.style.overflow = ""; };
+  }, [mobileOpen]);
 
   const isActive = (path: string) => location.pathname === path;
   const avatarLetter = user?.name ? user.name.charAt(0).toUpperCase() : "?";
@@ -334,7 +433,14 @@ export default function Sidebar({
     setTimeout(() => setBuyToast(false), 3000);
   };
 
-  /* ── Shared Brand Header ── */
+  const go = (path: string) => {
+    navigate(path);
+    setMobileOpen(false);
+  };
+
+  const close = () => setMobileOpen(false);
+
+  /* ── Shared Brand Header (with close button) ── */
   const BrandHeader = () => (
     <div className="sb-header">
       <div className="sb-brand">
@@ -343,6 +449,9 @@ export default function Sidebar({
           <div className="sb-brand-name">AI Tutor 4 Schools</div>
           <div className="sb-school-name">Greenfield Int. School</div>
         </div>
+        <button className="sb-close-btn" onClick={close} aria-label="Close menu">
+          <X size={18} />
+        </button>
       </div>
     </div>
   );
@@ -361,88 +470,116 @@ export default function Sidebar({
     </div>
   );
 
+  /* ── Shared outer wrapper (hamburger + backdrop + sidebar) ── */
+  const Wrapper = ({ children }: { children: React.ReactNode }) => (
+    <>
+      <style>{SHARED_STYLES}</style>
+
+      {/* Hamburger trigger — hidden while sidebar is open (X button in header handles close) */}
+      {!mobileOpen && (
+        <button
+          className="sb-hamburger"
+          onClick={() => setMobileOpen(true)}
+          aria-label="Open navigation menu"
+        >
+          <Menu size={18} />
+        </button>
+      )}
+
+      {/* Translucent backdrop — closes sidebar on tap */}
+      <div
+        className={`sb-backdrop${mobileOpen ? " open" : ""}`}
+        onClick={close}
+        aria-hidden="true"
+      />
+
+      {buyToast && (
+        <div className="sb-toast">
+          Subscription page coming soon — ask your school admin.
+        </div>
+      )}
+
+      {/* Sidebar panel */}
+      <div className={`sb${mobileOpen ? " sb-open" : ""}`}>
+        {children}
+      </div>
+    </>
+  );
+
   /* ═══════════════════════════════════════
      STUDENT
   ═══════════════════════════════════════ */
   if (user?.role === "student") {
     return (
-      <>
-        <style>{SHARED_STYLES}</style>
-        {buyToast && (
-          <div className="sb-toast">
-            Subscription page coming soon — ask your school admin.
-          </div>
-        )}
-        <div className="sb">
-          <BrandHeader />
+      <Wrapper>
+        <BrandHeader />
 
-          <nav className="sb-nav">
-            <button
-              className={`sb-nav-item${isActive("/chat") ? " active" : ""}`}
-              onClick={() => navigate("/chat")}
-            >
-              <Home size={16} /><span>Home</span>
-            </button>
-            <button
-              className={`sb-nav-item${isActive("/sessions") ? " active" : ""}`}
-              onClick={() => navigate("/sessions")}
-            >
-              <BookOpen size={16} /><span>My Sessions</span>
-            </button>
-            <button className="sb-nav-item disabled">
-              <GraduationCap size={16} /><span>Subjects</span>
-              <span className="sb-soon-badge">Soon</span>
-            </button>
-            <button
-              className={`sb-nav-item${isActive("/progress") ? " active" : ""}`}
-              onClick={() => navigate("/progress")}
-            >
-              <BarChart2 size={16} /><span>My Progress</span>
-            </button>
-            <button
-              className={`sb-nav-item${isActive("/assignments") ? " active" : ""}`}
-              onClick={() => navigate("/assignments")}
-            >
-              <ClipboardList size={16} /><span>Assignments</span>
-            </button>
-            <button className="sb-nav-item disabled">
-              <MessageCircle size={16} /><span>Messages</span>
-              <span className="sb-soon-badge">Soon</span>
-            </button>
-            <button
-              className={`sb-nav-item${isActive("/settings") ? " active" : ""}`}
-              onClick={() => navigate("/settings")}
-            >
-              <Settings size={16} /><span>Settings</span>
-            </button>
-          </nav>
+        <nav className="sb-nav">
+          <button
+            className={`sb-nav-item${isActive("/chat") ? " active" : ""}`}
+            onClick={() => go("/chat")}
+          >
+            <Home size={16} /><span>Home</span>
+          </button>
+          <button
+            className={`sb-nav-item${isActive("/sessions") ? " active" : ""}`}
+            onClick={() => go("/sessions")}
+          >
+            <BookOpen size={16} /><span>My Sessions</span>
+          </button>
+          <button className="sb-nav-item disabled">
+            <GraduationCap size={16} /><span>Subjects</span>
+            <span className="sb-soon-badge">Soon</span>
+          </button>
+          <button
+            className={`sb-nav-item${isActive("/progress") ? " active" : ""}`}
+            onClick={() => go("/progress")}
+          >
+            <BarChart2 size={16} /><span>My Progress</span>
+          </button>
+          <button
+            className={`sb-nav-item${isActive("/assignments") ? " active" : ""}`}
+            onClick={() => go("/assignments")}
+          >
+            <ClipboardList size={16} /><span>Assignments</span>
+          </button>
+          <button className="sb-nav-item disabled">
+            <MessageCircle size={16} /><span>Messages</span>
+            <span className="sb-soon-badge">Soon</span>
+          </button>
+          <button
+            className={`sb-nav-item${isActive("/settings") ? " active" : ""}`}
+            onClick={() => go("/settings")}
+          >
+            <Settings size={16} /><span>Settings</span>
+          </button>
+        </nav>
 
-          <div className="sb-divider" />
+        <div className="sb-divider" />
 
-          <div className="sb-scroll">
-            <div className="sb-spacer" />
+        <div className="sb-scroll">
+          <div className="sb-spacer" />
 
-            {/* Learning time widget */}
-            <div className="sb-time-widget">
-              <div className="sb-time-label">
-                <Clock size={12} />Learning Time This Week
-              </div>
-              <div className="sb-time-bar-track">
-                <div className="sb-time-bar-fill" style={{ width: "75%" }} />
-              </div>
-              <div className="sb-time-stats">
-                <span className="sb-time-used">7h 30m</span>
-                <span className="sb-time-total">/ 10h goal</span>
-              </div>
-              <button className="sb-buy-btn" onClick={handleBuyTime}>
-                Buy More Time
-              </button>
+          {/* Learning time widget */}
+          <div className="sb-time-widget">
+            <div className="sb-time-label">
+              <Clock size={12} />Learning Time This Week
             </div>
+            <div className="sb-time-bar-track">
+              <div className="sb-time-bar-fill" style={{ width: "75%" }} />
+            </div>
+            <div className="sb-time-stats">
+              <span className="sb-time-used">7h 30m</span>
+              <span className="sb-time-total">/ 10h goal</span>
+            </div>
+            <button className="sb-buy-btn" onClick={handleBuyTime}>
+              Buy More Time
+            </button>
           </div>
-
-          <Footer roleLabel="Student" />
         </div>
-      </>
+
+        <Footer roleLabel="Student" />
+      </Wrapper>
     );
   }
 
@@ -451,83 +588,80 @@ export default function Sidebar({
   ═══════════════════════════════════════ */
   if (user?.role === "teacher") {
     return (
-      <>
-        <style>{SHARED_STYLES}</style>
-        <div className="sb">
-          <BrandHeader />
+      <Wrapper>
+        <BrandHeader />
 
-          <nav className="sb-nav">
-            <div className="sb-section-label">Overview</div>
-            <button
-              className={`sb-nav-item${isActive("/teacher") ? " active" : ""}`}
-              onClick={() => navigate("/teacher")}
-            >
-              <LayoutDashboard size={16} /><span>Dashboard</span>
-            </button>
-            <button
-              className={`sb-nav-item${isActive("/teacher/students") ? " active" : ""}`}
-              onClick={() => navigate("/teacher/students")}
-            >
-              <Users size={16} /><span>Students</span>
-            </button>
-            <button
-              className={`sb-nav-item${isActive("/teacher/activity") ? " active" : ""}`}
-              onClick={() => navigate("/teacher/activity")}
-            >
-              <Activity size={16} /><span>Activity</span>
-            </button>
+        <nav className="sb-nav">
+          <div className="sb-section-label">Overview</div>
+          <button
+            className={`sb-nav-item${isActive("/teacher") ? " active" : ""}`}
+            onClick={() => go("/teacher")}
+          >
+            <LayoutDashboard size={16} /><span>Dashboard</span>
+          </button>
+          <button
+            className={`sb-nav-item${isActive("/teacher/students") ? " active" : ""}`}
+            onClick={() => go("/teacher/students")}
+          >
+            <Users size={16} /><span>Students</span>
+          </button>
+          <button
+            className={`sb-nav-item${isActive("/teacher/activity") ? " active" : ""}`}
+            onClick={() => go("/teacher/activity")}
+          >
+            <Activity size={16} /><span>Activity</span>
+          </button>
 
-            <div className="sb-section-label">Teaching</div>
-            <button
-              className={`sb-nav-item${isActive("/appointments") ? " active" : ""}`}
-              onClick={() => navigate("/appointments")}
-            >
-              <Calendar size={16} /><span>Sessions</span>
-            </button>
-            <button
-              className={`sb-nav-item${isActive("/teacher/assignments") ? " active" : ""}`}
-              onClick={() => navigate("/teacher/assignments")}
-            >
-              <ClipboardList size={16} /><span>Assignments</span>
-              <span className="sb-soon-badge">Soon</span>
-            </button>
-            <button
-              className={`sb-nav-item${isActive("/teacher/reports") ? " active" : ""}`}
-              onClick={() => navigate("/teacher/reports")}
-            >
-              <FileText size={16} /><span>Session Reports</span>
-            </button>
-            <button
-              className={`sb-nav-item${isActive("/teacher/knowledge") ? " active" : ""}`}
-              onClick={() => navigate("/teacher/knowledge")}
-            >
-              <Database size={16} /><span>Knowledge Base</span>
-            </button>
+          <div className="sb-section-label">Teaching</div>
+          <button
+            className={`sb-nav-item${isActive("/appointments") ? " active" : ""}`}
+            onClick={() => go("/appointments")}
+          >
+            <Calendar size={16} /><span>Sessions</span>
+          </button>
+          <button
+            className={`sb-nav-item${isActive("/teacher/assignments") ? " active" : ""}`}
+            onClick={() => go("/teacher/assignments")}
+          >
+            <ClipboardList size={16} /><span>Assignments</span>
+            <span className="sb-soon-badge">Soon</span>
+          </button>
+          <button
+            className={`sb-nav-item${isActive("/teacher/reports") ? " active" : ""}`}
+            onClick={() => go("/teacher/reports")}
+          >
+            <FileText size={16} /><span>Session Reports</span>
+          </button>
+          <button
+            className={`sb-nav-item${isActive("/teacher/knowledge") ? " active" : ""}`}
+            onClick={() => go("/teacher/knowledge")}
+          >
+            <Database size={16} /><span>Knowledge Base</span>
+          </button>
 
-            <div className="sb-section-label">Tools</div>
-            <button
-              className={`sb-nav-item${isActive("/teacher/progress") ? " active" : ""}`}
-              onClick={() => navigate("/teacher/progress")}
-            >
-              <BarChart size={16} /><span>Class Progress</span>
-              <span className="sb-soon-badge">Soon</span>
-            </button>
-            <button className="sb-nav-item disabled">
-              <Bell size={16} /><span>Notifications</span>
-            </button>
-            <button
-              className={`sb-nav-item${isActive("/teacher/settings") ? " active" : ""}`}
-              onClick={() => navigate("/teacher/settings")}
-            >
-              <Settings size={16} /><span>Settings</span>
-            </button>
-          </nav>
+          <div className="sb-section-label">Tools</div>
+          <button
+            className={`sb-nav-item${isActive("/teacher/progress") ? " active" : ""}`}
+            onClick={() => go("/teacher/progress")}
+          >
+            <BarChart size={16} /><span>Class Progress</span>
+            <span className="sb-soon-badge">Soon</span>
+          </button>
+          <button className="sb-nav-item disabled">
+            <Bell size={16} /><span>Notifications</span>
+          </button>
+          <button
+            className={`sb-nav-item${isActive("/teacher/settings") ? " active" : ""}`}
+            onClick={() => go("/teacher/settings")}
+          >
+            <Settings size={16} /><span>Settings</span>
+          </button>
+        </nav>
 
-          <div className="sb-scroll"><div className="sb-spacer" /></div>
+        <div className="sb-scroll"><div className="sb-spacer" /></div>
 
-          <Footer roleLabel="Teacher" />
-        </div>
-      </>
+        <Footer roleLabel="Teacher" />
+      </Wrapper>
     );
   }
 
@@ -536,67 +670,64 @@ export default function Sidebar({
   ═══════════════════════════════════════ */
   if (user?.role === "parent") {
     return (
-      <>
-        <style>{SHARED_STYLES}</style>
-        <div className="sb">
-          <BrandHeader />
+      <Wrapper>
+        <BrandHeader />
 
-          <nav className="sb-nav">
-            <div className="sb-section-label">Overview</div>
-            <button
-              className={`sb-nav-item${isActive("/parent") ? " active" : ""}`}
-              onClick={() => navigate("/parent")}
-            >
-              <LayoutDashboard size={16} /><span>Dashboard</span>
-            </button>
-            <button
-              className={`sb-nav-item${isActive("/parent/students") ? " active" : ""}`}
-              onClick={() => navigate("/parent/students")}
-            >
-              <Users size={16} /><span>My Children</span>
-            </button>
+        <nav className="sb-nav">
+          <div className="sb-section-label">Overview</div>
+          <button
+            className={`sb-nav-item${isActive("/parent") ? " active" : ""}`}
+            onClick={() => go("/parent")}
+          >
+            <LayoutDashboard size={16} /><span>Dashboard</span>
+          </button>
+          <button
+            className={`sb-nav-item${isActive("/parent/students") ? " active" : ""}`}
+            onClick={() => go("/parent/students")}
+          >
+            <Users size={16} /><span>My Children</span>
+          </button>
 
-            <div className="sb-section-label">Learning</div>
-            <button
-              className={`sb-nav-item${isActive("/appointments") ? " active" : ""}`}
-              onClick={() => navigate("/appointments")}
-            >
-              <Calendar size={16} /><span>Book Sessions</span>
-            </button>
-            <button
-              className={`sb-nav-item${isActive("/parent/reports") ? " active" : ""}`}
-              onClick={() => navigate("/parent/reports")}
-            >
-              <FileText size={16} /><span>Session Reports</span>
-            </button>
-            <button
-              className={`sb-nav-item${isActive("/parent/progress") ? " active" : ""}`}
-              onClick={() => navigate("/parent/progress")}
-            >
-              <BarChart2 size={16} /><span>Progress Tracker</span>
-              <span className="sb-soon-badge">Soon</span>
-            </button>
+          <div className="sb-section-label">Learning</div>
+          <button
+            className={`sb-nav-item${isActive("/appointments") ? " active" : ""}`}
+            onClick={() => go("/appointments")}
+          >
+            <Calendar size={16} /><span>Book Sessions</span>
+          </button>
+          <button
+            className={`sb-nav-item${isActive("/parent/reports") ? " active" : ""}`}
+            onClick={() => go("/parent/reports")}
+          >
+            <FileText size={16} /><span>Session Reports</span>
+          </button>
+          <button
+            className={`sb-nav-item${isActive("/parent/progress") ? " active" : ""}`}
+            onClick={() => go("/parent/progress")}
+          >
+            <BarChart2 size={16} /><span>Progress Tracker</span>
+            <span className="sb-soon-badge">Soon</span>
+          </button>
 
-            <div className="sb-section-label">Account</div>
-            <button className="sb-nav-item disabled">
-              <MessageSquare size={16} /><span>Messages</span>
-            </button>
-            <button className="sb-nav-item disabled">
-              <Bell size={16} /><span>Notifications</span>
-            </button>
-            <button
-              className={`sb-nav-item${isActive("/parent/settings") ? " active" : ""}`}
-              onClick={() => navigate("/parent/settings")}
-            >
-              <Settings size={16} /><span>Settings</span>
-            </button>
-          </nav>
+          <div className="sb-section-label">Account</div>
+          <button className="sb-nav-item disabled">
+            <MessageSquare size={16} /><span>Messages</span>
+          </button>
+          <button className="sb-nav-item disabled">
+            <Bell size={16} /><span>Notifications</span>
+          </button>
+          <button
+            className={`sb-nav-item${isActive("/parent/settings") ? " active" : ""}`}
+            onClick={() => go("/parent/settings")}
+          >
+            <Settings size={16} /><span>Settings</span>
+          </button>
+        </nav>
 
-          <div className="sb-scroll"><div className="sb-spacer" /></div>
+        <div className="sb-scroll"><div className="sb-spacer" /></div>
 
-          <Footer roleLabel="Parent" />
-        </div>
-      </>
+        <Footer roleLabel="Parent" />
+      </Wrapper>
     );
   }
 
@@ -605,95 +736,92 @@ export default function Sidebar({
   ═══════════════════════════════════════ */
   if (user?.role === "admin") {
     return (
-      <>
-        <style>{SHARED_STYLES}</style>
-        <div className="sb">
-          <BrandHeader />
+      <Wrapper>
+        <BrandHeader />
 
-          <nav className="sb-nav">
-            <div className="sb-section-label">Management</div>
-            <button
-              className={`sb-nav-item${isActive("/admin") ? " active" : ""}`}
-              onClick={() => navigate("/admin")}
-            >
-              <LayoutDashboard size={16} /><span>Dashboard</span>
-            </button>
-            <button
-              className={`sb-nav-item${isActive("/admin/users") ? " active" : ""}`}
-              onClick={() => navigate("/admin/users")}
-            >
-              <Users size={16} /><span>Users</span>
-            </button>
-            <button
-              className={`sb-nav-item${isActive("/admin/assessments") ? " active" : ""}`}
-              onClick={() => navigate("/admin/assessments")}
-            >
-              <ClipboardList size={16} /><span>Assessments</span>
-            </button>
+        <nav className="sb-nav">
+          <div className="sb-section-label">Management</div>
+          <button
+            className={`sb-nav-item${isActive("/admin") ? " active" : ""}`}
+            onClick={() => go("/admin")}
+          >
+            <LayoutDashboard size={16} /><span>Dashboard</span>
+          </button>
+          <button
+            className={`sb-nav-item${isActive("/admin/users") ? " active" : ""}`}
+            onClick={() => go("/admin/users")}
+          >
+            <Users size={16} /><span>Users</span>
+          </button>
+          <button
+            className={`sb-nav-item${isActive("/admin/assessments") ? " active" : ""}`}
+            onClick={() => go("/admin/assessments")}
+          >
+            <ClipboardList size={16} /><span>Assessments</span>
+          </button>
 
-            <div className="sb-section-label">Platform</div>
-            <button
-              className={`sb-nav-item${isActive("/appointments") ? " active" : ""}`}
-              onClick={() => navigate("/appointments")}
-            >
-              <Calendar size={16} /><span>All Sessions</span>
-            </button>
-            <button
-              className={`sb-nav-item${isActive("/admin/knowledge") ? " active" : ""}`}
-              onClick={() => navigate("/admin/knowledge")}
-            >
-              <Database size={16} /><span>Knowledge Base</span>
-            </button>
-            <button
-              className={`sb-nav-item${isActive("/admin/reports") ? " active" : ""}`}
-              onClick={() => navigate("/admin/reports")}
-            >
-              <FileText size={16} /><span>Reports</span>
-              <span className="sb-soon-badge">Soon</span>
-            </button>
-            <button
-              className={`sb-nav-item${isActive("/admin/chats") ? " active" : ""}`}
-              onClick={() => navigate("/admin/chats")}
-            >
-              <MessageSquare size={16} /><span>All Chats</span>
-            </button>
+          <div className="sb-section-label">Platform</div>
+          <button
+            className={`sb-nav-item${isActive("/appointments") ? " active" : ""}`}
+            onClick={() => go("/appointments")}
+          >
+            <Calendar size={16} /><span>All Sessions</span>
+          </button>
+          <button
+            className={`sb-nav-item${isActive("/admin/knowledge") ? " active" : ""}`}
+            onClick={() => go("/admin/knowledge")}
+          >
+            <Database size={16} /><span>Knowledge Base</span>
+          </button>
+          <button
+            className={`sb-nav-item${isActive("/admin/reports") ? " active" : ""}`}
+            onClick={() => go("/admin/reports")}
+          >
+            <FileText size={16} /><span>Reports</span>
+            <span className="sb-soon-badge">Soon</span>
+          </button>
+          <button
+            className={`sb-nav-item${isActive("/admin/chats") ? " active" : ""}`}
+            onClick={() => go("/admin/chats")}
+          >
+            <MessageSquare size={16} /><span>All Chats</span>
+          </button>
 
-            <div className="sb-section-label">Analytics</div>
-            <button
-              className={`sb-nav-item${isActive("/admin/activity") ? " active" : ""}`}
-              onClick={() => navigate("/admin/activity")}
-            >
-              <Activity size={16} /><span>Activity Log</span>
-            </button>
-            <button
-              className={`sb-nav-item${isActive("/admin/analytics") ? " active" : ""}`}
-              onClick={() => navigate("/admin/analytics")}
-            >
-              <BarChart size={16} /><span>Analytics</span>
-              <span className="sb-soon-badge">Soon</span>
-            </button>
+          <div className="sb-section-label">Analytics</div>
+          <button
+            className={`sb-nav-item${isActive("/admin/activity") ? " active" : ""}`}
+            onClick={() => go("/admin/activity")}
+          >
+            <Activity size={16} /><span>Activity Log</span>
+          </button>
+          <button
+            className={`sb-nav-item${isActive("/admin/analytics") ? " active" : ""}`}
+            onClick={() => go("/admin/analytics")}
+          >
+            <BarChart size={16} /><span>Analytics</span>
+            <span className="sb-soon-badge">Soon</span>
+          </button>
 
-            <div className="sb-section-label">System</div>
-            <button
-              className={`sb-nav-item${isActive("/admin/security") ? " active" : ""}`}
-              onClick={() => navigate("/admin/security")}
-            >
-              <ShieldCheck size={16} /><span>Security</span>
-              <span className="sb-soon-badge">Soon</span>
-            </button>
-            <button
-              className={`sb-nav-item${isActive("/settings") ? " active" : ""}`}
-              onClick={() => navigate("/settings")}
-            >
-              <Settings size={16} /><span>Settings</span>
-            </button>
-          </nav>
+          <div className="sb-section-label">System</div>
+          <button
+            className={`sb-nav-item${isActive("/admin/security") ? " active" : ""}`}
+            onClick={() => go("/admin/security")}
+          >
+            <ShieldCheck size={16} /><span>Security</span>
+            <span className="sb-soon-badge">Soon</span>
+          </button>
+          <button
+            className={`sb-nav-item${isActive("/settings") ? " active" : ""}`}
+            onClick={() => go("/settings")}
+          >
+            <Settings size={16} /><span>Settings</span>
+          </button>
+        </nav>
 
-          <div className="sb-scroll"><div className="sb-spacer" /></div>
+        <div className="sb-scroll"><div className="sb-spacer" /></div>
 
-          <Footer roleLabel="Admin" />
-        </div>
-      </>
+        <Footer roleLabel="Admin" />
+      </Wrapper>
     );
   }
 

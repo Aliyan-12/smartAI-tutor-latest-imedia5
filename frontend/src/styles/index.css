@@ -77,6 +77,17 @@ input, textarea, select {
   overflow: hidden;
 }
 
+/* On mobile/tablet the sidebar becomes position:fixed so the main content fills full width */
+@media (max-width: 1023px) {
+  .app-layout {
+    padding-top: 0;
+  }
+  .main-content {
+    width: 100% !important;
+    min-width: 0;
+  }
+}
+
 /* ============ SIDEBAR ============ */
 .sidebar {
   width: var(--sidebar-width);
@@ -1518,6 +1529,25 @@ input, textarea, select {
   color: var(--danger);
 }
 
+/* ============ TABLET ============ */
+@media (max-width: 480px) {
+  .tab-bar {
+    flex-direction: column;
+    width: auto;
+  }
+  .tree-doc-chunks {
+    display: none;
+  }
+  .tree-doc-type {
+    display: none;
+  }
+  .section-actions {
+    flex-direction: column;
+  }
+  .pr-card-top {
+    flex-direction: column;
+  }
+}
 /* ============ MOBILE ============ */
 @media (max-width: 768px) {
   .sidebar {

@@ -137,7 +137,7 @@ export default function ParentSettingsPage() {
         .ps-header p { font-size: 14px; color: #64748b; margin: 0; }
         .ps-tabs {
           display: flex; gap: 2px; padding: 20px 40px 0;
-          border-bottom: 2px solid #e2e8f0; overflow-x: auto;
+          border-bottom: 2px solid #e2e8f0;
         }
         .ps-tab {
           display: flex; align-items: center; gap: 6px; padding: 10px 16px;
@@ -273,6 +273,7 @@ export default function ParentSettingsPage() {
           </div>
 
           <div className="ps-tabs">
+            <div style={{ display: "flex", overflowX: "scroll"  }}>
             {TABS.map((t) => (
               <button
                 key={t.id}
@@ -282,6 +283,7 @@ export default function ParentSettingsPage() {
                 {t.icon} {t.label}
               </button>
             ))}
+            </div>
           </div>
 
           <div className="ps-body">

@@ -99,7 +99,22 @@ async def build_voice_system_prompt(
             logger.warning(f"Failed to build session voice prompt: {e}")
             system_text = SYSTEM_PROMPT
     else:
-        system_text = SYSTEM_PROMPT
+        # No appointment — personalise using the student's stored learning preferences
+        try:
+            from app.services.settings_service import get_student_settings
+            from app.services.gemini_service import build_personalised_system_prompt
+            async with async_session_factory() as db:
+                _profile = await get_student_settings(db, user_id)
+                _prefs = {
+                    "teaching_pace": _profile.teaching_pace,
+                    "learning_style": _profile.learning_style or [],
+                    "teaching_preferences": _profile.teaching_preferences or {},
+                    "interests": _profile.interests or [],
+                    "learning_goals": _profile.learning_goals,
+                }
+            system_text = build_personalised_system_prompt(_prefs)
+        except Exception:
+            system_text = SYSTEM_PROMPT
 
     # Inject connection-time KB content into system prompt
     if appointment_id and appt_subject:
