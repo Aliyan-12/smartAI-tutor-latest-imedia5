@@ -1,6 +1,8 @@
 import logging
 
-from fastapi import APIRouter, Depends, HTTPException
+from typing import Optional
+
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.session import get_db
@@ -90,3 +92,16 @@ async def streak_check(
     """Check and update the daily login streak for the authenticated student."""
     profile = await gamification_service.check_and_update_streak(db, current_user.id)
     return StudentProfileResponse.model_validate(profile)
+
+
+@router.get("/next-topics")
+async def get_next_topics(
+    subject: Optional[str] = Query(default=None),
+    key_stage: Optional[str] = Query(default=None),
+    current_user: User = Depends(require_student),
+    db: AsyncSession = Depends(get_db),
+):
+    """Return RAG-based topic recommendations for what to study next."""
+    return await gamification_service.get_next_topic_recommendations(
+        db, current_user.id, subject=subject, key_stage=key_stage
+    )

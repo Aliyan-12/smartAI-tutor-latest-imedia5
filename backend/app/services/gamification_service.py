@@ -339,3 +339,46 @@ async def get_dashboard_data(db: AsyncSession, student_id: int) -> Dict[str, Any
         "continue_learning": continue_learning,
         "xp_to_next_level": xp_remaining,
     }
+
+
+async def get_next_topic_recommendations(
+    db: AsyncSession,
+    student_id: int,
+    subject: Optional[str] = None,
+    key_stage: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Use RAG to suggest topics the student should study next."""
+    mastery_list = await get_mastery_overview(db, student_id)
+
+    relevant = [m for m in mastery_list if not subject or m.subject == subject]
+    mastered = [m for m in relevant if m.mastery_level in ("mastered", "practicing")]
+    studied_topics = {m.topic.lower() for m in relevant}
+
+    if not mastered:
+        return {"recommendations": []}
+
+    query = "Next topics to learn after mastering: " + ", ".join(m.topic for m in mastered[:6])
+
+    from app.services.retrieval_service import retrieve_relevant_chunks
+    chunks = await retrieve_relevant_chunks(
+        db, query, subject=subject, key_stage=key_stage, top_k=15
+    )
+
+    seen: set[str] = set()
+    recommendations: List[Dict[str, Any]] = []
+    for chunk in chunks:
+        title = chunk.document_title
+        key = title.lower()
+        if key not in seen and key not in studied_topics:
+            seen.add(key)
+            preview = chunk.content.strip()
+            recommendations.append({
+                "topic": title,
+                "subject": chunk.subject,
+                "key_stage": chunk.key_stage,
+                "preview": preview[:120] + "…" if len(preview) > 120 else preview,
+            })
+        if len(recommendations) >= 4:
+            break
+
+    return {"recommendations": recommendations}

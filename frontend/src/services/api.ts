@@ -476,6 +476,14 @@ export const gamificationApi = {
     });
     return handleResponse(res);
   },
+  async getNextTopics(subject?: string, keyStage?: string) {
+    const params = new URLSearchParams();
+    if (subject) params.set("subject", subject);
+    if (keyStage) params.set("key_stage", keyStage);
+    const qs = params.toString();
+    const res = await fetch(`${API_BASE}/gamification/next-topics${qs ? "?" + qs : ""}`, { headers: authHeaders() });
+    return handleResponse(res);
+  },
 };
 
 export const lessonApi = {
