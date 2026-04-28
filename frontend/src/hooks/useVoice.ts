@@ -35,6 +35,12 @@ export function useVoice() {
   const ttsActiveRef = useRef(false);
   const ttsProcessingRef = useRef(false);
 
+  // Connection lifecycle guards
+  const intentionalCloseRef = useRef(false);
+  const reconnectFnRef = useRef<(() => void) | null>(null);
+  const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const connectingRef = useRef(false);
+
   const isVoiceActive = voiceStatus !== "idle";
 
   const clearVoiceError = useCallback(() => setVoiceError(null), []);
@@ -76,7 +82,49 @@ export function useVoice() {
     setPlaying(false);
   }, []);
 
+  const cleanupAudio = useCallback(() => {
+    if (workletNodeRef.current) {
+      workletNodeRef.current.disconnect();
+      workletNodeRef.current = null;
+    }
+    if (sourceRef.current) {
+      sourceRef.current.disconnect();
+      sourceRef.current = null;
+    }
+    if (streamRef.current) {
+      streamRef.current.getTracks().forEach((t) => t.stop());
+      streamRef.current = null;
+    }
+    if (audioContextRef.current && audioContextRef.current.state !== "closed") {
+      audioContextRef.current.close();
+      audioContextRef.current = null;
+    }
+    playQueueRef.current.length = 0;
+    playingRef.current = false;
+    setPlaying(false);
+  }, []);
+
   const connectVoice = useCallback(async (sessionId: string | null, callbacks: VoiceCallbacks, appointmentId?: number) => {
+    // Prevent concurrent connection attempts
+    if (connectingRef.current) return;
+    connectingRef.current = true;
+
+    // Cancel any pending auto-reconnect timer
+    if (reconnectTimerRef.current) {
+      clearTimeout(reconnectTimerRef.current);
+      reconnectTimerRef.current = null;
+    }
+
+    // Close any existing WebSocket before opening a new one (prevents dual sessions)
+    intentionalCloseRef.current = true;
+    if (wsRef.current) {
+      try { wsRef.current.send(JSON.stringify({ type: "stop" })); } catch {}
+      wsRef.current.close();
+      wsRef.current = null;
+    }
+    cleanupAudio();
+    intentionalCloseRef.current = false;
+
     callbacksRef.current = callbacks;
     setVoiceError(null);
     setVoiceStatus("connecting");
@@ -85,8 +133,12 @@ export function useVoice() {
     if (!token) {
       setVoiceError("Not authenticated");
       setVoiceStatus("idle");
+      connectingRef.current = false;
       return;
     }
+
+    // Store reconnect closure for use in onclose handler
+    reconnectFnRef.current = () => connectVoice(sessionId, callbacks, appointmentId);
 
     // Create AudioContext for playback and mic processing
     const audioCtx = new AudioContext({ sampleRate: 16000 });
@@ -117,9 +169,10 @@ export function useVoice() {
 
     try {
       await audioCtx.audioWorklet.addModule(workletUrl);
-    } catch (e) {
+    } catch {
       setVoiceError("Audio processing setup failed");
       setVoiceStatus("idle");
+      connectingRef.current = false;
       return;
     }
 
@@ -132,12 +185,12 @@ export function useVoice() {
 
     const ws = new WebSocket(wsUrl);
     wsRef.current = ws;
+    connectingRef.current = false;
     let connectionEstablished = false;
 
     ws.onopen = async () => {
       let stream: MediaStream | null = null;
       try {
-        // Try with preferred constraints first; fall back to basic audio if browser rejects them
         try {
           stream = await navigator.mediaDevices.getUserMedia({
             audio: { sampleRate: 16000, channelCount: 1, echoCancellation: true, noiseSuppression: true },
@@ -162,7 +215,6 @@ export function useVoice() {
       }
 
       try {
-        // Guard: backend may have closed the WS while getUserMedia was pending
         if (ws.readyState !== WebSocket.OPEN) {
           stream.getTracks().forEach((t) => t.stop());
           return;
@@ -264,51 +316,47 @@ export function useVoice() {
     };
 
     ws.onclose = (ev) => {
-      cleanupAudio();
-      setVoiceStatus("idle");
-      if (!connectionEstablished) {
-        setVoiceError((prev) => {
-          if (prev) return prev;
-          if (ev.code === 4002) return "Insufficient credits — please subscribe to continue.";
-          if (ev.code === 4003) return "Voice is only available to students.";
-          return "Voice server unavailable — please try again or check server logs.";
-        });
-      }
-    };
-  }, [playNextChunk]);
+      // If this close was triggered by disconnectVoice(), do nothing extra
+      if (intentionalCloseRef.current) return;
 
-  const cleanupAudio = useCallback(() => {
-    if (workletNodeRef.current) {
-      workletNodeRef.current.disconnect();
-      workletNodeRef.current = null;
-    }
-    if (sourceRef.current) {
-      sourceRef.current.disconnect();
-      sourceRef.current = null;
-    }
-    if (streamRef.current) {
-      streamRef.current.getTracks().forEach((t) => t.stop());
-      streamRef.current = null;
-    }
-    if (audioContextRef.current && audioContextRef.current.state !== "closed") {
-      audioContextRef.current.close();
-      audioContextRef.current = null;
-    }
-    playQueueRef.current.length = 0;
-    playingRef.current = false;
-    setPlaying(false);
-  }, []);
+      cleanupAudio();
+
+      // Unexpected close after a live session — auto-reconnect once
+      if (connectionEstablished) {
+        setVoiceStatus("connecting");
+        reconnectTimerRef.current = setTimeout(() => {
+          reconnectTimerRef.current = null;
+          reconnectFnRef.current?.();
+        }, 1500);
+        return;
+      }
+
+      setVoiceStatus("idle");
+      setVoiceError((prev) => {
+        if (prev) return prev;
+        if (ev.code === 4002) return "Insufficient credits — please subscribe to continue.";
+        if (ev.code === 4003) return "Voice is only available to students.";
+        return "Voice server unavailable — please try again or check server logs.";
+      });
+    };
+  }, [cleanupAudio, playNextChunk]);
 
   const disconnectVoice = useCallback(() => {
+    intentionalCloseRef.current = true;
+    if (reconnectTimerRef.current) {
+      clearTimeout(reconnectTimerRef.current);
+      reconnectTimerRef.current = null;
+    }
+    reconnectFnRef.current = null;
     if (wsRef.current) {
-      try {
-        wsRef.current.send(JSON.stringify({ type: "stop" }));
-      } catch {}
+      try { wsRef.current.send(JSON.stringify({ type: "stop" })); } catch {}
       wsRef.current.close();
       wsRef.current = null;
     }
     cleanupAudio();
+    connectingRef.current = false;
     setVoiceStatus("idle");
+    intentionalCloseRef.current = false;
   }, [cleanupAudio]);
 
   // ── Streaming TTS pipeline ──────────────────────────────────────────────────
@@ -341,59 +389,44 @@ export function useVoice() {
     if (!ttsActiveRef.current || ttsQueueRef.current.length === 0) setPlaying(false);
   }, []);
 
-  // Buffer incoming text token, enqueue complete sentences for TTS
+  // Buffer incoming text tokens and flush in large paragraph-sized chunks
+  // to avoid gaps and ensure Gemini TTS gets enough context per call.
   const feedStreamTTS = useCallback((chunk: string) => {
     if (!ttsActiveRef.current) return;
     sentenceBufRef.current += chunk;
 
     const buf = sentenceBufRef.current;
-    let start = 0;
-    let i = 0;
 
-    while (i < buf.length) {
-      const ch = buf[i];
-      if (ch === "." || ch === "!" || ch === "?") {
-        const next = buf[i + 1];
-        const isEnd = next === undefined || next === " " || next === "\n";
-        if (isEnd) {
-          const sentence = buf.slice(start, i + 1).trim();
-          if (sentence.length >= 8) {
-            ttsQueueRef.current.push(sentence);
-            _processTTSQueue();
-          }
-          start = i + 1;
-          while (start < buf.length && (buf[start] === " " || buf[start] === "\n")) start++;
-          i = start;
-          continue;
-        }
-      } else if (ch === "\n" && buf[i + 1] === "\n") {
-        const sentence = buf.slice(start, i).trim();
-        if (sentence.length >= 8) {
-          ttsQueueRef.current.push(sentence);
-          _processTTSQueue();
-        }
-        start = i + 2;
-        i = start;
-        continue;
+    // Flush on paragraph break (\n\n)
+    const paraIdx = buf.indexOf("\n\n");
+    if (paraIdx !== -1) {
+      const paragraph = buf.slice(0, paraIdx).trim();
+      if (paragraph.length >= 40) {
+        ttsQueueRef.current.push(paragraph);
+        _processTTSQueue();
       }
-      i++;
+      sentenceBufRef.current = buf.slice(paraIdx + 2).trimStart();
+      return;
     }
 
-    // Force-flush if buffer grows very large (code blocks, lists, etc.)
-    if (buf.length - start > 250) {
-      const segment = buf.slice(start, start + 200);
-      const cutAt = segment.lastIndexOf(" ");
-      if (cutAt > 30) {
-        const sentence = segment.slice(0, cutAt).trim();
-        if (sentence.length >= 8) {
-          ttsQueueRef.current.push(sentence);
-          _processTTSQueue();
+    // Flush when buffer reaches ~350 chars — cut at last sentence boundary
+    if (buf.length >= 350) {
+      let cutAt = -1;
+      for (let i = buf.length - 1; i >= 150; i--) {
+        const ch = buf[i];
+        if ((ch === "." || ch === "!" || ch === "?") &&
+            (buf[i + 1] === " " || buf[i + 1] === "\n" || i + 1 === buf.length)) {
+          cutAt = i + 1;
+          break;
         }
-        start += cutAt + 1;
+      }
+      if (cutAt > 100) {
+        const paragraph = buf.slice(0, cutAt).trim();
+        ttsQueueRef.current.push(paragraph);
+        _processTTSQueue();
+        sentenceBufRef.current = buf.slice(cutAt).trimStart();
       }
     }
-
-    sentenceBufRef.current = buf.slice(start);
   }, [_processTTSQueue]);
 
   const startStreamTTS = useCallback(() => {
@@ -407,10 +440,9 @@ export function useVoice() {
   }, []);
 
   const endStreamTTS = useCallback(() => {
-    // Flush any text left in the buffer when streaming ends
     const remaining = sentenceBufRef.current.trim();
     sentenceBufRef.current = "";
-    if (remaining.length >= 4) {
+    if (remaining.length >= 20) {
       ttsQueueRef.current.push(remaining);
       _processTTSQueue();
     }

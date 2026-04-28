@@ -1,4 +1,3 @@
-import io
 import logging
 import struct
 import tempfile
@@ -7,7 +6,6 @@ from typing import Optional
 
 from google import genai
 from google.genai import types
-from gtts import gTTS
 
 from app.core.config import settings
 
@@ -42,29 +40,26 @@ def text_to_speech(text: str, lang: str = "en") -> tuple[bytes, str]:
     clean_text = text.strip()
     if not clean_text or clean_text.startswith("[Error"):
         raise ValueError("Cannot generate speech for empty or error text")
-    try:
-        client = _get_client()
-        response = client.models.generate_content(
-            model=TTS_MODEL,
-            contents=clean_text,
-            config=types.GenerateContentConfig(
-                response_modalities=["AUDIO"],
-                speech_config=types.SpeechConfig(
-                    voice_config=types.VoiceConfig(
-                        prebuilt_voice_config=types.PrebuiltVoiceConfig(voice_name="Puck")
-                    )
-                ),
+    client = _get_client()
+    response = client.models.generate_content(
+        model=TTS_MODEL,
+        contents=[
+            types.Content(
+                role="user",
+                parts=[types.Part(text=clean_text)],
+            )
+        ],
+        config=types.GenerateContentConfig(
+            response_modalities=["AUDIO"],
+            speech_config=types.SpeechConfig(
+                voice_config=types.VoiceConfig(
+                    prebuilt_voice_config=types.PrebuiltVoiceConfig(voice_name="Puck")
+                )
             ),
-        )
-        pcm = response.candidates[0].content.parts[0].inline_data.data
-        return _pcm_to_wav(pcm), "audio/wav"
-    except Exception as e:
-        logger.warning(f"Gemini TTS failed, falling back to gTTS: {e}")
-        tts = gTTS(text=clean_text, lang=lang, slow=False)
-        buf = io.BytesIO()
-        tts.write_to_fp(buf)
-        buf.seek(0)
-        return buf.read(), "audio/mpeg"
+        ),
+    )
+    pcm = response.candidates[0].content.parts[0].inline_data.data
+    return _pcm_to_wav(pcm), "audio/wav"
 
 
 def speech_to_text(audio_bytes: bytes, filename: str = "audio.webm") -> Optional[str]:
