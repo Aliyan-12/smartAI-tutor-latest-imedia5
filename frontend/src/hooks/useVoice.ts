@@ -185,7 +185,6 @@ export function useVoice() {
 
     const ws = new WebSocket(wsUrl);
     wsRef.current = ws;
-    connectingRef.current = false;
     let connectionEstablished = false;
 
     ws.onopen = async () => {
@@ -211,12 +210,14 @@ export function useVoice() {
         setVoiceError(msg);
         ws.close();
         setVoiceStatus("idle");
+        connectingRef.current = false;
         return;
       }
 
       try {
         if (ws.readyState !== WebSocket.OPEN) {
           stream.getTracks().forEach((t) => t.stop());
+          connectingRef.current = false;
           return;
         }
 
@@ -238,10 +239,12 @@ export function useVoice() {
         workletNode.connect(audioCtx.destination);
 
         setVoiceStatus("listening");
+        connectingRef.current = false;
       } catch {
         setVoiceError("Audio processing setup failed.");
         ws.close();
         setVoiceStatus("idle");
+        connectingRef.current = false;
       }
     };
 
@@ -311,6 +314,7 @@ export function useVoice() {
     };
 
     ws.onerror = () => {
+      connectingRef.current = false;
       setVoiceError("Voice connection failed");
       setVoiceStatus("idle");
     };

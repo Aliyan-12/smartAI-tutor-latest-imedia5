@@ -31,6 +31,9 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/voice", tags=["voice"])
 
+# One active voice WS per user — close old one when a new connection arrives
+_active_voice_ws: dict[int, WebSocket] = {}
+
 
 class TTSRequest(BaseModel):
     text: str = Field(..., min_length=1, max_length=5000)
@@ -89,6 +92,16 @@ async def voice_websocket(websocket: WebSocket):
     if not user_id or user_role != ROLE_STUDENT:
         await websocket.close(code=4003, reason="Only students can use voice")
         return
+
+    # ── Dedup: close any existing voice session for this user ─────────────────
+    existing = _active_voice_ws.get(user_id)
+    if existing is not None and existing is not websocket:
+        logger.info(f"Voice: closing stale session for user={user_id} (new connection arriving)")
+        try:
+            await existing.close(code=4000, reason="Replaced by new session")
+        except Exception:
+            pass
+    _active_voice_ws[user_id] = websocket
 
     async def send(data: dict) -> None:
         await _send_safe(websocket, data)
@@ -315,6 +328,9 @@ async def voice_websocket(websocket: WebSocket):
         _traceback.print_exc()
         logger.error(f"Voice WS error: {type(e).__name__}: {e}", exc_info=True)
         await send({"type": "error", "content": f"Voice error: {type(e).__name__}: {str(e)[:300]}"})
+    finally:
+        if _active_voice_ws.get(user_id) is websocket:
+            del _active_voice_ws[user_id]
 
     try:
         if websocket.client_state == WebSocketState.CONNECTED:
