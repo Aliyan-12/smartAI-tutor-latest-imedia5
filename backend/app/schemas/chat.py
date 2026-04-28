@@ -41,3 +41,11 @@ class StreamChunk(BaseModel):
     type: str
     content: str
     session_id: Optional[str] = None
+
+
+class QuizFeedbackRequest(BaseModel):
+    session_id: str
+    topic: str
+    score: float = 0.0
+    strong: List[str] = []
+    weak: List[str] = []

@@ -67,7 +67,7 @@ export default function SessionPage() {
 
   const {
     messages, streaming, streamContent, sendMessage, stopStreaming,
-    initSessionChat, activeSessionId, quizOffer, clearQuizOffer,
+    initSessionChat, activeSessionId, quizOffer, clearQuizOffer, sendQuizFeedback,
   } = useChat();
 
   const { voiceStatus, playing, speakText, connectVoice, disconnectVoice, isVoiceActive, startStreamTTS, feedStreamTTS, endStreamTTS, sendQuizResult } = useVoice();
@@ -361,15 +361,15 @@ export default function SessionPage() {
         setTestFeedback(null);
         clearQuizOffer();
 
-        // Notify AI of quiz result in real-time
+        // Notify AI of quiz result silently — no user bubble, AI responds in chat/voice
         if (isVoiceActive) {
           sendQuizResult(quizTopic, quizScore, quizStrong, quizWeak);
-        } else {
-          const weakNote = quizWeak.length > 0 ? ` I struggled with: ${quizWeak.join(", ")}.` : "";
-          const strongNote = quizStrong.length > 0 ? ` I did well on: ${quizStrong.join(", ")}.` : "";
-          sessionSend(
-            `I just finished the quiz on "${quizTopic}". My score was ${Math.round(quizScore)}%.${strongNote}${weakNote} Please give me feedback and tell me what to focus on next.`
-          );
+        } else if (activeSessionId) {
+          sendQuizFeedback(activeSessionId, quizTopic, quizScore, quizStrong, quizWeak, {
+            onStreamStart: startStreamTTS,
+            onToken: feedStreamTTS,
+            onStreamComplete: endStreamTTS,
+          });
         }
       } catch (err: any) {
         setTestError(err.message || "Failed to complete test");

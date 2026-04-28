@@ -221,6 +221,58 @@ export function useChat() {
 
   const clearQuizOffer = useCallback(() => setQuizOffer(null), []);
 
+  // Send quiz result silently — AI gets the data and responds, but NO user bubble is added
+  const sendQuizFeedback = useCallback((
+    sessionId: string,
+    topic: string,
+    score: number,
+    strong: string[],
+    weak: string[],
+    opts?: {
+      onStreamStart?: () => void;
+      onToken?: (chunk: string) => void;
+      onStreamComplete?: (text: string) => void;
+    }
+  ) => {
+    setStreaming(true);
+    setStreamContent("");
+    let accumulated = "";
+
+    const cancel = chatApi.streamQuizFeedback(
+      sessionId, topic, score, strong, weak,
+      (event) => {
+        if (event.type === "start") {
+          opts?.onStreamStart?.();
+        } else if (event.type === "token" && event.content) {
+          accumulated += event.content;
+          setStreamContent(accumulated);
+          opts?.onToken?.(event.content);
+        }
+      },
+      () => {
+        if (accumulated) {
+          setMessages((prev) => [...prev, {
+            id: Date.now() + 1,
+            chat_id: 0,
+            role: "assistant",
+            content: accumulated,
+            timestamp: new Date().toISOString(),
+          }]);
+        }
+        setStreamContent("");
+        setStreaming(false);
+        opts?.onStreamComplete?.(accumulated);
+      },
+      (err) => {
+        console.error("Quiz feedback stream error:", err);
+        setStreaming(false);
+        setStreamContent("");
+      }
+    );
+
+    cancelRef.current = cancel;
+  }, []);
+
   return {
     messages,
     chatList,
@@ -236,6 +288,7 @@ export function useChat() {
     resetChat,
     initSessionChat,
     sendMessage,
+    sendQuizFeedback,
     deleteChat,
     stopStreaming,
     clearQuizOffer,

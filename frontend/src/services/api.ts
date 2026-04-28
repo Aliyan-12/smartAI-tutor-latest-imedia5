@@ -150,6 +150,53 @@ export const chatApi = {
 
     return () => controller.abort();
   },
+
+  streamQuizFeedback(
+    sessionId: string,
+    topic: string,
+    score: number,
+    strong: string[],
+    weak: string[],
+    onEvent: (event: { type: string; content?: string; session_id?: string }) => void,
+    onDone: () => void,
+    onError: (err: Error) => void
+  ) {
+    const token = getToken();
+    const controller = new AbortController();
+
+    fetch(`${API_BASE}/chat/quiz-feedback`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+      body: JSON.stringify({ session_id: sessionId, topic, score, strong, weak }),
+      signal: controller.signal,
+    })
+      .then(async (res) => {
+        if (!res.ok) {
+          const body = await res.json().catch(() => ({}));
+          throw new Error(body.detail || "Quiz feedback request failed");
+        }
+        const reader = res.body?.getReader();
+        if (!reader) throw new Error("No response body");
+        const decoder = new TextDecoder();
+        let buffer = "";
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          buffer += decoder.decode(value, { stream: true });
+          const lines = buffer.split("\n");
+          buffer = lines.pop() || "";
+          for (const line of lines) {
+            const trimmed = line.trim();
+            if (!trimmed.startsWith("data: ")) continue;
+            try { onEvent(JSON.parse(trimmed.slice(6))); } catch { /* skip */ }
+          }
+        }
+        onDone();
+      })
+      .catch((err) => { if (err.name !== "AbortError") onError(err); });
+
+    return () => controller.abort();
+  },
 };
 
 export const voiceApi = {

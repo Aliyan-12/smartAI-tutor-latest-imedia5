@@ -11,7 +11,7 @@ from app.db.session import get_db, async_session_factory
 from app.middleware.auth import get_current_user
 from app.core.security import decode_access_token
 from app.models.user import User, ROLE_STUDENT
-from app.schemas.chat import MessageCreate, ChatResponse, ChatListItem, MessageResponse
+from app.schemas.chat import MessageCreate, ChatResponse, ChatListItem, MessageResponse, QuizFeedbackRequest
 from app.services import chat_service, gemini_service, credit_service, session_agent_service
 
 logger = logging.getLogger(__name__)
@@ -157,6 +157,84 @@ async def get_or_create_session_chat(
     ]
 
     return {"session_id": chat.session_id, "messages": messages_out}
+
+
+@router.post("/quiz-feedback")
+async def quiz_feedback_stream(
+    payload: QuizFeedbackRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Silently inject a quiz result into the AI's context and stream its feedback response.
+    No user message is saved or shown — only the AI reply appears in chat.
+    """
+    _ensure_student(current_user)
+
+    chat = await chat_service.get_chat_by_session(db, payload.session_id, current_user.id)
+    if not chat:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Chat not found")
+
+    history, rag_chunks = await chat_service.build_context(db, chat.id)
+
+    import re as _re
+    _appt_id: int | None = getattr(chat, "appointment_id", None)
+    if not _appt_id and chat.title:
+        _m = _re.match(r"\[session:(\d+)\]", chat.title)
+        if _m:
+            _appt_id = int(_m.group(1))
+
+    session_system_prompt: str | None = None
+    if _appt_id:
+        try:
+            session_system_prompt = await session_agent_service.build_session_system_prompt(
+                db, _appt_id, current_user.id, history_len=len(history)
+            )
+        except Exception:
+            pass
+
+    weak_str = ", ".join(payload.weak) if payload.weak else "none"
+    strong_str = ", ".join(payload.strong) if payload.strong else "none"
+    score_pct = round(payload.score, 1)
+
+    if score_pct >= 80:
+        tone = "Praise them enthusiastically — this is a great score!"
+    elif score_pct >= 60:
+        tone = "Acknowledge the effort, highlight strengths, gently note the areas to review."
+    else:
+        tone = "Be warm and encouraging — do not make them feel bad. Focus first on what they got right, then guide them through the weak areas clearly."
+
+    quiz_ctx = (
+        f"[QUIZ COMPLETED]\n"
+        f"Topic: {payload.topic} | Score: {score_pct}%\n"
+        f"Strong areas: {strong_str}\n"
+        f"Weak areas: {weak_str}\n"
+        f"Tone guidance: {tone}\n"
+        "Respond naturally — give brief, warm feedback on the quiz result, then continue teaching."
+    )
+
+    async def event_stream():
+        full_response = []
+        yield f"data: {json.dumps({'type': 'start', 'session_id': chat.session_id})}\n\n"
+
+        async for token in gemini_service.stream_response_async(
+            history,
+            quiz_ctx,
+            rag_chunks=rag_chunks,
+            system_prompt_override=session_system_prompt,
+        ):
+            full_response.append(token)
+            yield f"data: {json.dumps({'type': 'token', 'content': token})}\n\n"
+
+        complete_text = "".join(full_response)
+        if complete_text and not complete_text.startswith("[Error"):
+            async with async_session_factory() as save_session:
+                await chat_service.add_message(save_session, chat.id, "assistant", complete_text)
+                await save_session.commit()
+
+        yield f"data: {json.dumps({'type': 'end'})}\n\n"
+
+    return StreamingResponse(event_stream(), media_type="text/event-stream")
 
 
 @router.post("/stream")
