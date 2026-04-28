@@ -69,7 +69,7 @@ export default function SessionPage() {
     initSessionChat, activeSessionId, quizOffer, clearQuizOffer,
   } = useChat();
 
-  const { voiceStatus, playing, speakText, connectVoice, disconnectVoice, isVoiceActive, startStreamTTS, feedStreamTTS, endStreamTTS } = useVoice();
+  const { voiceStatus, playing, speakText, connectVoice, disconnectVoice, isVoiceActive, startStreamTTS, feedStreamTTS, endStreamTTS, sendQuizResult } = useVoice();
   const [voiceMessages, setVoiceMessages] = useState<{ role: string; content: string }[]>([]);
   const voiceAiTurnRef = useRef("");
   const [voiceQuizTopic, setVoiceQuizTopic] = useState<string | null>(null);
@@ -337,21 +337,36 @@ export default function SessionPage() {
       try {
         const capturedQuestions = testAssessment.questions;
         const completed = await assessmentsApi.complete(testAssessment.id) as Assessment;
+        const quizScore = completed.score_percent ?? 0;
+        const quizWeak: string[] = Array.isArray(completed.weak_topics) ? completed.weak_topics : [];
+        const quizStrong: string[] = Array.isArray(completed.strong_topics) ? completed.strong_topics : [];
+        const quizTopic = completed.topic || quizOffer?.topic || sessionSubject || "the quiz";
         setTestResult({
-          score: completed.score_percent ?? 0,
-          weak: completed.weak_topics ?? [],
-          strong: completed.strong_topics ?? [],
+          score: quizScore,
+          weak: quizWeak,
+          strong: quizStrong,
           report: completed.report_text ?? "",
           questions: capturedQuestions.map((q) => ({
             question_text: q.question_text,
             is_correct: q.is_correct ?? null,
           })),
           totalCorrect: capturedQuestions.filter((q) => q.is_correct === true).length,
-          topic: quizOffer?.topic || sessionSubject,
+          topic: quizTopic,
         });
         setTestAssessment(null);
         setTestFeedback(null);
         clearQuizOffer();
+
+        // Notify AI of quiz result in real-time
+        if (isVoiceActive) {
+          sendQuizResult(quizTopic, quizScore, quizStrong, quizWeak);
+        } else {
+          const weakNote = quizWeak.length > 0 ? ` I struggled with: ${quizWeak.join(", ")}.` : "";
+          const strongNote = quizStrong.length > 0 ? ` I did well on: ${quizStrong.join(", ")}.` : "";
+          sessionSend(
+            `I just finished the quiz on "${quizTopic}". My score was ${Math.round(quizScore)}%.${strongNote}${weakNote} Please give me feedback and tell me what to focus on next.`
+          );
+        }
       } catch (err: any) {
         setTestError(err.message || "Failed to complete test");
       }

@@ -188,11 +188,13 @@ async def stream_message(
             _appt_id = int(_m.group(1))
 
     # Build a session-specific system prompt when this chat belongs to an appointment
+    # history already includes the new user message so subtract 1 for the history_len
     session_system_prompt: str | None = None
     if _appt_id:
         try:
             session_system_prompt = await session_agent_service.build_session_system_prompt(
-                db, _appt_id, current_user.id
+                db, _appt_id, current_user.id,
+                history_len=max(0, len(history) - 1),
             )
         except Exception:
             logger.warning(

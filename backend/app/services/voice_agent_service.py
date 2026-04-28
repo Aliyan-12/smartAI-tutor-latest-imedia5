@@ -68,26 +68,27 @@ async def fetch_session_rag(appointment_id: int, subject: str, key_stage: str) -
 async def build_voice_system_prompt(
     appointment_id: int | None,
     user_id: int,
+    history_len: int = 0,
 ) -> tuple[str, str, str]:
     """
     Assemble the full voice-session system prompt.
     Returns (system_text, appt_subject, appt_key_stage).
     Includes connection-time KB injection and voice behavioural rules.
+    history_len is forwarded to build_session_system_prompt so the AI knows
+    whether this is a fresh session or a continuation.
     """
     appt_subject = ""
     appt_key_stage = ""
 
     if appointment_id:
         try:
-            async with async_session_factory() as db:
-                system_text = await session_agent_service.build_session_system_prompt(
-                    db, appointment_id, user_id
-                )
-
             from app.models.appointment import Appointment
             from sqlalchemy import select
 
             async with async_session_factory() as db:
+                system_text = await session_agent_service.build_session_system_prompt(
+                    db, appointment_id, user_id, history_len=history_len
+                )
                 result = await db.execute(
                     select(Appointment).where(Appointment.id == appointment_id)
                 )
@@ -130,6 +131,13 @@ async def build_voice_system_prompt(
                 f"for appointment {appointment_id}"
             )
 
+    continuation_note = (
+        "\n- CONTINUATION: Chat history has been seeded. Do NOT re-introduce yourself or repeat "
+        "topics already covered. Pick up naturally. Reference quiz results from this session "
+        "when relevant — praise strong performance warmly, and guide the student to revisit weak areas."
+        if history_len > 0 else ""
+    )
+
     system_text += (
         "\n\nVOICE SESSION RULES:\n"
         "- This is a real-time VOICE session. Speak naturally and concisely (under 90 s per response).\n"
@@ -139,6 +147,7 @@ async def build_voice_system_prompt(
         "- Do NOT verbally ask quiz questions — the Test panel handles that automatically.\n"
         "- Between turns you may receive [RELEVANT CURRICULUM CONTEXT] blocks — treat them as "
         "additional reference material for your next response, not as user messages."
+        + continuation_note
     )
 
     return system_text, appt_subject, appt_key_stage
@@ -178,17 +187,34 @@ async def seed_chat_history(gemini_session, history: list[dict]) -> None:
         logger.warning(f"History seeding failed (non-fatal): {e}")
 
 
-async def handle_tool_calls(tool_call, send_fn: SendFn) -> list:
+async def handle_tool_calls(tool_call, send_fn: SendFn, quiz_count: int = 0) -> list:
     """
     Process Gemini Live tool calls. Sends quiz_offer WS events to the browser.
+    Enforces a maximum of 3 quizzes per session.
     Returns FunctionResponse list to forward back to Gemini.
     """
+    MAX_QUIZZES = 3
     fn_responses = []
     for fc in tool_call.function_calls:
         if fc.name == "offer_quiz":
+            if quiz_count >= MAX_QUIZZES:
+                logger.info(f"Voice: quiz offer BLOCKED — session limit reached ({quiz_count}/{MAX_QUIZZES})")
+                fn_responses.append(
+                    types.FunctionResponse(
+                        id=fc.id,
+                        name=fc.name,
+                        response={
+                            "error": (
+                                f"Quiz limit reached ({MAX_QUIZZES} per session). "
+                                "Do not offer any more quizzes. Continue teaching instead."
+                            )
+                        },
+                    )
+                )
+                continue
             topic = (dict(fc.args) if fc.args else {}).get("topic", "")
             await send_fn({"type": "quiz_offer", "content": topic})
-            logger.info(f"Voice: quiz offered via tool — topic='{topic}'")
+            logger.info(f"Voice: quiz offered via tool — topic='{topic}' ({quiz_count+1}/{MAX_QUIZZES})")
             fn_responses.append(
                 types.FunctionResponse(
                     id=fc.id,

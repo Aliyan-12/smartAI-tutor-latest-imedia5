@@ -127,7 +127,9 @@ async def voice_websocket(websocket: WebSocket):
 
         # ── Build system prompt + Gemini Live config (via service) ──────────
         system_text, appt_subject, appt_key_stage = (
-            await voice_agent_service.build_voice_system_prompt(appointment_id, user_id)
+            await voice_agent_service.build_voice_system_prompt(
+                appointment_id, user_id, history_len=len(history)
+            )
         )
         live_config = voice_agent_service.make_live_config(system_text)
 
@@ -147,6 +149,7 @@ async def voice_websocket(websocket: WebSocket):
 
             user_transcript_accum = ""
             ai_transcript_accum = ""
+            quiz_offer_count = 0
 
             # ── browser → Gemini Live (audio forwarding) ──────────────────────
             async def browser_to_gemini():
@@ -170,6 +173,31 @@ async def voice_websocket(websocket: WebSocket):
                                 if data.get("type") == "stop":
                                     stop_event.set()
                                     return
+                                elif data.get("type") == "quiz_result":
+                                    topic = data.get("topic", "the quiz")
+                                    score = data.get("score", 0)
+                                    strong = ", ".join(data.get("strong", [])) or "none"
+                                    weak = ", ".join(data.get("weak", [])) or "none"
+                                    result_msg = (
+                                        f"[QUIZ RESULT] The student just completed a quiz.\n"
+                                        f"Topic: {topic} | Score: {round(score, 1)}%\n"
+                                        f"Strong areas: {strong}\n"
+                                        f"Weak areas: {weak}\n"
+                                        "Please give brief, warm verbal feedback on this result. "
+                                        "Praise strong areas enthusiastically. If there are weak areas, "
+                                        "gently guide the student to revisit them, and offer to explain further."
+                                    )
+                                    try:
+                                        await gemini_session.send_client_content(
+                                            turns=types.Content(
+                                                role="user",
+                                                parts=[types.Part(text=result_msg)],
+                                            ),
+                                            turn_complete=True,
+                                        )
+                                        logger.info(f"Voice: injected quiz result — topic='{topic}' score={score}%")
+                                    except Exception as qe:
+                                        logger.warning(f"Voice: failed to inject quiz result: {qe}")
                             except json.JSONDecodeError:
                                 pass
                 except WebSocketDisconnect:
@@ -181,7 +209,7 @@ async def voice_websocket(websocket: WebSocket):
 
             # ── Gemini Live → browser (response routing) ──────────────────────
             async def gemini_to_browser():
-                nonlocal user_transcript_accum, ai_transcript_accum, session_id
+                nonlocal user_transcript_accum, ai_transcript_accum, session_id, quiz_offer_count
                 try:
                     while not stop_event.is_set():
                         try:
@@ -196,8 +224,13 @@ async def voice_websocket(websocket: WebSocket):
                         # Tool calls → service handles offer_quiz
                         if hasattr(response, "tool_call") and response.tool_call:
                             fn_responses = await voice_agent_service.handle_tool_calls(
-                                response.tool_call, send
+                                response.tool_call, send, quiz_count=quiz_offer_count
                             )
+                            # Count successful quiz offers (those that got a "result" not "error")
+                            for fr in fn_responses:
+                                resp_dict = fr.response if isinstance(fr.response, dict) else {}
+                                if "result" in resp_dict:
+                                    quiz_offer_count += 1
                             if fn_responses:
                                 try:
                                     await gemini_session.send_tool_response(

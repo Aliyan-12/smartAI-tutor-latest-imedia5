@@ -502,6 +502,17 @@ export function useVoice() {
     setPlaying(false);
   }, []);
 
+  const sendQuizResult = useCallback((
+    topic: string,
+    score: number,
+    strong: string[],
+    weak: string[],
+  ) => {
+    if (wsRef.current?.readyState === WebSocket.OPEN) {
+      wsRef.current.send(JSON.stringify({ type: "quiz_result", topic, score, strong, weak }));
+    }
+  }, []);
+
   return {
     voiceStatus,
     isVoiceActive,
@@ -516,5 +527,6 @@ export function useVoice() {
     feedStreamTTS,
     endStreamTTS,
     cancelStreamTTS,
+    sendQuizResult,
   };
 }
