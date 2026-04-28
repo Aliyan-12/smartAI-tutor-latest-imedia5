@@ -37,6 +37,7 @@ export default function SessionPage() {
   const [sessionSubject, setSessionSubject] = useState("");
   const [learnTab, setLearnTab] = useState<LearnTab>("learn");
   const [isMobile, setIsMobile] = useState(false);
+  const [isSmall, setIsSmall] = useState(false);
   const [mobilePanelView, setMobilePanelView] = useState<"chat" | "learn">("chat");
   const [xp, setXp] = useState(0);
   const timerRef = useRef<number | null>(null);
@@ -189,7 +190,10 @@ export default function SessionPage() {
   }, [testResult]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
-    const check = () => setIsMobile(window.innerWidth < 1024);
+    const check = () => {
+      setIsMobile(window.innerWidth < 1024);
+      setIsSmall(window.innerWidth < 600);
+    };
     check();
     window.addEventListener("resize", check);
     return () => window.removeEventListener("resize", check);
@@ -827,57 +831,76 @@ export default function SessionPage() {
 
   return (
     <div style={styles.root}>
-      <div style={{ ...styles.topBar, background: topBarBg }}>
-        <div style={styles.topBarLeft}>
+      <div style={{ ...styles.topBar, background: topBarBg, height: isSmall ? 46 : 52, padding: isSmall ? "0 10px" : "0 20px" }}>
+        {/* LEFT — back + progress + title */}
+        <div style={{ ...styles.topBarLeft, gap: isSmall ? 6 : 10 }}>
           <button
-            style={styles.dashboardBtn}
+            style={{ ...styles.dashboardBtn, padding: isSmall ? "4px 8px" : "4px 10px" }}
             onClick={() => navigate("/chat")}
             title="Back to Dashboard"
           >
-            ← Dashboard
+            {isSmall ? "←" : "← Dashboard"}
           </button>
-          <div style={styles.dotProgress}>
-            {Array.from({ length: totalDots }).map((_, i) => (
-              <span
-                key={i}
-                style={{
-                  ...styles.dot,
-                  background: i < filledDots ? "white" : "rgba(255,255,255,0.35)",
-                }}
-              />
-            ))}
-          </div>
-          <span style={styles.topBarTitle}>
-            {sessionSubject || "Session"}{sessionTitle ? ` · ${sessionTitle}` : ""}
+          {!isSmall && (
+            <div style={styles.dotProgress}>
+              {Array.from({ length: totalDots }).map((_, i) => (
+                <span
+                  key={i}
+                  style={{
+                    ...styles.dot,
+                    background: i < filledDots ? "white" : "rgba(255,255,255,0.35)",
+                  }}
+                />
+              ))}
+            </div>
+          )}
+          {!isSmall && (
+            <span style={styles.topBarTitle}>
+              {sessionSubject || "Session"}{sessionTitle ? ` · ${sessionTitle}` : ""}
+            </span>
+          )}
+        </div>
+
+        {/* CENTER — timer */}
+        <div style={styles.topBarCenter}>
+          {!isSmall && <span style={styles.timerEmoji}>{isPaused ? "⏸" : "⏱"}</span>}
+          <span style={{ ...styles.timerText, fontSize: isSmall ? 16 : 22, opacity: isPaused ? 0.6 : 1 }}>
+            {formatTime(timeRemaining)}
+          </span>
+          <span style={{ ...styles.timerLabel, fontSize: isSmall ? 10 : 11 }}>
+            {isPaused ? "paused" : "left"}
           </span>
         </div>
-        <div style={styles.topBarCenter}>
-          <span style={styles.timerEmoji}>{isPaused ? "⏸" : "⏱"}</span>
-          <span style={{ ...styles.timerText, opacity: isPaused ? 0.6 : 1 }}>{formatTime(timeRemaining)}</span>
-          <span style={styles.timerLabel}>{isPaused ? "paused" : "left"}</span>
-        </div>
-        <div style={styles.topBarRight}>
-          <span style={styles.xpChip}>🔥 {xp} XP</span>
-          {isPaused && (
-            <span style={{ fontSize: 11, fontWeight: 700, letterSpacing: "0.5px", background: "rgba(255,255,255,0.2)", borderRadius: 99, padding: "3px 10px" }}>
-              ⏸ PAUSED
+
+        {/* RIGHT — XP + pause + end */}
+        <div style={{ ...styles.topBarRight, gap: isSmall ? 6 : 10 }}>
+          {!isSmall && <span style={styles.xpChip}>🔥 {xp} XP</span>}
+          {isMobile && !isSmall && isPaused && (
+            <span style={{ fontSize: 10, fontWeight: 700, background: "rgba(255,255,255,0.2)", borderRadius: 99, padding: "3px 8px" }}>
+              ⏸
             </span>
           )}
           <button
-            style={{ ...styles.endBtn, background: isPaused ? "rgba(255,255,255,0.25)" : "rgba(255,255,255,0.15)" }}
+            style={{
+              ...styles.endBtn,
+              background: isPaused ? "rgba(255,255,255,0.25)" : "rgba(255,255,255,0.15)",
+              padding: isSmall ? "5px 8px" : "5px 12px",
+            }}
             onClick={handlePause}
             title={isPaused ? "Resume session" : "Pause session"}
           >
-            {isPaused ? <Play size={14} style={{ marginRight: 4 }} /> : <Pause size={14} style={{ marginRight: 4 }} />}
-            {isPaused ? "Resume" : "Pause"}
+            {isPaused
+              ? <><Play size={14} style={isSmall ? {} : { marginRight: 4 }} />{!isSmall && "Resume"}</>
+              : <><Pause size={14} style={isSmall ? {} : { marginRight: 4 }} />{!isSmall && "Pause"}</>
+            }
           </button>
           <button
-            style={styles.endBtn}
+            style={{ ...styles.endBtn, padding: isSmall ? "5px 8px" : "5px 12px" }}
             onClick={handleEndSession}
             title="End session"
           >
-            <X size={14} style={{ marginRight: 4 }} />
-            End Lesson
+            <X size={14} style={isSmall ? {} : { marginRight: 4 }} />
+            {!isSmall && "End Lesson"}
           </button>
         </div>
       </div>
@@ -1013,11 +1036,10 @@ const styles: Record<string, React.CSSProperties> = {
     display: "flex",
     alignItems: "center",
     justifyContent: "space-between",
-    padding: "0 20px",
-    height: 52,
     color: "white",
     flexShrink: 0,
     transition: "background 0.5s",
+    minWidth: 0,
   },
   topBarLeft: {
     display: "flex",
