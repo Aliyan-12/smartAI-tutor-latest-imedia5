@@ -293,3 +293,11 @@ export interface LearningPreferences {
   auto_start_next_topic: boolean;
   notification_prefs: Record<string, boolean> | null;
 }
+
+export interface SlideData {
+  title: string;
+  emoji: string;
+  bullets: string[];
+  keyTerms: { term: string; definition: string }[];
+  highlight: string;
+}

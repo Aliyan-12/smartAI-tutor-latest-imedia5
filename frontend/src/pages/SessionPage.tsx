@@ -1,15 +1,16 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { Lock, X, Pause, Play } from "lucide-react";
-import { appointmentsApi, assessmentsApi, sessionsApi, gamificationApi } from "../services/api";
+import { appointmentsApi, assessmentsApi, sessionsApi, gamificationApi, slidesApi } from "../services/api";
 import ChatWindow from "../components/ChatWindow";
 import ChatInput from "../components/ChatInput";
 import AssessmentMode from "../components/AssessmentMode";
 import PostSessionScreen from "../components/PostSessionScreen";
+import LessonSlide from "../components/LessonSlide";
 import { useChat } from "../hooks/useChat";
 import { useVoice } from "../hooks/useVoice";
 import { useAuth } from "../context/AuthContext";
-import type { Assessment, ChatMessage } from "../types";
+import type { Assessment, ChatMessage, SlideData } from "../types";
 
 type SessionState = "passcode" | "active" | "ended";
 type LearnTab = "learn" | "test";
@@ -73,7 +74,13 @@ export default function SessionPage() {
   const { voiceStatus, playing, speakText, connectVoice, disconnectVoice, isVoiceActive, startStreamTTS, feedStreamTTS, endStreamTTS, sendQuizResult } = useVoice();
   const [voiceMessages, setVoiceMessages] = useState<{ role: string; content: string }[]>([]);
   const voiceAiTurnRef = useRef("");
+  const voiceAiTextForSlideRef = useRef("");
   const [voiceQuizTopic, setVoiceQuizTopic] = useState<string | null>(null);
+
+  const [currentSlide, setCurrentSlide] = useState<SlideData | null>(null);
+  const [slideHistory, setSlideHistory] = useState<SlideData[]>([]);
+  const [slideIndex, setSlideIndex] = useState(0);
+  const [slideLoading, setSlideLoading] = useState(false);
 
   const apptId = appointmentId ? parseInt(appointmentId) : 0;
 
@@ -106,6 +113,16 @@ export default function SessionPage() {
 
       setSessionState("active");
       initSessionChat(parseInt(appointmentId));
+
+      // Load persisted slides for this session
+      try {
+        const persistedSlides = await slidesApi.getSessionSlides(parseInt(appointmentId));
+        if (persistedSlides.length > 0) {
+          setSlideHistory(persistedSlides);
+          setCurrentSlide(persistedSlides[persistedSlides.length - 1]);
+          setSlideIndex(persistedSlides.length - 1);
+        }
+      } catch {}
 
       // Restore any in-progress test so a page refresh doesn't lose quiz state
       try {
@@ -409,14 +426,30 @@ export default function SessionPage() {
     ? "#d97706"
     : "var(--accent-blue, var(--accent))";
 
+  const generateSlide = useCallback(async (text: string) => {
+    if (!text || text.length < 80) return;
+    setSlideLoading(true);
+    try {
+      const slide = await slidesApi.generate(text, sessionSubject, apptId);
+      console.log("[Slides] API response:", slide);
+      if (slide) {
+        const newIndex = slideHistory.length;
+        setCurrentSlide(slide);
+        setSlideHistory(prev => [...prev, slide]);
+        setSlideIndex(newIndex);
+      }
+    } catch {}
+    finally { setSlideLoading(false); }
+  }, [sessionSubject, apptId, slideHistory.length]);
+
   const sessionSend = useCallback(
     (text: string) => sendMessage(text, {
       suppressNavigation: true,
       onStreamStart: startStreamTTS,
       onToken: feedStreamTTS,
-      onStreamComplete: endStreamTTS,
+      onStreamComplete: (aiText) => { endStreamTTS(); generateSlide(aiText); },
     }),
-    [sendMessage, startStreamTTS, feedStreamTTS, endStreamTTS]
+    [sendMessage, startStreamTTS, feedStreamTTS, endStreamTTS, generateSlide]
   );
 
   const handleVoiceToggle = useCallback(() => {
@@ -439,6 +472,8 @@ export default function SessionPage() {
         onAiTranscriptChunk: (chunk) => {
           // Accumulate for QUIZ_OFFER detection on turn complete
           voiceAiTurnRef.current += chunk;
+          // Also accumulate full text for slide generation (unstripped)
+          voiceAiTextForSlideRef.current += chunk;
           // Strip marker from visible transcript
           const cleanChunk = chunk.replace(/\[QUIZ_OFFER:\s*topic="[^"]*"\]/gi, "");
           setVoiceMessages((prev) => {
@@ -459,8 +494,11 @@ export default function SessionPage() {
         },
         onTurnSaved: () => {
           // DB commit confirmed — swap live transcripts into the unified message list
+          const aiText = voiceAiTextForSlideRef.current;
+          voiceAiTextForSlideRef.current = "";
           setVoiceMessages([]);
           if (apptId) initSessionChat(apptId);
+          if (aiText) generateSlide(aiText);
         },
         onCreditsUpdate: () => {},
         onSessionCreated: () => {},
@@ -468,7 +506,7 @@ export default function SessionPage() {
         onQuizOffer: (topic) => { setVoiceQuizTopic(topic); },
       }, apptId);
     }
-  }, [isVoiceActive, connectVoice, disconnectVoice, activeSessionId, apptId, initSessionChat]);
+  }, [isVoiceActive, connectVoice, disconnectVoice, activeSessionId, apptId, initSessionChat, generateSlide]);
 
   if (sessionState === "passcode") {
     return (
@@ -559,12 +597,22 @@ export default function SessionPage() {
         ) : null}
         {!isPaused && learnTab === "learn" && (
           <div style={styles.learnMessagesWrap}>
-            <div style={styles.emptyLearn}>
-              <span style={{ fontSize: 36 }}>📄</span>
-              <p style={styles.emptyLearnText}>
-                Lesson content will be shown here.
-              </p>
-            </div>
+            <LessonSlide
+              slide={currentSlide}
+              isLoading={slideLoading}
+              slideIndex={slideIndex}
+              totalSlides={slideHistory.length}
+              onPrev={() => {
+                const i = Math.max(0, slideIndex - 1);
+                setSlideIndex(i);
+                setCurrentSlide(slideHistory[i]);
+              }}
+              onNext={() => {
+                const i = Math.min(slideHistory.length - 1, slideIndex + 1);
+                setSlideIndex(i);
+                setCurrentSlide(slideHistory[i]);
+              }}
+            />
           </div>
         )}
 

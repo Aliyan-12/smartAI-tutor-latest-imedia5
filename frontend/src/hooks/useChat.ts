@@ -131,7 +131,9 @@ export function useChat() {
               return;
             }
             accumulated += event.content;
-            setStreamContent(accumulated);
+            // Strip quiz marker from visible stream — backend saves the clean version
+            const displayContent = accumulated.replace(/\[QUIZ_OFFER:[^\]]*\]/gi, "").trimEnd();
+            setStreamContent(displayContent);
             opts?.onToken?.(event.content);
           } else if (event.type === "title") {
             loadChats();

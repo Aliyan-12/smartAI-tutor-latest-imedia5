@@ -56,6 +56,21 @@ async def run_setup(fresh: bool = False):
         "ALTER TABLE appointments ADD COLUMN IF NOT EXISTS total_paused_seconds INTEGER DEFAULT 0",
         "ALTER TABLE assessments ADD COLUMN IF NOT EXISTS appointment_id INTEGER REFERENCES appointments(id)",
         "ALTER TABLE assessments ADD COLUMN IF NOT EXISTS assessment_type VARCHAR(20)",
+        # session_slides — persists AI-generated lesson slides per appointment
+        """CREATE TABLE IF NOT EXISTS session_slides (
+            id          SERIAL PRIMARY KEY,
+            appointment_id INTEGER NOT NULL REFERENCES appointments(id) ON DELETE CASCADE,
+            student_id  INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            slide_order INTEGER NOT NULL DEFAULT 0,
+            title       VARCHAR(200) NOT NULL,
+            emoji       VARCHAR(10) NOT NULL DEFAULT '📄',
+            bullets     JSONB NOT NULL DEFAULT '[]',
+            key_terms   JSONB NOT NULL DEFAULT '[]',
+            highlight   VARCHAR(500) NOT NULL DEFAULT '',
+            created_at  TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+        )""",
+        "CREATE INDEX IF NOT EXISTS ix_session_slides_appointment_id ON session_slides(appointment_id)",
+        "CREATE INDEX IF NOT EXISTS ix_session_slides_student_id ON session_slides(student_id)",
     ]
     async with engine.begin() as conn:
         for sql in _migrations:

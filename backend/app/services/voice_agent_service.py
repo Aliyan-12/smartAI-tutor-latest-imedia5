@@ -140,10 +140,13 @@ async def build_voice_system_prompt(
 
     system_text += (
         "\n\nVOICE SESSION RULES:\n"
-        "- This is a real-time VOICE session. Speak naturally and concisely (under 90 s per response).\n"
+        "- This is a real-time VOICE session. Keep every spoken response SHORT — maximum 3-4 sentences.\n"
+        "- Explain ONE concept per turn, then pause with a check-in: 'Does that make sense?' or 'Any questions?'\n"
+        "- Speak conversationally — like a friendly teacher, not a textbook. No lists or headers.\n"
+        "- Wait for the student's reply before introducing the next concept.\n"
         "- Stay strictly on topics from the [ASSIGNED CURRICULUM] above.\n"
-        "- To offer a quiz, call the `offer_quiz` tool. Then say: "
-        "'I have prepared a quiz for you — check the Test tab!'\n"
+        "- To offer a quiz (only when QUIZ PHASE is active per the session prompt), call the `offer_quiz` tool. "
+        "Then say: 'Great work! I have set up a quick test for you — check the Test tab when you are ready.'\n"
         "- Do NOT verbally ask quiz questions — the Test panel handles that automatically.\n"
         "- Between turns you may receive [RELEVANT CURRICULUM CONTEXT] blocks — treat them as "
         "additional reference material for your next response, not as user messages."

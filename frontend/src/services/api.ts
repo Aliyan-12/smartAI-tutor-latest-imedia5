@@ -667,6 +667,28 @@ export const lessonsApi = {
   },
 };
 
+export const slidesApi = {
+  generate: async (text: string, subject: string, appointmentId?: number): Promise<import("../types").SlideData | null> => {
+    const token = localStorage.getItem("token");
+    const res = await fetch("/api/slides/generate", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+      body: JSON.stringify({ text, subject, appointment_id: appointmentId }),
+    });
+    if (!res.ok) return null;
+    const data = await res.json();
+    return data?.slide ?? null;
+  },
+  getSessionSlides: async (appointmentId: number): Promise<import("../types").SlideData[]> => {
+    const token = localStorage.getItem("token");
+    const res = await fetch(`/api/slides/session/${appointmentId}`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    if (!res.ok) return [];
+    return res.json();
+  },
+};
+
 export const sessionsApi = {
   async startPractice(appointmentId: number): Promise<import("../types").Assessment> {
     const res = await fetch(`${API_BASE}/sessions/${appointmentId}/practice`, {
