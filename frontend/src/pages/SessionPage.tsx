@@ -81,6 +81,8 @@ export default function SessionPage() {
   const [slideHistory, setSlideHistory] = useState<SlideData[]>([]);
   const [slideIndex, setSlideIndex] = useState(0);
   const [slideLoading, setSlideLoading] = useState(false);
+  const [slideFailed, setSlideFailed] = useState(false);
+  const lastSlideTextRef = useRef("");
 
   const apptId = appointmentId ? parseInt(appointmentId) : 0;
 
@@ -121,6 +123,7 @@ export default function SessionPage() {
           setSlideHistory(persistedSlides);
           setCurrentSlide(persistedSlides[persistedSlides.length - 1]);
           setSlideIndex(persistedSlides.length - 1);
+          setSlideFailed(false);
         }
       } catch {}
 
@@ -427,20 +430,30 @@ export default function SessionPage() {
     : "var(--accent-blue, var(--accent))";
 
   const generateSlide = useCallback(async (text: string) => {
-    if (!text || text.length < 80) return;
+    if (!text || !text.trim()) return;
+    lastSlideTextRef.current = text;
+    setSlideFailed(false);
     setSlideLoading(true);
     try {
       const slide = await slidesApi.generate(text, sessionSubject, apptId);
-      console.log("[Slides] API response:", slide);
       if (slide) {
         const newIndex = slideHistory.length;
         setCurrentSlide(slide);
         setSlideHistory(prev => [...prev, slide]);
         setSlideIndex(newIndex);
+      } else {
+        setSlideFailed(true);
       }
-    } catch {}
-    finally { setSlideLoading(false); }
+    } catch {
+      setSlideFailed(true);
+    } finally {
+      setSlideLoading(false);
+    }
   }, [sessionSubject, apptId, slideHistory.length]);
+
+  const retrySlide = useCallback(() => {
+    if (lastSlideTextRef.current) generateSlide(lastSlideTextRef.current);
+  }, [generateSlide]);
 
   const sessionSend = useCallback(
     (text: string) => sendMessage(text, {
@@ -602,6 +615,8 @@ export default function SessionPage() {
               isLoading={slideLoading}
               slideIndex={slideIndex}
               totalSlides={slideHistory.length}
+              slideFailed={slideFailed}
+              onRetry={retrySlide}
               onPrev={() => {
                 const i = Math.max(0, slideIndex - 1);
                 setSlideIndex(i);
@@ -753,32 +768,42 @@ export default function SessionPage() {
               </div>
             ) : (
               <div style={styles.assessCard}>
-                {quizOffer && (
-                  <div style={{ padding: "8px 12px", background: "rgba(99,102,241,0.1)", border: "1px solid rgba(99,102,241,0.25)", borderRadius: 8, marginBottom: 12, fontSize: 12, color: "var(--accent-blue, var(--accent))", fontWeight: 600, textAlign: "center" }}>
-                    🤖 Your AI tutor suggested a quiz on <em>{quizOffer.topic}</em>
-                  </div>
-                )}
-                <div style={{ textAlign: "center", marginBottom: 14 }}>
-                  <span style={{ fontSize: 32 }}>📝</span>
-                </div>
-                <p style={{ fontSize: 14, fontWeight: 700, color: "var(--text-primary)", marginBottom: 6, textAlign: "center" }}>Formal Test</p>
-                <p style={{ fontSize: 12, color: "var(--text-muted)", lineHeight: 1.6, textAlign: "center", marginBottom: 12 }}>
-                  Complete a 10-question test on this session's topic. Results will be saved to your progress record.
-                </p>
-                <div style={styles.testWarning}>
-                  Your score will be recorded and shared with your teacher.
-                </div>
-                {testError && <p style={{ ...styles.errorText, marginBottom: 10 }}>{testError}</p>}
-                {isPaused ? (
-                  <p style={{ fontSize: 12, color: "var(--text-muted)", textAlign: "center", marginTop: 10 }}>Resume session to access the test</p>
+                {quizOffer ? (
+                  <>
+                    <div style={{ padding: "8px 12px", background: "rgba(99,102,241,0.1)", border: "1px solid rgba(99,102,241,0.25)", borderRadius: 8, marginBottom: 12, fontSize: 12, color: "var(--accent-blue, var(--accent))", fontWeight: 600, textAlign: "center" }}>
+                      🤖 Your AI tutor suggested a quiz on <em>{quizOffer.topic}</em>
+                    </div>
+                    <div style={{ textAlign: "center", marginBottom: 14 }}>
+                      <span style={{ fontSize: 32 }}>📝</span>
+                    </div>
+                    <p style={{ fontSize: 14, fontWeight: 700, color: "var(--text-primary)", marginBottom: 6, textAlign: "center" }}>Formal Test</p>
+                    <p style={{ fontSize: 12, color: "var(--text-muted)", lineHeight: 1.6, textAlign: "center", marginBottom: 12 }}>
+                      Complete a 10-question test on this session's topic. Results will be saved to your progress record.
+                    </p>
+                    <div style={styles.testWarning}>
+                      Your score will be recorded and shared with your teacher.
+                    </div>
+                    {testError && <p style={{ ...styles.errorText, marginBottom: 10 }}>{testError}</p>}
+                    {isPaused ? (
+                      <p style={{ fontSize: 12, color: "var(--text-muted)", textAlign: "center", marginTop: 10 }}>Resume session to access the test</p>
+                    ) : (
+                      <button
+                        style={{ ...styles.generateBtn, marginTop: 12 }}
+                        onClick={() => handleStartTest()}
+                        disabled={testLoading}
+                      >
+                        {testLoading ? "Generating..." : "Start Test"}
+                      </button>
+                    )}
+                  </>
                 ) : (
-                  <button
-                    style={{ ...styles.generateBtn, marginTop: 12 }}
-                    onClick={() => handleStartTest()}
-                    disabled={testLoading}
-                  >
-                    {testLoading ? "Generating..." : "Start Test"}
-                  </button>
+                  <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 12, padding: "40px 24px", textAlign: "center" }}>
+                    <span style={{ fontSize: 40 }}>⏳</span>
+                    <p style={{ fontSize: 14, fontWeight: 700, color: "var(--text-primary)", margin: 0 }}>No test yet</p>
+                    <p style={{ fontSize: 12, color: "var(--text-muted)", lineHeight: 1.6, margin: 0, maxWidth: 220 }}>
+                      Your AI tutor will suggest a test when you've covered enough of the topic. Keep learning!
+                    </p>
+                  </div>
                 )}
               </div>
             )}

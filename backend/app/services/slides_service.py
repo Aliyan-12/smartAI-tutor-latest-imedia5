@@ -10,7 +10,6 @@ from app.core.config import settings
 
 logger = logging.getLogger(__name__)
 
-_SLIDE_MODEL = "gemini-2.5-flash-preview-04-17"
 
 
 class KeyTerm(BaseModel):
@@ -38,23 +37,23 @@ Subject: {subject}
 AI Tutor Response:
 {text}
 
-Generate a lesson slide for ONE key concept from the above response.
+Generate a comprehensive lesson slide for the main concept from the above tutor response.
 Rules:
-- title: short concept name, max 6 words
-- emoji: exactly one relevant emoji character
-- bullets: 2-4 bullet points, each max 12 words, no bullet prefixes
-- keyTerms: 1-3 objects, each definition max 15 words
-- highlight: one key takeaway sentence, max 20 words
+- title: clear concept name, max 7 words, specific and descriptive
+- emoji: exactly one highly relevant subject emoji
+- bullets: 3-5 bullet points, each 8-15 words, educational and factual, no bullet prefixes
+- keyTerms: 2-4 objects, each with a concise term and a clear definition (max 20 words)
+- highlight: one memorable key takeaway or insight sentence, 15-25 words
 
 Return a single JSON object matching the schema exactly."""
 
-_SHORT_TEXT_THRESHOLD = 80
+_SHORT_TEXT_THRESHOLD = 40
 
 _SKIP_PATTERNS = [
     "hello", "hi there", "how can i help", "how may i help",
     "welcome", "great to meet", "nice to meet", "good morning",
-    "good afternoon", "good evening", "error", "sorry, i",
-    "i apologise", "i apologize", "i cannot", "i can't",
+    "good afternoon", "good evening", "sorry, i",
+    "i apologise", "i apologize",
 ]
 
 _client: Optional[genai.Client] = None
@@ -95,7 +94,7 @@ def generate_slide(text: str, subject: str = "") -> Optional[dict]:
 
         client = _get_client()
         response = client.models.generate_content(
-            model=_SLIDE_MODEL,
+            model=settings.gemini_model,
             contents=prompt,
             config=types.GenerateContentConfig(
                 system_instruction=_SYSTEM_INSTRUCTION,
