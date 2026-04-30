@@ -11,7 +11,6 @@ from app.core.config import settings
 logger = logging.getLogger(__name__)
 
 
-
 class KeyTerm(BaseModel):
     term: str
     definition: str
@@ -26,24 +25,31 @@ class SlideOutput(BaseModel):
 
 _SYSTEM_INSTRUCTION = (
     "You are a lesson slide generator for a UK K-12 AI tutoring platform. "
-    "Given an AI tutor's response, extract ONE clear key concept and produce a "
-    "structured lesson slide. Output only valid JSON matching the required schema. "
-    "No markdown fences. No text before or after the JSON object."
+    "Given an AI tutor's response and the session subject, extract ONE clear educational concept "
+    "that is DIRECTLY related to the stated subject. "
+    "If the response is about platform/technical issues, social exchanges, quiz announcements, "
+    "or contains no subject-specific educational content, return a JSON object with an empty title string. "
+    "If the concept is too similar to an already-covered slide title provided, also return empty title. "
+    "Output only valid JSON matching the required schema. No markdown fences."
 )
 
 _PROMPT_TEMPLATE = """\
 Subject: {subject}
 
+Already covered slide titles this session (do NOT repeat or create very similar slides):
+{existing_titles_str}
+
 AI Tutor Response:
 {text}
 
-Generate a comprehensive lesson slide for the main concept from the above tutor response.
-Rules:
-- title: clear concept name, max 7 words, specific and descriptive
-- emoji: exactly one highly relevant subject emoji
-- bullets: 3-5 bullet points, each 8-15 words, educational and factual, no bullet prefixes
-- keyTerms: 2-4 objects, each with a concise term and a clear definition (max 20 words)
-- highlight: one memorable key takeaway or insight sentence, 15-25 words
+STRICT RULES — READ CAREFULLY:
+1. The slide MUST be about a {subject}-specific educational concept. If the response discusses platform issues, quiz logistics, technical problems, or anything not directly about {subject}, return {{"title": "", "emoji": "📄", "bullets": [], "keyTerms": [], "highlight": ""}}.
+2. If the concept is already covered by one of the "Already covered" titles above (same topic, same idea), return {{"title": "", "emoji": "📄", "bullets": [], "keyTerms": [], "highlight": ""}}.
+3. Title: max 7 words, specific {subject} concept name.
+4. Emoji: exactly one emoji relevant to {subject}.
+5. Bullets: 3-5 educational bullet points, each 8-15 words, factual and {subject}-focused.
+6. KeyTerms: 2-4 {subject} terms with clear definitions (max 20 words each).
+7. Highlight: one memorable key takeaway about this {subject} concept, 15-25 words.
 
 Return a single JSON object matching the schema exactly."""
 
@@ -54,6 +60,9 @@ _SKIP_PATTERNS = [
     "welcome", "great to meet", "nice to meet", "good morning",
     "good afternoon", "good evening", "sorry, i",
     "i apologise", "i apologize",
+    "check the test tab", "try refreshing", "refresh the page",
+    "slight delay", "processing delay", "technical", "i've set up a quick test",
+    "check the test", "i've prepared a final test",
 ]
 
 _client: Optional[genai.Client] = None
@@ -67,8 +76,6 @@ def _get_client() -> genai.Client:
 
 
 def _should_skip(text: str) -> bool:
-    """Return True if the text is too short or is a greeting/error that has no
-    teachable concept worth turning into a slide."""
     stripped = text.strip()
     if len(stripped) < _SHORT_TEXT_THRESHOLD:
         return True
@@ -76,20 +83,40 @@ def _should_skip(text: str) -> bool:
     return any(pattern in lower for pattern in _SKIP_PATTERNS)
 
 
-def generate_slide(text: str, subject: str = "") -> Optional[dict]:
+def _titles_too_similar(new_title: str, existing_titles: list[str]) -> bool:
+    """Return True if new_title overlaps heavily with any existing title."""
+    new_words = set(w for w in new_title.lower().split() if len(w) > 3)
+    if not new_words:
+        return False
+    for existing in existing_titles:
+        existing_words = set(w for w in existing.lower().split() if len(w) > 3)
+        if not existing_words:
+            continue
+        overlap = new_words & existing_words
+        # Reject if ≥60% of meaningful words in the new title match an existing title
+        if len(overlap) / len(new_words) >= 0.6:
+            logger.info(f"slides_service: '{new_title}' too similar to existing '{existing}' — skipping")
+            return True
+    return False
+
+
+def generate_slide(text: str, subject: str = "", existing_titles: list[str] | None = None) -> Optional[dict]:
     """Generate a structured lesson slide dict from an AI tutor response.
 
-    Returns a dict with keys: title, emoji, bullets, keyTerms, highlight.
-    Returns None if the text is too short, is a greeting/error, or if Gemini
-    fails for any reason.
+    Returns None if the text is off-topic, too short, duplicates an existing slide,
+    or if Gemini cannot produce a valid subject-related slide.
     """
     try:
         if _should_skip(text):
             return None
 
+        existing = existing_titles or []
+        existing_titles_str = "\n".join(f"- {t}" for t in existing) if existing else "(none yet)"
+
         prompt = _PROMPT_TEMPLATE.format(
             subject=subject.strip() if subject else "General",
             text=text.strip(),
+            existing_titles_str=existing_titles_str,
         )
 
         client = _get_client()
@@ -108,7 +135,6 @@ def generate_slide(text: str, subject: str = "") -> Optional[dict]:
             logger.warning("slides_service: Gemini returned empty response")
             return None
 
-        # Strip accidental markdown fences just in case
         if raw.startswith("```"):
             parts = raw.split("```")
             raw = parts[1] if len(parts) > 1 else raw
@@ -118,12 +144,23 @@ def generate_slide(text: str, subject: str = "") -> Optional[dict]:
 
         slide = json.loads(raw)
 
-        # Validate required keys are present and non-empty
         required = {"title", "emoji", "bullets", "keyTerms", "highlight"}
         if not required.issubset(slide.keys()):
             logger.warning("slides_service: missing required keys in Gemini response")
             return None
-        if not slide.get("title") or not slide.get("bullets"):
+
+        title = (slide.get("title") or "").strip()
+
+        # Empty title = Gemini signalled this response is not slide-worthy
+        if len(title) < 3:
+            logger.info("slides_service: Gemini returned empty title — response not slide-worthy")
+            return None
+
+        if not slide.get("bullets"):
+            return None
+
+        # Final deduplication guard
+        if _titles_too_similar(title, existing):
             return None
 
         return slide

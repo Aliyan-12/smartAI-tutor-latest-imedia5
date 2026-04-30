@@ -429,13 +429,16 @@ export default function SessionPage() {
     ? "#d97706"
     : "var(--accent-blue, var(--accent))";
 
+  const MAX_SLIDES = 15;
+
   const generateSlide = useCallback(async (text: string) => {
     if (!text || !text.trim()) return;
+    if (slideHistory.length >= MAX_SLIDES) return;
     lastSlideTextRef.current = text;
     setSlideFailed(false);
     setSlideLoading(true);
     try {
-      const slide = await slidesApi.generate(text, sessionSubject, apptId);
+      const slide = await slidesApi.generate(text, sessionSubject, apptId, slideHistory.map(s => s.title));
       if (slide) {
         const newIndex = slideHistory.length;
         setCurrentSlide(slide);
@@ -460,7 +463,7 @@ export default function SessionPage() {
       suppressNavigation: true,
       onStreamStart: startStreamTTS,
       onToken: feedStreamTTS,
-      onStreamComplete: (aiText) => { endStreamTTS(); generateSlide(aiText); },
+      onStreamComplete: (aiText, hasSlideTrigger) => { endStreamTTS(); if (hasSlideTrigger) generateSlide(aiText); },
     }),
     [sendMessage, startStreamTTS, feedStreamTTS, endStreamTTS, generateSlide]
   );
@@ -506,12 +509,12 @@ export default function SessionPage() {
           }
         },
         onTurnSaved: () => {
-          // DB commit confirmed — swap live transcripts into the unified message list
           const aiText = voiceAiTextForSlideRef.current;
           voiceAiTextForSlideRef.current = "";
           setVoiceMessages([]);
           if (apptId) initSessionChat(apptId);
-          if (aiText) generateSlide(aiText);
+          // Only generate slide if response is substantial (voice has no marker — cap enforced inside generateSlide)
+          if (aiText && aiText.trim().length >= 80) generateSlide(aiText);
         },
         onCreditsUpdate: () => {},
         onSessionCreated: () => {},

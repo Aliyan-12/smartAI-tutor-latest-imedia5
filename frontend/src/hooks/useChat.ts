@@ -85,7 +85,7 @@ export function useChat() {
       suppressNavigation?: boolean;
       onStreamStart?: () => void;
       onToken?: (chunk: string) => void;
-      onStreamComplete?: (text: string) => void;
+      onStreamComplete?: (text: string, hasSlideTrigger?: boolean) => void;
     }) => {
       const userMsg: ChatMessage = {
         id: Date.now(),
@@ -131,8 +131,11 @@ export function useChat() {
               return;
             }
             accumulated += event.content;
-            // Strip quiz marker from visible stream — backend saves the clean version
-            const displayContent = accumulated.replace(/\[QUIZ_OFFER:[^\]]*\]/gi, "").trimEnd();
+            // Strip markers from visible stream — backend saves the clean version
+            const displayContent = accumulated
+              .replace(/\[QUIZ_OFFER:[^\]]*\]/gi, "")
+              .replace(/\[SLIDE_TRIGGER\]/gi, "")
+              .trimEnd();
             setStreamContent(displayContent);
             opts?.onToken?.(event.content);
           } else if (event.type === "title") {
@@ -152,20 +155,22 @@ export function useChat() {
             setStreaming(false);
             return;
           }
+          const hasSlideTrigger = /\[SLIDE_TRIGGER\]/i.test(accumulated);
+          const cleanText = accumulated.replace(/\[SLIDE_TRIGGER\]/gi, "").trimEnd();
           setMessages((prev) => [
             ...prev,
             {
               id: Date.now() + 1,
               chat_id: 0,
               role: "assistant",
-              content: accumulated,
+              content: cleanText,
               timestamp: new Date().toISOString(),
             },
           ]);
           setStreamContent("");
           setStreaming(false);
           loadChats();
-          opts?.onStreamComplete?.(accumulated);
+          opts?.onStreamComplete?.(cleanText, hasSlideTrigger);
         },
         (err) => {
           console.error("Stream error:", err);

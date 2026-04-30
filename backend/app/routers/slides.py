@@ -20,6 +20,7 @@ class SlideGenerateRequest(BaseModel):
     text: str
     subject: str = ""
     appointment_id: Optional[int] = None
+    existing_titles: list[str] = []
 
 
 def _ensure_student(user: User) -> None:
@@ -48,7 +49,7 @@ async def generate_slide_endpoint(
     if not body.text or not body.text.strip():
         return {"slide": None}
 
-    slide = generate_slide(body.text, body.subject)
+    slide = generate_slide(body.text, body.subject, body.existing_titles)
 
     if slide and body.appointment_id:
         async with async_session_factory() as save_db:
