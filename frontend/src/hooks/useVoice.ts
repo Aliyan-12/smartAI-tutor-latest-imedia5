@@ -14,6 +14,35 @@ interface VoiceCallbacks {
   onQuizOffer?: (topic: string) => void;
 }
 
+function _splitAtSentenceBoundary(text: string, maxLen: number): string[] {
+  if (text.length <= maxLen) return [text];
+  const chunks: string[] = [];
+  let start = 0;
+  while (start < text.length) {
+    const end = Math.min(start + maxLen, text.length);
+    if (end >= text.length) {
+      const tail = text.slice(start).trim();
+      if (tail.length >= 10) chunks.push(tail);
+      break;
+    }
+    let cutAt = -1;
+    for (let i = end; i > start + 40; i--) {
+      const ch = text[i - 1];
+      if ((ch === "." || ch === "!" || ch === "?") &&
+          (i >= text.length || text[i] === " " || text[i] === "\n")) {
+        cutAt = i;
+        break;
+      }
+    }
+    if (cutAt === -1) cutAt = end;
+    const chunk = text.slice(start, cutAt).trim();
+    if (chunk.length >= 10) chunks.push(chunk);
+    start = cutAt;
+    while (start < text.length && text[start] === " ") start++;
+  }
+  return chunks.filter(c => c.length >= 10);
+}
+
 export function useVoice() {
   const [voiceStatus, setVoiceStatus] = useState<VoiceStatus>("idle");
   const [voiceError, setVoiceError] = useState<string | null>(null);
@@ -31,7 +60,7 @@ export function useVoice() {
 
   // Streaming TTS state
   const sentenceBufRef = useRef<string>("");
-  const ttsQueueRef = useRef<string[]>([]);
+  const ttsQueueRef = useRef<Array<Promise<Blob>>>([]);
   const ttsActiveRef = useRef(false);
   const ttsProcessingRef = useRef(false);
   const ttsDelayTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -372,10 +401,10 @@ export function useVoice() {
     ttsProcessingRef.current = true;
 
     while (ttsQueueRef.current.length > 0 && ttsActiveRef.current) {
-      const sentence = ttsQueueRef.current.shift()!;
+      const blobPromise = ttsQueueRef.current.shift()!;
       try {
-        const blob = await voiceApi.speak(sentence);
-        if (!ttsActiveRef.current) { break; }
+        const blob = await blobPromise;
+        if (!ttsActiveRef.current) break;
         const url = URL.createObjectURL(blob);
         const audio = new Audio(url);
         audioRef.current = audio;
@@ -386,7 +415,7 @@ export function useVoice() {
           audio.play().catch(() => resolve());
         });
       } catch {
-        // skip failed chunks silently
+        // skip cancelled or failed chunks silently
       }
     }
 
@@ -414,33 +443,33 @@ export function useVoice() {
     ttsProcessingRef.current = false;
     setPlaying(false);
 
-    // After 4 seconds, flush whatever text has accumulated so audio starts promptly
-    // without waiting for the full stream. If stream ends first, endStreamTTS cancels
+    // After 1.5 seconds, flush whatever text has accumulated so TTS starts generating
+    // while the stream is still coming in. If stream ends first, endStreamTTS cancels
     // this timer and sends everything as one call for perfect voice consistency.
     ttsDelayTimerRef.current = setTimeout(() => {
       ttsDelayTimerRef.current = null;
       const buffered = sentenceBufRef.current.trim();
       if (buffered.length >= 40 && ttsActiveRef.current) {
         sentenceBufRef.current = "";
-        ttsQueueRef.current.push(buffered);
+        ttsQueueRef.current.push(voiceApi.speak(buffered));
         _processTTSQueue();
       }
-    }, 4000);
+    }, 1500);
   }, [_processTTSQueue]);
 
   const endStreamTTS = useCallback(() => {
-    // Stream finished — cancel the 4-second timer and send all buffered text as one
-    // TTS call so voice remains perfectly consistent for short responses.
     if (ttsDelayTimerRef.current) {
       clearTimeout(ttsDelayTimerRef.current);
       ttsDelayTimerRef.current = null;
     }
     const fullText = sentenceBufRef.current.trim();
     sentenceBufRef.current = "";
-    if (fullText.length >= 20) {
-      ttsQueueRef.current.push(fullText);
-      _processTTSQueue();
-    }
+    if (fullText.length < 20) return;
+    // Split at sentence boundaries and start all fetches in parallel so
+    // long responses resolve in ~6s instead of 15s+.
+    const chunks = _splitAtSentenceBoundary(fullText, 110);
+    chunks.forEach(chunk => ttsQueueRef.current.push(voiceApi.speak(chunk)));
+    _processTTSQueue();
   }, [_processTTSQueue]);
 
   const cancelStreamTTS = useCallback(() => {

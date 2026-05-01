@@ -149,7 +149,9 @@ async def build_voice_system_prompt(
         "Then say: 'Great work! I have set up a quick test for you — check the Test tab when you are ready.'\n"
         "- Do NOT verbally ask quiz questions — the Test panel handles that automatically.\n"
         "- Between turns you may receive [RELEVANT CURRICULUM CONTEXT] blocks — treat them as "
-        "additional reference material for your next response, not as user messages."
+        "additional reference material for your next response, not as user messages.\n"
+        "- NEVER include [SLIDE_TRIGGER], [QUIZ_OFFER:...], or any bracket-marker tokens in your spoken responses — "
+        "these are text-only internal signals and must NOT appear in voice output."
         + continuation_note
     )
 

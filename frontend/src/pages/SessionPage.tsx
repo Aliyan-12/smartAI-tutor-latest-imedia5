@@ -524,7 +524,11 @@ export default function SessionPage() {
           } else {
             setVoiceMessages([]);
           }
-          if (aiText && aiText.trim().length >= 80) generateSlide(aiText);
+          const cleanAiText = aiText
+            .replace(/\[SLIDE_TRIGGER\]/gi, "")
+            .replace(/\[QUIZ_OFFER:[^\]]*\]/gi, "")
+            .trim();
+          if (cleanAiText.length >= 80) generateSlide(cleanAiText);
         },
         onCreditsUpdate: () => {},
         onSessionCreated: () => {},

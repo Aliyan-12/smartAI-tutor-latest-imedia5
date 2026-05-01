@@ -63,6 +63,7 @@ _SKIP_PATTERNS = [
     "check the test tab", "try refreshing", "refresh the page",
     "slight delay", "processing delay", "technical", "i've set up a quick test",
     "check the test", "i've prepared a final test",
+    "[slide_trigger]", "[quiz_offer:",
 ]
 
 _client: Optional[genai.Client] = None
@@ -80,7 +81,11 @@ def _should_skip(text: str) -> bool:
     if len(stripped) < _SHORT_TEXT_THRESHOLD:
         return True
     lower = stripped.lower()
-    return any(pattern in lower for pattern in _SKIP_PATTERNS)
+    for pattern in _SKIP_PATTERNS:
+        if pattern in lower:
+            logger.warning(f"slides_service: skip pattern matched: '{pattern}'")
+            return True
+    return False
 
 
 def _titles_too_similar(new_title: str, existing_titles: list[str]) -> bool:
@@ -108,6 +113,7 @@ def generate_slide(text: str, subject: str = "", existing_titles: list[str] | No
     """
     try:
         if _should_skip(text):
+            logger.warning(f"slides_service: skipped — text too short or matched skip pattern (len={len(text.strip())}, preview='{text.strip()[:60]}')")
             return None
 
         existing = existing_titles or []
