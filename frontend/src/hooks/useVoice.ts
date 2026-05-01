@@ -34,6 +34,7 @@ export function useVoice() {
   const ttsQueueRef = useRef<string[]>([]);
   const ttsActiveRef = useRef(false);
   const ttsProcessingRef = useRef(false);
+  const ttsDelayTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Connection lifecycle guards
   const intentionalCloseRef = useRef(false);
@@ -393,66 +394,60 @@ export function useVoice() {
     if (!ttsActiveRef.current || ttsQueueRef.current.length === 0) setPlaying(false);
   }, []);
 
-  // Buffer incoming text tokens and flush in large paragraph-sized chunks
-  // to avoid gaps and ensure Gemini TTS gets enough context per call.
+  // Buffer incoming text tokens — flush only at stream end so the entire
+  // response is sent as a single TTS request, guaranteeing a consistent voice.
   const feedStreamTTS = useCallback((chunk: string) => {
     if (!ttsActiveRef.current) return;
     sentenceBufRef.current += chunk;
-
-    const buf = sentenceBufRef.current;
-
-    // Flush on paragraph break (\n\n)
-    const paraIdx = buf.indexOf("\n\n");
-    if (paraIdx !== -1) {
-      const paragraph = buf.slice(0, paraIdx).trim();
-      if (paragraph.length >= 40) {
-        ttsQueueRef.current.push(paragraph);
-        _processTTSQueue();
-      }
-      sentenceBufRef.current = buf.slice(paraIdx + 2).trimStart();
-      return;
-    }
-
-    // Flush when buffer reaches ~350 chars — cut at last sentence boundary
-    if (buf.length >= 350) {
-      let cutAt = -1;
-      for (let i = buf.length - 1; i >= 150; i--) {
-        const ch = buf[i];
-        if ((ch === "." || ch === "!" || ch === "?") &&
-            (buf[i + 1] === " " || buf[i + 1] === "\n" || i + 1 === buf.length)) {
-          cutAt = i + 1;
-          break;
-        }
-      }
-      if (cutAt > 100) {
-        const paragraph = buf.slice(0, cutAt).trim();
-        ttsQueueRef.current.push(paragraph);
-        _processTTSQueue();
-        sentenceBufRef.current = buf.slice(cutAt).trimStart();
-      }
-    }
-  }, [_processTTSQueue]);
+  }, []);
 
   const startStreamTTS = useCallback(() => {
-    // Stop any existing audio and reset all streaming TTS state
+    // Cancel any pending early-start timer from a previous response
+    if (ttsDelayTimerRef.current) {
+      clearTimeout(ttsDelayTimerRef.current);
+      ttsDelayTimerRef.current = null;
+    }
     if (audioRef.current) { audioRef.current.pause(); audioRef.current = null; }
     ttsActiveRef.current = true;
     ttsQueueRef.current = [];
     sentenceBufRef.current = "";
     ttsProcessingRef.current = false;
     setPlaying(false);
-  }, []);
+
+    // After 4 seconds, flush whatever text has accumulated so audio starts promptly
+    // without waiting for the full stream. If stream ends first, endStreamTTS cancels
+    // this timer and sends everything as one call for perfect voice consistency.
+    ttsDelayTimerRef.current = setTimeout(() => {
+      ttsDelayTimerRef.current = null;
+      const buffered = sentenceBufRef.current.trim();
+      if (buffered.length >= 40 && ttsActiveRef.current) {
+        sentenceBufRef.current = "";
+        ttsQueueRef.current.push(buffered);
+        _processTTSQueue();
+      }
+    }, 4000);
+  }, [_processTTSQueue]);
 
   const endStreamTTS = useCallback(() => {
-    const remaining = sentenceBufRef.current.trim();
+    // Stream finished — cancel the 4-second timer and send all buffered text as one
+    // TTS call so voice remains perfectly consistent for short responses.
+    if (ttsDelayTimerRef.current) {
+      clearTimeout(ttsDelayTimerRef.current);
+      ttsDelayTimerRef.current = null;
+    }
+    const fullText = sentenceBufRef.current.trim();
     sentenceBufRef.current = "";
-    if (remaining.length >= 20) {
-      ttsQueueRef.current.push(remaining);
+    if (fullText.length >= 20) {
+      ttsQueueRef.current.push(fullText);
       _processTTSQueue();
     }
   }, [_processTTSQueue]);
 
   const cancelStreamTTS = useCallback(() => {
+    if (ttsDelayTimerRef.current) {
+      clearTimeout(ttsDelayTimerRef.current);
+      ttsDelayTimerRef.current = null;
+    }
     ttsActiveRef.current = false;
     ttsQueueRef.current = [];
     sentenceBufRef.current = "";

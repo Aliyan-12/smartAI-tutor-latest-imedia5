@@ -73,6 +73,7 @@ export default function SessionPage() {
 
   const { voiceStatus, playing, speakText, connectVoice, disconnectVoice, isVoiceActive, startStreamTTS, feedStreamTTS, endStreamTTS, sendQuizResult } = useVoice();
   const [voiceMessages, setVoiceMessages] = useState<{ role: string; content: string }[]>([]);
+  const voiceMessagesRef = useRef<{ role: string; content: string }[]>([]);
   const voiceAiTurnRef = useRef("");
   const voiceAiTextForSlideRef = useRef("");
   const [voiceQuizTopic, setVoiceQuizTopic] = useState<string | null>(null);
@@ -414,6 +415,7 @@ export default function SessionPage() {
   const displayMessages = voiceChatMessages.length > 0
     ? [...messages, ...voiceChatMessages]
     : messages;
+  voiceMessagesRef.current = voiceMessages; // keep ref in sync for stale-closure-free access
 
   const totalSeconds = durationMinutes * 60;
   const elapsedSeconds = totalSeconds - timeRemaining;
@@ -511,9 +513,17 @@ export default function SessionPage() {
         onTurnSaved: () => {
           const aiText = voiceAiTextForSlideRef.current;
           voiceAiTextForSlideRef.current = "";
-          setVoiceMessages([]);
-          if (apptId) initSessionChat(apptId);
-          // Only generate slide if response is substantial (voice has no marker — cap enforced inside generateSlide)
+          // Capture count before async DB reload to avoid stale closure
+          const savedCount = voiceMessagesRef.current.length;
+          if (apptId) {
+            initSessionChat(apptId).then(() => {
+              // Remove only the completed-turn messages; any new messages the user
+              // started during the DB load are preserved (slice keeps them).
+              setVoiceMessages((prev) => prev.slice(savedCount));
+            });
+          } else {
+            setVoiceMessages([]);
+          }
           if (aiText && aiText.trim().length >= 80) generateSlide(aiText);
         },
         onCreditsUpdate: () => {},
