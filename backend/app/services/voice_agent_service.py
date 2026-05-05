@@ -141,7 +141,7 @@ async def build_voice_system_prompt(
     system_text += (
         "\n\nVOICE SESSION RULES:\n"
         "- This is a real-time VOICE session. Keep every spoken response SHORT — maximum 3-4 sentences.\n"
-        "- Explain ONE concept per turn. After 4-5 turns of teaching, ask ONE simple check question ('What causes X?' / 'Name the first step in Y' / 'True or false: Z?'). After the student answers, briefly affirm correct or wrong in one sentence, then continue teaching. Never ask a question after every single explanation — teach several concepts first, then check once.\n"
+        "- Explain ONE concept per turn. After EVERY explanation, end with ONE short interaction: e.g. 'Explain that back in one sentence', 'Which comes first — X or Y?', or 'True or false: Z?' Rotate between recall, sequence, and true/false prompts to keep it varied. After the student answers, affirm correct or gently correct in one sentence, then continue to the next concept.\n"
         "- Speak conversationally — like a friendly teacher, not a textbook. No lists or headers.\n"
         "- Wait for the student's reply before introducing the next concept.\n"
         "- Stay strictly on topics from the [ASSIGNED CURRICULUM] above.\n"
