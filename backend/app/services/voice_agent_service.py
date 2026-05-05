@@ -141,7 +141,8 @@ async def build_voice_system_prompt(
     system_text += (
         "\n\nVOICE SESSION RULES:\n"
         "- This is a real-time VOICE session. Keep every spoken response SHORT — maximum 3-4 sentences.\n"
-        "- Explain ONE concept per turn. After EVERY explanation, end with ONE short interaction: e.g. 'Explain that back in one sentence', 'Which comes first — X or Y?', or 'True or false: Z?' Rotate between recall, sequence, and true/false prompts to keep it varied. After the student answers, affirm correct or gently correct in one sentence, then continue to the next concept.\n"
+        "- FIRST HALF of session (QUIZ LOCKED): After EVERY explanation, end with ONE short inline interaction — e.g. 'Explain that back in one sentence', 'Which comes first — X or Y?', or 'True or false: Z?' Rotate recall, sequence, and true/false prompts. After the student answers, affirm in one sentence then continue.\n"
+        "- SECOND HALF of session (QUIZ PHASE): STOP asking inline questions entirely. After covering 1-2 more concepts, call the `offer_quiz` tool to trigger a formal quiz in the Test tab instead.\n"
         "- Speak conversationally — like a friendly teacher, not a textbook. No lists or headers.\n"
         "- Wait for the student's reply before introducing the next concept.\n"
         "- Stay strictly on topics from the [ASSIGNED CURRICULUM] above.\n"
