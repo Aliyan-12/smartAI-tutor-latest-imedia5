@@ -23,3 +23,6 @@ backend/uploads/
 .mypy_cache/
 htmlcov/
 .coverage
+
+backend/test_*.py
+backend/verify_*.py
