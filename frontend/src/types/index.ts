@@ -90,6 +90,7 @@ export interface KnowledgeDocument {
   uploaded_by: number;
   created_at: string;
   updated_at: string;
+  kb_type: string;
 }
 
 export interface DocumentListResponse {

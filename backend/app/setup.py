@@ -71,6 +71,9 @@ async def run_setup(fresh: bool = False):
         )""",
         "CREATE INDEX IF NOT EXISTS ix_session_slides_appointment_id ON session_slides(appointment_id)",
         "CREATE INDEX IF NOT EXISTS ix_session_slides_student_id ON session_slides(student_id)",
+        # kb_type — separates course material from model training transcripts
+        "ALTER TABLE documents ADD COLUMN IF NOT EXISTS kb_type VARCHAR(20) NOT NULL DEFAULT 'course_material'",
+        "CREATE INDEX IF NOT EXISTS ix_documents_kb_type ON documents(kb_type)",
     ]
     async with engine.begin() as conn:
         for sql in _migrations:

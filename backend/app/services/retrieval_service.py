@@ -20,6 +20,18 @@ BASE_SQL = """
     JOIN documents d ON d.id = dc.document_id
     WHERE d.status = 'ready'
       AND dc.embedding IS NOT NULL
+      AND d.kb_type = 'course_material'
+"""
+
+TRAINING_SQL = """
+    SELECT
+        dc.content,
+        1 - (dc.embedding <=> $1::vector) AS similarity
+    FROM document_chunks dc
+    JOIN documents d ON d.id = dc.document_id
+    WHERE d.status = 'ready'
+      AND dc.embedding IS NOT NULL
+      AND d.kb_type = 'model_training'
 """
 
 
@@ -87,4 +99,58 @@ async def retrieve_relevant_chunks(
 
     except Exception as e:
         logger.warning(f"pgvector search failed, skipping RAG: {e}")
+        return []
+
+
+async def retrieve_training_style_examples(
+    db,
+    query: str,
+    subject: Optional[str] = None,
+    top_k: int = 3,
+) -> List[str]:
+    """
+    Retrieve teaching style examples from model_training KB.
+    Used to inject expert tutor style patterns into the session system prompt.
+    Returns list of content strings (truncated to 450 chars each).
+    """
+    try:
+        query_embedding = await embed_query(query)
+    except Exception as e:
+        logger.warning(f"Training style embed failed: {e}")
+        return []
+
+    embedding_literal = "[" + ",".join(str(v) for v in query_embedding) + "]"
+
+    params = [embedding_literal, top_k]
+    param_idx = 3
+    extra = ""
+
+    if subject:
+        extra = f" AND d.subject = ${param_idx}"
+        params.append(subject)
+
+    sql_str = f"{TRAINING_SQL}{extra} ORDER BY dc.embedding <=> $1::vector LIMIT $2"
+
+    try:
+        conn = await db.connection()
+        raw_conn = await conn.get_raw_connection()
+        asyncpg_conn = raw_conn.dbapi_connection._connection
+
+        rows = await asyncpg_conn.fetch(sql_str, *params)
+
+        examples = []
+        for row in rows:
+            sim = float(row["similarity"])
+            if sim < 0.2:
+                continue
+            content = row["content"].strip()
+            if len(content) >= 60:
+                examples.append(content[:450])
+
+        if examples:
+            logger.info(f"Training style: retrieved {len(examples)} examples for query '{query[:50]}'")
+        return examples
+
+    except Exception as e:
+        logger.warning(f"Training style retrieval failed (non-fatal): {e}")
         return []

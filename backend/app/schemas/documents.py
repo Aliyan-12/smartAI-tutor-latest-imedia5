@@ -11,6 +11,7 @@ class ScrapeRequest(BaseModel):
     exam_board: str = "None"
     tier: str = "None"
     unit_name: Optional[str] = None
+    kb_type: str = "course_material"
 
 
 class LinkImportRequest(BaseModel):
@@ -22,6 +23,7 @@ class LinkImportRequest(BaseModel):
     tier: str = "None"
     unit_name: Optional[str] = None
     source_type: str = Field(..., description="onedrive or gdocs")
+    kb_type: str = "course_material"
 
 
 class DocumentResponse(BaseModel):
@@ -31,6 +33,7 @@ class DocumentResponse(BaseModel):
     subject: str
     exam_board: str
     tier: str
+    kb_type: str = "course_material"
     unit_name: Optional[str] = None
     source_type: str
     source_url: Optional[str] = None

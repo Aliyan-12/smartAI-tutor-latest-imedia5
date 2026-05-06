@@ -159,12 +159,14 @@ async def create_document_record(
     source_url: Optional[str] = None,
     file_path: Optional[str] = None,
     file_type: Optional[str] = None,
+    kb_type: str = "course_material",
 ) -> Document:
     doc = Document(
         title=title, key_stage=key_stage, subject=subject,
         exam_board=exam_board, tier=tier, unit_name=unit_name,
         source_type=source_type, uploaded_by=uploaded_by,
         source_url=source_url, file_path=file_path, file_type=file_type,
+        kb_type=kb_type,
     )
     db.add(doc)
     await db.flush()
@@ -225,6 +227,7 @@ async def list_documents(
     key_stage: Optional[str] = None,
     subject: Optional[str] = None,
     exam_board: Optional[str] = None,
+    kb_type: Optional[str] = None,
     status: Optional[str] = None,
     limit: int = 100,
     offset: int = 0,
@@ -239,6 +242,8 @@ async def list_documents(
         filters.append(Document.subject == subject)
     if exam_board:
         filters.append(Document.exam_board == exam_board)
+    if kb_type:
+        filters.append(Document.kb_type == kb_type)
     if status:
         filters.append(Document.status == status)
 

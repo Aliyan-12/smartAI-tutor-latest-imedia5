@@ -19,6 +19,8 @@ EXAM_BOARDS = ["AQA", "Edexcel", "OCR", "WJEC", "None"]
 
 TIERS = ["Foundation", "Higher", "None"]
 
+KB_TYPES = ["course_material", "model_training"]
+
 EMBEDDING_DIM = 768
 
 
@@ -31,6 +33,7 @@ class Document(Base):
     subject: Mapped[str] = mapped_column(String(100), nullable=False, index=True)
     exam_board: Mapped[str] = mapped_column(String(20), nullable=False, default="None", index=True)
     tier: Mapped[str] = mapped_column(String(20), nullable=False, default="None")
+    kb_type: Mapped[str] = mapped_column(String(20), nullable=False, default="course_material", index=True)
     unit_name: Mapped[str] = mapped_column(String(300), nullable=True)
     source_type: Mapped[str] = mapped_column(String(16), nullable=False)
     source_url: Mapped[str] = mapped_column(Text, nullable=True)

@@ -9,7 +9,7 @@ from sqlalchemy import select
 from app.db.session import get_db, async_session_factory
 from app.middleware.auth import require_teacher
 from app.models.user import User
-from app.models.documents import KEY_STAGES, SUBJECTS, EXAM_BOARDS, TIERS, Document, DocumentChunk
+from app.models.documents import KEY_STAGES, SUBJECTS, EXAM_BOARDS, TIERS, KB_TYPES, Document, DocumentChunk
 from app.schemas.documents import DocumentResponse, DocumentListResponse, ScrapeRequest, LinkImportRequest, CurriculumInfo
 from app.services import document_service, scraper_service
 from app.core.config import settings
@@ -40,6 +40,7 @@ async def upload_documents(
     exam_board: str = Form("None"),
     tier: str = Form("None"),
     unit_name: Optional[str] = Form(None),
+    kb_type: str = Form("course_material"),
     current_user: User = Depends(require_teacher),
     db: AsyncSession = Depends(get_db),
 ):
@@ -62,7 +63,7 @@ async def upload_documents(
             db=db, title=name, key_stage=key_stage, subject=subject,
             exam_board=exam_board, tier=tier, unit_name=unit_name,
             source_type="upload", uploaded_by=current_user.id,
-            file_path=file_path, file_type=ext,
+            file_path=file_path, file_type=ext, kb_type=kb_type,
         )
         created_docs.append(doc)
 
@@ -107,6 +108,7 @@ async def scrape_document(
         tier=payload.tier, unit_name=payload.unit_name,
         source_type="scrape", uploaded_by=current_user.id,
         source_url=payload.url, file_path=file_path, file_type="txt",
+        kb_type=payload.kb_type,
     )
     await db.commit()
 
@@ -146,6 +148,7 @@ async def import_link(
         tier=payload.tier, unit_name=payload.unit_name,
         source_type=payload.source_type, uploaded_by=current_user.id,
         source_url=payload.url, file_path=file_path, file_type=ext,
+        kb_type=payload.kb_type,
     )
     await db.commit()
 
@@ -163,6 +166,7 @@ async def list_documents(
     key_stage: Optional[str] = Query(None),
     subject: Optional[str] = Query(None),
     exam_board: Optional[str] = Query(None),
+    kb_type: Optional[str] = Query(None),
     status_filter: Optional[str] = Query(None, alias="status"),
     limit: int = Query(50, ge=1, le=200),
     offset: int = Query(0, ge=0),
@@ -171,7 +175,7 @@ async def list_documents(
 ):
     docs, total = await document_service.list_documents(
         db, key_stage=key_stage, subject=subject, exam_board=exam_board,
-        status=status_filter, limit=limit, offset=offset,
+        kb_type=kb_type, status=status_filter, limit=limit, offset=offset,
     )
     return DocumentListResponse(
         documents=[DocumentResponse.model_validate(d) for d in docs],

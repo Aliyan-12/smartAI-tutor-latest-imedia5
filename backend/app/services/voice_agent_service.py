@@ -131,6 +131,33 @@ async def build_voice_system_prompt(
                 f"for appointment {appointment_id}"
             )
 
+    # Inject training style examples from model_training KB
+    training_style_section = ""
+    if appointment_id and appt_subject:
+        try:
+            from app.services import retrieval_service as _ret
+            async with async_session_factory() as db:
+                style_examples = await _ret.retrieve_training_style_examples(
+                    db=db,
+                    query=f"{appt_subject} teaching explanation",
+                    subject=appt_subject,
+                    top_k=2,
+                )
+                if style_examples:
+                    examples_text = "\n\n".join(
+                        f"[Tutor Example {i+1}]: {ex}" for i, ex in enumerate(style_examples)
+                    )
+                    training_style_section = (
+                        "\n\nEXPERT TUTOR STYLE — Mirror this tone:\n"
+                        + examples_text
+                        + "\n"
+                    )
+        except Exception as e:
+            logger.warning(f"Voice training style injection failed (non-fatal): {e}")
+
+    if training_style_section:
+        system_text += training_style_section
+
     continuation_note = (
         "\n- CONTINUATION: Chat history has been seeded. Do NOT re-introduce yourself or repeat "
         "topics already covered. Pick up naturally. Reference quiz results from this session "
