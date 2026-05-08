@@ -433,9 +433,14 @@ export default function Sidebar({
 
   const handleDeleteChat = async (sessionId: string) => {
     try {
-      await chatApi.deleteChat(sessionId);
+      if (onDeleteChat) {
+        // Parent (ChatPage) handles the API call + navigation + state reset
+        onDeleteChat(sessionId);
+      } else {
+        await chatApi.deleteChat(sessionId);
+        if (activeSessionId === sessionId) navigate("/chat");
+      }
       setInternalChats((prev) => prev.filter((c) => c.session_id !== sessionId));
-      if (onDeleteChat) onDeleteChat(sessionId);
     } catch (_) {}
   };
 

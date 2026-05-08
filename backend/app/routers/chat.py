@@ -351,13 +351,17 @@ async def stream_message(
                 except Exception:
                     pass
 
+            title_to_yield: str | None = None
             if chat.title == "New Chat":
                 saved_chat = await chat_service.get_chat_by_session(save_session, chat.session_id, current_user.id)
                 if saved_chat:
-                    title = gemini_service.generate_chat_title(payload.message)
-                    await chat_service.update_chat_title(save_session, saved_chat, title)
-                    yield f"data: {json.dumps({'type': 'title', 'content': title})}\n\n"
+                    title_to_yield = gemini_service.generate_chat_title(payload.message)
+                    await chat_service.update_chat_title(save_session, saved_chat, title_to_yield)
+
             await save_session.commit()
+
+            if title_to_yield:
+                yield f"data: {json.dumps({'type': 'title', 'content': title_to_yield})}\n\n"
 
         if quiz_topic:
             yield f"data: {json.dumps({'type': 'quiz_offer', 'content': quiz_topic})}\n\n"

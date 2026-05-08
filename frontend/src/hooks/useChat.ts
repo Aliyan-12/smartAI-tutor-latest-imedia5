@@ -196,7 +196,7 @@ export function useChat() {
 
   const deleteChat = useCallback(
     async (sessionId: string) => {
-      await chatApi.deleteChat(sessionId);
+      try { await chatApi.deleteChat(sessionId); } catch (_) {}
       if (activeSessionId === sessionId) {
         startNewChat();
       }
