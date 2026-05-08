@@ -3,7 +3,7 @@ import { useNavigate, useLocation } from "react-router-dom";
 import {
   LogOut, LayoutDashboard, Users, Activity,
   BookOpen, Settings, Calendar, FileText,
-  Home, BarChart2, ClipboardList,
+  BarChart2, ClipboardList,
   MessageCircle, Clock, GraduationCap, Bell,
   ShieldCheck, Database, MessageSquare, BarChart,
   Menu, X,
@@ -405,6 +405,7 @@ export default function Sidebar({
   const location = useLocation();
   const [buyToast, setBuyToast] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
+  const [chatsExpanded, setChatsExpanded] = useState(false);
 
   useEffect(() => {
     if (onLoadChats) onLoadChats();
@@ -516,11 +517,74 @@ export default function Sidebar({
 
         <nav className="sb-nav">
           <button
-            className={`sb-nav-item${isActive("/chat") ? " active" : ""}`}
-            onClick={() => go("/chat")}
+            className={`sb-nav-item${isActive("/student/dashboard") ? " active" : ""}`}
+            onClick={() => go("/student/dashboard")}
           >
-            <Home size={16} /><span>Home</span>
+            <LayoutDashboard size={16} /><span>Dashboard</span>
           </button>
+
+          {/* Chats dropdown */}
+          <button
+            className={`sb-nav-item${location.pathname.startsWith("/chat") ? " active" : ""}`}
+            onClick={() => { setChatsExpanded((v) => !v); }}
+            style={{ justifyContent: "space-between" }}
+          >
+            <span style={{ display: "flex", alignItems: "center", gap: 10 }}>
+              <MessageCircle size={16} /><span>Chats</span>
+            </span>
+            <span style={{ fontSize: 10, color: "#64748b", transition: "transform 0.2s", transform: chatsExpanded ? "rotate(180deg)" : "none" }}>▼</span>
+          </button>
+
+          {chatsExpanded && (
+            <div style={{ paddingLeft: 12, display: "flex", flexDirection: "column", gap: 1 }}>
+              {onNewChat && (
+                <button
+                  className="sb-nav-item"
+                  style={{ fontSize: 12, color: "#1a73e8", paddingTop: 6, paddingBottom: 6 }}
+                  onClick={() => { go("/chat"); if (onNewChat) onNewChat(); }}
+                >
+                  <span style={{ fontSize: 14 }}>＋</span><span>New Chat</span>
+                </button>
+              )}
+              {(() => {
+                const regularChats = chatList.filter((c) => !c.title.toLowerCase().startsWith("[session:"));
+                if (regularChats.length === 0) {
+                  return <div style={{ fontSize: 12, color: "#475569", padding: "6px 12px" }}>No chats yet</div>;
+                }
+                return regularChats.slice(0, 10).map((chat) => (
+                <div key={chat.session_id} style={{ display: "flex", alignItems: "center", gap: 2 }}>
+                  <button
+                    className={`sb-nav-item${activeSessionId === chat.session_id ? " active" : ""}`}
+                    style={{ fontSize: 12, paddingTop: 6, paddingBottom: 6, flex: 1, minWidth: 0 }}
+                    onClick={() => { go(`/chat/${chat.session_id}`); if (onSelectChat) onSelectChat(chat.session_id); }}
+                    title={chat.title || "Chat"}
+                  >
+                    <MessageSquare size={13} />
+                    <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", flex: 1 }}>
+                      {chat.title || "Untitled Chat"}
+                    </span>
+                  </button>
+                  {onDeleteChat && (
+                    <button
+                      onClick={(e) => { e.stopPropagation(); if (onDeleteChat) onDeleteChat(chat.session_id); }}
+                      title="Delete chat"
+                      style={{
+                        background: "none", border: "none", color: "rgba(255,255,255,0.2)",
+                        cursor: "pointer", padding: "4px 5px", borderRadius: 5, flexShrink: 0,
+                        fontSize: 13, lineHeight: 1, transition: "color 0.15s",
+                      }}
+                      onMouseEnter={(e) => (e.currentTarget.style.color = "#ef4444")}
+                      onMouseLeave={(e) => (e.currentTarget.style.color = "rgba(255,255,255,0.2)")}
+                    >
+                      ×
+                    </button>
+                  )}
+                </div>
+                ));
+              })()}
+            </div>
+          )}
+
           <button
             className={`sb-nav-item${isActive("/sessions") ? " active" : ""}`}
             onClick={() => go("/sessions")}
@@ -594,8 +658,8 @@ export default function Sidebar({
         <nav className="sb-nav">
           <div className="sb-section-label">Overview</div>
           <button
-            className={`sb-nav-item${isActive("/teacher") ? " active" : ""}`}
-            onClick={() => go("/teacher")}
+            className={`sb-nav-item${isActive("/teacher/dashboard") ? " active" : ""}`}
+            onClick={() => go("/teacher/dashboard")}
           >
             <LayoutDashboard size={16} /><span>Dashboard</span>
           </button>
@@ -676,8 +740,8 @@ export default function Sidebar({
         <nav className="sb-nav">
           <div className="sb-section-label">Overview</div>
           <button
-            className={`sb-nav-item${isActive("/parent") ? " active" : ""}`}
-            onClick={() => go("/parent")}
+            className={`sb-nav-item${isActive("/parent/dashboard") ? " active" : ""}`}
+            onClick={() => go("/parent/dashboard")}
           >
             <LayoutDashboard size={16} /><span>Dashboard</span>
           </button>
@@ -742,8 +806,8 @@ export default function Sidebar({
         <nav className="sb-nav">
           <div className="sb-section-label">Management</div>
           <button
-            className={`sb-nav-item${isActive("/admin") ? " active" : ""}`}
-            onClick={() => go("/admin")}
+            className={`sb-nav-item${isActive("/admin/dashboard") ? " active" : ""}`}
+            onClick={() => go("/admin/dashboard")}
           >
             <LayoutDashboard size={16} /><span>Dashboard</span>
           </button>

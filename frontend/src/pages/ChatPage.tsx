@@ -1,10 +1,9 @@
 import { useEffect, useState, useCallback, useRef } from "react";
-import { useParams, useNavigate } from "react-router-dom";
+import { useParams, useNavigate, useLocation } from "react-router-dom";
 import { X } from "lucide-react";
 import Sidebar from "../components/Sidebar";
 import ChatWindow from "../components/ChatWindow";
 import ChatInput from "../components/ChatInput";
-import WelcomeScreen from "../components/WelcomeScreen";
 import AssessmentMode from "../components/AssessmentMode";
 import { useChat } from "../hooks/useChat";
 import { useVoice } from "../hooks/useVoice";
@@ -60,6 +59,16 @@ export default function ChatPage() {
       loadChat(sessionId);
     }
   }, [sessionId]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const location = useLocation();
+
+  useEffect(() => {
+    const prompt = (location.state as { prompt?: string } | null)?.prompt;
+    if (prompt) {
+      navigate(location.pathname, { replace: true, state: {} });
+      sendMessage(prompt);
+    }
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleVoiceStart = useCallback(() => {
     setVoiceMessages([]);
@@ -136,7 +145,6 @@ export default function ChatPage() {
   const allMessages = isVoiceActive ? [...messages, ...voiceMessages] : messages;
   const currentStreamContent = isVoiceActive ? voiceAiStream : streamContent;
   const isStreaming = isVoiceActive ? voiceAiStream.length > 0 : streaming;
-  const showWelcome = allMessages.length === 0 && !isStreaming && !isVoiceActive;
 
   return (
     <div className="app-layout">
@@ -153,20 +161,12 @@ export default function ChatPage() {
 
       <div className="main-content">
         <div className="chat-container">
-          {showWelcome ? (
-            <WelcomeScreen
-              onPromptClick={(topic) => {
-                if (topic) sendMessage(topic);
-              }}
-            />
-          ) : (
-            <ChatWindow
-              messages={allMessages}
-              streaming={isStreaming}
-              streamContent={currentStreamContent}
-              onSpeak={speakText}
-            />
-          )}
+          <ChatWindow
+            messages={allMessages}
+            streaming={isStreaming}
+            streamContent={currentStreamContent}
+            onSpeak={speakText}
+          />
         </div>
 
         {voiceError && (

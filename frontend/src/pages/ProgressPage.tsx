@@ -159,19 +159,42 @@ export default function ProgressPage() {
       ? Math.round((totalQuestionsCorrect / totalQuestionsAttempted) * 100)
       : null;
 
-  // Weekly chart scores (last 4 weeks, index 0 = oldest)
-  const weeklyScores: (number | null)[] = (() => {
-    const now = Date.now();
-    return [0, 1, 2, 3].map((w) => {
-      const start = now - (w + 1) * 7 * 24 * 3600 * 1000;
-      const end = now - w * 7 * 24 * 3600 * 1000;
-      const weekAsm = completedAssessments.filter((a) => {
-        const t = new Date(a.created_at).getTime();
-        return t >= start && t < end;
-      });
-      if (weekAsm.length === 0) return null;
-      return Math.round(weekAsm.reduce((s, a) => s + (a.score_percent ?? 0), 0) / weekAsm.length);
-    }).reverse();
+  // Compute this Monday (start of current calendar week)
+  const thisMonday = (() => {
+    const d = new Date();
+    d.setHours(0, 0, 0, 0);
+    const day = d.getDay(); // 0=Sun
+    d.setDate(d.getDate() + (day === 0 ? -6 : 1 - day));
+    return d;
+  })();
+
+  // Weekly chart scores: 4 calendar weeks (Mon-Sun), index 0 = 3 weeks ago, index 3 = this week
+  const weeklyScores: (number | null)[] = [3, 2, 1, 0].map((w) => {
+    const start = new Date(thisMonday);
+    start.setDate(start.getDate() - w * 7);
+    const end = new Date(start);
+    end.setDate(end.getDate() + 7);
+    const weekAsm = completedAssessments.filter((a) => {
+      const t = new Date(a.created_at).getTime();
+      return t >= start.getTime() && t < end.getTime();
+    });
+    if (weekAsm.length === 0) return null;
+    return Math.round(weekAsm.reduce((s, a) => s + (a.score_percent ?? 0), 0) / weekAsm.length);
+  });
+
+  // Human-readable labels for the 4 past weeks + 1 predicted next week
+  const weekLabels: string[] = (() => {
+    const fmt = (d: Date) =>
+      d.toLocaleDateString("en-GB", { day: "numeric", month: "short" });
+    const labels = [3, 2, 1, 0].map((w) => {
+      const d = new Date(thisMonday);
+      d.setDate(d.getDate() - w * 7);
+      return w === 0 ? "This wk" : fmt(d);
+    });
+    const nextMon = new Date(thisMonday);
+    nextMon.setDate(nextMon.getDate() + 7);
+    labels.push(fmt(nextMon));
+    return labels;
   })();
 
   // Predicted next week score via linear extrapolation
@@ -487,7 +510,7 @@ export default function ProgressPage() {
                           transition: "height 0.4s ease",
                         }}
                       />
-                      <span style={{ position: "absolute", bottom: 0, fontSize: 11, color: "#94a3b8" }}>W{i + 1}</span>
+                      <span style={{ position: "absolute", bottom: 0, fontSize: 11, color: i === 3 ? "#3b82f6" : "#94a3b8", fontWeight: i === 3 ? 700 : 400 }}>{weekLabels[i]}</span>
                     </div>
                   );
                 })}
@@ -506,13 +529,13 @@ export default function ProgressPage() {
                         opacity: 0.85,
                       }}
                     />
-                    <span style={{ position: "absolute", bottom: 0, fontSize: 11, color: "#a855f7", fontWeight: 600 }}>W5 ✦</span>
+                    <span style={{ position: "absolute", bottom: 0, fontSize: 11, color: "#a855f7", fontWeight: 600 }}>{weekLabels[4]} ✦</span>
                   </div>
                 )}
               </div>
             </div>
             <p style={{ fontSize: 12, color: "#94a3b8", marginTop: 4 }}>
-              Average quiz accuracy per week. W5 is AI-predicted based on your trend.
+              Average quiz accuracy per calendar week (Mon–Sun). Next week bar is AI-predicted based on your trend.
             </p>
           </div>
 

@@ -19,6 +19,7 @@ import ParentSettingsPage from "./pages/ParentSettingsPage";
 import TeacherReportsPage from "./pages/TeacherReportsPage";
 import TeacherSettingsPage from "./pages/TeacherSettingsPage";
 import SessionReportPage from "./pages/SessionReportPage";
+import DashboardPage from "./pages/DashboardPage";
 import type { ReactNode } from "react";
 
 function ProtectedRoute({ children, allowedRoles }: { children: ReactNode; allowedRoles?: string[] }) {
@@ -62,13 +63,13 @@ function RoleRouter() {
 
   switch (user.role) {
     case "admin":
-      return <Navigate to="/admin" replace />;
+      return <Navigate to="/admin/dashboard" replace />;
     case "teacher":
-      return <Navigate to="/teacher" replace />;
+      return <Navigate to="/teacher/dashboard" replace />;
     case "student":
-      return <Navigate to="/chat" replace />;
+      return <Navigate to="/student/dashboard" replace />;
     case "parent":
-      return <Navigate to="/parent" replace />;
+      return <Navigate to="/parent/dashboard" replace />;
     default:
       return <Navigate to="/login" replace />;
   }
@@ -87,23 +88,31 @@ export default function App() {
               </ProtectedRoute>
             }
           />
-          <Route path="/admin" element={<ProtectedRoute allowedRoles={["admin"]}><AdminDashboard /></ProtectedRoute>} />
+          <Route path="/admin/dashboard" element={<ProtectedRoute allowedRoles={["admin"]}><AdminDashboard /></ProtectedRoute>} />
           <Route path="/admin/users" element={<ProtectedRoute allowedRoles={["admin"]}><AdminDashboard /></ProtectedRoute>} />
           <Route path="/admin/chats" element={<ProtectedRoute allowedRoles={["admin"]}><AdminDashboard /></ProtectedRoute>} />
-          <Route path="/teacher" element={<ProtectedRoute allowedRoles={["admin", "teacher"]}><TeacherDashboard /></ProtectedRoute>} />
+          <Route path="/teacher/dashboard" element={<ProtectedRoute allowedRoles={["admin", "teacher"]}><TeacherDashboard /></ProtectedRoute>} />
           <Route path="/teacher/students" element={<ProtectedRoute allowedRoles={["admin", "teacher"]}><TeacherDashboard /></ProtectedRoute>} />
           <Route path="/teacher/activity" element={<ProtectedRoute allowedRoles={["admin", "teacher"]}><TeacherDashboard /></ProtectedRoute>} />
           <Route path="/teacher/reports" element={<ProtectedRoute allowedRoles={["admin", "teacher"]}><TeacherReportsPage /></ProtectedRoute>} />
           <Route path="/teacher/settings" element={<ProtectedRoute allowedRoles={["admin", "teacher"]}><TeacherSettingsPage /></ProtectedRoute>} />
           <Route path="/admin/knowledge" element={<ProtectedRoute allowedRoles={["admin"]}><KnowledgeBasePage /></ProtectedRoute>} />
           <Route path="/teacher/knowledge" element={<ProtectedRoute allowedRoles={["admin", "teacher"]}><KnowledgeBasePage /></ProtectedRoute>} />
-          <Route path="/parent" element={<ProtectedRoute allowedRoles={["parent"]}><ParentDashboard /></ProtectedRoute>} />
+          <Route path="/parent/dashboard" element={<ProtectedRoute allowedRoles={["parent"]}><ParentDashboard /></ProtectedRoute>} />
           <Route path="/parent/students" element={<ProtectedRoute allowedRoles={["parent"]}><ParentDashboard /></ProtectedRoute>} />
           <Route path="/parent/appointments" element={<ProtectedRoute allowedRoles={["parent"]}><ParentDashboard /></ProtectedRoute>} />
           <Route path="/parent/reports" element={<ProtectedRoute allowedRoles={["parent"]}><ParentReportsPage /></ProtectedRoute>} />
           <Route path="/parent/settings" element={<ProtectedRoute allowedRoles={["parent"]}><ParentSettingsPage /></ProtectedRoute>} />
           <Route path="/appointments" element={<ProtectedRoute allowedRoles={["admin", "teacher", "parent"]}><AppointmentsPage /></ProtectedRoute>} />
           <Route path="/admin/assessments" element={<ProtectedRoute allowedRoles={["admin"]}><AdminDashboard /></ProtectedRoute>} />
+          <Route
+            path="/student/dashboard"
+            element={
+              <ProtectedRoute allowedRoles={["student"]}>
+                <DashboardPage />
+              </ProtectedRoute>
+            }
+          />
           <Route
             path="/chat"
             element={
