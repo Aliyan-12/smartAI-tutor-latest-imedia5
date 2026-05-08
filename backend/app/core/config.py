@@ -52,6 +52,12 @@ class Settings(BaseSettings):
     max_appointments_per_week: int = 100
     default_class_price: float = 25.00
 
+    presenton_url: str = "http://localhost:5000"
+    presenton_api_key: str = ""
+    presenton_user: str = "smartai"
+    presenton_password: str = "smartai123"
+    pexels_api_key: str = ""
+
     @property
     def database_url(self) -> str:
         return (

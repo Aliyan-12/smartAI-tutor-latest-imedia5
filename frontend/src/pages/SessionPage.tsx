@@ -78,12 +78,11 @@ export default function SessionPage() {
   const voiceAiTextForSlideRef = useRef("");
   const [voiceQuizTopic, setVoiceQuizTopic] = useState<string | null>(null);
 
+  const [sessionKeyStage, setSessionKeyStage] = useState("");
   const [currentSlide, setCurrentSlide] = useState<SlideData | null>(null);
   const [slideHistory, setSlideHistory] = useState<SlideData[]>([]);
   const [slideIndex, setSlideIndex] = useState(0);
-  const [slideLoading, setSlideLoading] = useState(false);
-  const [slideFailed, setSlideFailed] = useState(false);
-  const lastSlideTextRef = useRef("");
+  const slidePollingRefs = useRef<Map<number, number>>(new Map());
 
   const apptId = appointmentId ? parseInt(appointmentId) : 0;
 
@@ -96,6 +95,7 @@ export default function SessionPage() {
       setDurationMinutes(result.duration_minutes);
       setSessionTitle(result.title);
       setSessionSubject(result.subject);
+      setSessionKeyStage(result.key_stage || "");
 
       // Restore persisted pause state
       const savedPausedSeconds: number = result.total_paused_seconds || 0;
@@ -124,7 +124,6 @@ export default function SessionPage() {
           setSlideHistory(persistedSlides);
           setCurrentSlide(persistedSlides[persistedSlides.length - 1]);
           setSlideIndex(persistedSlides.length - 1);
-          setSlideFailed(false);
         }
       } catch {}
 
@@ -433,39 +432,68 @@ export default function SessionPage() {
 
   const MAX_SLIDES = 15;
 
+  // Clean up any active slide polling intervals on unmount
+  useEffect(() => {
+    const refs = slidePollingRefs.current;
+    return () => { refs.forEach((id) => clearInterval(id)); };
+  }, []);
+
   const generateSlide = useCallback(async (text: string) => {
     if (!text || !text.trim()) return;
     if (slideHistory.length >= MAX_SLIDES) return;
-    lastSlideTextRef.current = text;
-    setSlideFailed(false);
-    setSlideLoading(true);
-    try {
-      const slide = await slidesApi.generate(text, sessionSubject, apptId, slideHistory.map(s => s.title));
-      if (slide) {
-        const newIndex = slideHistory.length;
-        setCurrentSlide(slide);
-        setSlideHistory(prev => [...prev, slide]);
-        setSlideIndex(newIndex);
-      } else {
-        setSlideFailed(true);
-      }
-    } catch {
-      setSlideFailed(true);
-    } finally {
-      setSlideLoading(false);
-    }
-  }, [sessionSubject, apptId, slideHistory.length]);
 
-  const retrySlide = useCallback(() => {
-    if (lastSlideTextRef.current) generateSlide(lastSlideTextRef.current);
-  }, [generateSlide]);
+    const result = await slidesApi.generate(
+      text,
+      sessionSubject,
+      sessionKeyStage,
+      apptId || undefined,
+      slideHistory.map((s) => s.topic),
+    );
+    if (!result) return; // skipped by backend (not slide-worthy)
+
+    const placeholder: SlideData = {
+      slide_id: result.slide_id,
+      status: "generating",
+      topic: result.topic,
+      presentation_id: null,
+      viewer_url: null,
+      pptx_url: null,
+    };
+    const newIndex = slideHistory.length;
+    setSlideHistory((prev) => [...prev, placeholder]);
+    setCurrentSlide(placeholder);
+    setSlideIndex(newIndex);
+
+    // Poll until ready or failed (max 3 min)
+    const intervalId = window.setInterval(async () => {
+      const updated = await slidesApi.getSlide(result.slide_id);
+      if (!updated) return;
+      if (updated.status === "ready" || updated.status === "failed") {
+        clearInterval(intervalId);
+        slidePollingRefs.current.delete(result.slide_id);
+        setSlideHistory((prev) =>
+          prev.map((s) => (s.slide_id === result.slide_id ? updated : s))
+        );
+        setCurrentSlide((prev) =>
+          prev?.slide_id === result.slide_id ? updated : prev
+        );
+      }
+    }, 3000);
+    slidePollingRefs.current.set(result.slide_id, intervalId);
+    setTimeout(() => {
+      if (slidePollingRefs.current.has(result.slide_id)) {
+        clearInterval(intervalId);
+        slidePollingRefs.current.delete(result.slide_id);
+      }
+    }, 180_000);
+  }, [sessionSubject, sessionKeyStage, apptId, slideHistory]);
 
   const sessionSend = useCallback(
     (text: string) => sendMessage(text, {
       suppressNavigation: true,
       onStreamStart: startStreamTTS,
       onToken: feedStreamTTS,
-      onStreamComplete: (aiText, hasSlideTrigger) => { endStreamTTS(); if (hasSlideTrigger) generateSlide(aiText); },
+      onStreamComplete: (aiText: string, hasSlideTrigger: boolean) => { endStreamTTS(); if (hasSlideTrigger) generateSlide(aiText); },
     }),
     [sendMessage, startStreamTTS, feedStreamTTS, endStreamTTS, generateSlide]
   );
@@ -524,11 +552,7 @@ export default function SessionPage() {
           } else {
             setVoiceMessages([]);
           }
-          const cleanAiText = aiText
-            .replace(/\[SLIDE_TRIGGER\]/gi, "")
-            .replace(/\[QUIZ_OFFER:[^\]]*\]/gi, "")
-            .trim();
-          if (cleanAiText.length >= 80) generateSlide(cleanAiText);
+          if (aiText.includes("[SLIDE_TRIGGER]")) generateSlide(aiText);
         },
         onCreditsUpdate: () => {},
         onSessionCreated: () => {},
@@ -629,11 +653,8 @@ export default function SessionPage() {
           <div style={styles.learnMessagesWrap}>
             <LessonSlide
               slide={currentSlide}
-              isLoading={slideLoading}
               slideIndex={slideIndex}
               totalSlides={slideHistory.length}
-              slideFailed={slideFailed}
-              onRetry={retrySlide}
               onPrev={() => {
                 const i = Math.max(0, slideIndex - 1);
                 setSlideIndex(i);

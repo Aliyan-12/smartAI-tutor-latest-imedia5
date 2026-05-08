@@ -71,6 +71,21 @@ async def run_setup(fresh: bool = False):
         )""",
         "CREATE INDEX IF NOT EXISTS ix_session_slides_appointment_id ON session_slides(appointment_id)",
         "CREATE INDEX IF NOT EXISTS ix_session_slides_student_id ON session_slides(student_id)",
+        # session_presentations — Presenton-generated slides per appointment
+        """CREATE TABLE IF NOT EXISTS session_presentations (
+            id                SERIAL PRIMARY KEY,
+            appointment_id    INTEGER NOT NULL REFERENCES appointments(id) ON DELETE CASCADE,
+            student_id        INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            slide_order       INTEGER NOT NULL DEFAULT 0,
+            topic             VARCHAR(300) NOT NULL DEFAULT '',
+            presentation_id   VARCHAR(200) NOT NULL DEFAULT '',
+            viewer_url        VARCHAR(1000) NOT NULL DEFAULT '',
+            pptx_url          VARCHAR(1000) NOT NULL DEFAULT '',
+            status            VARCHAR(20) NOT NULL DEFAULT 'generating',
+            created_at        TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+        )""",
+        "CREATE INDEX IF NOT EXISTS ix_session_presentations_appointment_id ON session_presentations(appointment_id)",
+        "CREATE INDEX IF NOT EXISTS ix_session_presentations_student_id ON session_presentations(student_id)",
         # kb_type — separates course material from model training transcripts
         "ALTER TABLE documents ADD COLUMN IF NOT EXISTS kb_type VARCHAR(20) NOT NULL DEFAULT 'course_material'",
         "CREATE INDEX IF NOT EXISTS ix_documents_kb_type ON documents(kb_type)",

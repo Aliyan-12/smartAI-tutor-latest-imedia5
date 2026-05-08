@@ -670,17 +670,39 @@ export const lessonsApi = {
 };
 
 export const slidesApi = {
-  generate: async (text: string, subject: string, appointmentId?: number, existingTitles?: string[]): Promise<import("../types").SlideData | null> => {
+  generate: async (
+    text: string,
+    subject: string,
+    keyStage: string,
+    appointmentId?: number,
+    existingTopics?: string[],
+  ): Promise<{ slide_id: number; status: string; topic: string } | null> => {
     const token = localStorage.getItem("token");
     const res = await fetch("/api/slides/generate", {
       method: "POST",
       headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-      body: JSON.stringify({ text, subject, appointment_id: appointmentId, existing_titles: existingTitles ?? [] }),
+      body: JSON.stringify({
+        text,
+        subject,
+        key_stage: keyStage,
+        appointment_id: appointmentId,
+        existing_topics: existingTopics ?? [],
+      }),
     });
     if (!res.ok) return null;
     const data = await res.json();
-    return data?.slide ?? null;
+    return data?.slide_id != null ? data : null;
   },
+
+  getSlide: async (slideId: number): Promise<import("../types").SlideData | null> => {
+    const token = localStorage.getItem("token");
+    const res = await fetch(`/api/slides/${slideId}`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    if (!res.ok) return null;
+    return res.json();
+  },
+
   getSessionSlides: async (appointmentId: number): Promise<import("../types").SlideData[]> => {
     const token = localStorage.getItem("token");
     const res = await fetch(`/api/slides/session/${appointmentId}`, {

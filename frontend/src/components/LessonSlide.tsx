@@ -1,101 +1,70 @@
+import { useState } from "react";
 import type { SlideData } from "../types";
 
 interface LessonSlideProps {
   slide: SlideData | null;
-  isLoading: boolean;
   slideIndex: number;
   totalSlides: number;
   onPrev: () => void;
   onNext: () => void;
-  onRetry?: () => void;
-  slideFailed?: boolean;
 }
 
 const HEADER_GRADIENT = "linear-gradient(135deg, #4f46e5 0%, #7c3aed 100%)";
 
 export default function LessonSlide({
   slide,
-  isLoading,
   slideIndex,
   totalSlides,
   onPrev,
   onNext,
-  onRetry,
-  slideFailed,
 }: LessonSlideProps) {
-  if (!isLoading && !slide) {
-    return (
-      <div style={s.empty}>
-        <span style={{ fontSize: 40 }}>{slideFailed ? "⚠️" : "🖥️"}</span>
-        <p style={s.emptyTitle}>
-          {slideFailed ? "Slide could not be generated" : "Slides will appear here"}
-        </p>
-        <p style={s.emptyText}>
-          {slideFailed
-            ? "The AI couldn't create a slide for that response."
-            : "Chat with your AI tutor to generate lesson slides."}
-        </p>
-        {slideFailed && onRetry && (
-          <button onClick={onRetry} style={s.retryBtn} type="button">
-            ↻ Retry Slide
-          </button>
-        )}
-      </div>
-    );
-  }
-
-  if (isLoading && !slide) {
-    return (
-      <div style={s.skeletonWrap}>
-        <style>{`
-          @keyframes shimmer {
-            0%   { background-position: -600px 0; }
-            100% { background-position: 600px 0; }
-          }
-          .slide-shimmer {
-            background: linear-gradient(90deg, #e2e8f0 25%, #f1f5f9 50%, #e2e8f0 75%);
-            background-size: 1200px 100%;
-            animation: shimmer 1.6s infinite linear;
-            border-radius: 6px;
-          }
-        `}</style>
-        <div style={{ background: "#6366f1", borderRadius: "12px 12px 0 0", padding: "20px 20px 18px", marginBottom: 0 }}>
-          <div className="slide-shimmer" style={{ height: 18, width: "60%", marginBottom: 10, opacity: 0.5 }} />
-          <div className="slide-shimmer" style={{ height: 26, width: "80%", opacity: 0.4 }} />
-        </div>
-        <div style={{ background: "white", borderRadius: "0 0 12px 12px", padding: 20, flex: 1 }}>
-          <div className="slide-shimmer" style={{ height: 14, borderRadius: 99, marginBottom: 16 }} />
-          <div className="slide-shimmer" style={{ height: 12, width: "90%", marginBottom: 10 }} />
-          <div className="slide-shimmer" style={{ height: 12, width: "75%", marginBottom: 10 }} />
-          <div className="slide-shimmer" style={{ height: 12, width: "82%", marginBottom: 20 }} />
-          <div className="slide-shimmer" style={{ height: 60, borderRadius: 8 }} />
-        </div>
-      </div>
-    );
-  }
-
-  if (!slide) return null;
+  const [iframeBlocked, setIframeBlocked] = useState(false);
 
   const canPrev = slideIndex > 0;
   const canNext = slideIndex < totalSlides - 1;
 
+  if (!slide) {
+    return (
+      <div style={s.empty}>
+        <span style={{ fontSize: 40 }}>🖥️</span>
+        <p style={s.emptyTitle}>Slides will appear here</p>
+        <p style={s.emptyText}>Chat with your AI tutor to generate lesson slides.</p>
+      </div>
+    );
+  }
+
   return (
     <div style={s.outerWrap}>
       <style>{`
+        @keyframes shimmer {
+          0%   { background-position: -600px 0; }
+          100% { background-position:  600px 0; }
+        }
+        .slide-shimmer {
+          background: linear-gradient(90deg, #e2e8f0 25%, #f1f5f9 50%, #e2e8f0 75%);
+          background-size: 1200px 100%;
+          animation: shimmer 1.6s infinite linear;
+          border-radius: 6px;
+        }
         @keyframes slideIn {
           from { opacity: 0; transform: translateY(10px); }
           to   { opacity: 1; transform: translateY(0); }
         }
+        @keyframes spin {
+          to { transform: rotate(360deg); }
+        }
       `}</style>
 
-      <div style={s.slideCard} key={`${slide.title}-${slideIndex}`}>
+      <div style={s.slideCard} key={`${slide.slide_id}-${slideIndex}`}>
         {/* HEADER */}
         <div style={s.header}>
           <div style={s.headerLeft}>
-            <span style={s.headerEmoji}>{slide.emoji}</span>
+            <span style={s.headerIcon}>
+              {slide.status === "generating" ? "⏳" : slide.status === "failed" ? "⚠️" : "📊"}
+            </span>
             <div>
               <p style={s.slideLabel}>Lesson Slide</p>
-              <h2 style={s.headerTitle}>{slide.title}</h2>
+              <h2 style={s.headerTitle}>{slide.topic}</h2>
             </div>
           </div>
           {totalSlides > 0 && (
@@ -105,38 +74,93 @@ export default function LessonSlide({
 
         {/* BODY */}
         <div style={s.body}>
-          {slide.highlight && (
-            <div style={s.highlightBox}>
-              <span style={s.highlightIcon}>💡</span>
-              <p style={s.highlightText}>{slide.highlight}</p>
-            </div>
-          )}
 
-          {slide.bullets.length > 0 && (
-            <div style={s.section}>
-              <p style={s.sectionLabel}>Key Points</p>
-              <ul style={s.bulletList}>
-                {slide.bullets.map((b, i) => (
-                  <li key={i} style={s.bulletItem}>
-                    <span style={s.bulletSquare} />
-                    <span style={s.bulletText}>{b}</span>
-                  </li>
-                ))}
-              </ul>
-            </div>
-          )}
-
-          {slide.keyTerms.length > 0 && (
-            <div style={s.section}>
-              <p style={s.sectionLabel}>Key Terms</p>
-              <div style={s.keyTermsGrid}>
-                {slide.keyTerms.map((kt, i) => (
-                  <div key={i} style={s.keyTermCard}>
-                    <span style={s.keyTermTerm}>{kt.term}</span>
-                    <span style={s.keyTermDef}>{kt.definition}</span>
-                  </div>
-                ))}
+          {/* ── GENERATING skeleton ── */}
+          {slide.status === "generating" && (
+            <div style={s.generatingWrap}>
+              <div className="slide-shimmer" style={{ height: 140, borderRadius: 10, marginBottom: 12 }} />
+              <div className="slide-shimmer" style={{ height: 14, width: "70%", marginBottom: 8 }} />
+              <div className="slide-shimmer" style={{ height: 12, width: "90%", marginBottom: 8 }} />
+              <div className="slide-shimmer" style={{ height: 12, width: "75%", marginBottom: 16 }} />
+              <div className="slide-shimmer" style={{ height: 60, borderRadius: 8 }} />
+              <div style={s.generatingBadge}>
+                <span style={s.spinner} />
+                <span>Generating slide&hellip;</span>
               </div>
+            </div>
+          )}
+
+          {/* ── READY: iframe viewer ── */}
+          {slide.status === "ready" && slide.viewer_url && !iframeBlocked && (
+            <div style={s.iframeWrap}>
+              <iframe
+                key={slide.slide_id}
+                src={slide.viewer_url}
+                style={s.iframe}
+                title={slide.topic}
+                allow="fullscreen"
+                onError={() => setIframeBlocked(true)}
+              />
+              <div style={s.iframeActions}>
+                {slide.pptx_url && (
+                  <a
+                    href={slide.pptx_url}
+                    download
+                    style={s.downloadBtn}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                  >
+                    ↓ Download PPTX
+                  </a>
+                )}
+                <a
+                  href={slide.viewer_url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  style={s.openBtn}
+                >
+                  ↗ Full screen
+                </a>
+              </div>
+            </div>
+          )}
+
+          {/* ── READY but iframe blocked: fallback links ── */}
+          {slide.status === "ready" && slide.viewer_url && iframeBlocked && (
+            <div style={s.fallbackWrap}>
+              <span style={{ fontSize: 36 }}>📊</span>
+              <p style={s.fallbackTitle}>{slide.topic}</p>
+              <p style={s.fallbackText}>Your browser blocked the embedded viewer.</p>
+              <a
+                href={slide.viewer_url}
+                target="_blank"
+                rel="noopener noreferrer"
+                style={s.openBtnLarge}
+              >
+                ↗ View Slide
+              </a>
+              {slide.pptx_url && (
+                <a
+                  href={slide.pptx_url}
+                  download
+                  style={s.downloadBtnLarge}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                >
+                  ↓ Download PPTX
+                </a>
+              )}
+            </div>
+          )}
+
+          {/* ── FAILED ── */}
+          {slide.status === "failed" && (
+            <div style={s.failedWrap}>
+              <span style={{ fontSize: 36 }}>⚠️</span>
+              <p style={s.failedTitle}>Slide generation failed</p>
+              <p style={s.failedText}>
+                Could not create a slide for <em>{slide.topic}</em>.
+              </p>
             </div>
           )}
         </div>
@@ -203,8 +227,8 @@ const s: Record<string, React.CSSProperties> = {
     flex: 1,
     minWidth: 0,
   },
-  headerEmoji: {
-    fontSize: 40,
+  headerIcon: {
+    fontSize: 36,
     lineHeight: 1,
     flexShrink: 0,
     filter: "drop-shadow(0 2px 4px rgba(0,0,0,0.2))",
@@ -218,12 +242,15 @@ const s: Record<string, React.CSSProperties> = {
     margin: "0 0 3px 0",
   },
   headerTitle: {
-    fontSize: 17,
+    fontSize: 16,
     fontWeight: 800,
     color: "white",
     margin: 0,
     lineHeight: 1.3,
     textShadow: "0 1px 3px rgba(0,0,0,0.2)",
+    overflow: "hidden",
+    textOverflow: "ellipsis",
+    whiteSpace: "nowrap" as const,
   },
   slideChip: {
     fontSize: 11,
@@ -239,100 +266,162 @@ const s: Record<string, React.CSSProperties> = {
   body: {
     flex: 1,
     overflowY: "auto" as const,
+    display: "flex",
+    flexDirection: "column" as const,
+    background: "#fafbff",
+  },
+
+  // Generating skeleton
+  generatingWrap: {
     padding: "16px 18px",
     display: "flex",
     flexDirection: "column" as const,
-    gap: 14,
-    background: "#fafbff",
+    gap: 0,
+    flex: 1,
   },
-  highlightBox: {
+  generatingBadge: {
+    marginTop: 14,
     display: "flex",
-    alignItems: "flex-start",
-    gap: 10,
-    padding: "12px 14px",
-    background: "rgba(79,70,229,0.07)",
-    borderLeft: "4px solid #4f46e5",
-    borderRadius: "0 8px 8px 0",
-  },
-  highlightIcon: {
-    fontSize: 16,
-    flexShrink: 0,
-    marginTop: 1,
-  },
-  highlightText: {
-    fontSize: 13,
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
+    fontSize: 12,
     fontWeight: 600,
-    color: "#3730a3",
-    lineHeight: 1.55,
-    margin: 0,
-    fontStyle: "italic",
-  },
-  section: {
-    display: "flex",
-    flexDirection: "column" as const,
-    gap: 8,
-  },
-  sectionLabel: {
-    fontSize: 10,
-    fontWeight: 800,
-    textTransform: "uppercase" as const,
-    letterSpacing: "0.8px",
     color: "#6366f1",
-    margin: 0,
-    borderBottom: "1px solid rgba(99,102,241,0.2)",
-    paddingBottom: 5,
   },
-  bulletList: {
-    listStyle: "none",
-    margin: 0,
-    padding: 0,
-    display: "flex",
-    flexDirection: "column" as const,
-    gap: 8,
-  },
-  bulletItem: {
-    display: "flex",
-    alignItems: "flex-start",
-    gap: 10,
-  },
-  bulletSquare: {
-    width: 8,
-    height: 8,
-    borderRadius: 2,
-    background: "#6366f1",
+  spinner: {
+    display: "inline-block",
+    width: 14,
+    height: 14,
+    border: "2px solid #e0e7ff",
+    borderTop: "2px solid #6366f1",
+    borderRadius: "50%",
+    animation: "spin 0.8s linear infinite",
     flexShrink: 0,
-    marginTop: 5,
   },
-  bulletText: {
-    fontSize: 13,
-    color: "#1e293b",
-    lineHeight: 1.6,
-  },
-  keyTermsGrid: {
+
+  // iframe viewer
+  iframeWrap: {
+    flex: 1,
     display: "flex",
     flexDirection: "column" as const,
-    gap: 6,
+    minHeight: 0,
   },
-  keyTermCard: {
-    background: "#f1f5f9",
-    borderRadius: 8,
-    padding: "9px 12px",
+  iframe: {
+    flex: 1,
+    border: "none",
+    width: "100%",
+    minHeight: 280,
+  },
+  iframeActions: {
+    display: "flex",
+    gap: 8,
+    padding: "8px 12px",
+    borderTop: "1px solid #e2e8f0",
+    background: "white",
+    flexShrink: 0,
+    flexWrap: "wrap" as const,
+  },
+  downloadBtn: {
+    flex: 1,
+    padding: "6px 10px",
+    background: "#4f46e5",
+    color: "white",
+    border: "none",
+    borderRadius: 7,
+    fontSize: 11,
+    fontWeight: 700,
+    cursor: "pointer",
+    textAlign: "center" as const,
+    textDecoration: "none",
+    display: "block",
+  },
+  openBtn: {
+    flex: 1,
+    padding: "6px 10px",
+    background: "transparent",
+    color: "#4f46e5",
+    border: "1px solid #c7d2fe",
+    borderRadius: 7,
+    fontSize: 11,
+    fontWeight: 700,
+    cursor: "pointer",
+    textAlign: "center" as const,
+    textDecoration: "none",
+    display: "block",
+  },
+
+  // Fallback (iframe blocked)
+  fallbackWrap: {
+    flex: 1,
     display: "flex",
     flexDirection: "column" as const,
-    gap: 3,
-    border: "1px solid #e2e8f0",
+    alignItems: "center",
+    justifyContent: "center",
+    padding: "24px 20px",
+    gap: 10,
+    textAlign: "center" as const,
   },
-  keyTermTerm: {
-    fontSize: 12,
+  fallbackTitle: {
+    fontSize: 15,
     fontWeight: 800,
     color: "#1e293b",
-    letterSpacing: "0.3px",
+    margin: 0,
   },
-  keyTermDef: {
+  fallbackText: {
     fontSize: 12,
-    color: "#64748b",
-    lineHeight: 1.5,
+    color: "#94a3b8",
+    margin: 0,
   },
+  openBtnLarge: {
+    padding: "10px 24px",
+    background: "#4f46e5",
+    color: "white",
+    border: "none",
+    borderRadius: 8,
+    fontSize: 13,
+    fontWeight: 700,
+    cursor: "pointer",
+    textDecoration: "none",
+    display: "inline-block",
+  },
+  downloadBtnLarge: {
+    padding: "10px 24px",
+    background: "transparent",
+    color: "#4f46e5",
+    border: "1px solid #c7d2fe",
+    borderRadius: 8,
+    fontSize: 13,
+    fontWeight: 700,
+    cursor: "pointer",
+    textDecoration: "none",
+    display: "inline-block",
+  },
+
+  // Failed
+  failedWrap: {
+    flex: 1,
+    display: "flex",
+    flexDirection: "column" as const,
+    alignItems: "center",
+    justifyContent: "center",
+    padding: "24px 20px",
+    gap: 10,
+    textAlign: "center" as const,
+  },
+  failedTitle: {
+    fontSize: 14,
+    fontWeight: 700,
+    color: "#ef4444",
+    margin: 0,
+  },
+  failedText: {
+    fontSize: 12,
+    color: "#94a3b8",
+    margin: 0,
+  },
+
+  // Nav
   nav: {
     display: "flex",
     alignItems: "center",
@@ -358,6 +447,8 @@ const s: Record<string, React.CSSProperties> = {
     fontWeight: 600,
     color: "#94a3b8",
   },
+
+  // Empty state
   empty: {
     flex: 1,
     display: "flex",
@@ -381,25 +472,5 @@ const s: Record<string, React.CSSProperties> = {
     lineHeight: 1.6,
     margin: 0,
     maxWidth: 220,
-  },
-  retryBtn: {
-    marginTop: 6,
-    padding: "8px 20px",
-    background: "#4f46e5",
-    color: "white",
-    border: "none",
-    borderRadius: 8,
-    fontSize: 13,
-    fontWeight: 700,
-    cursor: "pointer",
-    fontFamily: "inherit",
-  },
-  skeletonWrap: {
-    margin: "14px",
-    borderRadius: 14,
-    overflow: "hidden",
-    boxShadow: "0 4px 20px rgba(79,70,229,0.1)",
-    display: "flex",
-    flexDirection: "column" as const,
   },
 };

@@ -14,7 +14,11 @@ from app.routers import sessions, slides
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+    force=True,
 )
+# Ensure uvicorn access logger is visible
+logging.getLogger("uvicorn.access").setLevel(logging.INFO)
+logging.getLogger("uvicorn.error").setLevel(logging.INFO)
 logger = logging.getLogger(__name__)
 
 
@@ -25,7 +29,7 @@ async def lifespan(app: FastAPI):
     await init_database()
     logger.info("=== SmartAI Tutor ready ===")
     yield
-    yield
+    logger.info("=== SmartAI Tutor shutting down ===")
 
 
 app = FastAPI(

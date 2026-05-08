@@ -296,9 +296,10 @@ export interface LearningPreferences {
 }
 
 export interface SlideData {
-  title: string;
-  emoji: string;
-  bullets: string[];
-  keyTerms: { term: string; definition: string }[];
-  highlight: string;
+  slide_id: number;
+  status: "generating" | "ready" | "failed";
+  topic: string;
+  presentation_id: string | null;
+  viewer_url: string | null;
+  pptx_url: string | null;
 }
