@@ -279,6 +279,8 @@ async def stream_message(
                 f"Failed to build session prompt for appointment {_appt_id}, using default"
             )
 
+    is_session = _appt_id is not None
+
     # Load student learning preferences for non-session chats (session prompt already includes them)
     student_prefs: dict | None = None
     if not session_system_prompt:
@@ -294,6 +296,14 @@ async def stream_message(
             }
         except Exception:
             pass
+
+    # For non-session (simple) chats, use the simple prompt which has no quiz/slide markers
+    if not is_session:
+        from app.services.gemini_service import SIMPLE_CHAT_SYSTEM_PROMPT, build_personalised_system_prompt as _build_prompt
+        if student_prefs:
+            session_system_prompt = _build_prompt(student_prefs, base_prompt=SIMPLE_CHAT_SYSTEM_PROMPT)
+        else:
+            session_system_prompt = SIMPLE_CHAT_SYSTEM_PROMPT
 
     async def event_stream():
         full_response = []
@@ -311,8 +321,16 @@ async def stream_message(
 
         complete_text = "".join(full_response)
 
-        quiz_topic = gemini_service.extract_quiz_offer(complete_text)
-        clean_text = gemini_service.strip_quiz_offer(complete_text)
+        # Only process quiz/slide markers for session chats
+        if is_session:
+            quiz_topic = gemini_service.extract_quiz_offer(complete_text)
+            clean_text = gemini_service.strip_quiz_offer(complete_text)
+        else:
+            quiz_topic = None
+            clean_text = complete_text
+
+        if not is_session:
+            clean_text = clean_text.replace("[SLIDE_TRIGGER]", "").replace("[QUIZ_OFFER:", "").strip()
 
         if "[Error:" in clean_text:
             yield f"data: {json.dumps({'type': 'end'})}\n\n"

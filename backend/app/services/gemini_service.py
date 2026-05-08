@@ -30,14 +30,29 @@ SYSTEM_PROMPT = (
     "Do not include the marker if you have already offered a quiz recently in this conversation."
 )
 
+SIMPLE_CHAT_SYSTEM_PROMPT = (
+    "You are SmartAI Tutor, a friendly and knowledgeable AI tutor designed for K-12 students. "
+    "You explain concepts clearly using age-appropriate language, provide step-by-step solutions, "
+    "and encourage students to think critically. You adapt your responses based on the student's "
+    "level and ask follow-up questions to check understanding. Keep your tone warm, supportive, "
+    "and patient. Use examples and analogies when helpful. If a question is outside the educational "
+    "scope, gently redirect the student back to learning topics.\n\n"
+    "When KNOWLEDGE BASE CONTEXT is provided in a message, use it as your primary reference material "
+    "to answer the student's question. Synthesise the information naturally and accurately. "
+    "Do not mention chunk boundaries or source labels. If the context does not fully answer the "
+    "question, supplement with your general knowledge and say so.\n\n"
+    "Focus purely on explaining topics clearly using the knowledge base provided. Do not include any special markers or control sequences in your responses."
+)
 
-def build_personalised_system_prompt(student_preferences: dict) -> str:
+
+def build_personalised_system_prompt(student_preferences: dict, base_prompt: str = None) -> str:
     """
     Build a personalised system prompt by injecting the student's learning preferences
-    on top of the base SYSTEM_PROMPT.
+    on top of the base prompt (defaults to SYSTEM_PROMPT).
     """
+    _base = base_prompt or SYSTEM_PROMPT
     if not student_preferences:
-        return SYSTEM_PROMPT
+        return _base
 
     additions = []
 
@@ -84,12 +99,12 @@ def build_personalised_system_prompt(student_preferences: dict) -> str:
         )
 
     if not additions:
-        return SYSTEM_PROMPT
+        return _base
 
     preference_block = "\n\nSTUDENT PREFERENCES (follow these carefully):\n" + "\n".join(
         f"- {a}" for a in additions
     )
-    return SYSTEM_PROMPT + preference_block
+    return _base + preference_block
 
 MAX_RETRIES = 5
 RETRY_DELAY = 1.0  # base delay; doubles each attempt (1s, 2s, 4s, 8s, 16s)

@@ -885,9 +885,8 @@ export default function WelcomeScreen({ onPromptClick }: Props) {
           </div>
         )}
 
-        {/* Two-column: Sessions + Assignments */}
-        {(hasSessions || pendingAssignments.length > 0) && (
-          <div className="ws-grid" style={{ marginBottom: 20 }}>
+        {/* Two-column: Sessions + Assignments — always shown */}
+        <div className="ws-grid" style={{ marginBottom: 20 }}>
             {/* Upcoming / Active Sessions */}
             <div className="ws-card">
               <div className="ws-card-title">Your Sessions</div>
@@ -998,8 +997,7 @@ export default function WelcomeScreen({ onPromptClick }: Props) {
                 View All Assignments →
               </button>
             </div>
-          </div>
-        )}
+        </div>
 
         {/* Two-column: Today's Plan + Quick Actions */}
         <div className="ws-grid">
@@ -1115,6 +1113,46 @@ export default function WelcomeScreen({ onPromptClick }: Props) {
               </button>
             </div>
           </div>
+        </div>
+
+        {/* AI Tutor Tip */}
+        <div style={{ padding: "14px 18px", background: "#f0fdf4", border: "1px solid #bbf7d0", borderRadius: 10, display: "flex", alignItems: "center", gap: 12, marginBottom: 20, flexWrap: "wrap" }}>
+          <span style={{ fontSize: 18 }}>🤖</span>
+          <p style={{ flex: 1, fontSize: 13, color: "#166534", margin: 0, fontStyle: "italic" }}>
+            <strong>AI Tip: </strong>
+            {daily_plan.weak_spots.length > 0
+              ? `Focus on improving "${daily_plan.weak_spots[0].topic}" in ${daily_plan.weak_spots[0].subject} — it needs the most attention right now.`
+              : daily_plan.spaced_review.length > 0
+              ? `You haven't practised "${daily_plan.spaced_review[0].topic}" in a while — a quick review will reinforce your memory.`
+              : "Keep up the great work! Regular daily practice is the key to long-term learning success."}
+          </p>
+          <button
+            onClick={() => onPromptClick("What should I focus on studying today based on my progress?")}
+            style={{ fontSize: 13, fontWeight: 600, color: "#16a34a", background: "white", border: "1px solid #bbf7d0", borderRadius: 7, padding: "5px 14px", cursor: "pointer", fontFamily: "inherit", whiteSpace: "nowrap" }}
+          >
+            Ask AI →
+          </button>
+        </div>
+
+        {/* Bottom links row */}
+        <div style={{ display: "flex", gap: 10, marginBottom: 32, flexWrap: "wrap" }}>
+          {[
+            { icon: "📊", label: "My Progress", path: "/progress" },
+            { icon: "📅", label: "My Sessions", path: "/sessions" },
+            { icon: "📝", label: "Assignments", path: "/assignments" },
+            { icon: "⚙️", label: "Settings", path: "/settings" },
+          ].map((item) => (
+            <button
+              key={item.path}
+              onClick={() => navigate(item.path)}
+              style={{ flex: "1 1 120px", display: "flex", alignItems: "center", gap: 8, padding: "11px 14px", background: "#fff", border: "1px solid #e2e8f0", borderRadius: 10, fontSize: 13, fontWeight: 600, color: "#0f172a", cursor: "pointer", fontFamily: "inherit", transition: "border-color 0.15s, box-shadow 0.15s", boxShadow: "0 1px 3px rgba(0,0,0,0.04)" }}
+              onMouseEnter={(e) => { e.currentTarget.style.borderColor = "#3b82f6"; e.currentTarget.style.boxShadow = "0 2px 8px rgba(59,130,246,0.12)"; }}
+              onMouseLeave={(e) => { e.currentTarget.style.borderColor = "#e2e8f0"; e.currentTarget.style.boxShadow = "0 1px 3px rgba(0,0,0,0.04)"; }}
+            >
+              <span style={{ fontSize: 18 }}>{item.icon}</span>
+              {item.label}
+            </button>
+          ))}
         </div>
       </div>
     </>

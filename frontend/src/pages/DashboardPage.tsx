@@ -31,8 +31,10 @@ export default function DashboardPage() {
         onSelectChat={(id) => navigate(`/chat/${id}`)}
         onNewChat={() => navigate("/chat")}
       />
-      <div className="main-content" style={{ overflowY: "auto" }}>
-        <WelcomeScreen onPromptClick={handlePromptClick} />
+      <div className="main-content">
+        <div style={{ flex: 1, overflowY: "auto" }}>
+          <WelcomeScreen onPromptClick={handlePromptClick} />
+        </div>
       </div>
     </div>
   );
