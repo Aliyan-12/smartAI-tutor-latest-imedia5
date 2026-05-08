@@ -493,7 +493,7 @@ export default function SessionPage() {
       suppressNavigation: true,
       onStreamStart: startStreamTTS,
       onToken: feedStreamTTS,
-      onStreamComplete: (aiText: string, hasSlideTrigger: boolean) => { endStreamTTS(); if (hasSlideTrigger) generateSlide(aiText); },
+      onStreamComplete: (aiText: string, hasSlideTrigger?: boolean) => { endStreamTTS(); if (hasSlideTrigger) generateSlide(aiText); },
     }),
     [sendMessage, startStreamTTS, feedStreamTTS, endStreamTTS, generateSlide]
   );

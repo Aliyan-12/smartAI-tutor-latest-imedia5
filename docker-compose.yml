@@ -1,17 +1,17 @@
 services:
   db:
-    image: pgvector/pgvector:pg16
+    image: pgvector/pgvector:pg17
     restart: unless-stopped
     environment:
-      POSTGRES_USER: ${POSTGRES_USER:-smartai}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-smartai_secret_2024}
-      POSTGRES_DB: ${POSTGRES_DB:-smartai_tutor}
+      POSTGRES_USER: ${POSTGRES_USER:-}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-}
+      POSTGRES_DB: ${POSTGRES_DB:-}
     ports:
       - "5432:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-smartai}"]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-}"]
       interval: 5s
       timeout: 5s
       retries: 5
@@ -28,8 +28,8 @@ services:
       IMAGE_PROVIDER: pexels
       PEXELS_API_KEY: ${PEXELS_API_KEY}
       CAN_CHANGE_KEYS: "false"
-      AUTH_USERNAME: ${PRESENTON_USER:-smartai}
-      AUTH_PASSWORD: ${PRESENTON_PASSWORD:-smartai123}
+      AUTH_USERNAME: ${PRESENTON_USER:-}
+      AUTH_PASSWORD: ${PRESENTON_PASSWORD:-}
     volumes:
       - presenton_data:/app_data
       - ./presenton-patches/get_layout_by_name.py:/app/servers/fastapi/templates/get_layout_by_name.py:ro
