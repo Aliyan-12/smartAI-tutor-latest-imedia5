@@ -9,6 +9,7 @@ import {
   Menu, X,
 } from "lucide-react";
 import { useAuth } from "../context/AuthContext";
+import { chatApi } from "../services/api";
 import type { ChatListItem, Appointment } from "../types";
 
 interface Props {
@@ -405,11 +406,30 @@ export default function Sidebar({
   const location = useLocation();
   const [buyToast, setBuyToast] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
-  const [chatsExpanded, setChatsExpanded] = useState(false);
+  const [chatsExpanded, setChatsExpanded] = useState(true);
+  const [internalChats, setInternalChats] = useState<ChatListItem[]>(chatList);
+
+  const loadInternalChats = () => {
+    if (user?.role === "student") {
+      chatApi.listChats()
+        .then((data) => setInternalChats(data as ChatListItem[]))
+        .catch(() => {});
+    }
+  };
 
   useEffect(() => {
+    loadInternalChats();
     if (onLoadChats) onLoadChats();
-  }, [onLoadChats]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user?.role]);
+
+  const handleDeleteChat = async (sessionId: string) => {
+    try {
+      await chatApi.deleteChat(sessionId);
+      setInternalChats((prev) => prev.filter((c) => c.session_id !== sessionId));
+      if (onDeleteChat) onDeleteChat(sessionId);
+    } catch (_) {}
+  };
 
   // Auto-close sidebar when route changes (e.g. browser back/forward)
   useEffect(() => {
@@ -537,17 +557,15 @@ export default function Sidebar({
 
           {chatsExpanded && (
             <div style={{ paddingLeft: 12, display: "flex", flexDirection: "column", gap: 1 }}>
-              {onNewChat && (
-                <button
-                  className="sb-nav-item"
-                  style={{ fontSize: 12, color: "#1a73e8", paddingTop: 6, paddingBottom: 6 }}
-                  onClick={() => { go("/chat"); if (onNewChat) onNewChat(); }}
-                >
-                  <span style={{ fontSize: 14 }}>＋</span><span>New Chat</span>
-                </button>
-              )}
+              <button
+                className="sb-nav-item"
+                style={{ fontSize: 12, color: "#1a73e8", paddingTop: 6, paddingBottom: 6 }}
+                onClick={() => { navigate("/chat"); if (onNewChat) onNewChat(); }}
+              >
+                <span style={{ fontSize: 14 }}>＋</span><span>New Chat</span>
+              </button>
               {(() => {
-                const regularChats = chatList.filter((c) => !c.title.toLowerCase().startsWith("[session:"));
+                const regularChats = internalChats.filter((c) => !c.title.toLowerCase().startsWith("[session:"));
                 if (regularChats.length === 0) {
                   return <div style={{ fontSize: 12, color: "#475569", padding: "6px 12px" }}>No chats yet</div>;
                 }
@@ -556,7 +574,7 @@ export default function Sidebar({
                   <button
                     className={`sb-nav-item${activeSessionId === chat.session_id ? " active" : ""}`}
                     style={{ fontSize: 12, paddingTop: 6, paddingBottom: 6, flex: 1, minWidth: 0 }}
-                    onClick={() => { go(`/chat/${chat.session_id}`); if (onSelectChat) onSelectChat(chat.session_id); }}
+                    onClick={() => { navigate(`/chat/${chat.session_id}`); if (onSelectChat) onSelectChat(chat.session_id); }}
                     title={chat.title || "Chat"}
                   >
                     <MessageSquare size={13} />
@@ -564,21 +582,19 @@ export default function Sidebar({
                       {chat.title || "Untitled Chat"}
                     </span>
                   </button>
-                  {onDeleteChat && (
-                    <button
-                      onClick={(e) => { e.stopPropagation(); if (onDeleteChat) onDeleteChat(chat.session_id); }}
-                      title="Delete chat"
-                      style={{
-                        background: "none", border: "none", color: "rgba(255,255,255,0.2)",
-                        cursor: "pointer", padding: "4px 5px", borderRadius: 5, flexShrink: 0,
-                        fontSize: 13, lineHeight: 1, transition: "color 0.15s",
-                      }}
-                      onMouseEnter={(e) => (e.currentTarget.style.color = "#ef4444")}
-                      onMouseLeave={(e) => (e.currentTarget.style.color = "rgba(255,255,255,0.2)")}
-                    >
-                      ×
-                    </button>
-                  )}
+                  <button
+                    onClick={(e) => { e.stopPropagation(); handleDeleteChat(chat.session_id); }}
+                    title="Delete chat"
+                    style={{
+                      background: "none", border: "none", color: "rgba(255,255,255,0.2)",
+                      cursor: "pointer", padding: "4px 5px", borderRadius: 5, flexShrink: 0,
+                      fontSize: 13, lineHeight: 1, transition: "color 0.15s",
+                    }}
+                    onMouseEnter={(e) => (e.currentTarget.style.color = "#ef4444")}
+                    onMouseLeave={(e) => (e.currentTarget.style.color = "rgba(255,255,255,0.2)")}
+                  >
+                    ×
+                  </button>
                 </div>
                 ));
               })()}
