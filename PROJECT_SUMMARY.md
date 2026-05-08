@@ -122,19 +122,20 @@ Documents are organized following the UK national curriculum hierarchy:
 |------|-------|------|
 | LoginPage | /login | public |
 | RegisterPage | /register | public |
+| DashboardPage | /student/dashboard | student |
 | ChatPage | /chat, /chat/:sessionId | student |
 | SessionsPage | /sessions | student |
 | SessionPage | /session/:appointmentId | student |
 | ProgressPage | /progress | student |
 | AssignmentsPage | /assignments | student |
 | SettingsPage | /settings | student |
-| AdminDashboard | /admin | admin |
-| TeacherDashboard | /teacher | teacher |
+| AdminDashboard | /admin/dashboard | admin |
+| TeacherDashboard | /teacher/dashboard | teacher |
 | KnowledgeBasePage | /teacher/knowledge | teacher |
 | TeacherReportsPage | /teacher/reports | teacher |
 | TeacherSettingsPage | /teacher/settings | teacher |
 | AppointmentsPage | /appointments | teacher + parent |
-| ParentDashboard | /parent | parent |
+| ParentDashboard | /parent/dashboard | parent |
 | ParentReportsPage | /parent/reports | parent |
 | ParentSettingsPage | /parent/settings | parent |
 | SessionReportPage | /session/:id/report | student |
@@ -324,6 +325,118 @@ Documents are organized following the UK national curriculum hierarchy:
 | Document parsing | pypdf, python-docx, python-pptx |
 | Web scraping | BeautifulSoup4 |
 | Email | Dummy SMTP (dev), HTML templates via email_service.py |
+| Slide generation | Presenton (self-hosted, Docker image `ghcr.io/presenton/presenton:latest`) |
+| Containerisation | Docker + Docker Compose (4 services: db, presenton, backend, frontend) |
+| Reverse proxy | Nginx (inside frontend container for dev; host Nginx + Certbot for production) |
+
+---
+
+## Running the Project
+
+### Option A — Docker (recommended, mirrors production)
+
+```bash
+# First run: build images
+docker compose build
+
+# Start all services
+docker compose up -d
+
+# View logs
+docker compose logs -f backend
+
+# After first start: initialise DB and seed default users
+docker exec -w /app <project>-backend-1 python -m app.setup
+docker exec -w /app <project>-backend-1 python -m app.seed
+
+# Rebuild after frontend/backend code changes
+docker compose build --no-cache frontend backend
+docker compose up -d
+```
+
+Services started by Docker Compose:
+
+| Service | Image / Build | Host Port | Purpose |
+|---------|--------------|-----------|---------|
+| db | pgvector/pgvector:pg17 | 5432 (internal only) | PostgreSQL + pgvector |
+| presenton | ghcr.io/presenton/presenton:latest | 5000 | AI slide generator |
+| backend | ./backend | 8001 | FastAPI (uvicorn) |
+| frontend | ./frontend | 3000 | React app served by nginx |
+
+The frontend nginx container also reverse-proxies `/api/` → `backend:8001` and `/ws/` on the Docker internal network.
+
+### Option B — Local development (no Docker)
+
+**Backend:**
+```bash
+cd backend
+py -3.11 -m venv venv
+./venv/Scripts/activate
+pip install -r requirements.txt
+# Requires a running PostgreSQL with pgvector on localhost:5432
+python -m app.setup      # create tables + run migrations
+python -m app.seed       # seed default users (first run only)
+uvicorn app.main:app --host 0.0.0.0 --port 8001 --reload
+```
+
+**Frontend:**
+```bash
+cd frontend
+npm install
+npm run dev              # starts Vite dev server on http://localhost:5173
+```
+
+> In dev mode the frontend hits `http://localhost:8001` directly. Set `VITE_API_URL` in `frontend/.env` if the backend runs on a different address.
+
+---
+
+## Production Deployment
+
+Live at **https://dev.smartaitutor.online**
+
+Architecture:
+```
+Browser → host Nginx (443/80, Certbot SSL)
+            ├── /          → localhost:3000  (frontend Docker container)
+            ├── /api/      → localhost:8001  (backend Docker container, proxy_buffering off for SSE)
+            ├── /ws/       → localhost:8001  (WebSocket upgrade)
+            └── /slides/   → localhost:5000  (Presenton Docker container)
+```
+
+Deployment steps on VPS:
+```bash
+cd /path/to/directory
+git pull || git clone <repo-url>
+docker compose build --no-cache frontend backend
+docker compose up -d
+```
+
+`PRESENTON_PUBLIC_URL` in `docker-compose.yml` is set to `https://dev.smartaitutor.online/slides` so slide iframe URLs resolve correctly in the browser.
+
+---
+
+## Chat Feature Split (Free vs Paid)
+
+| Feature | Simple Chat `/chat` | AI Session (paid) |
+|---------|--------------------|--------------------|
+| RAG curriculum answers | ✅ | ✅ |
+| Quiz generation | ❌ | ✅ |
+| Slide generation | ❌ | ✅ |
+| Voice mode | ✅ | ✅ |
+| XP / gamification | ✅ | ✅ |
+
+Simple chat uses `SIMPLE_CHAT_SYSTEM_PROMPT` (no `[QUIZ_OFFER]` / `[SLIDE_TRIGGER]` instructions). Session chat uses the full personalised system prompt. The distinction is made in `backend/app/routers/chat.py` via the `is_session` flag (derived from the `appointment_id` FK on the chat).
+
+---
+
+## Role-Based Routes
+
+| Role | Landing page after login | Dashboard route |
+|------|--------------------------|-----------------|
+| Student | /student/dashboard | /student/dashboard |
+| Teacher | /teacher/dashboard | /teacher/dashboard |
+| Parent | /parent/dashboard | /parent/dashboard |
+| Admin | /admin/dashboard | /admin/dashboard |
 
 ---
 
@@ -342,9 +455,11 @@ Documents are organized following the UK national curriculum hierarchy:
 
 | Service | Port | URL |
 |---------|------|-----|
-| Frontend (Vite) | 5173 | http://localhost:5173 |
-| Backend (FastAPI) | 8001 | http://localhost:8001 |
+| Frontend — Vite dev | 5173 | http://localhost:5173 |
+| Frontend — Docker nginx | 3000 | http://localhost:3000 |
+| Backend (FastAPI/uvicorn) | 8001 | http://localhost:8001 |
 | PostgreSQL | 5432 | localhost:5432 |
+| Presenton | 5000 | http://localhost:5000 |
 | API Docs (Swagger) | 8001 | http://localhost:8001/docs |
 
 ---
