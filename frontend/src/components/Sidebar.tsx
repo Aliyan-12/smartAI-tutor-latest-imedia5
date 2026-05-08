@@ -417,6 +417,14 @@ export default function Sidebar({
     }
   };
 
+  // Sync from prop when parent (ChatPage) refreshes its list via useChat
+  useEffect(() => {
+    if (chatList.length > 0) {
+      setInternalChats(chatList);
+    }
+  }, [chatList]);
+
+  // Fetch independently on page navigation (for pages that don't pass chatList)
   useEffect(() => {
     loadInternalChats();
     if (onLoadChats) onLoadChats();
