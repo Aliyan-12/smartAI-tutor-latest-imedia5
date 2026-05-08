@@ -421,7 +421,7 @@ export default function Sidebar({
     loadInternalChats();
     if (onLoadChats) onLoadChats();
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [user?.role]);
+  }, [user?.role, location.pathname]);
 
   const handleDeleteChat = async (sessionId: string) => {
     try {
