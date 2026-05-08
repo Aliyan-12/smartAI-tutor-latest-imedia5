@@ -50,6 +50,7 @@ services:
     environment:
       POSTGRES_HOST: db
       PRESENTON_URL: http://presenton
+      PRESENTON_PUBLIC_URL: http://localhost:5000
     volumes:
       - ./backend:/app
       - backend_uploads:/app/uploads

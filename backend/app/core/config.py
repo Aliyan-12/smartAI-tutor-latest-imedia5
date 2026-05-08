@@ -20,7 +20,7 @@ class Settings(BaseSettings):
 
     gemini_api_key: str = ""
     gemini_model: str = "gemini-2.5-pro" #"gemini-2.5-flash"
-    gemini_model_fast: str = "gemini-2.5-pro"
+    gemini_model_fast: str = "gemini-2.5-flash"
 
     jwt_secret_key: str = "change-this-to-a-random-64-char-string"
     jwt_algorithm: str = "HS256"
@@ -53,6 +53,7 @@ class Settings(BaseSettings):
     default_class_price: float = 25.00
 
     presenton_url: str = "http://localhost:5000"
+    presenton_public_url: str = "http://localhost:5000"
     presenton_api_key: str = ""
     presenton_user: str = "smartai"
     presenton_password: str = "smartai123"

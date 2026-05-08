@@ -31,12 +31,17 @@ _session_cookie_expires: float = 0.0  # Unix timestamp; refresh 1 h before expir
 # ── Topic extraction ──────────────────────────────────────────────────────────
 _TOPIC_SYSTEM = (
     "You are a lesson slide topic extractor for a UK K-12 AI tutoring platform. "
-    "Given an AI tutor's response and the session subject, return ONLY a short topic "
-    "title (max 7 words) if the response teaches a specific educational concept directly "
-    "related to the subject. Return an empty string if the response is a greeting, "
-    "quiz announcement, social exchange, platform instruction, or contains no new "
-    "subject-specific educational content. Output only the title string — no quotes, "
-    "no explanation, no punctuation."
+    "Given an AI tutor's response and the session subject, extract a short topic title "
+    "(max 7 words) that names the main educational concept being taught. "
+    "IMPORTANT: many tutor responses start with a brief affirmation like 'Exactly!', "
+    "'You're right!', 'Great question!', or 'Absolutely!' before teaching content — "
+    "these affirmations do NOT make a response non-educational; extract the topic from "
+    "the teaching content that follows. "
+    "Return an empty string ONLY when the ENTIRE response is one of: "
+    "a pure greeting with zero subject teaching, a quiz score acknowledgement, "
+    "pure praise with no new facts ('Well done!'), or a technical platform instruction. "
+    "If even one sentence teaches or explains a subject concept, extract the topic. "
+    "Output only the title string — no quotes, no explanation, no punctuation."
 )
 
 _TOPIC_PROMPT = """\
@@ -51,7 +56,6 @@ Return the topic title or empty string:"""
 _SHORT_THRESHOLD = 60
 
 _SKIP_PATTERNS = [
-    "hi there", "hello", "how can i help", "welcome",
     "check the test", "try refreshing", "technical issue",
     "i've set up", "i've prepared", "let me set you",
     "[quiz_offer", "[slide_trigger]",
@@ -269,11 +273,12 @@ async def _call_presenton(content: str) -> Optional[dict]:
         return None
 
     raw_path = data.get("path", "")
+    public_base = settings.presenton_public_url.rstrip("/")
     pptx_url = (
         raw_path if raw_path.startswith("http")
-        else f"{settings.presenton_url}{raw_path}"
+        else f"{public_base}{raw_path}"
     )
-    viewer_url = f"{settings.presenton_url}/presentation?id={presentation_id}"
+    viewer_url = f"{public_base}/presentation?id={presentation_id}"
 
     logger.info(f"slides_service: Presenton slide ready — id={presentation_id}")
     return {
@@ -290,10 +295,16 @@ def extract_topic(text: str, subject: str, existing_titles: list[str]) -> Option
     Extract a slide-worthy topic from AI response text (synchronous).
     Returns None if the text should be skipped.
     """
+    text_preview = text.strip()[:80].replace("\n", " ")
+    logger.info(f"slides_service: extract_topic called — subject={subject!r} text_len={len(text)} preview={text_preview!r}")
+
     if _should_skip(text):
+        matched = next((p for p in _SKIP_PATTERNS if p in text.strip().lower()), "too_short")
+        logger.info(f"slides_service: skipped — pattern={matched!r}")
         return None
 
     topic = _extract_topic_sync(text, subject, existing_titles)
+    logger.info(f"slides_service: gemini topic={topic!r}")
     if not topic:
         return None
 
