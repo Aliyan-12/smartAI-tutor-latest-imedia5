@@ -102,7 +102,7 @@ export default function PostSessionScreen({
               <span style={styles.actionBtnIcon}>📊</span>
               <span style={styles.actionBtnText}>View My Progress</span>
             </button>
-            <button style={styles.actionBtn} onClick={() => navigate("/chat")}>
+            <button style={styles.actionBtn} onClick={() => navigate("/student/dashboard")}>
               <span style={styles.actionBtnIcon}>🤖</span>
               <span style={styles.actionBtnText}>Ask AI Tutor</span>
             </button>
@@ -180,12 +180,20 @@ export default function PostSessionScreen({
           <span>🔥 Keep your streak going</span>
         </div>
 
-        <button
-          style={styles.backBtn}
-          onClick={() => navigate("/chat")}
-        >
-          ← Back to Dashboard
-        </button>
+        <div style={{ display: "flex", gap: 10, justifyContent: "center" }}>
+          <button
+            style={styles.backBtn}
+            onClick={() => navigate("/student/dashboard")}
+          >
+            ← Back to Dashboard
+          </button>
+          <button
+            style={{ ...styles.backBtn, background: "rgba(26,115,232,0.08)", borderColor: "rgba(26,115,232,0.3)", color: "#1a73e8" }}
+            onClick={() => navigate("/progress")}
+          >
+            📈 View Weekly Progress
+          </button>
+        </div>
       </div>
     </div>
   );

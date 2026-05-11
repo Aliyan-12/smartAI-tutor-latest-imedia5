@@ -600,9 +600,9 @@ export default function SessionPage() {
           <p className="auth-switch" style={{ marginTop: 16 }}>
             <a
               href="#"
-              onClick={(e) => { e.preventDefault(); navigate("/chat"); }}
+              onClick={(e) => { e.preventDefault(); navigate("/student/dashboard"); }}
             >
-              Back to Chat
+              Back to Dashboard
             </a>
           </p>
         </div>
