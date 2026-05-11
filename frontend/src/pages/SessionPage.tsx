@@ -937,7 +937,7 @@ export default function SessionPage() {
         <div style={{ ...styles.topBarLeft, gap: isSmall ? 6 : 10 }}>
           <button
             style={{ ...styles.dashboardBtn, padding: isSmall ? "4px 8px" : "4px 10px" }}
-            onClick={() => navigate("/chat")}
+            onClick={() => navigate("/student/dashboard")}
             title="Back to Dashboard"
           >
             {isSmall ? "←" : "← Dashboard"}

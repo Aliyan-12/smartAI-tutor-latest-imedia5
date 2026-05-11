@@ -407,6 +407,7 @@ export default function Sidebar({
   const [buyToast, setBuyToast] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
   const [chatsExpanded, setChatsExpanded] = useState(true);
+  const [sessionsExpanded, setSessionsExpanded] = useState(true);
   const [internalChats, setInternalChats] = useState<ChatListItem[]>(chatList);
 
   const loadInternalChats = () => {
@@ -614,12 +615,29 @@ export default function Sidebar({
             </div>
           )}
 
+          {/* Sessions dropdown */}
           <button
-            className={`sb-nav-item${isActive("/sessions") ? " active" : ""}`}
-            onClick={() => go("/sessions")}
+            className={`sb-nav-item${location.pathname.startsWith("/sessions") || location.pathname.startsWith("/session") ? " active" : ""}`}
+            onClick={() => setSessionsExpanded((v) => !v)}
+            style={{ justifyContent: "space-between" }}
           >
-            <BookOpen size={16} /><span>My Sessions</span>
+            <span style={{ display: "flex", alignItems: "center", gap: 10 }}>
+              <BookOpen size={16} /><span>Sessions</span>
+            </span>
+            <span style={{ fontSize: 10, color: "#64748b", transition: "transform 0.2s", transform: sessionsExpanded ? "rotate(180deg)" : "none" }}>▼</span>
           </button>
+
+          {sessionsExpanded && (
+            <div style={{ paddingLeft: 12, display: "flex", flexDirection: "column", gap: 1 }}>
+              <button
+                className={`sb-nav-item${isActive("/sessions") ? " active" : ""}`}
+                style={{ fontSize: 12, paddingTop: 6, paddingBottom: 6 }}
+                onClick={() => go("/sessions")}
+              >
+                <Calendar size={13} /><span>My Sessions</span>
+              </button>
+            </div>
+          )}
           <button className="sb-nav-item disabled">
             <GraduationCap size={16} /><span>Subjects</span>
             <span className="sb-soon-badge">Soon</span>
@@ -706,24 +724,50 @@ export default function Sidebar({
           </button>
 
           <div className="sb-section-label">Teaching</div>
+          {/* Sessions dropdown */}
           <button
-            className={`sb-nav-item${isActive("/appointments") ? " active" : ""}`}
-            onClick={() => go("/appointments")}
+            className={`sb-nav-item${(location.pathname.startsWith("/appointments") || isActive("/teacher/reports")) ? " active" : ""}`}
+            onClick={() => setSessionsExpanded((v) => !v)}
+            style={{ justifyContent: "space-between" }}
           >
-            <Calendar size={16} /><span>Sessions</span>
+            <span style={{ display: "flex", alignItems: "center", gap: 10 }}>
+              <Calendar size={16} /><span>Sessions</span>
+            </span>
+            <span style={{ fontSize: 10, color: "#64748b", transition: "transform 0.2s", transform: sessionsExpanded ? "rotate(180deg)" : "none" }}>▼</span>
           </button>
+
+          {sessionsExpanded && (
+            <div style={{ paddingLeft: 12, display: "flex", flexDirection: "column", gap: 1 }}>
+              <button
+                className={`sb-nav-item${isActive("/appointments/new") ? " active" : ""}`}
+                style={{ fontSize: 12, color: "#1a73e8", paddingTop: 6, paddingBottom: 6 }}
+                onClick={() => go("/appointments/new")}
+              >
+                <span style={{ fontSize: 14 }}>＋</span><span>New Session</span>
+              </button>
+              <button
+                className={`sb-nav-item${isActive("/appointments") ? " active" : ""}`}
+                style={{ fontSize: 12, paddingTop: 6, paddingBottom: 6 }}
+                onClick={() => go("/appointments")}
+              >
+                <Calendar size={13} /><span>All Sessions</span>
+              </button>
+              <button
+                className={`sb-nav-item${isActive("/teacher/reports") ? " active" : ""}`}
+                style={{ fontSize: 12, paddingTop: 6, paddingBottom: 6 }}
+                onClick={() => go("/teacher/reports")}
+              >
+                <FileText size={13} /><span>Session Reports</span>
+              </button>
+            </div>
+          )}
+
           <button
             className={`sb-nav-item${isActive("/teacher/assignments") ? " active" : ""}`}
             onClick={() => go("/teacher/assignments")}
           >
             <ClipboardList size={16} /><span>Assignments</span>
             <span className="sb-soon-badge">Soon</span>
-          </button>
-          <button
-            className={`sb-nav-item${isActive("/teacher/reports") ? " active" : ""}`}
-            onClick={() => go("/teacher/reports")}
-          >
-            <FileText size={16} /><span>Session Reports</span>
           </button>
           <button
             className={`sb-nav-item${isActive("/teacher/knowledge") ? " active" : ""}`}
@@ -782,18 +826,43 @@ export default function Sidebar({
           </button>
 
           <div className="sb-section-label">Learning</div>
+          {/* Sessions dropdown */}
           <button
-            className={`sb-nav-item${isActive("/appointments") ? " active" : ""}`}
-            onClick={() => go("/appointments")}
+            className={`sb-nav-item${(location.pathname.startsWith("/appointments") || isActive("/parent/reports")) ? " active" : ""}`}
+            onClick={() => setSessionsExpanded((v) => !v)}
+            style={{ justifyContent: "space-between" }}
           >
-            <Calendar size={16} /><span>Book Sessions</span>
+            <span style={{ display: "flex", alignItems: "center", gap: 10 }}>
+              <Calendar size={16} /><span>Sessions</span>
+            </span>
+            <span style={{ fontSize: 10, color: "#64748b", transition: "transform 0.2s", transform: sessionsExpanded ? "rotate(180deg)" : "none" }}>▼</span>
           </button>
-          <button
-            className={`sb-nav-item${isActive("/parent/reports") ? " active" : ""}`}
-            onClick={() => go("/parent/reports")}
-          >
-            <FileText size={16} /><span>Session Reports</span>
-          </button>
+
+          {sessionsExpanded && (
+            <div style={{ paddingLeft: 12, display: "flex", flexDirection: "column", gap: 1 }}>
+              <button
+                className={`sb-nav-item${isActive("/appointments/new") ? " active" : ""}`}
+                style={{ fontSize: 12, color: "#1a73e8", paddingTop: 6, paddingBottom: 6 }}
+                onClick={() => go("/appointments/new")}
+              >
+                <span style={{ fontSize: 14 }}>＋</span><span>New Session</span>
+              </button>
+              <button
+                className={`sb-nav-item${isActive("/appointments") ? " active" : ""}`}
+                style={{ fontSize: 12, paddingTop: 6, paddingBottom: 6 }}
+                onClick={() => go("/appointments")}
+              >
+                <Calendar size={13} /><span>All Sessions</span>
+              </button>
+              <button
+                className={`sb-nav-item${isActive("/parent/reports") ? " active" : ""}`}
+                style={{ fontSize: 12, paddingTop: 6, paddingBottom: 6 }}
+                onClick={() => go("/parent/reports")}
+              >
+                <FileText size={13} /><span>Session Reports</span>
+              </button>
+            </div>
+          )}
           <button
             className={`sb-nav-item${isActive("/parent/progress") ? " active" : ""}`}
             onClick={() => go("/parent/progress")}

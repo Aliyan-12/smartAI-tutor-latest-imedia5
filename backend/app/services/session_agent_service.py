@@ -183,6 +183,65 @@ async def build_session_system_prompt(
     key_stage = appointment.key_stage
     title = appointment.title or f"{subject} Session"
     description = appointment.description or "Cover the session topic thoroughly."
+
+    # Parse structured fields from description (set by booking form)
+    _topics_match = _re.search(r"Topics?:\s*([^\n]+)", description, _re.IGNORECASE)
+    _type_match = _re.search(r"Session type:\s*([^\n]+)", description, _re.IGNORECASE)
+
+    session_type_raw = _type_match.group(1).strip() if _type_match else "General Tutoring"
+    topics_raw = _topics_match.group(1).strip() if _topics_match else ""
+
+    # Build a clean topic list (split by comma, strip dashes/underscores)
+    if topics_raw:
+        topics_list = [t.strip().replace("-", " ").replace("_", " ").title() for t in topics_raw.split(",") if t.strip()]
+    else:
+        topics_list = []
+
+    topics_str = "\n".join(f"  • {t}" for t in topics_list) if topics_list else "  • General session topic (no specific units pre-selected)"
+
+    # Strip the Topics/Session type lines from description so only actual notes remain
+    tutor_notes = _re.sub(r"Topics?:\s*[^\n]+\n?", "", description, flags=_re.IGNORECASE)
+    tutor_notes = _re.sub(r"Session type:\s*[^\n]+\n?", "", tutor_notes, flags=_re.IGNORECASE).strip()
+    tutor_notes = tutor_notes if tutor_notes else "None"
+
+    # Map session type to specific AI behaviour instructions
+    SESSION_TYPE_INSTRUCTIONS = {
+        "Homework Help": (
+            "HOMEWORK HELP MODE: The student needs help with specific homework. "
+            "Ask what exact question or problem they are stuck on. Walk them through it step-by-step. "
+            "Don't just give the answer — guide them to understand the method."
+        ),
+        "Revision": (
+            "REVISION MODE: The student is revisiting previously learned material. "
+            "Start by asking what they already remember about the topic — use their answer to gauge depth. "
+            "Reinforce key points, correct misconceptions, and fill gaps."
+        ),
+        "Exam Prep": (
+            "EXAM PREP MODE: Treat this like a focused exam practice session. "
+            "After explaining each concept, ask an exam-style question. Use precise, exam-board appropriate language. "
+            "Reference common mistakes students make in exams for this topic."
+        ),
+        "Topic Introduction": (
+            "TOPIC INTRODUCTION MODE: This is the student's FIRST encounter with this topic. "
+            "Start from zero assumptions. Build understanding from the ground up with clear analogies. "
+            "Go extra slowly — confirm understanding before each next concept."
+        ),
+        "General Tutoring": (
+            "GENERAL TUTORING MODE: Cover the topic comprehensively at the student's pace. "
+            "Balance explanation with interaction."
+        ),
+    }
+    session_type_instruction = SESSION_TYPE_INSTRUCTIONS.get(session_type_raw, SESSION_TYPE_INSTRUCTIONS["General Tutoring"])
+
+    scheduled_str = ""
+    if appointment.scheduled_at:
+        _sched = appointment.scheduled_at
+        if _sched.tzinfo is None:
+            _sched = _sched.replace(tzinfo=_dt.timezone.utc)
+        scheduled_str = _sched.strftime("%A, %d %B %Y at %H:%M UTC")
+    else:
+        scheduled_str = "Not specified"
+
     duration_minutes: int = appointment.duration_minutes or 60
 
     # Calculate elapsed / remaining time so we can gate quiz offers accurately
@@ -203,6 +262,8 @@ async def build_session_system_prompt(
     teaching_pace = profile.teaching_pace if profile else "just_right"
     interests_list = profile.interests or [] if profile else []
     interests = ", ".join(interests_list) if interests_list else "not specified"
+    learning_goals_list = profile.learning_goals if profile and hasattr(profile, "learning_goals") and profile.learning_goals else []
+    learning_goals_str = ", ".join(learning_goals_list) if learning_goals_list else "not specified"
     teaching_prefs = profile.teaching_preferences or {} if profile else {}
 
     prefs_parts = []
@@ -335,12 +396,20 @@ The following are real excerpts from an expert {subject} tutor. Study how they e
 SESSION CONTEXT:
 - Subject: {subject} | Key Stage: {key_stage}
 - Session Title: {title}
-- Session Goal: {description}
-- Session duration: {duration_minutes} minutes | Time elapsed: ~{elapsed_minutes} min | Time remaining: ~{remaining_minutes} min
+- Session Type: {session_type_raw}
+- Scheduled: {scheduled_str}
+- Duration: {duration_minutes} min | Elapsed: ~{elapsed_minutes} min | Remaining: ~{remaining_minutes} min
+
+TOPICS TO COVER THIS SESSION:
+{topics_str}
+
+TUTOR NOTES FROM BOOKING:
+{tutor_notes}
 
 STUDENT PROFILE:
 - XP Level: {xp_level}/10 | Learning Style: {learning_style} | Pace: {teaching_pace}
 - Interests: {interests} | Preferences: {preferences_str}
+- Learning Goals: {learning_goals_str}
 
 STUDENT PROGRESS IN {subject.upper()}:
 - Strong: {strong_str}
@@ -404,6 +473,9 @@ SLIDE TRIGGER RULE — FOLLOW EXACTLY:
   - Your response is only a check-in question with no new teaching content
   - You are troubleshooting a platform problem or giving UI navigation advice
 - One [SLIDE_TRIGGER] per response maximum, at the absolute end, never in the middle.
+
+SESSION-TYPE BEHAVIOUR:
+{session_type_instruction}
 
 {training_style_section}
 {start_instruction}

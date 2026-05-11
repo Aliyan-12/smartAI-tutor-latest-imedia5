@@ -8,6 +8,7 @@ import TeacherDashboard from "./pages/TeacherDashboard";
 import KnowledgeBasePage from "./pages/KnowledgeBasePage";
 import ParentDashboard from "./pages/ParentDashboard";
 import AppointmentsPage from "./pages/AppointmentsPage";
+import BookSessionPage from "./pages/BookSessionPage";
 import SessionPage from "./pages/SessionPage";
 import SessionsPage from "./pages/SessionsPage";
 import ProgressPage from "./pages/ProgressPage";
@@ -104,6 +105,7 @@ export default function App() {
           <Route path="/parent/reports" element={<ProtectedRoute allowedRoles={["parent"]}><ParentReportsPage /></ProtectedRoute>} />
           <Route path="/parent/settings" element={<ProtectedRoute allowedRoles={["parent"]}><ParentSettingsPage /></ProtectedRoute>} />
           <Route path="/appointments" element={<ProtectedRoute allowedRoles={["admin", "teacher", "parent"]}><AppointmentsPage /></ProtectedRoute>} />
+          <Route path="/appointments/new" element={<ProtectedRoute allowedRoles={["teacher", "parent"]}><BookSessionPage /></ProtectedRoute>} />
           <Route path="/admin/assessments" element={<ProtectedRoute allowedRoles={["admin"]}><AdminDashboard /></ProtectedRoute>} />
           <Route
             path="/student/dashboard"
