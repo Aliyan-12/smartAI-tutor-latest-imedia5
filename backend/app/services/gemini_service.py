@@ -1,4 +1,5 @@
 import time
+import re as _re_json
 from typing import AsyncGenerator, List, Optional, TYPE_CHECKING
 import logging
 
@@ -275,6 +276,15 @@ def strip_quiz_offer(text: str) -> str:
     return QUIZ_OFFER_RE.sub("", text).rstrip()
 
 
+def _repair_json(raw: str) -> str:
+    """Fix common Gemini JSON output issues: trailing commas, unescaped control chars."""
+    # Remove trailing commas before } or ]
+    raw = _re_json.sub(r",\s*([}\]])", r"\1", raw)
+    # Remove literal tab/newline/CR inside JSON strings (replace with space)
+    raw = _re_json.sub(r'(?<!\\)([\t\r\n])', " ", raw)
+    return raw
+
+
 def _extract_json_array(raw: str) -> str:
     """Extract the first complete JSON array from raw text, ignoring trailing content."""
     start = raw.find("[")
@@ -399,7 +409,12 @@ def generate_mcq_questions(
         raw = raw.strip()
 
     raw = _extract_json_array(raw)
-    return json_module.loads(raw)
+    raw = _repair_json(raw)
+    try:
+        return json_module.loads(raw)
+    except json_module.JSONDecodeError as exc:
+        logger.error(f"MCQ JSON parse failed even after repair — raw snippet: {raw[:300]!r}")
+        raise exc
 
 
 def generate_assessment_report(
