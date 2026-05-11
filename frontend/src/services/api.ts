@@ -18,7 +18,15 @@ function authHeaders(): HeadersInit {
 async function handleResponse<T>(response: Response): Promise<T> {
   if (!response.ok) {
     const body = await response.json().catch(() => ({}));
-    throw new Error(body.detail || `Request failed with status ${response.status}`);
+    // FastAPI validation errors return detail as an array [{loc, msg, type}]
+    const detail = body.detail;
+    let message: string;
+    if (Array.isArray(detail)) {
+      message = detail.map((e: { msg?: string }) => e.msg || "Validation error").join("; ");
+    } else {
+      message = detail || `Request failed with status ${response.status}`;
+    }
+    throw new Error(message);
   }
   return response.json();
 }

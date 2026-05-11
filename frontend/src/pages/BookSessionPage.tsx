@@ -673,8 +673,8 @@ export default function BookSessionPage() {
     </form>
   );
 
-  // ── Parent: right-side Session Summary panel ─────────────────────────
-  const summaryPanel = isParent && (
+  // ── Parent + Teacher: right-side Session Summary panel ───────────────
+  const summaryPanel = (isParent || isTeacher) && (
     <div
       style={{
         width: 300,
