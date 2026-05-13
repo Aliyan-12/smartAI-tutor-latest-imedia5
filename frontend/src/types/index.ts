@@ -20,7 +20,7 @@ export interface AuthResponse {
 export interface ChatMessage {
   id: number;
   chat_id: number;
-  role: "user" | "assistant" | "system";
+  role: "user" | "assistant" | "system" | "quiz_result";
   content: string;
   timestamp: string;
 }

@@ -228,7 +228,7 @@ export function useChat() {
 
   const clearQuizOffer = useCallback(() => setQuizOffer(null), []);
 
-  // Send quiz result silently — AI gets the data and responds, but NO user bubble is added
+  // Send quiz result — adds a visible quiz_result bubble for the student, then streams AI response
   const sendQuizFeedback = useCallback((
     sessionId: string,
     topic: string,
@@ -239,8 +239,22 @@ export function useChat() {
       onStreamStart?: () => void;
       onToken?: (chunk: string) => void;
       onStreamComplete?: (text: string) => void;
-    }
+    },
+    questionDetails?: Array<{ question_text: string; chosen_text: string; correct_text: string; is_correct: boolean }>
   ) => {
+    // Build human-readable summary for the visible quiz_result bubble
+    const scoreRound = Math.round(score);
+    const quizResultContent = `Quiz completed: ${scoreRound}% on "${topic}"`;
+
+    // Add a styled quiz_result message so the student sees what happened
+    setMessages((prev) => [...prev, {
+      id: Date.now(),
+      chat_id: 0,
+      role: "quiz_result" as const,
+      content: quizResultContent,
+      timestamp: new Date().toISOString(),
+    }]);
+
     setStreaming(true);
     setStreamContent("");
     let accumulated = "";
@@ -274,7 +288,8 @@ export function useChat() {
         console.error("Quiz feedback stream error:", err);
         setStreaming(false);
         setStreamContent("");
-      }
+      },
+      questionDetails
     );
 
     cancelRef.current = cancel;

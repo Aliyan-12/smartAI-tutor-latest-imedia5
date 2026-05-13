@@ -167,7 +167,8 @@ export const chatApi = {
     weak: string[],
     onEvent: (event: { type: string; content?: string; session_id?: string }) => void,
     onDone: () => void,
-    onError: (err: Error) => void
+    onError: (err: Error) => void,
+    questionDetails?: Array<{ question_text: string; chosen_text: string; correct_text: string; is_correct: boolean }>
   ) {
     const token = getToken();
     const controller = new AbortController();
@@ -175,7 +176,7 @@ export const chatApi = {
     fetch(`${API_BASE}/chat/quiz-feedback`, {
       method: "POST",
       headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-      body: JSON.stringify({ session_id: sessionId, topic, score, strong, weak }),
+      body: JSON.stringify({ session_id: sessionId, topic, score, strong, weak, question_details: questionDetails }),
       signal: controller.signal,
     })
       .then(async (res) => {

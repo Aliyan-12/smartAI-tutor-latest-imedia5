@@ -158,6 +158,58 @@ async def _fetch_unit_kb_content_rag(
     return "\n\n".join(all_content)[:max_chars]
 
 
+def _get_lesson_plan(duration_minutes: int) -> str:
+    """Return the full session plan as a readable string for injection into the AI prompt."""
+    if duration_minutes <= 35:
+        return (
+            f"FULL {duration_minutes}-MINUTE LESSON PLAN:\n"
+            f"  • Phase 1 — Introduction     (0–3 min):   Warm greeting. State today's topic + learning goal in 1-2 sentences.\n"
+            f"  • Phase 2 — Core Teaching    (3–18 min):  Teach each key concept step by step. One concept per turn. Check understanding after each one.\n"
+            f"  • Phase 3 — Guided Practice  (18–25 min): Work through practice examples together. Guide the student — don't just give answers.\n"
+            f"  • Phase 4 — Quiz Time        (25–28 min): Offer a formal quiz (if QUIZ PHASE is active). Otherwise do quick recall questions.\n"
+            f"  • Phase 5 — Session Summary  (28–30 min): 2-3 sentence recap of what was learned. Encourage + suggest what to revisit."
+        )
+    else:
+        return (
+            f"FULL {duration_minutes}-MINUTE LESSON PLAN:\n"
+            f"  • Phase 1 — Warm-Up          (0–5 min):   Greet the student. Check prior knowledge with 1-2 questions to calibrate your teaching level.\n"
+            f"  • Phase 2 — Core Teaching    (5–30 min):  Teach all key concepts systematically. One concept per turn, check after each. Build from simple → complex.\n"
+            f"  • Phase 3 — Guided Practice  (30–45 min): Deep practice. Worked examples, past exam questions, step-by-step problem solving together.\n"
+            f"  • Phase 4 — Quiz Time        (45–55 min): Offer a formal quiz (if QUIZ PHASE is active). Focus on topics covered today.\n"
+            f"  • Phase 5 — Session Summary  (55–60 min): Full recap of all concepts. Praise strong performance. Set a clear focus for next session."
+        )
+
+
+def _get_lesson_phase(elapsed_minutes: int, duration_minutes: int) -> dict:
+    """Return the current lesson phase name and AI instruction based on elapsed time."""
+    pct = elapsed_minutes / max(duration_minutes, 1) * 100
+
+    if duration_minutes <= 35:
+        # 30-minute lesson structure
+        if pct < 12:   # 0-3.5 min
+            return {"phase": "Introduction (Phase 1/5)", "instruction": "Greet the student warmly, state today's topic and what they'll learn by the end. Keep it to 2-3 sentences. Do NOT start teaching concepts yet."}
+        elif pct < 62:  # 3.5-18.5 min
+            return {"phase": "Core Teaching (Phase 2/5)", "instruction": "Teach the main concepts one at a time. After each concept, ask ONE short interaction question. Build gradually — do not rush."}
+        elif pct < 85:  # 18.5-25 min
+            return {"phase": "Guided Practice (Phase 3/5)", "instruction": "Move into practice. Give the student a worked example or short problem to try. Guide them through it — don't give the answer directly. Encourage effort."}
+        elif pct < 95:  # 25-28.5 min
+            return {"phase": "Quiz Time (Phase 4/5)", "instruction": "Teaching is complete. If QUIZ PHASE is active, offer the formal quiz now. Otherwise do 1-2 quick recall questions to consolidate."}
+        else:            # 28.5-30 min
+            return {"phase": "Session Summary (Phase 5/5)", "instruction": "Give a brief 2-3 sentence summary of exactly what was learned today. Tell the student one specific thing to review before next time. Be warm and encouraging."}
+    else:
+        # 60-minute lesson structure
+        if pct < 9:    # 0-5 min
+            return {"phase": "Warm-Up (Phase 1/5)", "instruction": "Greet the student. Ask 1-2 quick questions to check what they already know about today's topic. Use their answers to decide how basic or advanced to pitch your teaching."}
+        elif pct < 50:  # 5-30 min
+            return {"phase": "Core Teaching (Phase 2/5)", "instruction": "Teach all main concepts one at a time, from simple to complex. Use clear explanations and real-world examples. After each concept, ask ONE interaction question to confirm understanding before moving on."}
+        elif pct < 75:  # 30-45 min
+            return {"phase": "Guided Practice (Phase 3/5)", "instruction": "Move into deeper practice now. Give worked examples, guide problem-solving, or work through past exam questions together. Scaffold carefully — prompt thinking, don't give answers directly."}
+        elif pct < 92:  # 45-55 min
+            return {"phase": "Quiz Time (Phase 4/5)", "instruction": "The teaching phase is complete. If QUIZ PHASE is active, offer the formal quiz now to test everything covered today. Otherwise do targeted recall questions on the weakest areas."}
+        else:            # 55-60 min
+            return {"phase": "Session Summary (Phase 5/5)", "instruction": "Summarise all key concepts covered today in 3-4 sentences. Highlight what the student did particularly well. Suggest one specific topic to review or practise before the next session."}
+
+
 async def build_session_system_prompt(
     db: AsyncSession,
     appointment_id: int,
@@ -316,9 +368,14 @@ async def build_session_system_prompt(
         )
     session_quiz_str = "\n".join(session_quiz_lines) if session_quiz_lines else "  No quizzes completed in this session yet."
 
-    # Quiz timing gate — quizzes only allowed in the final phase of the session
-    QUIZ_UNLOCK_AFTER_MINUTES = 40  # no quiz before this mark
-    QUIZ_UNLOCK_REMAINING_MINUTES = 20  # also unlock if < 20 mins remaining
+    # Quiz timing gate — adjusted per session duration
+    if duration_minutes <= 35:
+        QUIZ_UNLOCK_AFTER_MINUTES = 20
+        QUIZ_UNLOCK_REMAINING_MINUTES = 8
+    else:
+        QUIZ_UNLOCK_AFTER_MINUTES = 40
+        QUIZ_UNLOCK_REMAINING_MINUTES = 18
+
     quiz_phase = (
         elapsed_minutes >= QUIZ_UNLOCK_AFTER_MINUTES
         or remaining_minutes <= QUIZ_UNLOCK_REMAINING_MINUTES
@@ -346,6 +403,12 @@ async def build_session_system_prompt(
             f"{remaining_quizzes} more quiz(zes). Frame it as a final test: "
             "'We've covered a lot today — let me set you a quick test to check what you've learned!'"
         )
+
+    # Lesson phase + full plan
+    lesson_phase_info = _get_lesson_phase(elapsed_minutes, duration_minutes)
+    lesson_phase_name = lesson_phase_info["phase"]
+    lesson_phase_instruction = lesson_phase_info["instruction"]
+    lesson_plan_str = _get_lesson_plan(duration_minutes)
 
     # Continuation vs fresh start
     is_continuation = history_len > 0
@@ -399,6 +462,9 @@ SESSION CONTEXT:
 - Session Type: {session_type_raw}
 - Scheduled: {scheduled_str}
 - Duration: {duration_minutes} min | Elapsed: ~{elapsed_minutes} min | Remaining: ~{remaining_minutes} min
+- Current Lesson Phase: {lesson_phase_name}
+
+{lesson_plan_str}
 
 TOPICS TO COVER THIS SESSION:
 {topics_str}
@@ -420,6 +486,12 @@ THIS SESSION'S QUIZ RESULTS:
 {session_quiz_str}
 
 QUIZ STATUS: {quiz_timing_note}
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+CURRENT PHASE INSTRUCTION:
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+You are now in the **{lesson_phase_name}** phase of this session.
+{lesson_phase_instruction}
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 TEACHING STYLE — FOLLOW THESE STRICTLY:
@@ -447,10 +519,16 @@ TEACHING STYLE — FOLLOW THESE STRICTLY:
    ── ALWAYS ──
    - NEVER use vague check-ins like "Does that make sense?" or "Any questions?"
    - If the student asks YOU a question, answer it naturally — do not bolt an interaction prompt onto the end of that specific reply.
-4. CONVERSATIONAL TONE: Write as a friendly teacher talking to the student — not as a textbook. No headers, no numbered lists unless the student asks.
+4. CONVERSATIONAL TONE: Write like a friendly, enthusiastic teacher talking directly to the student — not like a textbook. Use contractions ("you've", "let's", "it's"). No headers, no bullet lists unless asked. Short sentences. Natural language.
 5. BUILD GRADUALLY: Teach one concept → get student response → teach next concept. Do not jump ahead.
 6. ANALOGIES & EXAMPLES: Use a simple real-world analogy or example the student can picture. Keep it age-appropriate for {key_stage}.
-7. ENCOURAGEMENT: Be warm, patient, and positive. Celebrate correct answers. Never make the student feel bad for not knowing something.
+7. ENCOURAGEMENT & PERSONALITY: You are a warm, enthusiastic tutor who genuinely cares about the student's progress.
+   - Celebrate correct answers specifically: "Exactly right! Well done." / "That's perfect — you've really understood this."
+   - When they get something wrong, guide them gently: "Not quite — let's think about it this way..." / "Good try! The key thing to remember is..."
+   - NEVER give direct answers immediately. First ask a guiding question: "What do you think happens when...?" / "Can you recall what we said about...?"
+   - Use the student's name occasionally if you know it (it's in the profile).
+   - Short encouraging phrases: "You're making great progress!", "Keep it up!", "That's a tricky one — let's break it down."
+   - NEVER say "Great question!" — it's hollow. Instead, answer the question directly and warmly.
 
 QUIZ RULES — FOLLOW EXACTLY:
 - {quiz_timing_note}

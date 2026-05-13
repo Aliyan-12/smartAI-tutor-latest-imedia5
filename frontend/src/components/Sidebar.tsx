@@ -617,7 +617,7 @@ export default function Sidebar({
 
           {/* Sessions dropdown */}
           <button
-            className={`sb-nav-item${location.pathname.startsWith("/sessions") || location.pathname.startsWith("/session") ? " active" : ""}`}
+            className={`sb-nav-item${location.pathname.startsWith("/sessions") || location.pathname.startsWith("/session") || isActive("/lesson/setup") ? " active" : ""}`}
             onClick={() => setSessionsExpanded((v) => !v)}
             style={{ justifyContent: "space-between" }}
           >
@@ -630,6 +630,13 @@ export default function Sidebar({
           {sessionsExpanded && (
             <div style={{ paddingLeft: 12, display: "flex", flexDirection: "column", gap: 1 }}>
               <button
+                className={`sb-nav-item${isActive("/lesson/setup") ? " active" : ""}`}
+                style={{ fontSize: 12, color: "#1a73e8", paddingTop: 6, paddingBottom: 6 }}
+                onClick={() => go("/lesson/setup")}
+              >
+                <span style={{ fontSize: 14 }}>＋</span><span>Start a Lesson</span>
+              </button>
+              <button
                 className={`sb-nav-item${isActive("/sessions") ? " active" : ""}`}
                 style={{ fontSize: 12, paddingTop: 6, paddingBottom: 6 }}
                 onClick={() => go("/sessions")}
@@ -638,10 +645,6 @@ export default function Sidebar({
               </button>
             </div>
           )}
-          <button className="sb-nav-item disabled">
-            <GraduationCap size={16} /><span>Subjects</span>
-            <span className="sb-soon-badge">Soon</span>
-          </button>
           <button
             className={`sb-nav-item${isActive("/progress") ? " active" : ""}`}
             onClick={() => go("/progress")}

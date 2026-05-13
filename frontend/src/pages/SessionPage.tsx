@@ -66,6 +66,8 @@ export default function SessionPage() {
   const [practiceAnswering, setPracticeAnswering] = useState(false);
   const [testAnswering, setTestAnswering] = useState(false);
 
+  const [isAiTyping, setIsAiTyping] = useState(false);
+
   const {
     messages, streaming, streamContent, sendMessage, stopStreaming,
     initSessionChat, activeSessionId, quizOffer, clearQuizOffer, sendQuizFeedback,
@@ -208,6 +210,11 @@ export default function SessionPage() {
     if (!isVoiceActive || !testResult) return;
     speakText(`Quiz complete! You scored ${Math.round(testResult.score)} percent. ${testResult.weak.length > 0 ? `Areas to review: ${testResult.weak.join(", ")}.` : "Great job on all topics!"}`);
   }, [testResult]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Clear typing indicator as a safety net if streaming ends without firing onStreamStart
+  useEffect(() => {
+    if (!streaming) setIsAiTyping(false);
+  }, [streaming]);
 
   useEffect(() => {
     const check = () => {
@@ -381,15 +388,28 @@ export default function SessionPage() {
         setTestFeedback(null);
         clearQuizOffer();
 
-        // Notify AI of quiz result silently — no user bubble, AI responds in chat/voice
+        // Build per-question detail for the AI so it can address specific wrong answers
+        const questionDetails = capturedQuestions.map((q) => ({
+          question_text: q.question_text,
+          chosen_text: q.student_answer !== null && q.student_answer !== undefined
+            ? (q.options[q.student_answer] ?? `Option ${q.student_answer + 1}`)
+            : "No answer",
+          correct_text: q.correct_answer !== null && q.correct_answer !== undefined
+            ? (q.options[q.correct_answer] ?? `Option ${q.correct_answer + 1}`)
+            : "Unknown",
+          is_correct: q.is_correct === true,
+        }));
+
+        // Notify AI of quiz result — adds a visible quiz_result bubble + AI responds in chat/voice
         if (isVoiceActive) {
           sendQuizResult(quizTopic, quizScore, quizStrong, quizWeak);
         } else if (activeSessionId) {
+          setIsAiTyping(true);
           sendQuizFeedback(activeSessionId, quizTopic, quizScore, quizStrong, quizWeak, {
-            onStreamStart: startStreamTTS,
+            onStreamStart: () => { setIsAiTyping(false); startStreamTTS(); },
             onToken: feedStreamTTS,
-            onStreamComplete: endStreamTTS,
-          });
+            onStreamComplete: () => { setIsAiTyping(false); endStreamTTS(); },
+          }, questionDetails);
         }
       } catch (err: any) {
         setTestError(err.message || "Failed to complete test");
@@ -489,12 +509,15 @@ export default function SessionPage() {
   }, [sessionSubject, sessionKeyStage, apptId, slideHistory]);
 
   const sessionSend = useCallback(
-    (text: string) => sendMessage(text, {
-      suppressNavigation: true,
-      onStreamStart: startStreamTTS,
-      onToken: feedStreamTTS,
-      onStreamComplete: (aiText: string, hasSlideTrigger?: boolean) => { endStreamTTS(); if (hasSlideTrigger) generateSlide(aiText); },
-    }),
+    (text: string) => {
+      setIsAiTyping(true);
+      sendMessage(text, {
+        suppressNavigation: true,
+        onStreamStart: () => { setIsAiTyping(false); startStreamTTS(); },
+        onToken: feedStreamTTS,
+        onStreamComplete: (aiText: string, hasSlideTrigger?: boolean) => { setIsAiTyping(false); endStreamTTS(); if (hasSlideTrigger) generateSlide(aiText); },
+      });
+    },
     [sendMessage, startStreamTTS, feedStreamTTS, endStreamTTS, generateSlide]
   );
 
@@ -912,6 +935,7 @@ export default function SessionPage() {
             streaming={streaming}
             streamContent={streamContent}
             onSpeak={speakText}
+            isAiTyping={isAiTyping}
           />
         ) : null}
       </div>
