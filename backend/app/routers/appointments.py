@@ -34,16 +34,26 @@ async def list_teachers(
 @router.post("/book", response_model=AppointmentResponse)
 async def book_appointment(
     payload: AppointmentCreate,
-    current_user: User = Depends(require_parent_or_teacher),
+    current_user: User = Depends(require_any_authenticated),
     db: AsyncSession = Depends(get_db),
 ):
+    is_self_booking = current_user.role == ROLE_STUDENT
+
+    # Students can only book AI sessions for themselves
+    if is_self_booking and payload.student_id != current_user.id:
+        raise HTTPException(status_code=403, detail="Students can only book sessions for themselves")
+
     student = await get_user_by_id(db, payload.student_id)
     if not student:
         raise HTTPException(status_code=404, detail="Student not found")
 
-    teacher = await get_user_by_id(db, payload.teacher_id)
-    if not teacher:
-        raise HTTPException(status_code=404, detail="Teacher not found")
+    # For parent/teacher bookings validate the teacher exists; for student AI sessions skip it
+    if not is_self_booking:
+        teacher = await get_user_by_id(db, payload.teacher_id)
+        if not teacher:
+            raise HTTPException(status_code=404, detail="Teacher not found")
+    else:
+        teacher = student  # AI session — student acts as their own booking owner
 
     if current_user.role == ROLE_PARENT and student.parent_id != current_user.id:
         raise HTTPException(status_code=403, detail="Student is not linked to your account")
@@ -67,20 +77,26 @@ async def book_appointment(
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(e))
 
-    parent_email = None
-    if student.parent_id:
-        parent_user = await get_user_by_id(db, student.parent_id)
-        if parent_user:
-            parent_email = parent_user.email
+    # Auto-confirm AI sessions booked by students so they can join immediately
+    if is_self_booking:
+        appointment.status = "confirmed"
+        await db.flush()
+        await db.refresh(appointment)
+    else:
+        parent_email = None
+        if student.parent_id:
+            parent_user = await get_user_by_id(db, student.parent_id)
+            if parent_user:
+                parent_email = parent_user.email
 
-    email_service.send_booking_confirmation(
-        student_email=student.email,
-        student_name=student.name,
-        teacher_name=teacher.name,
-        subject=payload.subject,
-        scheduled_at=payload.scheduled_at,
-        parent_email=parent_email,
-    )
+        email_service.send_booking_confirmation(
+            student_email=student.email,
+            student_name=student.name,
+            teacher_name=teacher.name,
+            subject=payload.subject,
+            scheduled_at=payload.scheduled_at,
+            parent_email=parent_email,
+        )
 
     resp = AppointmentResponse.model_validate(appointment)
     resp.student_name = student.name

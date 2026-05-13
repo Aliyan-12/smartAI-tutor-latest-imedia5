@@ -12,7 +12,7 @@ import { useVoice } from "../hooks/useVoice";
 import { useAuth } from "../context/AuthContext";
 import type { Assessment, ChatMessage, SlideData } from "../types";
 
-type SessionState = "passcode" | "active" | "ended";
+type SessionState = "loading" | "passcode" | "active" | "ended";
 type LearnTab = "learn" | "test";
 
 const SUBJECTS = [
@@ -25,7 +25,7 @@ export default function SessionPage() {
   const navigate = useNavigate();
   const { user } = useAuth();
 
-  const [sessionState, setSessionState] = useState<SessionState>("passcode");
+  const [sessionState, setSessionState] = useState<SessionState>("loading");
   const [passcode, setPasscode] = useState("");
   const [joinError, setJoinError] = useState("");
   const [durationMinutes, setDurationMinutes] = useState(60);
@@ -88,11 +88,12 @@ export default function SessionPage() {
 
   const apptId = appointmentId ? parseInt(appointmentId) : 0;
 
-  const handleJoin = async () => {
+  const handleJoin = async (overrideCode?: string) => {
     if (!appointmentId) return;
     setJoinError("");
+    const code = overrideCode !== undefined ? overrideCode : passcode;
     try {
-      const result = await appointmentsApi.joinSession(parseInt(appointmentId), passcode) as any;
+      const result = await appointmentsApi.joinSession(parseInt(appointmentId), code) as any;
       setSessionStartedAt(result.session_started_at);
       setDurationMinutes(result.duration_minutes);
       setSessionTitle(result.title);
@@ -150,6 +151,20 @@ export default function SessionPage() {
     gamificationApi.getProfile().then((p: any) => setXp(p?.xp_total ?? 0)).catch(() => {});
   }, []);
 
+  // On mount: check if appointment has a passcode. If not, skip passcode screen.
+  useEffect(() => {
+    if (!appointmentId) return;
+    appointmentsApi.get(parseInt(appointmentId))
+      .then((appt: any) => {
+        if (!appt.passcode) {
+          handleJoin("");
+        } else {
+          setSessionState("passcode");
+        }
+      })
+      .catch(() => setSessionState("passcode"));
+  }, [appointmentId]); // eslint-disable-line react-hooks/exhaustive-deps
+
   useEffect(() => {
     if (!quizOffer) return;
     if (testAssessment || testLoading || testResult) return;
@@ -188,27 +203,37 @@ export default function SessionPage() {
     return () => { if (timerRef.current) clearInterval(timerRef.current); };
   }, [sessionState, sessionStartedAt, durationMinutes, isPaused, totalPausedMs, apptId]);
 
-  // Auto-read test question via TTS when voice is active
+  // Auto-read test question via TTS (both chat and voice mode)
   useEffect(() => {
-    if (!isVoiceActive || !testAssessment) return;
+    if (!testAssessment) return;
     const q = testAssessment.questions[testCurrentQ];
     if (!q) return;
-    const opts = q.options.map((o, i) => `${["A", "B", "C", "D"][i]}: ${o}`).join(". ");
-    speakText(`Question ${testCurrentQ + 1}: ${q.question_text}. Options: ${opts}`);
+    const opts = q.options.map((o, i) => `${["A", "B", "C", "D"][i]}: ${o}.`).join(" ");
+    // Use streaming pipeline so all chunks fire in parallel — no 1.5s delay
+    startStreamTTS();
+    feedStreamTTS(`Question ${testCurrentQ + 1}: ${q.question_text}. Options are: ${opts}`);
+    endStreamTTS();
   }, [testCurrentQ, testAssessment?.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Auto-read feedback via TTS when voice is active
+  // Auto-read feedback via TTS (both chat and voice mode)
   useEffect(() => {
-    if (!isVoiceActive || !testFeedback) return;
+    if (!testFeedback) return;
     const result = testFeedback.isCorrect ? "Correct!" : "Not quite.";
     const explanation = testFeedback.explanation ? ` ${testFeedback.explanation}` : "";
-    speakText(`${result}${explanation}`);
+    const fullText = `${result}${explanation}`;
+    // Use streaming pipeline for parallel chunk fetching (faster for longer explanations)
+    startStreamTTS();
+    feedStreamTTS(fullText);
+    endStreamTTS();
   }, [testFeedback]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Auto-read final test score via TTS when voice is active
+  // Auto-read final test score via TTS (both chat and voice mode)
   useEffect(() => {
-    if (!isVoiceActive || !testResult) return;
-    speakText(`Quiz complete! You scored ${Math.round(testResult.score)} percent. ${testResult.weak.length > 0 ? `Areas to review: ${testResult.weak.join(", ")}.` : "Great job on all topics!"}`);
+    if (!testResult) return;
+    const weakMsg = testResult.weak.length > 0 ? `Areas to review: ${testResult.weak.join(", ")}.` : "Great job on all topics!";
+    startStreamTTS();
+    feedStreamTTS(`Quiz complete! You scored ${Math.round(testResult.score)} percent. ${weakMsg}`);
+    endStreamTTS();
   }, [testResult]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Clear typing indicator as a safety net if streaming ends without firing onStreamStart
@@ -585,6 +610,17 @@ export default function SessionPage() {
     }
   }, [isVoiceActive, connectVoice, disconnectVoice, activeSessionId, apptId, initSessionChat, generateSlide]);
 
+  if (sessionState === "loading") {
+    return (
+      <div className="auth-page">
+        <div className="auth-card" style={{ textAlign: "center" }}>
+          <img src="/Original-Logo.png" alt="SmartAI Tutor" className="auth-logo" />
+          <p style={{ marginTop: 16, color: "var(--text-secondary)", fontSize: 14 }}>Loading session...</p>
+        </div>
+      </div>
+    );
+  }
+
   if (sessionState === "passcode") {
     return (
       <div className="auth-page">
@@ -601,7 +637,7 @@ export default function SessionPage() {
               value={passcode}
               onChange={(e) => setPasscode(e.target.value.toUpperCase())}
               placeholder="e.g. ABC123"
-              onKeyDown={(e) => e.key === "Enter" && handleJoin()}
+              onKeyDown={(e) => { if (e.key === "Enter") handleJoin(); }}
               style={{
                 textAlign: "center",
                 fontSize: 22,
@@ -614,7 +650,7 @@ export default function SessionPage() {
           {joinError && <p className="error-text">{joinError}</p>}
           <button
             className="auth-submit"
-            onClick={handleJoin}
+            onClick={() => handleJoin()}
             disabled={!passcode.trim()}
           >
             <Lock size={16} style={{ marginRight: 6, verticalAlign: "middle" }} />
@@ -858,7 +894,7 @@ export default function SessionPage() {
                 )}
               </div>
             )}
-            {playing && (
+            {playing && !testAssessment && !testResult && (
               <div style={styles.ttsOverlay}>
                 <span style={{ fontSize: 36 }}>🔊</span>
                 <p style={styles.pausedOverlayText}>AI Tutor is speaking...</p>

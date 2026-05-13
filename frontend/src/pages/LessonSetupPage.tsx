@@ -47,10 +47,11 @@ export default function LessonSetupPage() {
     locationState.subject ?? searchParams.get("subject") ?? ""
   );
   const [keyStage, setKeyStage] = useState("");
-  const [topic, setTopic] = useState(locationState.topic ?? "");
-  const [subtopic, setSubtopic] = useState("");
+  const [selectedTopics, setSelectedTopics] = useState<string[]>([]);
   const [goal, setGoal] = useState<GoalId>(locationState.goal ?? "learn");
   const [duration, setDuration] = useState<30 | 60>(30);
+  const [requirePasscode, setRequirePasscode] = useState(false);
+  const [bookingPasscode, setBookingPasscode] = useState("");
   const [extraDetails, setExtraDetails] = useState("");
   const [showExtra, setShowExtra] = useState(false);
 
@@ -69,7 +70,7 @@ export default function LessonSetupPage() {
   const [submitError, setSubmitError] = useState<string | null>(null);
 
   // ── Derived ─────────────────────────────────────────────────────────────
-  const canSubmit = subject.trim() !== "" && keyStage.trim() !== "" && topic.trim() !== "";
+  const canSubmit = subject.trim() !== "" && keyStage.trim() !== "" && selectedTopics.length > 0;
 
   // Fetch subjects + key stages from KB
   useEffect(() => {
@@ -85,13 +86,13 @@ export default function LessonSetupPage() {
   useEffect(() => {
     if (!subject || !keyStage) {
       setKbUnits([]);
-      setTopic("");
+      setSelectedTopics([]);
       return;
     }
     lessonsApi.getUnits(subject, keyStage)
       .then((data: any) => {
         setKbUnits(data.units ?? []);
-        setTopic("");
+        setSelectedTopics([]);
       })
       .catch(() => setKbUnits([]));
   }, [subject, keyStage]);
@@ -121,8 +122,13 @@ export default function LessonSetupPage() {
   const handleSubjectChange = (val: string) => {
     setSubject(val);
     setKeyStage("");
-    setTopic("");
-    setSubtopic("");
+    setSelectedTopics([]);
+  };
+
+  const toggleTopic = (name: string) => {
+    setSelectedTopics((prev) =>
+      prev.includes(name) ? prev.filter((t) => t !== name) : [...prev, name]
+    );
   };
 
   // Pre-fill from assignment
@@ -131,7 +137,7 @@ export default function LessonSetupPage() {
     const hw = assignment.homework;
     setSubject(hw.subject ?? "");
     setKeyStage(hw.key_stage ?? "");
-    setTopic(hw.topic ?? "");
+    if (hw.topic) setSelectedTopics([hw.topic]);
   };
 
   // ── Submit: create appointment then navigate to session ─────────────────
@@ -141,9 +147,10 @@ export default function LessonSetupPage() {
     setSubmitError(null);
 
     const sessionType = goalToSessionType(goal);
-    const titleStr = `${sessionType} - ${subject}: ${topic}`;
+    const topicsStr = selectedTopics.join(", ");
+    const titleStr = `${sessionType} - ${subject}: ${selectedTopics[0] ?? subject}`;
     const descParts = [
-      `Topics: ${topic}${subtopic ? ", " + subtopic : ""}`,
+      `Topics: ${topicsStr}`,
       `Session type: ${sessionType}`,
     ];
     if (extraDetails.trim()) descParts.push(extraDetails.trim());
@@ -158,6 +165,7 @@ export default function LessonSetupPage() {
         scheduled_at: new Date().toISOString(),
         duration_minutes: duration,
         description: descParts.join("\n"),
+        passcode: requirePasscode && bookingPasscode.trim() ? bookingPasscode.trim() : undefined,
       }) as { id: number };
 
       navigate(`/session/${appointment.id}`);
@@ -182,10 +190,10 @@ export default function LessonSetupPage() {
   ];
 
   return (
-    <div style={{ display: "flex", minHeight: "100vh", background: "var(--bg-primary)" }}>
+    <div style={{ display: "flex", height: "100vh", overflow: "hidden", background: "var(--bg-primary)" }}>
       <Sidebar />
 
-      <main style={{ flex: 1, minWidth: 0, overflowY: "auto" }}>
+      <main style={{ flex: 1, minWidth: 0, overflowY: "auto", height: "100%" }}>
         {/* ── Stats bar ─────────────────────────────────────────────────── */}
         <div style={s.statsBar}>
           <div style={{ flex: 1 }} />
@@ -213,7 +221,7 @@ export default function LessonSetupPage() {
               </p>
             </div>
 
-            {/* ── Step 1: Subject / Topic / Sub-topic ─────────────────── */}
+            {/* ── Step 1: Subject / Key Stage / Topics ─────────────────── */}
             <div style={s.stepCard}>
               <div style={s.stepHeader}>
                 <span style={s.stepNum}>1</span>
@@ -245,7 +253,7 @@ export default function LessonSetupPage() {
                   <select
                     style={{ ...s.select, opacity: subject ? 1 : 0.5 }}
                     value={keyStage}
-                    onChange={(e) => { setKeyStage(e.target.value); setTopic(""); setSubtopic(""); }}
+                    onChange={(e) => { setKeyStage(e.target.value); setSelectedTopics([]); }}
                     disabled={!subject}
                   >
                     <option value="">Select key stage...</option>
@@ -257,38 +265,51 @@ export default function LessonSetupPage() {
                 </div>
               </div>
 
-              {/* Topic dropdown — populated from KB units */}
-              <div style={s.formGroup}>
-                <label style={s.label}>Topic</label>
-                <div style={s.selectWrap}>
-                  <select
-                    style={{ ...s.select, opacity: keyStage ? 1 : 0.5 }}
-                    value={topic}
-                    onChange={(e) => setTopic(e.target.value)}
-                    disabled={!keyStage}
-                  >
-                    <option value="">Select a topic...</option>
-                    {kbUnits.map((u) => (
-                      <option key={u.id} value={u.unit_name}>{u.unit_name}</option>
-                    ))}
-                  </select>
-                  <ChevronDown size={15} style={s.selectArrow} />
+              {/* Topics — multi-select chips from KB units */}
+              {keyStage && (
+                <div style={{ ...s.formGroup, marginBottom: 0 }}>
+                  <label style={s.label}>
+                    Topics
+                    {selectedTopics.length > 0 && (
+                      <span style={{ fontWeight: 400, color: "#1a73e8", marginLeft: 6 }}>
+                        {selectedTopics.length} selected
+                      </span>
+                    )}
+                  </label>
+                  {kbUnits.length === 0 ? (
+                    <p style={{ fontSize: 13, color: "var(--text-muted)", margin: "4px 0 0" }}>
+                      No topics available for this combination.
+                    </p>
+                  ) : (
+                    <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 4 }}>
+                      {kbUnits.map((unit) => {
+                        const sel = selectedTopics.includes(unit.unit_name);
+                        return (
+                          <button
+                            key={unit.id}
+                            type="button"
+                            onClick={() => toggleTopic(unit.unit_name)}
+                            style={{
+                              padding: "5px 12px",
+                              borderRadius: 99,
+                              fontSize: 12,
+                              fontWeight: 600,
+                              border: `1.5px solid ${sel ? "#1a73e8" : "var(--border-color)"}`,
+                              background: sel ? "rgba(26,115,232,0.1)" : "var(--bg-primary)",
+                              color: sel ? "#1a73e8" : "var(--text-secondary)",
+                              cursor: "pointer",
+                              fontFamily: "inherit",
+                              transition: "border-color 0.15s, background 0.15s",
+                            }}
+                          >
+                            {unit.title}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  )}
                 </div>
-              </div>
-
-              {/* Sub-topic — free text, optional */}
-              <div style={{ ...s.formGroup, marginBottom: 0 }}>
-                <label style={s.label}>
-                  Sub-topic <span style={s.optional}>(optional)</span>
-                </label>
-                <input
-                  style={s.input}
-                  type="text"
-                  value={subtopic}
-                  onChange={(e) => setSubtopic(e.target.value)}
-                  placeholder="e.g. Common Denominators"
-                />
-              </div>
+              )}
             </div>
 
             {/* ── Step 2: Goal ────────────────────────────────────────── */}
@@ -376,6 +397,39 @@ export default function LessonSetupPage() {
                   rows={4}
                 />
               )}
+
+              {/* Passcode — same pattern as BookSessionPage */}
+              <div style={{ marginTop: 16 }}>
+                <label style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer", marginBottom: 8 }}>
+                  <input
+                    type="checkbox"
+                    checked={requirePasscode}
+                    onChange={(e) => {
+                      setRequirePasscode(e.target.checked);
+                      if (!e.target.checked) setBookingPasscode("");
+                    }}
+                    style={{ width: 15, height: 15, accentColor: "var(--accent, #1a73e8)", cursor: "pointer" }}
+                  />
+                  <span style={{ fontSize: 13, fontWeight: 600, color: "var(--text-primary)" }}>
+                    Require passcode to join
+                  </span>
+                </label>
+                {requirePasscode && (
+                  <input
+                    type="text"
+                    placeholder="e.g. ABC123"
+                    value={bookingPasscode}
+                    onChange={(e) => setBookingPasscode(e.target.value.toUpperCase())}
+                    maxLength={16}
+                    style={{
+                      ...s.input,
+                      letterSpacing: 3,
+                      width: 200,
+                      fontWeight: 700,
+                    }}
+                  />
+                )}
+              </div>
             </div>
 
             {/* ── Error message ─────────────────────────────────────── */}
