@@ -1,31 +1,39 @@
-import { useState, useRef, type FormEvent } from "react";
+import { useState, useRef, useEffect, useCallback, type FormEvent } from "react";
 import { Link } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
 
-// ── Draggable item config ─────────────────────────────────────────────────────
-interface DragItem {
+// ── Physics item ───────────────────────────────────────────────────────────────
+interface PhysItem {
   id: number;
   emoji: string;
   label: string;
-  x: number;    // % of container width
-  y: number;    // % of container height
-  rot: number;  // initial rotation
-  size: number; // font-size in px
+  size: number;
+  x: number;       // px from container left
+  y: number;       // px from container top
+  vx: number;      // px/frame velocity
+  vy: number;
+  rot: number;     // degrees current rotation
+  angVel: number;  // deg/frame angular velocity
+  floatPhase: number;
+  floatAmp: number;
+  floatSpeed: number;
+  popScale: number;  // for click-pop effect
+  popDecay: number;
 }
 
-const DRAG_ITEMS: DragItem[] = [
-  { id: 1,  emoji: "📚", label: "Books",    x: 7,  y: 12, rot: -8,  size: 38 },
-  { id: 2,  emoji: "✏️", label: "Write",    x: 54, y: 8,  rot: 14,  size: 32 },
-  { id: 3,  emoji: "🧠", label: "Brain",    x: 78, y: 18, rot: -5,  size: 42 },
-  { id: 4,  emoji: "⭐", label: "Star",     x: 28, y: 30, rot: 20,  size: 36 },
-  { id: 5,  emoji: "🎯", label: "Goal",     x: 66, y: 42, rot: -12, size: 32 },
-  { id: 6,  emoji: "💡", label: "Idea",     x: 10, y: 55, rot: 8,   size: 36 },
-  { id: 7,  emoji: "🔬", label: "Science",  x: 46, y: 64, rot: -18, size: 32 },
-  { id: 8,  emoji: "🏆", label: "Trophy",   x: 82, y: 60, rot: 10,  size: 40 },
-  { id: 9,  emoji: "🎲", label: "Play",     x: 22, y: 78, rot: -6,  size: 32 },
-  { id: 10, emoji: "🚀", label: "Launch",   x: 60, y: 82, rot: 22,  size: 38 },
-  { id: 11, emoji: "🧮", label: "Maths",    x: 38, y: 47, rot: -10, size: 34 },
-  { id: 12, emoji: "🎨", label: "Art",      x: 72, y: 74, rot: 16,  size: 32 },
+const ITEMS_CFG = [
+  { id: 1,  emoji: "📚", label: "Books",   size: 38, xPct: 7,  yPct: 12 },
+  { id: 2,  emoji: "✏️", label: "Write",   size: 32, xPct: 54, yPct: 8  },
+  { id: 3,  emoji: "🧠", label: "Brain",   size: 42, xPct: 78, yPct: 18 },
+  { id: 4,  emoji: "⭐", label: "Star",    size: 36, xPct: 28, yPct: 30 },
+  { id: 5,  emoji: "🎯", label: "Goal",    size: 32, xPct: 66, yPct: 42 },
+  { id: 6,  emoji: "💡", label: "Idea",    size: 36, xPct: 10, yPct: 55 },
+  { id: 7,  emoji: "🔬", label: "Science", size: 32, xPct: 46, yPct: 64 },
+  { id: 8,  emoji: "🏆", label: "Trophy",  size: 40, xPct: 82, yPct: 60 },
+  { id: 9,  emoji: "🎲", label: "Play",    size: 32, xPct: 22, yPct: 78 },
+  { id: 10, emoji: "🚀", label: "Launch",  size: 38, xPct: 60, yPct: 82 },
+  { id: 11, emoji: "🧮", label: "Maths",   size: 34, xPct: 38, yPct: 47 },
+  { id: 12, emoji: "🎨", label: "Art",     size: 32, xPct: 72, yPct: 74 },
 ];
 
 const ROLE_CARDS = [
@@ -35,6 +43,11 @@ const ROLE_CARDS = [
   { icon: "🛡️", role: "Admin",    desc: "Manage school settings, users and knowledge base" },
 ];
 
+const FRICTION = 0.93;
+const BOUNCE   = 0.52;
+const ANG_FRICTION = 0.90;
+const MAX_VEL = 20;
+
 export default function LoginPage() {
   const { login } = useAuth();
   const [email,    setEmail]    = useState("");
@@ -42,61 +55,234 @@ export default function LoginPage() {
   const [error,    setError]    = useState("");
   const [loading,  setLoading]  = useState(false);
 
-  // ── Drag state ──────────────────────────────────────────────────────────────
-  const [items,       setItems]       = useState<DragItem[]>(DRAG_ITEMS);
-  const [draggingId,  setDraggingId]  = useState<number | null>(null);
-  const [droppedId,   setDroppedId]   = useState<number | null>(null);
-  const containerRef = useRef<HTMLDivElement>(null);
-  const dragRef      = useRef<{
+  const containerRef  = useRef<HTMLDivElement>(null);
+  const itemDivsRef   = useRef<Map<number, HTMLDivElement>>(new Map());
+  const physRef       = useRef<PhysItem[]>([]);
+  const rafRef        = useRef<number>(0);
+  const frameRef      = useRef<number>(0);
+
+  const dragRef = useRef<{
     id: number;
-    startCX: number; startCY: number;
-    itemXpx: number; itemYpx: number;
+    offsetX: number;
+    offsetY: number;
+    vxSamples: number[];
+    vySamples: number[];
+    lastX: number;
+    lastY: number;
   } | null>(null);
 
+  // ── Apply transforms directly to DOM (bypasses React re-renders) ─────────────
+  const flushTransforms = () => {
+    for (const item of physRef.current) {
+      const el = itemDivsRef.current.get(item.id);
+      if (!el) continue;
+      const speed   = Math.sqrt(item.vx ** 2 + item.vy ** 2);
+      const isDrag  = dragRef.current?.id === item.id;
+      const stretchX = isDrag ? 1.0 : Math.max(0.7, 1 - speed * 0.018);
+      const stretchY = isDrag ? 1.0 : Math.min(1.35, 1 + speed * 0.022);
+      const glow     = Math.min(speed * 2.5, 22);
+      const ps       = item.popScale;
+
+      el.style.left      = `${item.x}px`;
+      el.style.top       = `${item.y}px`;
+      el.style.transform = `rotate(${item.rot}deg) scale(${(isDrag ? 1.38 : stretchX) * ps}, ${(isDrag ? 1.38 : stretchY) * ps})`;
+      el.style.filter    = speed > 1.2
+        ? `drop-shadow(0 0 ${glow}px rgba(26,115,232,0.85))`
+        : isDrag
+          ? "drop-shadow(0 10px 24px rgba(26,115,232,0.9)) brightness(1.3)"
+          : "";
+    }
+  };
+
+  // ── Physics loop ─────────────────────────────────────────────────────────────
+  const startLoop = useCallback(() => {
+    const tick = () => {
+      frameRef.current++;
+      const container = containerRef.current;
+      if (!container) { rafRef.current = requestAnimationFrame(tick); return; }
+      const W = container.clientWidth;
+      const H = container.clientHeight;
+
+      const items = physRef.current;
+      for (const item of items) {
+        if (dragRef.current?.id === item.id) continue;
+
+        const itemW = item.size + 28;
+        const itemH = item.size + 40;
+        const speed = Math.sqrt(item.vx ** 2 + item.vy ** 2);
+
+        // Gentle idle float when nearly still
+        if (speed < 0.6) {
+          item.floatPhase += item.floatSpeed;
+          item.vx += Math.cos(item.floatPhase * 0.73) * 0.014;
+          item.vy += Math.sin(item.floatPhase) * 0.018;
+          item.angVel += Math.sin(item.floatPhase * 1.4) * 0.012;
+        }
+
+        item.x   += item.vx;
+        item.y   += item.vy;
+        item.rot += item.angVel;
+
+        item.vx    *= FRICTION;
+        item.vy    *= FRICTION;
+        item.angVel *= ANG_FRICTION;
+
+        // Wall bounce
+        if (item.x < 0)           { item.x = 0;           item.vx =  Math.abs(item.vx) * BOUNCE; item.angVel *= -0.6; }
+        if (item.x > W - itemW)   { item.x = W - itemW;   item.vx = -Math.abs(item.vx) * BOUNCE; item.angVel *= -0.6; }
+        if (item.y < 0)           { item.y = 0;           item.vy =  Math.abs(item.vy) * BOUNCE; }
+        if (item.y > H - itemH)   { item.y = H - itemH;   item.vy = -Math.abs(item.vy) * BOUNCE; item.angVel *= -0.7; }
+
+        // Pop scale decay
+        if (item.popScale !== 1) {
+          item.popScale += (1 - item.popScale) * item.popDecay;
+          if (Math.abs(item.popScale - 1) < 0.005) item.popScale = 1;
+        }
+      }
+
+      // Circle collision (every 2nd frame for perf)
+      if (frameRef.current % 2 === 0) {
+        for (let i = 0; i < items.length; i++) {
+          for (let j = i + 1; j < items.length; j++) {
+            const a = items[i], b = items[j];
+            const ra = (a.size / 2) + 14;
+            const rb = (b.size / 2) + 14;
+            const ax = a.x + ra, ay = a.y + ra;
+            const bx = b.x + rb, by = b.y + rb;
+            const dx = bx - ax, dy = by - ay;
+            const dist = Math.sqrt(dx * dx + dy * dy);
+            const minD = ra + rb;
+            if (dist < minD && dist > 0.01) {
+              const nx = dx / dist, ny = dy / dist;
+              const overlap = (minD - dist) * 0.55;
+              a.x -= nx * overlap; a.y -= ny * overlap;
+              b.x += nx * overlap; b.y += ny * overlap;
+              const dvx = a.vx - b.vx, dvy = a.vy - b.vy;
+              const dot = dvx * nx + dvy * ny;
+              if (dot > 0) {
+                const imp = dot * 0.65;
+                a.vx -= imp * nx; a.vy -= imp * ny;
+                b.vx += imp * nx; b.vy += imp * ny;
+                a.angVel += (dvy * nx - dvx * ny) * 0.55;
+                b.angVel -= (dvy * nx - dvx * ny) * 0.55;
+                // Pop flash on collision
+                a.popScale = 1.22; a.popDecay = 0.18;
+                b.popScale = 1.22; b.popDecay = 0.18;
+              }
+            }
+          }
+        }
+      }
+
+      flushTransforms();
+      rafRef.current = requestAnimationFrame(tick);
+    };
+    rafRef.current = requestAnimationFrame(tick);
+  }, []);
+
+  // ── Init physics items after mount ───────────────────────────────────────────
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container) return;
+    const W = container.clientWidth;
+    const H = container.clientHeight;
+
+    physRef.current = ITEMS_CFG.map((cfg) => ({
+      ...cfg,
+      x: (cfg.xPct / 100) * W,
+      y: (cfg.yPct / 100) * H,
+      vx: (Math.random() - 0.5) * 0.4,
+      vy: (Math.random() - 0.5) * 0.4,
+      rot: (Math.random() - 0.5) * 28,
+      angVel: (Math.random() - 0.5) * 0.4,
+      floatPhase: Math.random() * Math.PI * 2,
+      floatAmp:   2 + Math.random() * 3,
+      floatSpeed: 0.007 + Math.random() * 0.007,
+      popScale:   0.1,  // start at 0 → pops in on entrance
+      popDecay:   0.12,
+    }));
+
+    // Stagger entrance pops
+    physRef.current.forEach((item, idx) => {
+      setTimeout(() => { item.popScale = 1.55; item.popDecay = 0.15; }, idx * 60);
+    });
+
+    flushTransforms();
+    startLoop();
+    return () => cancelAnimationFrame(rafRef.current);
+  }, [startLoop]);
+
+  // ── Pointer handlers ──────────────────────────────────────────────────────────
   const onPointerDown = (e: React.PointerEvent<HTMLDivElement>, id: number) => {
     e.stopPropagation();
+    e.preventDefault();
     (e.currentTarget as HTMLDivElement).setPointerCapture(e.pointerId);
     const container = containerRef.current;
     if (!container) return;
-    const rect   = container.getBoundingClientRect();
-    const item   = items.find((it) => it.id === id)!;
+    const rect = container.getBoundingClientRect();
+    const item = physRef.current.find((it) => it.id === id)!;
     dragRef.current = {
       id,
-      startCX:  e.clientX,
-      startCY:  e.clientY,
-      itemXpx: (item.x / 100) * rect.width,
-      itemYpx: (item.y / 100) * rect.height,
+      offsetX: (e.clientX - rect.left) - item.x,
+      offsetY: (e.clientY - rect.top)  - item.y,
+      vxSamples: [],
+      vySamples: [],
+      lastX: e.clientX,
+      lastY: e.clientY,
     };
-    setDraggingId(id);
+    // Pop feedback on grab
+    item.popScale = 1.18;
+    item.popDecay = 0.2;
+    const el = itemDivsRef.current.get(id);
+    if (el) el.style.zIndex = "100";
   };
 
   const onPointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
     if (!dragRef.current || !containerRef.current) return;
-    const rect  = containerRef.current.getBoundingClientRect();
-    const { id, startCX, startCY, itemXpx, itemYpx } = dragRef.current;
-    const ITEM_SIZE = (items.find((it) => it.id === id)?.size ?? 36) + 20;
-    const nx = Math.max(0, Math.min(rect.width  - ITEM_SIZE, itemXpx + (e.clientX - startCX)));
-    const ny = Math.max(0, Math.min(rect.height - ITEM_SIZE, itemYpx + (e.clientY - startCY)));
-    setItems((prev) =>
-      prev.map((it) =>
-        it.id === id
-          ? { ...it, x: (nx / rect.width) * 100, y: (ny / rect.height) * 100 }
-          : it
-      )
-    );
+    const rect = containerRef.current.getBoundingClientRect();
+    const { id, offsetX, offsetY, vxSamples, vySamples, lastX, lastY } = dragRef.current;
+    const item = physRef.current.find((it) => it.id === id)!;
+    const itemW = item.size + 28;
+    const itemH = item.size + 40;
+
+    const nx = Math.max(0, Math.min(rect.width  - itemW, (e.clientX - rect.left) - offsetX));
+    const ny = Math.max(0, Math.min(rect.height - itemH, (e.clientY - rect.top)  - offsetY));
+
+    vxSamples.push(e.clientX - lastX);
+    vySamples.push(e.clientY - lastY);
+    if (vxSamples.length > 7) vxSamples.shift();
+    if (vySamples.length > 7) vySamples.shift();
+    dragRef.current.lastX = e.clientX;
+    dragRef.current.lastY = e.clientY;
+
+    const latestVx = vxSamples[vxSamples.length - 1] ?? 0;
+    item.x    = nx;
+    item.y    = ny;
+    item.rot += latestVx * 0.35;
   };
 
-  const onPointerUp = () => {
-    if (dragRef.current) {
-      const id = dragRef.current.id;
-      setDroppedId(id);
-      setTimeout(() => setDroppedId(null), 600);
-    }
+  const releaseDrag = () => {
+    if (!dragRef.current) return;
+    const { id, vxSamples, vySamples } = dragRef.current;
+    const item = physRef.current.find((it) => it.id === id)!;
+
+    const avgVx = vxSamples.length ? vxSamples.reduce((a, b) => a + b, 0) / vxSamples.length : 0;
+    const avgVy = vySamples.length ? vySamples.reduce((a, b) => a + b, 0) / vySamples.length : 0;
+
+    item.vx     = Math.max(-MAX_VEL, Math.min(MAX_VEL, avgVx * 1.6));
+    item.vy     = Math.max(-MAX_VEL, Math.min(MAX_VEL, avgVy * 1.6));
+    item.angVel = avgVx * 0.85;
+
+    // Landing pop
+    item.popScale = 1.15;
+    item.popDecay = 0.17;
+
+    const el = itemDivsRef.current.get(id);
+    if (el) el.style.zIndex = "5";
     dragRef.current = null;
-    setDraggingId(null);
   };
 
-  // ── Login submit ────────────────────────────────────────────────────────────
+  // ── Login ─────────────────────────────────────────────────────────────────────
   const handleSubmit = async (ev: FormEvent) => {
     ev.preventDefault();
     setError("");
@@ -138,8 +324,7 @@ export default function LoginPage() {
           pointer-events: none;
         }
 
-        /* Header */
-        .lp-brand-hdr { display: flex; align-items: center; gap: 14px; position: relative; z-index: 10; }
+        .lp-brand-hdr { display: flex; align-items: center; gap: 14px; position: relative; z-index: 10; pointer-events: none; }
         .lp-brand-badge {
           width: 50px; height: 50px; border-radius: 13px; background: #1a73e8;
           display: flex; align-items: center; justify-content: center;
@@ -148,7 +333,6 @@ export default function LoginPage() {
         .lp-brand-hdr h1 { font-size: 19px; font-weight: 800; color: #fff; margin: 0; letter-spacing: -0.2px; }
         .lp-brand-hdr p  { font-size: 12px; color: #636363; margin: 2px 0 0; }
 
-        /* Hero */
         .lp-hero {
           flex: 1; display: flex; flex-direction: column; justify-content: center;
           padding: 36px 0; position: relative; z-index: 10; pointer-events: none;
@@ -157,7 +341,6 @@ export default function LoginPage() {
         .lp-tagline span { color: #1a73e8; }
         .lp-sub { font-size: 16px; color: #b8b8b8; max-width: 400px; line-height: 1.6; margin: 0; }
 
-        /* Hint */
         .lp-hint {
           margin-top: 16px; display: flex; align-items: center; gap: 7px;
           font-size: 12px; color: rgba(255,255,255,0.38); pointer-events: none;
@@ -166,9 +349,9 @@ export default function LoginPage() {
           width: 7px; height: 7px; border-radius: 50%; background: #1a73e8; flex-shrink: 0;
           animation: lp-pulse 1.6s ease-in-out infinite;
         }
+        @keyframes lp-pulse { 0%,100% { opacity: 0.4; transform: scale(1); } 50% { opacity: 1; transform: scale(1.5); } }
 
-        /* Role cards */
-        .lp-role-cards { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; position: relative; z-index: 10; }
+        .lp-role-cards { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; position: relative; z-index: 10; pointer-events: none; }
         .lp-role-card {
           background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.08);
           border-radius: 10px; padding: 13px 15px;
@@ -180,44 +363,35 @@ export default function LoginPage() {
         .lp-role-info h4 { font-size: 13px; font-weight: 700; color: #e2e8f0; margin: 0 0 2px; }
         .lp-role-info p  { font-size: 11px; color: #636363; margin: 0; line-height: 1.4; }
 
-        /* ══ DRAGGABLE ITEMS ══ */
+        /* ══ PHYSICS DRAGGABLE ITEMS ══ */
         .lp-drag-item {
           position: absolute;
-          display: flex; flex-direction: column; align-items: center; gap: 2px;
+          display: flex; flex-direction: column; align-items: center; gap: 3px;
           cursor: grab; touch-action: none;
-          border-radius: 12px; padding: 5px 7px;
-          transition: filter 0.18s, box-shadow 0.18s;
-          will-change: transform;
+          border-radius: 14px; padding: 6px 8px;
+          will-change: transform, left, top, filter;
+          z-index: 5;
+          transition: filter 0.1s;
         }
         .lp-drag-item:hover {
-          filter: drop-shadow(0 0 14px rgba(26,115,232,0.7));
+          filter: drop-shadow(0 0 16px rgba(26,115,232,0.75)) !important;
         }
-        .lp-drag-item.is-dragging {
-          cursor: grabbing;
-          filter: drop-shadow(0 10px 24px rgba(26,115,232,0.9)) brightness(1.25);
-          z-index: 100 !important;
+        .lp-drag-item:active { cursor: grabbing; }
+        .lp-drag-emoji {
+          line-height: 1; display: block; pointer-events: none;
+          transition: transform 0.12s;
         }
-        .lp-drag-item.is-dropped {
-          animation: lp-drop-bounce 0.55s cubic-bezier(0.34,1.56,0.64,1) both;
-        }
-        .lp-drag-emoji { line-height: 1; display: block; transition: transform 0.15s; }
-        .lp-drag-item:hover .lp-drag-emoji { transform: scale(1.2); }
+        .lp-drag-item:hover .lp-drag-emoji { transform: scale(1.18); }
         .lp-drag-label {
-          font-size: 9px; font-weight: 700; color: rgba(255,255,255,0.55);
+          font-size: 9px; font-weight: 700; color: rgba(255,255,255,0.6);
           text-transform: uppercase; letter-spacing: 0.6px;
-          opacity: 0; transition: opacity 0.18s; white-space: nowrap;
+          user-select: none; pointer-events: none; white-space: nowrap;
         }
-        .lp-drag-item:hover .lp-drag-label { opacity: 1; }
 
-        @keyframes lp-item-entrance {
-          from { opacity: 0; transform: scale(0.2) rotate(var(--ir)); }
-          to   { opacity: 1; transform: scale(1)   rotate(var(--ir)); }
-        }
-        @keyframes lp-drop-bounce {
-          0%   { transform: scale(1.5) rotate(var(--ir)); }
-          45%  { transform: scale(0.8) rotate(calc(var(--ir) - 5deg)); }
-          75%  { transform: scale(1.1) rotate(var(--ir)); }
-          100% { transform: scale(1)   rotate(var(--ir)); }
+        /* Ripple on collision */
+        @keyframes lp-ripple {
+          0%   { transform: scale(1); opacity: 0.8; }
+          100% { transform: scale(2.4); opacity: 0; }
         }
 
         /* ══ FORM PANEL ══ */
@@ -288,43 +462,31 @@ export default function LoginPage() {
 
       <div className="lp-root">
 
-        {/* ── Brand panel: draggable playground ─────────────────────────────── */}
+        {/* ── Brand panel: physics playground ───────────────────────────────── */}
         <div
           className="lp-brand"
           ref={containerRef}
           onPointerMove={onPointerMove}
-          onPointerUp={onPointerUp}
-          onPointerLeave={onPointerUp}
+          onPointerUp={releaseDrag}
+          onPointerLeave={releaseDrag}
         >
-          {/* 12 draggable learning items */}
-          {items.map((item, idx) => {
-            const isDragging = draggingId === item.id;
-            const isDropped  = droppedId  === item.id;
-            return (
-              <div
-                key={item.id}
-                className={`lp-drag-item${isDragging ? " is-dragging" : ""}${isDropped ? " is-dropped" : ""}`}
-                style={{
-                  left:   `${item.x}%`,
-                  top:    `${item.y}%`,
-                  zIndex: isDragging ? 100 : 5,
-                  transform: `rotate(${isDragging ? item.rot * 0.5 : item.rot}deg) scale(${isDragging ? 1.35 : 1})`,
-                  // CSS custom property for animation
-                  ["--ir" as string]: `${item.rot}deg`,
-                  animation: isDropped
-                    ? undefined
-                    : `lp-item-entrance 0.55s cubic-bezier(0.34,1.56,0.64,1) ${idx * 0.06}s both`,
-                  transition: isDragging ? "none" : "filter 0.18s, box-shadow 0.18s, transform 0.22s",
-                }}
-                onPointerDown={(e) => onPointerDown(e, item.id)}
-              >
-                <span className="lp-drag-emoji" style={{ fontSize: item.size }}>{item.emoji}</span>
-                <span className="lp-drag-label">{item.label}</span>
-              </div>
-            );
-          })}
+          {/* Physics items — rendered once, positions managed by RAF loop */}
+          {ITEMS_CFG.map((cfg) => (
+            <div
+              key={cfg.id}
+              className="lp-drag-item"
+              ref={(el) => {
+                if (el) itemDivsRef.current.set(cfg.id, el);
+                else itemDivsRef.current.delete(cfg.id);
+              }}
+              onPointerDown={(e) => onPointerDown(e, cfg.id)}
+            >
+              <span className="lp-drag-emoji" style={{ fontSize: cfg.size }}>{cfg.emoji}</span>
+              <span className="lp-drag-label">{cfg.label}</span>
+            </div>
+          ))}
 
-          {/* Brand header — z-index above items */}
+          {/* Brand header */}
           <div className="lp-brand-hdr">
             <div className="lp-brand-badge">🤖</div>
             <div>
@@ -345,7 +507,7 @@ export default function LoginPage() {
             </p>
             <p className="lp-hint">
               <span className="lp-hint-dot" />
-              Grab and drag the items to explore!
+              Throw and play with the items — they bounce off each other!
             </p>
           </div>
 
@@ -367,7 +529,6 @@ export default function LoginPage() {
         <div className="lp-form">
           <div className="lp-card">
 
-            {/* Mobile banner (shown only on mobile via CSS) */}
             <div className="lp-m-banner">
               <div className="lp-m-banner-hdr">
                 <div className="lp-m-banner-icon">🤖</div>
@@ -389,14 +550,12 @@ export default function LoginPage() {
             </div>
 
             <div className="lp-m-form-body">
-              {/* Desktop logo */}
               <div className="lp-logo">
                 <img src="/Original-Logo.png" alt="SmartAI Tutor" />
                 <h2>Welcome Back!</h2>
                 <p>Sign in to your learning platform</p>
               </div>
 
-              {/* Mobile heading */}
               <div className="lp-m-heading">
                 <h2>Welcome Back!</h2>
                 <p>Sign in to your learning platform</p>
