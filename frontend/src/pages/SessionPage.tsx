@@ -20,6 +20,60 @@ const SUBJECTS = [
   "Physics","Chemistry","Biology","Computer Science","French","Spanish",
 ];
 
+function playCorrectSound() {
+  try {
+    const ctx = new (window.AudioContext || (window as any).webkitAudioContext)();
+    [523.25, 659.25].forEach((freq, i) => {
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.connect(gain); gain.connect(ctx.destination);
+      osc.type = "sine"; osc.frequency.value = freq;
+      const t = ctx.currentTime + i * 0.09;
+      gain.gain.setValueAtTime(0, t);
+      gain.gain.linearRampToValueAtTime(0.28, t + 0.02);
+      gain.gain.exponentialRampToValueAtTime(0.001, t + 0.38);
+      osc.start(t); osc.stop(t + 0.42);
+    });
+  } catch {}
+}
+
+function playWrongSound() {
+  try {
+    const ctx = new (window.AudioContext || (window as any).webkitAudioContext)();
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.connect(gain); gain.connect(ctx.destination);
+    osc.type = "sawtooth";
+    osc.frequency.setValueAtTime(220, ctx.currentTime);
+    osc.frequency.exponentialRampToValueAtTime(110, ctx.currentTime + 0.25);
+    gain.gain.setValueAtTime(0.2, ctx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.3);
+    osc.start(ctx.currentTime); osc.stop(ctx.currentTime + 0.32);
+  } catch {}
+}
+
+const PHASES_30 = [
+  { label: "Intro",    end: 3  },
+  { label: "Teaching", end: 18 },
+  { label: "Practice", end: 25 },
+  { label: "Quiz",     end: 28 },
+  { label: "Summary",  end: 30 },
+];
+const PHASES_60 = [
+  { label: "Warm-Up",  end: 5  },
+  { label: "Teaching", end: 30 },
+  { label: "Practice", end: 45 },
+  { label: "Quiz",     end: 55 },
+  { label: "Summary",  end: 60 },
+];
+
+function getCurrentPhaseIndex(elapsedMin: number, phases: typeof PHASES_30) {
+  for (let i = 0; i < phases.length; i++) {
+    if (elapsedMin < phases[i].end) return i;
+  }
+  return phases.length - 1;
+}
+
 export default function SessionPage() {
   const { appointmentId } = useParams<{ appointmentId: string }>();
   const navigate = useNavigate();
@@ -87,6 +141,11 @@ export default function SessionPage() {
   const slidePollingRefs = useRef<Map<number, number>>(new Map());
 
   const apptId = appointmentId ? parseInt(appointmentId) : 0;
+
+  const sessionPhases = durationMinutes <= 30 ? PHASES_30 : PHASES_60;
+  const phaseElapsedSeconds = durationMinutes * 60 - timeRemaining;
+  const phaseElapsedMin = Math.floor(phaseElapsedSeconds / 60);
+  const currentPhaseIdx = getCurrentPhaseIndex(phaseElapsedMin, sessionPhases);
 
   const handleJoin = async (overrideCode?: string) => {
     if (!appointmentId) return;
@@ -366,12 +425,14 @@ export default function SessionPage() {
         question_index: q.question_index,
         student_answer: answerIndex,
       }) as import("../types").AssessmentQuestion;
+      const isCorrectAnswer = updated.is_correct ?? false;
       setTestFeedback({
         selectedAnswer: answerIndex,
-        isCorrect: updated.is_correct ?? false,
+        isCorrect: isCorrectAnswer,
         explanation: updated.explanation,
         correctAnswer: updated.correct_answer,
       });
+      if (isCorrectAnswer) playCorrectSound(); else playWrongSound();
       setTestAssessment((prev) => {
         if (!prev) return prev;
         return { ...prev, questions: prev.questions.map((q2, i) => i === testCurrentQ ? { ...q2, ...updated } : q2) };
@@ -1065,6 +1126,45 @@ export default function SessionPage() {
           </button>
         </div>
       </div>
+
+      {sessionState === "active" && !isPaused && (
+        <div style={{
+          display: "flex", alignItems: "center", justifyContent: "center",
+          gap: 0, padding: "0 16px", height: 32,
+          background: "rgba(0,0,0,0.18)", borderBottom: "1px solid rgba(255,255,255,0.08)",
+        }}>
+          {sessionPhases.map((phase, i) => (
+            <div key={i} style={{ display: "flex", alignItems: "center" }}>
+              <div style={{
+                display: "flex", alignItems: "center", gap: 5, padding: "3px 10px",
+                borderRadius: 99, fontSize: 11, fontWeight: i === currentPhaseIdx ? 700 : 500,
+                background: i < currentPhaseIdx
+                  ? "rgba(255,255,255,0.12)"
+                  : i === currentPhaseIdx
+                  ? "rgba(255,255,255,0.92)"
+                  : "transparent",
+                color: i < currentPhaseIdx
+                  ? "rgba(255,255,255,0.55)"
+                  : i === currentPhaseIdx
+                  ? "#1a73e8"
+                  : "rgba(255,255,255,0.45)",
+                transition: "all 0.4s ease",
+                whiteSpace: "nowrap",
+              }}>
+                {i < currentPhaseIdx && <span style={{ fontSize: 9 }}>✓</span>}
+                {phase.label}
+              </div>
+              {i < sessionPhases.length - 1 && (
+                <div style={{
+                  width: 24, height: 1,
+                  background: i < currentPhaseIdx ? "rgba(255,255,255,0.3)" : "rgba(255,255,255,0.12)",
+                  transition: "background 0.4s ease",
+                }} />
+              )}
+            </div>
+          ))}
+        </div>
+      )}
 
       <div style={styles.panels}>
         {isMobile ? (

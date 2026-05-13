@@ -3,6 +3,58 @@ import { CheckCircle, XCircle, Award, ChevronRight, RotateCcw } from "lucide-rea
 import { assessmentsApi } from "../services/api";
 import type { Assessment, AssessmentQuestion } from "../types";
 
+function playCorrectSound() {
+  try {
+    const ctx = new (window.AudioContext || (window as any).webkitAudioContext)();
+    [523.25, 659.25].forEach((freq, i) => {
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.connect(gain); gain.connect(ctx.destination);
+      osc.type = "sine"; osc.frequency.value = freq;
+      const t = ctx.currentTime + i * 0.09;
+      gain.gain.setValueAtTime(0, t);
+      gain.gain.linearRampToValueAtTime(0.28, t + 0.02);
+      gain.gain.exponentialRampToValueAtTime(0.001, t + 0.38);
+      osc.start(t); osc.stop(t + 0.42);
+    });
+  } catch {}
+}
+
+function playWrongSound() {
+  try {
+    const ctx = new (window.AudioContext || (window as any).webkitAudioContext)();
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.connect(gain); gain.connect(ctx.destination);
+    osc.type = "sawtooth";
+    osc.frequency.setValueAtTime(220, ctx.currentTime);
+    osc.frequency.exponentialRampToValueAtTime(110, ctx.currentTime + 0.25);
+    gain.gain.setValueAtTime(0.2, ctx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.3);
+    osc.start(ctx.currentTime); osc.stop(ctx.currentTime + 0.32);
+  } catch {}
+}
+
+if (typeof document !== "undefined" && !document.getElementById("quiz-anim-styles")) {
+  const s = document.createElement("style");
+  s.id = "quiz-anim-styles";
+  s.textContent = `
+    @keyframes quizCorrectFlash {
+      0%   { background: rgba(16,185,129,0.08); }
+      25%  { background: rgba(16,185,129,0.28); box-shadow: 0 0 0 3px rgba(16,185,129,0.25); }
+      100% { background: rgba(16,185,129,0.08); }
+    }
+    @keyframes quizWrongShake {
+      0%,100% { transform: translateX(0); }
+      18%     { transform: translateX(-7px); }
+      36%     { transform: translateX(7px); }
+      54%     { transform: translateX(-4px); }
+      72%     { transform: translateX(4px); }
+    }
+  `;
+  document.head.appendChild(s);
+}
+
 type Phase = "confirming" | "loading" | "questioning" | "feedback" | "completed";
 
 interface Props {
@@ -72,6 +124,8 @@ export default function AssessmentMode({ quizOffer, onComplete, onDecline }: Pro
         correctAnswer: updatedQuestion.correct_answer,
       });
 
+      if (updatedQuestion.is_correct) playCorrectSound(); else playWrongSound();
+
       // Update local assessment questions list
       setAssessment((prev) => {
         if (!prev) return prev;
@@ -122,6 +176,7 @@ export default function AssessmentMode({ quizOffer, onComplete, onDecline }: Pro
         background: "var(--success-light)",
         borderColor: "var(--success)",
         color: "var(--success)",
+        animation: "quizCorrectFlash 0.5s ease forwards",
       };
     }
     if (optionIndex === feedback.selectedAnswer && !feedback.isCorrect) {
@@ -129,6 +184,7 @@ export default function AssessmentMode({ quizOffer, onComplete, onDecline }: Pro
         background: "var(--danger-light)",
         borderColor: "var(--danger)",
         color: "var(--danger)",
+        animation: "quizWrongShake 0.45s ease forwards",
       };
     }
     return { opacity: 0.45 };

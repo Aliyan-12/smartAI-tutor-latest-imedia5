@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
-import { appointmentsApi } from "../services/api";
+import { appointmentsApi, gamificationApi } from "../services/api";
 import type { SessionReport } from "../types";
 
 interface Props {
@@ -22,6 +22,9 @@ export default function PostSessionScreen({
   const [report, setReport] = useState<SessionReport | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [streak, setStreak] = useState(0);
+  const [animXp, setAnimXp] = useState(0);
+  const [xpTotal, setXpTotal] = useState(0);
 
   useEffect(() => {
     let cancelled = false;
@@ -49,6 +52,25 @@ export default function PostSessionScreen({
     return () => { cancelled = true; };
   }, [appointmentId]);
 
+  useEffect(() => {
+    if (loading) return;
+    gamificationApi.getProfile()
+      .then((p: any) => {
+        setStreak(p?.current_streak ?? 0);
+        setXpTotal(p?.xp_total ?? 0);
+        // Animate XP count-up
+        const target = p?.xp_earned_today ?? xpEarned;
+        let start = 0;
+        const step = Math.ceil(target / 40);
+        const iv = setInterval(() => {
+          start += step;
+          if (start >= target) { setAnimXp(target); clearInterval(iv); }
+          else setAnimXp(start);
+        }, 35);
+      })
+      .catch(() => {});
+  }, [loading]); // eslint-disable-line
+
   const firstName = user?.name?.split(" ")[0] ?? "Student";
   const timeSpent = report?.time_spent_minutes ?? durationMinutes;
   const quizScore = report?.quiz_score_percent;
@@ -58,6 +80,7 @@ export default function PostSessionScreen({
     <div style={styles.overlay}>
       <div style={styles.card}>
         <div style={styles.header}>
+          <div style={{ fontSize: 22, marginBottom: 6, letterSpacing: 6, opacity: 0.7 }}>🎊 🌟 ✨ 🎊</div>
           <div style={styles.celebrationEmoji}>🎉</div>
           <h1 style={styles.title}>Nice work, {firstName}!</h1>
           <p style={styles.subtitle}>
@@ -173,11 +196,45 @@ export default function PostSessionScreen({
           ) : null}
         </div>
 
-        <div style={styles.xpBanner}>
-          <span>🏆 Keep it up!</span>
-          <span style={styles.xpBadge}>+{xpEarned} XP earned</span>
-          <span style={styles.xpDivider}>|</span>
-          <span>🔥 Keep your streak going</span>
+        <div style={{
+          display: "flex", alignItems: "center", justifyContent: "center",
+          gap: 16, padding: "18px 28px",
+          background: "linear-gradient(135deg, rgba(26,115,232,0.08) 0%, rgba(99,102,241,0.08) 100%)",
+          borderBottom: "1px solid var(--border-color)",
+          flexWrap: "wrap",
+        }}>
+          {/* XP Earned */}
+          <div style={{ textAlign: "center", minWidth: 100 }}>
+            <div style={{
+              fontSize: 36, fontWeight: 800,
+              background: "linear-gradient(135deg, #1a73e8, #6366f1)",
+              WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent",
+              lineHeight: 1,
+            }}>
+              +{animXp}
+            </div>
+            <div style={{ fontSize: 11, fontWeight: 600, color: "var(--text-muted)", marginTop: 2, textTransform: "uppercase", letterSpacing: "0.5px" }}>XP Earned</div>
+          </div>
+
+          <div style={{ width: 1, height: 40, background: "var(--border-color)" }} />
+
+          {/* Streak */}
+          <div style={{ textAlign: "center", minWidth: 100 }}>
+            <div style={{ fontSize: 36, fontWeight: 800, color: "#f97316", lineHeight: 1 }}>
+              🔥 {streak}
+            </div>
+            <div style={{ fontSize: 11, fontWeight: 600, color: "var(--text-muted)", marginTop: 2, textTransform: "uppercase", letterSpacing: "0.5px" }}>Day Streak</div>
+          </div>
+
+          <div style={{ width: 1, height: 40, background: "var(--border-color)" }} />
+
+          {/* Total XP */}
+          <div style={{ textAlign: "center", minWidth: 100 }}>
+            <div style={{ fontSize: 36, fontWeight: 800, color: "#10b981", lineHeight: 1 }}>
+              {xpTotal}
+            </div>
+            <div style={{ fontSize: 11, fontWeight: 600, color: "var(--text-muted)", marginTop: 2, textTransform: "uppercase", letterSpacing: "0.5px" }}>Total XP</div>
+          </div>
         </div>
 
         <div style={{ display: "flex", gap: 10, justifyContent: "center" }}>
@@ -218,10 +275,12 @@ const styles: Record<string, React.CSSProperties> = {
     boxShadow: "0 8px 32px rgba(0,0,0,0.12)",
   },
   header: {
-    background: "linear-gradient(135deg, var(--accent-blue) 0%, #6366f1 100%)",
-    padding: "32px 32px 28px",
+    background: "linear-gradient(135deg, #1a73e8 0%, #6366f1 60%, #8b5cf6 100%)",
+    padding: "36px 32px 30px",
     textAlign: "center",
     color: "white",
+    position: "relative",
+    overflow: "hidden",
   },
   celebrationEmoji: {
     fontSize: 48,
@@ -231,13 +290,13 @@ const styles: Record<string, React.CSSProperties> = {
     fontSize: 26,
     fontWeight: 800,
     margin: "0 0 8px",
-    color: "black",
+    color: "white",
   },
   subtitle: {
     fontSize: 15,
     opacity: 0.9,
     margin: 0,
-    color: "black",
+    color: "rgba(255,255,255,0.88)",
   },
   statsRow: {
     display: "flex",
