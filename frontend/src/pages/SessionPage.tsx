@@ -4,6 +4,7 @@ import { Lock, X, Pause, Play } from "lucide-react";
 import { appointmentsApi, assessmentsApi, sessionsApi, gamificationApi, slidesApi } from "../services/api";
 import ChatWindow from "../components/ChatWindow";
 import ChatInput from "../components/ChatInput";
+import LottiePlayer, { LOTTIE_URLS } from "../components/LottiePlayer";
 import AssessmentMode from "../components/AssessmentMode";
 import PostSessionScreen from "../components/PostSessionScreen";
 import LessonSlide from "../components/LessonSlide";
@@ -1036,6 +1037,24 @@ export default function SessionPage() {
           />
         ) : null}
       </div>
+
+      {isAiTyping && (
+        <div style={{
+          display: "flex", alignItems: "center", gap: 8,
+          padding: "4px 12px",
+          borderTop: "1px solid var(--border-color)",
+          background: "var(--bg-secondary)",
+        }}>
+          <LottiePlayer
+            src={LOTTIE_URLS.thinking}
+            fallback="🤔"
+            style={{ width: 32, height: 32 }}
+          />
+          <span style={{ fontSize: 12, color: "var(--text-muted)", fontStyle: "italic" }}>
+            AI Tutor is thinking...
+          </span>
+        </div>
+      )}
 
       <div style={styles.chatInputWrap}>
         <ChatInput

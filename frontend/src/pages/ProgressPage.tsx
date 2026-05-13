@@ -1,9 +1,10 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import Sidebar from "../components/Sidebar";
 import { gamificationApi, assessmentsApi, appointmentsApi } from "../services/api";
 import { useAuth } from "../context/AuthContext";
 import type { TopicMastery, StudentProfile, Assessment, Appointment } from "../types";
+import LottiePlayer, { LOTTIE_URLS } from "../components/LottiePlayer";
 
 interface SubjectStats {
   subject: string;
@@ -93,6 +94,7 @@ export default function ProgressPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [showAllSubjects, setShowAllSubjects] = useState(false);
+  const [estimatorHours, setEstimatorHours] = useState(5);
 
   useEffect(() => {
     const load = async () => {
@@ -233,6 +235,23 @@ export default function ProgressPage() {
 
   const weakestSubject = subjectStats.find((s) => s.needsFocus)?.subject ?? "your weaker topics";
 
+  // Progress estimator: estimate level gain from extra study hours
+  const currentLevel = profile?.xp_level ?? 1;
+  const currentXp = profile?.xp_total ?? 0;
+  const xpPerHour = 45; // approx XP per hour of study
+  const projectedXp = currentXp + estimatorHours * xpPerHour;
+  const projectedLevel = Math.floor(projectedXp / 100) + 1;
+  const levelsGained = Math.max(0, projectedLevel - currentLevel);
+  const avgScoreOverall = mastery.length > 0
+    ? Math.round(
+        mastery.reduce((sum, m) => {
+          const hist = m.score_history ?? [];
+          const avg = hist.length > 0 ? hist.reduce((a, s) => a + s.score, 0) / hist.length : 0;
+          return sum + avg;
+        }, 0) / mastery.length
+      )
+    : 0;
+
   const achievements = [
     profile && profile.current_streak >= 5 ? { icon: "🔥", label: `${profile.current_streak}-day streak` } : null,
     profile && profile.xp_total >= 100 ? { icon: "⭐", label: `${profile.xp_total} XP` } : null,
@@ -332,6 +351,109 @@ export default function ProgressPage() {
             ))}
           </div>
 
+          {/* ── Goal Estimator ─────────────────────────────────────────────── */}
+          <div style={{
+            background: "var(--bg-secondary)",
+            border: "1px solid var(--border-color)",
+            borderRadius: 14,
+            padding: "20px 22px",
+            marginBottom: 20,
+            animation: "lp-slide-up 0.5s ease both",
+          }}>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 14 }}>
+              <div>
+                <h3 style={{ fontSize: 15, fontWeight: 800, color: "var(--text-primary)", margin: 0 }}>
+                  🎯 Goal Estimator
+                </h3>
+                <p style={{ fontSize: 12, color: "var(--text-muted)", margin: "3px 0 0" }}>
+                  Drag to see how extra study hours unlock new levels
+                </p>
+              </div>
+              <LottiePlayer
+                src={avgScoreOverall >= 70 ? LOTTIE_URLS.trophy : LOTTIE_URLS.brain}
+                fallback={avgScoreOverall >= 70 ? "🏆" : "🧠"}
+                style={{ width: 60, height: 60 }}
+              />
+            </div>
+
+            {/* Slider */}
+            <div style={{ marginBottom: 16 }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
+                <span style={{ fontSize: 13, fontWeight: 600, color: "var(--text-secondary)" }}>
+                  Extra study time
+                </span>
+                <span style={{
+                  fontSize: 15, fontWeight: 800, color: "#1a73e8",
+                  background: "rgba(26,115,232,0.1)", padding: "2px 10px", borderRadius: 99,
+                }}>
+                  {estimatorHours}h / week
+                </span>
+              </div>
+              <input
+                type="range"
+                min={1} max={20} step={1}
+                value={estimatorHours}
+                onChange={(e) => setEstimatorHours(Number(e.target.value))}
+                style={{
+                  width: "100%", height: 6, accentColor: "#1a73e8",
+                  cursor: "grab", borderRadius: 99,
+                }}
+              />
+              <div style={{ display: "flex", justifyContent: "space-between", fontSize: 10, color: "var(--text-muted)", marginTop: 4 }}>
+                <span>1h</span><span>5h</span><span>10h</span><span>15h</span><span>20h</span>
+              </div>
+            </div>
+
+            {/* Projection result */}
+            <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+              <div style={{
+                flex: 1, minWidth: 110, padding: "12px 14px",
+                background: "rgba(26,115,232,0.06)", border: "1px solid rgba(26,115,232,0.15)",
+                borderRadius: 10, textAlign: "center",
+                animation: "lp-bounce-in 0.3s ease both",
+              }} key={estimatorHours}>
+                <div style={{ fontSize: 24, fontWeight: 800, color: "#1a73e8" }}>
+                  +{levelsGained}
+                </div>
+                <div style={{ fontSize: 11, color: "var(--text-muted)", fontWeight: 600 }}>Levels Gained</div>
+              </div>
+              <div style={{
+                flex: 1, minWidth: 110, padding: "12px 14px",
+                background: "rgba(16,185,129,0.06)", border: "1px solid rgba(16,185,129,0.15)",
+                borderRadius: 10, textAlign: "center",
+              }}>
+                <div style={{ fontSize: 24, fontWeight: 800, color: "#10b981" }}>
+                  {projectedXp}
+                </div>
+                <div style={{ fontSize: 11, color: "var(--text-muted)", fontWeight: 600 }}>Projected XP</div>
+              </div>
+              <div style={{
+                flex: 1, minWidth: 110, padding: "12px 14px",
+                background: "rgba(99,102,241,0.06)", border: "1px solid rgba(99,102,241,0.15)",
+                borderRadius: 10, textAlign: "center",
+              }}>
+                <div style={{ fontSize: 24, fontWeight: 800, color: "#6366f1" }}>
+                  Lv {projectedLevel}
+                </div>
+                <div style={{ fontSize: 11, color: "var(--text-muted)", fontWeight: 600 }}>Target Level</div>
+              </div>
+            </div>
+
+            {levelsGained > 0 && (
+              <div style={{
+                marginTop: 12, padding: "8px 12px",
+                background: "rgba(16,185,129,0.07)", borderRadius: 8,
+                fontSize: 12, fontWeight: 600, color: "#10b981",
+                display: "flex", alignItems: "center", gap: 6,
+                animation: "lp-slide-up 0.3s ease both",
+              }}>
+                <span style={{ animation: "lp-spin-slow 2s linear infinite", display: "inline-block" }}>⭐</span>
+                {estimatorHours}h of study per week will take you to Level {projectedLevel}!
+                {levelsGained >= 3 && " You're on fire! 🔥"}
+              </div>
+            )}
+          </div>
+
           {/* Subject progress + Strengths/Focus */}
           <div style={{ display: "flex", gap: 14, flexWrap: "wrap", marginBottom: 16 }}>
             {/* Progress by Subject */}
@@ -350,6 +472,14 @@ export default function ProgressPage() {
                             <span style={{ fontSize: 10, fontWeight: 700, color: "#f59e0b", background: "#fef3c7", padding: "2px 7px", borderRadius: 999 }}>
                               Needs Focus
                             </span>
+                          )}
+                          {s.percent >= 80 && (
+                            <LottiePlayer
+                              src={LOTTIE_URLS.stars}
+                              fallback="⭐"
+                              loop={false}
+                              style={{ width: 32, height: 32, flexShrink: 0 }}
+                            />
                           )}
                         </div>
                         <span style={{ fontSize: 12, color: "#64748b", fontWeight: 600 }}>
