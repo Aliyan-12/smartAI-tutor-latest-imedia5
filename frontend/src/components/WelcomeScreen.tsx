@@ -4,8 +4,16 @@ import { useAuth } from "../context/AuthContext";
 import { gamificationApi, appointmentsApi, assignmentsApi } from "../services/api";
 import type { DashboardData, Appointment, MyAssignment } from "../types";
 
+interface HeroStats {
+  streak: number;
+  xp: number;
+  level: number;
+  xpPct: number;
+}
+
 interface Props {
   onPromptClick: (text: string) => void;
+  onStatsLoaded?: (stats: HeroStats) => void;
 }
 
 const SUBJECT_COLORS: Record<string, { color: string; bg: string; icon: string }> = {
@@ -58,7 +66,7 @@ function formatDueDate(iso: string): string {
 
 const XP_PER_LEVEL = 500;
 
-export default function WelcomeScreen({ onPromptClick }: Props) {
+export default function WelcomeScreen({ onPromptClick, onStatsLoaded }: Props) {
   const { user } = useAuth();
   const navigate = useNavigate();
   const [dashData, setDashData] = useState<DashboardData | null>(null);
@@ -79,6 +87,13 @@ export default function WelcomeScreen({ onPromptClick }: Props) {
       setDashData(dash);
       setAppointments(appts ?? []);
       setAssignments(assgns ?? []);
+      const xpEarned = XP_PER_LEVEL - dash.xp_to_next_level;
+      onStatsLoaded?.({
+        streak: dash.profile.current_streak,
+        xp: dash.profile.xp_total,
+        level: dash.profile.xp_level,
+        xpPct: Math.min(100, Math.max(0, (xpEarned / XP_PER_LEVEL) * 100)),
+      });
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : "Failed to load dashboard");
     } finally {
@@ -141,10 +156,9 @@ export default function WelcomeScreen({ onPromptClick }: Props) {
       <style>{`
         .ws-root {
           padding: 24px 20px 40px;
-          max-width: 1060px;
-          margin: 0 auto;
           width: 100%;
           font-family: "DM Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+          box-sizing: border-box;
         }
 
         .ws-loading, .ws-error {
@@ -171,95 +185,6 @@ export default function WelcomeScreen({ onPromptClick }: Props) {
         @keyframes ws-spin {
           from { transform: rotate(0deg); }
           to { transform: rotate(360deg); }
-        }
-
-        .ws-greeting-banner {
-          background: #fff;
-          border: 1px solid #e2e8f0;
-          border-radius: 14px;
-          padding: 20px 24px;
-          display: flex;
-          align-items: center;
-          justify-content: space-between;
-          gap: 20px;
-          margin-bottom: 20px;
-          box-shadow: 0 1px 4px rgba(0,0,0,0.05);
-          flex-wrap: wrap;
-        }
-
-        .ws-greeting-left h1 {
-          font-size: 22px;
-          font-weight: 800;
-          color: #0f172a;
-          margin: 0 0 4px;
-        }
-
-        .ws-greeting-left h1 span { color: #1a73e8; }
-
-        .ws-greeting-left p {
-          font-size: 14px;
-          color: #64748b;
-          margin: 0;
-        }
-
-        .ws-stats-row {
-          display: flex;
-          align-items: center;
-          gap: 16px;
-          flex-wrap: wrap;
-        }
-
-        .ws-stat-chip {
-          display: flex;
-          align-items: center;
-          gap: 6px;
-          background: #f8fafc;
-          border: 1px solid #e2e8f0;
-          border-radius: 999px;
-          padding: 7px 14px;
-          font-size: 13px;
-          font-weight: 700;
-          color: #0f172a;
-          white-space: nowrap;
-        }
-
-        .ws-stat-chip .ws-chip-icon { font-size: 16px; }
-
-        .ws-xp-block {
-          display: flex;
-          flex-direction: column;
-          gap: 4px;
-          min-width: 160px;
-        }
-
-        .ws-xp-meta {
-          display: flex;
-          justify-content: space-between;
-          font-size: 12px;
-          font-weight: 600;
-        }
-
-        .ws-xp-meta .ws-xp-val { color: #0f172a; }
-        .ws-xp-meta .ws-level { color: #3b82f6; }
-
-        .ws-xp-bar-track {
-          height: 8px;
-          background: #e2e8f0;
-          border-radius: 999px;
-          overflow: hidden;
-        }
-
-        .ws-xp-bar-fill {
-          height: 100%;
-          border-radius: 999px;
-          background: linear-gradient(90deg, #3b82f6, #60a5fa);
-          transition: width 0.6s ease;
-        }
-
-        .ws-xp-next {
-          font-size: 11px;
-          color: #94a3b8;
-          text-align: right;
         }
 
         /* ── Stats summary row ── */
@@ -450,26 +375,6 @@ export default function WelcomeScreen({ onPromptClick }: Props) {
           padding: 28px 24px;
           text-align: center;
           margin-bottom: 20px;
-        }
-
-        .ws-start-cta .ws-cta-icon {
-          font-size: 40px;
-          margin-bottom: 10px;
-        }
-
-        .ws-start-cta h2 {
-          font-size: 18px;
-          font-weight: 800;
-          color: #0f172a;
-          margin: 0 0 6px;
-        }
-
-        .ws-start-cta p {
-          font-size: 13px;
-          color: #64748b;
-          max-width: 340px;
-          margin: 0 auto 16px;
-          line-height: 1.5;
         }
 
         /* Subject launch cards */
@@ -797,7 +702,6 @@ export default function WelcomeScreen({ onPromptClick }: Props) {
           .ws-grid { grid-template-columns: 1fr; }
           .ws-study-stats { grid-template-columns: repeat(2, 1fr); }
           .ws-continue-actions { flex-direction: row; flex-wrap: wrap; min-width: unset; width: 100%; }
-          .ws-greeting-banner { flex-direction: column; align-items: flex-start; }
         }
 
         @media (max-width: 480px) {
@@ -806,39 +710,6 @@ export default function WelcomeScreen({ onPromptClick }: Props) {
       `}</style>
 
       <div className="ws-root">
-        {/* Greeting banner */}
-        <div className="ws-greeting-banner">
-          <div className="ws-greeting-left">
-            <h1>
-              {getGreeting()}, <span>{firstName}</span>! 👋
-            </h1>
-            <p>Let's keep learning and growing.</p>
-          </div>
-
-          <div className="ws-stats-row">
-            <div className="ws-stat-chip">
-              <span className="ws-chip-icon">🔥</span>
-              {profile.current_streak} day streak
-            </div>
-
-            <div className="ws-xp-block">
-              <div className="ws-xp-meta">
-                <span className="ws-xp-val">⭐ {profile.xp_total.toLocaleString()} XP</span>
-                <span className="ws-level">Level {profile.xp_level}</span>
-              </div>
-              <div className="ws-xp-bar-track">
-                <div className="ws-xp-bar-fill" style={{ width: `${xpPct}%` }} />
-              </div>
-              <div className="ws-xp-next">{xp_to_next_level} XP to next level</div>
-            </div>
-
-            <div className="ws-stat-chip">
-              <span className="ws-chip-icon">🏅</span>
-              Level {profile.xp_level}
-            </div>
-          </div>
-        </div>
-
         {/* Study Stats Row */}
         <div className="ws-study-stats">
           <div className="ws-study-stat-card">
@@ -957,24 +828,20 @@ export default function WelcomeScreen({ onPromptClick }: Props) {
           </div>
         ) : (
           <div className="ws-start-cta">
-            <div className="ws-cta-icon">🚀</div>
-            <h2>Start Your First Session</h2>
-            <p>
-              Pick a subject and your AI tutor will personalise the lesson for you.
-            </p>
-            {/* Teaching robot illustration */}
-            <img
-              src="/images/teaching-robot.png"
-              alt="Teaching robot"
-              draggable={false}
-              style={{
-                width: 100,
-                height: "auto",
-                margin: "0 auto 6px",
-                display: "block",
-                pointerEvents: "none",
-              }}
-            />
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 16, marginBottom: 14 }}>
+              <img
+                src="/images/teaching-robot.png"
+                alt="Teaching robot"
+                draggable={false}
+                style={{ width: 70, height: "auto", objectFit: "contain", pointerEvents: "none", flexShrink: 0 }}
+              />
+              <div style={{ textAlign: "left" }}>
+                <h2 style={{ fontSize: 20, fontWeight: 800, color: "#0f172a", margin: "0 0 4px" }}>Start Your First Session</h2>
+                <p style={{ fontSize: 13, color: "#64748b", margin: 0, lineHeight: 1.5 }}>
+                  Pick a subject and your AI tutor will personalise the lesson for you.
+                </p>
+              </div>
+            </div>
             {/* Subject launch cards */}
             <div className="ws-subject-cards">
               {[

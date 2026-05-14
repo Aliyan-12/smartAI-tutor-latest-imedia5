@@ -313,9 +313,10 @@ export default function ProgressPage() {
             <div style={{ position: "absolute", bottom: -30, right: 25, width: 130, height: 130, borderRadius: "50%", background: "rgba(255,255,255,0.05)", pointerEvents: "none" }} />
             <div>
               <h1 style={{ fontSize: 22, fontWeight: 800, color: "#fff", margin: 0 }}>📊 My Progress</h1>
-              <p style={{ fontSize: 14, color: "rgba(255,255,255,0.85)", margin: "4px 0 0" }}>
+              <p className="pg-hero-sub" style={{ fontSize: 14, color: "rgba(255,255,255,0.85)", margin: "4px 0 0" }}>
                 See how you're improving and where to focus more.
               </p>
+              <style>{`@media (max-width: 640px) { .pg-hero-sub { display: none !important; } }`}</style>
             </div>
             {profile && (
               <div style={{

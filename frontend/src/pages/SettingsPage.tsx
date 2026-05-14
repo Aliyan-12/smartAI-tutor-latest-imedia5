@@ -161,12 +161,77 @@ export default function SettingsPage() {
   return (
     <>
       <style>{`
-        .sett-page { display: flex; height: 100vh; background: #f8fafc; }
-        .sett-main { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
-        .sett-header { padding: 32px 40px 0; flex-shrink: 0; }
-        .sett-header h1 { font-size: 26px; font-weight: 800; color: #0f172a; margin: 0 0 4px; }
-        .sett-header p { font-size: 14px; color: #64748b; margin: 0; }
-        .sett-tabs { display: flex; gap: 2px; padding: 20px 40px 0; border-bottom: 2px solid #e2e8f0; overflow-x: auto; flex-shrink: 0; }
+        .sett-page { display: flex; height: 100vh; background: #f8fafc; overflow: hidden; }
+        .sett-main { flex: 1; display: flex; flex-direction: column; overflow-y: auto; overflow-x: hidden; }
+        .sett-body { flex: none; padding: 24px; max-width: 860px; }
+        @media (max-width: 768px) {
+          .sett-page { overflow-x: hidden; }
+          .sett-main { overflow-x: hidden; }
+          .sett-body { padding: 16px; max-width: 100%; }
+          .sett-tabs { padding: 12px 16px 0; }
+          .sett-hero { margin: 12px 12px 0; padding: 20px 18px; min-height: unset; }
+          .sett-hero h1 { font-size: 20px; }
+          .sett-hero-robot { height: 70px; }
+          .sett-hero-right { display: none; }
+        }
+
+        /* Hero banner */
+        .sett-hero {
+          flex-shrink: 0;
+          margin: 24px 24px 0;
+          border-radius: 18px;
+          background: linear-gradient(135deg, #1e1b4b 0%, #312e81 45%, #4338ca 75%, #6366f1 100%);
+          padding: 28px 32px;
+          display: flex; align-items: center; justify-content: space-between;
+          overflow: hidden; position: relative; min-height: 110px;
+        }
+        .sett-hero::before {
+          content: ""; position: absolute; inset: 0;
+          background: radial-gradient(ellipse at 30% 50%, rgba(99,102,241,0.35) 0%, transparent 65%),
+                      radial-gradient(ellipse at 80% 20%, rgba(139,92,246,0.25) 0%, transparent 55%);
+          pointer-events: none;
+        }
+        .sett-hero-left { position: relative; z-index: 1; }
+        .sett-hero-badge {
+          display: inline-flex; align-items: center; gap: 6px;
+          background: rgba(255,255,255,0.12); border: 1px solid rgba(255,255,255,0.2);
+          border-radius: 999px; padding: 4px 12px; font-size: 11px; font-weight: 700;
+          color: rgba(255,255,255,0.85); margin-bottom: 8px; backdrop-filter: blur(6px);
+        }
+        .sett-hero h1 {
+          font-size: 24px; font-weight: 800; color: #fff;
+          margin: 0 0 4px; line-height: 1.2;
+        }
+        .sett-hero p { font-size: 13px; color: rgba(199,210,254,0.85); margin: 0; }
+        .sett-hero-avatar {
+          width: 52px; height: 52px; border-radius: 50%;
+          background: linear-gradient(135deg, #a5b4fc, #7c3aed);
+          display: flex; align-items: center; justify-content: center;
+          font-size: 22px; font-weight: 800; color: white;
+          border: 3px solid rgba(255,255,255,0.25);
+          box-shadow: 0 4px 16px rgba(0,0,0,0.3);
+          margin-top: 10px;
+        }
+        .sett-hero-right {
+          position: relative; z-index: 1;
+          display: flex; flex-direction: column; align-items: flex-end; gap: 8px;
+        }
+        .sett-hero-robot {
+          height: 90px; width: auto; object-fit: contain;
+          filter: drop-shadow(0 6px 20px rgba(0,0,0,0.4));
+          pointer-events: none; flex-shrink: 0;
+        }
+        .sett-hero-stat-row {
+          display: flex; gap: 8px;
+        }
+        .sett-hero-stat {
+          background: rgba(255,255,255,0.1); border: 1px solid rgba(255,255,255,0.15);
+          border-radius: 10px; padding: 6px 12px; text-align: center; backdrop-filter: blur(6px);
+        }
+        .sett-hero-stat-val { font-size: 14px; font-weight: 800; color: #fff; line-height: 1; }
+        .sett-hero-stat-lbl { font-size: 10px; color: rgba(199,210,254,0.75); margin-top: 2px; font-weight: 600; }
+
+        .sett-tabs { display: flex; gap: 2px; padding: 16px 24px 0; border-bottom: 2px solid #e2e8f0; overflow-x: auto; flex-shrink: 0; }
         .sett-tab {
           display: flex; align-items: center; gap: 6px; padding: 10px 16px;
           font-size: 13px; font-weight: 600; cursor: pointer; color: #64748b;
@@ -174,11 +239,20 @@ export default function SettingsPage() {
           background: none; border-top: none; border-left: none; border-right: none;
           transition: color .15s, border-color .15s;
         }
-        .sett-tab.active { color: #3b82f6; border-bottom-color: #3b82f6; }
+        .sett-tab.active { color: #6366f1; border-bottom-color: #6366f1; }
         .sett-tab:hover:not(.active) { color: #374151; }
-        .sett-body { flex: 1; padding: 28px 40px; max-width: 860px; overflow-y: auto; }
-        .sett-card { background: white; border: 1.5px solid #e2e8f0; border-radius: 12px; padding: 24px; margin-bottom: 16px; }
-        .sett-card-title { font-size: 15px; font-weight: 700; color: #0f172a; margin: 0 0 18px; display: flex; align-items: center; gap: 8px; }
+        /* .sett-body base rule is in the responsive block above */
+        .sett-card {
+          background: white; border: 1.5px solid #e2e8f0; border-radius: 14px;
+          padding: 24px; margin-bottom: 16px;
+          box-shadow: 0 2px 8px rgba(0,0,0,0.04);
+          border-top: 3px solid #6366f1;
+        }
+        .sett-card-title {
+          font-size: 15px; font-weight: 700; color: #0f172a; margin: 0 0 18px;
+          display: flex; align-items: center; gap: 8px;
+          padding-bottom: 12px; border-bottom: 1px solid #f1f5f9;
+        }
         .sett-row { display: flex; align-items: center; justify-content: space-between; padding: 12px 0; border-bottom: 1px solid #f1f5f9; }
         .sett-row:last-child { border-bottom: none; padding-bottom: 0; }
         .sett-row-label { font-size: 14px; font-weight: 600; color: #0f172a; }
@@ -188,7 +262,7 @@ export default function SettingsPage() {
           font-size: 14px; color: #0f172a; outline: none; transition: border-color .15s;
           margin-bottom: 12px;
         }
-        .sett-input:focus { border-color: #3b82f6; }
+        .sett-input:focus { border-color: #6366f1; }
         .sett-select {
           padding: 8px 12px; border: 1.5px solid #e2e8f0; border-radius: 8px;
           font-size: 13px; color: #374151; background: white; cursor: pointer; outline: none;
@@ -202,7 +276,7 @@ export default function SettingsPage() {
           content: ""; position: absolute; height: 18px; width: 18px; left: 3px; bottom: 3px;
           background: white; border-radius: 50%; transition: .2s;
         }
-        .sett-toggle input:checked + .sett-toggle-slider { background: #3b82f6; }
+        .sett-toggle input:checked + .sett-toggle-slider { background: #6366f1; }
         .sett-toggle input:checked + .sett-toggle-slider:before { transform: translateX(20px); }
         .sett-style-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; margin-bottom: 18px; }
         .sett-style-tile {
@@ -211,7 +285,7 @@ export default function SettingsPage() {
           font-size: 14px; font-weight: 600; color: #374151; transition: .15s;
           background: white;
         }
-        .sett-style-tile.selected { border-color: #3b82f6; background: #eff6ff; color: #1d4ed8; }
+        .sett-style-tile.selected { border-color: #6366f1; background: #eef2ff; color: #4338ca; }
         .sett-pace-row { display: flex; gap: 10px; margin-bottom: 18px; }
         .sett-pace-btn {
           flex: 1; display: flex; align-items: center; justify-content: center; gap: 8px;
@@ -219,28 +293,29 @@ export default function SettingsPage() {
           font-size: 13px; font-weight: 600; color: #374151; cursor: pointer;
           background: white; transition: .15s;
         }
-        .sett-pace-btn.selected { border-color: #3b82f6; background: #eff6ff; color: #1d4ed8; }
+        .sett-pace-btn.selected { border-color: #6366f1; background: #eef2ff; color: #4338ca; }
         .sett-check-label {
           display: flex; align-items: center; gap: 10px; padding: 10px 0;
           font-size: 14px; color: #374151; cursor: pointer; user-select: none;
           border-bottom: 1px solid #f8fafc;
         }
         .sett-check-label:last-child { border-bottom: none; }
-        .sett-check-label input { width: 16px; height: 16px; accent-color: #3b82f6; cursor: pointer; }
+        .sett-check-label input { width: 16px; height: 16px; accent-color: #6366f1; cursor: pointer; }
         .sett-tag-row { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 10px; }
         .sett-tag {
           display: flex; align-items: center; gap: 5px; padding: 4px 10px;
-          background: #eff6ff; color: #1d4ed8; border-radius: 999px; font-size: 12px; font-weight: 600;
+          background: #eef2ff; color: #4338ca; border-radius: 999px; font-size: 12px; font-weight: 600;
+          border: 1px solid #c7d2fe;
         }
-        .sett-tag button { background: none; border: none; color: #3b82f6; cursor: pointer; font-size: 14px; line-height: 1; padding: 0; }
+        .sett-tag button { background: none; border: none; color: #6366f1; cursor: pointer; font-size: 14px; line-height: 1; padding: 0; }
         .sett-tag-input { display: flex; gap: 8px; }
         .sett-tag-input input {
           flex: 1; padding: 8px 12px; border: 1.5px solid #e2e8f0; border-radius: 8px;
           font-size: 13px; outline: none; transition: border-color .15s;
         }
-        .sett-tag-input input:focus { border-color: #3b82f6; }
+        .sett-tag-input input:focus { border-color: #6366f1; }
         .sett-tag-add {
-          padding: 8px 14px; background: #3b82f6; color: white; border: none;
+          padding: 8px 14px; background: linear-gradient(135deg, #6366f1, #4f46e5); color: white; border: none;
           border-radius: 8px; font-size: 13px; font-weight: 600; cursor: pointer;
         }
         .sett-summary-box {
@@ -256,14 +331,15 @@ export default function SettingsPage() {
           background: white; cursor: pointer; font-weight: 700; color: #374151;
           display: flex; align-items: center; justify-content: center; transition: .15s;
         }
-        .sett-text-btn.selected { border-color: #3b82f6; background: #eff6ff; color: #1d4ed8; }
+        .sett-text-btn.selected { border-color: #6366f1; background: #eef2ff; color: #4338ca; }
         .sett-save-btn {
-          padding: 10px 24px; background: #3b82f6; color: white; border: none;
+          padding: 10px 24px; background: linear-gradient(135deg, #6366f1, #4f46e5); color: white; border: none;
           border-radius: 8px; font-size: 14px; font-weight: 700; cursor: pointer;
-          transition: background .15s; margin-top: 4px;
+          transition: opacity .15s; margin-top: 4px;
+          box-shadow: 0 2px 8px rgba(99,102,241,0.35);
         }
-        .sett-save-btn:hover { background: #2563eb; }
-        .sett-save-btn:disabled { background: #93c5fd; cursor: default; }
+        .sett-save-btn:hover { opacity: 0.88; }
+        .sett-save-btn:disabled { opacity: 0.5; cursor: default; }
         .sett-danger-btn {
           padding: 10px 20px; background: #fef2f2; color: #dc2626; border: 1.5px solid #fecaca;
           border-radius: 8px; font-size: 14px; font-weight: 700; cursor: pointer; transition: .15s;
@@ -286,9 +362,29 @@ export default function SettingsPage() {
       <div className="sett-page">
         <Sidebar />
         <div className="sett-main">
-          <div className="sett-header">
-            <h1>Settings</h1>
-            <p>Manage your account and learning preferences.</p>
+          {/* Hero Banner */}
+          <div className="sett-hero">
+            <div className="sett-hero-left">
+              <div className="sett-hero-badge">⚙️ Settings</div>
+              <h1>Your Account</h1>
+              <p>Personalise your learning experience</p>
+              <div className="sett-hero-avatar">
+                {(name || user?.name || "?").charAt(0).toUpperCase()}
+              </div>
+            </div>
+            <div className="sett-hero-right">
+              <img src="/images/robotAI.png" alt="Settings robot" className="sett-hero-robot" draggable={false} />
+              <div className="sett-hero-stat-row">
+                <div className="sett-hero-stat">
+                  <div className="sett-hero-stat-val">5</div>
+                  <div className="sett-hero-stat-lbl">Sections</div>
+                </div>
+                <div className="sett-hero-stat">
+                  <div className="sett-hero-stat-val">{user?.name ? "✓" : "!"}</div>
+                  <div className="sett-hero-stat-lbl">Profile</div>
+                </div>
+              </div>
+            </div>
           </div>
 
           <div className="sett-tabs">

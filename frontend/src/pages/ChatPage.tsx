@@ -314,7 +314,7 @@ export default function ChatPage() {
                 ))}
               </div>
 
-              <p style={{ margin: 0, fontSize: 11, color: "#d1d5db" }}>
+              <p style={{ margin: 0, fontSize: 11, color: "#374151" }}>
                 🔒 AI can make mistakes — always verify important information.
               </p>
             </div>

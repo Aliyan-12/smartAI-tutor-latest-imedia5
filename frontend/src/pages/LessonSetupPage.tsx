@@ -194,33 +194,109 @@ export default function LessonSetupPage() {
       <Sidebar />
 
       <main style={{ flex: 1, minWidth: 0, overflowY: "auto", height: "100%" }}>
-        {/* ── Stats bar ─────────────────────────────────────────────────── */}
-        <div style={s.statsBar}>
-          <div style={{ flex: 1 }} />
-          <div style={s.statsBadges}>
-            <span style={s.statPill}>🔥 {streak} Day Streak</span>
-            <span style={s.statPill}>⭐ {xpTotal} XP</span>
-            <span style={s.levelBadge}>
-              <span style={s.levelLabel}>Level {xpLevel}</span>
-              <div style={s.levelTrack}>
-                <div style={{ ...s.levelFill, width: `${xpProgress}%` }} />
+        <style>{`
+          @media (max-width: 768px) {
+            .lsp-two-col { flex-direction: column !important; padding: 16px 16px 40px !important; gap: 16px !important; }
+            .lsp-right-col { display: none !important; }
+          }
+        `}</style>
+        {/* ── Hero banner ───────────────────────────────────────────────── */}
+        <div style={{
+          background: "linear-gradient(135deg, #1a73e8 0%, #6366f1 60%, #8b5cf6 100%)",
+          width: "100%",
+          padding: "18px 28px",
+          position: "relative",
+          overflow: "hidden",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          boxSizing: "border-box",
+        }}>
+          {/* Decorative circles */}
+          <div style={{
+            position: "absolute", top: -40, left: -40,
+            width: 180, height: 180, borderRadius: "50%",
+            background: "rgba(255,255,255,0.07)", pointerEvents: "none",
+          }} />
+          <div style={{
+            position: "absolute", bottom: -30, left: 200,
+            width: 120, height: 120, borderRadius: "50%",
+            background: "rgba(255,255,255,0.07)", pointerEvents: "none",
+          }} />
+
+          {/* Left: heading + subtitle */}
+          <div style={{ position: "relative", zIndex: 1 }}>
+            <h1 style={{
+              fontSize: 22, fontWeight: 800, color: "#fff",
+              margin: "0 0 4px", lineHeight: 1.2,
+            }}>
+              Let's set up your lesson 👋
+            </h1>
+            <p style={{
+              fontSize: 13, color: "rgba(255,255,255,0.85)", margin: 0,
+            }}>
+              Tell us a few details and your AI tutor will take it from there.
+            </p>
+          </div>
+
+          {/* Right: frosted-glass stat chips + robot image */}
+          <div style={{
+            display: "flex", alignItems: "center", gap: 10,
+            position: "relative", zIndex: 1, paddingRight: 120,
+          }}>
+            <span style={{
+              fontSize: 13, fontWeight: 600, color: "#fff",
+              background: "rgba(255,255,255,0.15)",
+              backdropFilter: "blur(8px)",
+              border: "1px solid rgba(255,255,255,0.25)",
+              borderRadius: 99, padding: "5px 12px", whiteSpace: "nowrap",
+            }}>🔥 {streak} Day Streak</span>
+            <span style={{
+              fontSize: 13, fontWeight: 600, color: "#fff",
+              background: "rgba(255,255,255,0.15)",
+              backdropFilter: "blur(8px)",
+              border: "1px solid rgba(255,255,255,0.25)",
+              borderRadius: 99, padding: "5px 12px", whiteSpace: "nowrap",
+            }}>⭐ {xpTotal} XP</span>
+            <span style={{
+              display: "flex", alignItems: "center", gap: 8,
+              background: "rgba(255,255,255,0.15)",
+              backdropFilter: "blur(8px)",
+              border: "1px solid rgba(255,255,255,0.25)",
+              borderRadius: 99, padding: "5px 12px",
+            }}>
+              <span style={{
+                fontSize: 13, fontWeight: 700, color: "#fff", whiteSpace: "nowrap",
+              }}>Level {xpLevel}</span>
+              <div style={{
+                width: 64, height: 6, borderRadius: 99,
+                background: "rgba(255,255,255,0.25)", overflow: "hidden",
+              }}>
+                <div style={{
+                  height: "100%", borderRadius: 99,
+                  background: "#fff",
+                  width: `${xpProgress}%`,
+                  transition: "width 0.4s ease",
+                }} />
               </div>
             </span>
           </div>
+
+          {/* Robot image — bottom-right */}
+          <img
+            src="/images/robotAI.png"
+            alt=""
+            style={{
+              position: "absolute", bottom: 0, right: 16,
+              width: 110, pointerEvents: "none", zIndex: 1,
+            }}
+          />
         </div>
 
         {/* ── Two-column layout ──────────────────────────────────────────── */}
-        <div style={s.twoCol}>
+        <div style={s.twoCol} className="lsp-two-col">
           {/* ── Left: form ──────────────────────────────────────────────── */}
           <div style={s.leftCol}>
-            {/* Page header */}
-            <div style={s.pageHeader}>
-              <h1 style={s.pageTitle}>Let's set up your lesson 👋</h1>
-              <p style={s.pageSubtitle}>
-                Tell us a few details and your AI tutor will take it from there.
-              </p>
-            </div>
-
             {/* ── Step 1: Subject / Key Stage / Topics ─────────────────── */}
             <div style={s.stepCard}>
               <div style={s.stepHeader}>
@@ -465,7 +541,7 @@ export default function LessonSetupPage() {
           </div>
 
           {/* ── Right: panels ───────────────────────────────────────────── */}
-          <div style={s.rightCol}>
+          <div style={s.rightCol} className="lsp-right-col">
             {/* Recommended for You */}
             <div style={s.rightCard}>
               <div style={s.rightCardHeader}>
@@ -603,8 +679,6 @@ const s: Record<string, React.CSSProperties> = {
   twoCol: {
     display: "flex",
     gap: 24,
-    maxWidth: 1100,
-    margin: "0 auto",
     padding: "28px 28px 48px",
     alignItems: "flex-start",
   },

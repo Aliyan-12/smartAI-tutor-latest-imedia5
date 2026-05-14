@@ -46,10 +46,13 @@ const QUICK_ACTIONS = [
   },
 ];
 
+interface HeroStats { streak: number; xp: number; level: number; xpPct: number; }
+
 export default function DashboardPage() {
   const navigate = useNavigate();
   const { chatList, loadChats, credits, loadCredits } = useChat();
   const [appointments, setAppointments] = useState<Appointment[]>([]);
+  const [heroStats, setHeroStats] = useState<HeroStats | null>(null);
 
   useEffect(() => {
     loadChats();
@@ -138,37 +141,77 @@ export default function DashboardPage() {
             {/* Decorative circles */}
             <div style={{ position: "absolute", top: -20, right: 80, width: 100, height: 100, borderRadius: "50%", background: "rgba(255,255,255,0.08)", pointerEvents: "none" }} />
             <div style={{ position: "absolute", bottom: -30, right: 30, width: 140, height: 140, borderRadius: "50%", background: "rgba(255,255,255,0.06)", pointerEvents: "none" }} />
+            <style>{`
+              @media (max-width: 640px) {
+                .db-hero-sub { display: none !important; }
+                .db-hero-robot { display: none !important; }
+                .db-hero-stats { margin-right: 0 !important; gap: 6px !important; }
+                .db-hero-stat-chip { min-width: unset !important; padding: 6px 8px !important; }
+                .db-hero-stat-chip span:first-child { font-size: 16px !important; }
+                .db-hero-xp { min-width: 120px !important; padding: 6px 8px !important; }
+              }
+            `}</style>
             <div>
               <h2 style={{ fontSize: 22, fontWeight: 800, color: "#fff", margin: 0 }}>
                 Good {new Date().getHours() < 12 ? "morning" : new Date().getHours() < 17 ? "afternoon" : "evening"}! 👋
               </h2>
-              <p style={{ fontSize: 13, color: "rgba(255,255,255,0.85)", margin: "6px 0 0" }}>
+              <p className="db-hero-sub" style={{ fontSize: 13, color: "rgba(255,255,255,0.85)", margin: "6px 0 0" }}>
                 Ready to learn something amazing today?
               </p>
             </div>
-            <div style={{ display: "flex", alignItems: "center", gap: 10, zIndex: 1 }}>
-              <LottiePlayer
-                src={LOTTIE_URLS.trophy}
-                fallback="🏆"
-                style={{ width: 62, height: 62 }}
-              />
-              <LottiePlayer
-                src={LOTTIE_URLS.stars}
-                fallback="⭐"
-                style={{ width: 54, height: 54 }}
-              />
+            <div className="db-hero-stats" style={{ display: "flex", alignItems: "center", gap: 10, zIndex: 1, marginRight: 130 }}>
+              {heroStats ? (
+                <>
+                  {/* Streak */}
+                  <div className="db-hero-stat-chip" style={{
+                    background: "rgba(255,255,255,0.14)", border: "1px solid rgba(255,255,255,0.25)",
+                    borderRadius: 12, padding: "8px 14px", backdropFilter: "blur(10px)",
+                    display: "flex", flexDirection: "column", alignItems: "center", gap: 2, minWidth: 64,
+                  }}>
+                    <span style={{ fontSize: 20 }}>🔥</span>
+                    <span style={{ fontSize: 14, fontWeight: 800, color: "#fff", lineHeight: 1 }}>{heroStats.streak}</span>
+                    <span style={{ fontSize: 10, color: "rgba(255,255,255,0.72)", fontWeight: 600 }}>day streak</span>
+                  </div>
+
+                  {/* XP bar block */}
+                  <div className="db-hero-xp" style={{
+                    background: "rgba(255,255,255,0.14)", border: "1px solid rgba(255,255,255,0.25)",
+                    borderRadius: 12, padding: "8px 14px", backdropFilter: "blur(10px)", minWidth: 148,
+                  }}>
+                    <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 5 }}>
+                      <span style={{ fontSize: 11, fontWeight: 700, color: "#fff" }}>⭐ {heroStats.xp.toLocaleString()} XP</span>
+                      <span style={{ fontSize: 11, fontWeight: 700, color: "#fde68a" }}>Lv {heroStats.level}</span>
+                    </div>
+                    <div style={{ height: 6, background: "rgba(255,255,255,0.2)", borderRadius: 999, overflow: "hidden" }}>
+                      <div style={{ height: "100%", background: "linear-gradient(90deg, #fbbf24, #f59e0b)", borderRadius: 999, width: `${heroStats.xpPct}%`, transition: "width 0.6s ease" }} />
+                    </div>
+                    <div style={{ fontSize: 10, color: "rgba(255,255,255,0.6)", marginTop: 4, textAlign: "right" }}>to next level</div>
+                  </div>
+
+                  {/* Level badge */}
+                  <div className="db-hero-stat-chip" style={{
+                    background: "rgba(255,255,255,0.14)", border: "1px solid rgba(255,255,255,0.25)",
+                    borderRadius: 12, padding: "8px 14px", backdropFilter: "blur(10px)",
+                    display: "flex", flexDirection: "column", alignItems: "center", gap: 2, minWidth: 64,
+                  }}>
+                    <span style={{ fontSize: 20 }}>🏅</span>
+                    <span style={{ fontSize: 14, fontWeight: 800, color: "#fff", lineHeight: 1 }}>Level {heroStats.level}</span>
+                    <span style={{ fontSize: 10, color: "rgba(255,255,255,0.72)", fontWeight: 600 }}>rank</span>
+                  </div>
+                </>
+              ) : (
+                <LottiePlayer src={LOTTIE_URLS.trophy} fallback="🏆" style={{ width: 62, height: 62 }} />
+              )}
+
               <img
                 src="/images/robotAI.png"
                 alt="AI tutor robot"
+                className="db-hero-robot"
                 draggable={false}
                 style={{
-                  width: 120,
-                  height: "auto",
-                  position: "absolute",
-                  right: 20,
-                  bottom: 0,
-                  pointerEvents: "none",
-                  objectFit: "contain",
+                  width: 120, height: "auto",
+                  position: "absolute", right: 20, bottom: 0,
+                  pointerEvents: "none", objectFit: "contain",
                 }}
               />
             </div>
@@ -204,7 +247,7 @@ export default function DashboardPage() {
             ))}
           </div>
 
-          <WelcomeScreen onPromptClick={handlePromptClick} />
+          <WelcomeScreen onPromptClick={handlePromptClick} onStatsLoaded={setHeroStats} />
         </div>
       </div>
     </div>

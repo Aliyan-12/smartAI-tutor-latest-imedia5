@@ -568,7 +568,7 @@ input, textarea, select {
 
 /* ============ VOICE MODE ============ */
 .voice-mode-bar {
-  max-width: 780px;
+  max-width: 100%;
   margin: 0 auto;
   display: flex;
   align-items: center;
@@ -638,7 +638,7 @@ input, textarea, select {
 }
 
 .input-wrapper {
-  max-width: 780px;
+  max-width: 100%;
   margin: 0 auto;
   display: flex;
   align-items: flex-end;

@@ -121,16 +121,21 @@ export default function AssignmentsPage() {
           transition: border-color .15s;
         }
         .asgn-cal-btn:hover { border-color: #3b82f6; color: #3b82f6; }
-        .asgn-tabs { display: flex; gap: 0; padding: 24px 40px 0; border-bottom: 2px solid #e2e8f0; }
+        .asgn-tabs { display: flex; gap: 0; padding: 24px 40px 0; border-bottom: 2px solid #e2e8f0; overflow-x: auto; -webkit-overflow-scrolling: touch; flex-shrink: 0; scrollbar-width: none; }
+        .asgn-tabs::-webkit-scrollbar { display: none; }
         .asgn-tab {
           padding: 10px 20px; font-size: 14px; font-weight: 600; cursor: pointer;
           color: #64748b; border-bottom: 2px solid transparent; margin-bottom: -2px;
           transition: color .15s, border-color .15s; background: none; border-top: none;
-          border-left: none; border-right: none;
+          border-left: none; border-right: none; white-space: nowrap; flex-shrink: 0;
         }
         .asgn-tab.active { color: #3b82f6; border-bottom-color: #3b82f6; }
         .asgn-tab:hover:not(.active) { color: #374151; }
         .asgn-body { flex: 1; padding: 24px 40px; display: flex; flex-direction: column; gap: 14px; }
+        @media (max-width: 640px) {
+          .asgn-tabs { padding: 12px 16px 0; }
+          .asgn-body { padding: 16px; }
+        }
         .asgn-card {
           background: white; border-radius: 12px; border: 1.5px solid #e2e8f0;
           padding: 20px 24px; display: flex; align-items: flex-start;
