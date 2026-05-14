@@ -616,7 +616,6 @@ export default function RegisterPage() {
           .rp-robo-ring-2 { width: 155px; height: 155px; }
           .rp-robo-ring-3 { width: 190px; height: 190px; }
           .rp-robo-orbit  { width: 155px; height: 155px; }
-          .rp-hi-info p { display: none; }
         }
 
         @media (max-width: 768px) {

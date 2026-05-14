@@ -622,7 +622,6 @@ export default function LoginPage() {
           .lp-robo-ring-3 { width: 190px; height: 190px; }
           .lp-robo-orbit  { width: 155px; height: 155px; }
           .lp-role-cards  { gap: 8px; }
-          .lp-role-info p { display: none; }
         }
         @media (max-width: 768px) {
           .lp-root { display: block; background: #0a0a15; }
@@ -630,7 +629,7 @@ export default function LoginPage() {
           .lp-form { display: block; min-height: 100vh; padding: 0; background: transparent; }
           .lp-card { max-width: 100%; min-height: 100vh; display: flex; flex-direction: column; }
           .lp-logo { display: none; }
-          .lp-m-banner { display: block; background: linear-gradient(160deg, #0a0a15, #111127); padding: 22px 22px 20px; position: relative; overflow: hidden; flex-shrink: 0; }
+          .lp-m-banner { display: flex; flex-direction: column; background: linear-gradient(160deg, #0a0a15 0%, #111127 55%, #0d1a2e 100%); padding: 22px 22px 20px; position: relative; overflow: hidden; flex-shrink: 0; }
           .lp-m-constellation { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; z-index: 0; }
           .lp-m-banner-hdr { display: flex; align-items: center; gap: 11px; margin-bottom: 14px; position: relative; z-index: 1; }
           .lp-m-banner-icon { width: 38px; height: 38px; border-radius: 10px; background: #1a73e8; display: flex; align-items: center; justify-content: center; font-size: 18px; flex-shrink: 0; box-shadow: 0 3px 10px rgba(26,115,232,0.4); }
@@ -657,12 +656,14 @@ export default function LoginPage() {
             border: 1px solid rgba(255,255,255,0.18);
             border-top-color: rgba(255,255,255,0.28);
             border-bottom-color: rgba(255,255,255,0.06);
-            border-radius: 10px; padding: 9px 11px;
-            font-size: 12px; font-weight: 700; color: #f0f4ff;
-            display: flex; align-items: center; gap: 7px;
+            border-radius: 10px; padding: 9px 10px;
+            display: flex; align-items: center; gap: 8px;
             backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);
             box-shadow: 0 6px 16px rgba(0,0,0,0.4), inset 0 1px 0 rgba(255,255,255,0.16), inset 0 -1px 0 rgba(0,0,0,0.2);
           }
+          .lp-m-chip-icon { font-size: 16px; flex-shrink: 0; }
+          .lp-m-chip-title { font-size: 11px; font-weight: 700; color: #f0f4ff; line-height: 1.2; }
+          .lp-m-chip-desc { font-size: 10px; color: rgba(200,210,235,0.7); margin-top: 1px; line-height: 1.3; }
           .lp-m-form-body { flex: 1; background: #f5f5f0; border-radius: 20px 20px 0 0; margin-top: -10px; padding: 28px 22px 36px; position: relative; z-index: 2; box-shadow: 0 -4px 20px rgba(0,0,0,0.1); }
           .lp-m-heading { display: block; margin-bottom: 22px; }
           .lp-m-heading h2 { font-size: 20px; font-weight: 800; color: #2c2c2c; margin: 0 0 4px; }
@@ -798,7 +799,13 @@ export default function LoginPage() {
 
               <div className="lp-m-chips">
                 {ROLE_CARDS.map((c) => (
-                  <span className="lp-m-chip" key={c.role}>{c.icon} {c.role}</span>
+                  <div className="lp-m-chip" key={c.role}>
+                    <span className="lp-m-chip-icon">{c.icon}</span>
+                    <div>
+                      <div className="lp-m-chip-title">{c.role}</div>
+                      <div className="lp-m-chip-desc">{c.desc}</div>
+                    </div>
+                  </div>
                 ))}
               </div>
             </div>
