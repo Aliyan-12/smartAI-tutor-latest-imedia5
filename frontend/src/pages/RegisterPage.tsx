@@ -56,13 +56,15 @@ export default function RegisterPage() {
   const [error,    setError]    = useState("");
   const [loading,  setLoading]  = useState(false);
 
-  const containerRef = useRef<HTMLDivElement>(null);
-  const canvasRef    = useRef<HTMLCanvasElement>(null);
-  const itemDivsRef  = useRef<Map<number, HTMLDivElement>>(new Map());
-  const physRef      = useRef<PhysItem[]>([]);
-  const rafRef       = useRef<number>(0);
-  const consRafRef   = useRef<number>(0);
-  const frameRef     = useRef<number>(0);
+  const containerRef     = useRef<HTMLDivElement>(null);
+  const canvasRef        = useRef<HTMLCanvasElement>(null);
+  const mobileCanvasRef  = useRef<HTMLCanvasElement>(null);
+  const itemDivsRef      = useRef<Map<number, HTMLDivElement>>(new Map());
+  const physRef          = useRef<PhysItem[]>([]);
+  const rafRef           = useRef<number>(0);
+  const consRafRef       = useRef<number>(0);
+  const mobileConsRafRef = useRef<number>(0);
+  const frameRef         = useRef<number>(0);
 
   const dragRef = useRef<{
     id: number;
@@ -153,6 +155,62 @@ export default function RegisterPage() {
       cancelAnimationFrame(consRafRef.current);
       window.removeEventListener("resize", resize);
     };
+  }, []);
+
+  // ── Mobile constellation canvas ───────────────────────────────────────────────
+  useEffect(() => {
+    const canvas = mobileCanvasRef.current;
+    if (!canvas) return;
+    interface Star { x: number; y: number; vx: number; vy: number; r: number; opacity: number; }
+    let W = 0, H = 0, stars: Star[] = [];
+
+    const init = () => {
+      W = canvas.offsetWidth; H = canvas.offsetHeight;
+      if (!W || !H) return;
+      canvas.width = W; canvas.height = H;
+      stars = Array.from({ length: 30 }, () => ({
+        x: Math.random() * W, y: Math.random() * H,
+        vx: (Math.random() - 0.5) * 0.25, vy: (Math.random() - 0.5) * 0.25,
+        r: 1.0 + Math.random() * 1.5, opacity: 0.3 + Math.random() * 0.5,
+      }));
+    };
+    init();
+
+    const drawTick = () => {
+      if (!W || !H) { init(); mobileConsRafRef.current = requestAnimationFrame(drawTick); return; }
+      const ctx = canvas.getContext("2d");
+      if (!ctx) return;
+      ctx.clearRect(0, 0, W, H);
+      for (const s of stars) {
+        s.x = (s.x + s.vx + W) % W;
+        s.y = (s.y + s.vy + H) % H;
+      }
+      for (let i = 0; i < stars.length; i++) {
+        for (let j = i + 1; j < stars.length; j++) {
+          const a = stars[i], b = stars[j];
+          const dx = a.x - b.x, dy = a.y - b.y;
+          const d = Math.sqrt(dx * dx + dy * dy);
+          if (d < 120) {
+            ctx.strokeStyle = `rgba(100,160,255,${(1 - d / 120) * 0.25})`;
+            ctx.lineWidth = 0.7;
+            ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke();
+          }
+        }
+      }
+      for (const s of stars) {
+        const g = ctx.createRadialGradient(s.x, s.y, 0, s.x, s.y, s.r * 3);
+        g.addColorStop(0, `rgba(130,180,255,${s.opacity})`);
+        g.addColorStop(1, "rgba(130,180,255,0)");
+        ctx.fillStyle = g;
+        ctx.beginPath(); ctx.arc(s.x, s.y, s.r * 3, 0, Math.PI * 2); ctx.fill();
+        ctx.fillStyle = `rgba(200,225,255,${s.opacity * 1.2})`;
+        ctx.beginPath(); ctx.arc(s.x, s.y, s.r, 0, Math.PI * 2); ctx.fill();
+      }
+      mobileConsRafRef.current = requestAnimationFrame(drawTick);
+    };
+
+    mobileConsRafRef.current = requestAnimationFrame(drawTick);
+    return () => cancelAnimationFrame(mobileConsRafRef.current);
   }, []);
 
   // ── Apply transforms directly to DOM ─────────────────────────────────────────
@@ -479,13 +537,25 @@ export default function RegisterPage() {
           position: relative; z-index: 10; pointer-events: none;
         }
         .rp-highlight {
-          background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.07);
-          border-radius: 10px; padding: 13px 15px;
+          background: linear-gradient(145deg, rgba(255,255,255,0.11) 0%, rgba(255,255,255,0.04) 100%);
+          border: 1px solid rgba(255,255,255,0.18);
+          border-top-color: rgba(255,255,255,0.3);
+          border-bottom-color: rgba(255,255,255,0.06);
+          border-radius: 12px; padding: 13px 15px;
           display: flex; align-items: flex-start; gap: 10px;
+          backdrop-filter: blur(14px);
+          -webkit-backdrop-filter: blur(14px);
+          box-shadow:
+            0 8px 24px rgba(0,0,0,0.45),
+            0 2px 6px rgba(0,0,0,0.3),
+            inset 0 1px 0 rgba(255,255,255,0.18),
+            inset 0 -1px 0 rgba(0,0,0,0.25);
+          transform: translateY(0);
+          transition: transform 0.2s, box-shadow 0.2s;
         }
         .rp-hi-icon { font-size: 18px; flex-shrink: 0; margin-top: 1px; }
-        .rp-hi-info h4 { font-size: 13px; font-weight: 700; color: #e2e8f0; margin: 0 0 2px; }
-        .rp-hi-info p  { font-size: 11px; color: #636363; margin: 0; line-height: 1.4; }
+        .rp-hi-info h4 { font-size: 13px; font-weight: 700; color: #f0f4ff; margin: 0 0 3px; }
+        .rp-hi-info p  { font-size: 11px; color: rgba(200,210,235,0.75); margin: 0; line-height: 1.4; }
 
         /* ══ PHYSICS ITEMS ══ */
         .rp-drag-item {
@@ -555,16 +625,42 @@ export default function RegisterPage() {
           .rp-form { display: block; min-height: 100vh; width: 100%; padding: 0; background: transparent; overflow-y: visible; }
           .rp-card { max-width: 100%; min-height: 100vh; display: flex; flex-direction: column; }
           .rp-logo { display: none; }
-          .rp-m-banner { display: block; background: linear-gradient(160deg, #0a0a15, #111127); padding: 28px 22px 26px; position: relative; overflow: hidden; flex-shrink: 0; }
-          .rp-m-banner::before { content: ""; position: absolute; top: -50px; right: -50px; width: 200px; height: 200px; border-radius: 50%; background: radial-gradient(circle, rgba(26,115,232,0.2) 0%, transparent 70%); pointer-events: none; }
-          .rp-m-banner-hdr { display: flex; align-items: center; gap: 11px; margin-bottom: 16px; position: relative; z-index: 1; }
-          .rp-m-banner-icon { width: 40px; height: 40px; border-radius: 10px; background: #1a73e8; display: flex; align-items: center; justify-content: center; font-size: 19px; flex-shrink: 0; box-shadow: 0 3px 10px rgba(26,115,232,0.4); }
+          .rp-m-banner { display: block; background: linear-gradient(160deg, #0a0a15, #111127); padding: 22px 22px 20px; position: relative; overflow: hidden; flex-shrink: 0; }
+          .rp-m-constellation { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; z-index: 0; }
+          .rp-m-banner-hdr { display: flex; align-items: center; gap: 11px; margin-bottom: 14px; position: relative; z-index: 1; }
+          .rp-m-banner-icon { width: 38px; height: 38px; border-radius: 10px; background: #1a73e8; display: flex; align-items: center; justify-content: center; font-size: 18px; flex-shrink: 0; box-shadow: 0 3px 10px rgba(26,115,232,0.4); }
           .rp-m-banner-hdr h3 { font-size: 15px; font-weight: 800; color: #fff; margin: 0; }
           .rp-m-banner-hdr p  { font-size: 11px; color: #636363; margin: 2px 0 0; }
-          .rp-m-tagline { font-size: 21px; font-weight: 800; color: #fff; line-height: 1.22; margin: 0 0 5px; position: relative; z-index: 1; }
+          /* hero row: text + robot */
+          .rp-m-hero-row { display: flex; align-items: center; gap: 10px; position: relative; z-index: 1; margin-bottom: 14px; }
+          .rp-m-hero-text { flex: 1; min-width: 0; }
+          .rp-m-tagline { font-size: 20px; font-weight: 800; color: #fff; line-height: 1.22; margin: 0 0 5px; }
           .rp-m-tagline span { color: #1a73e8; }
-          .rp-m-sub { font-size: 12px; color: #8a8a8a; margin: 0; position: relative; z-index: 1; }
-          .rp-m-form-body { flex: 1; background: #f5f5f0; border-radius: 20px 20px 0 0; margin-top: -12px; padding: 28px 22px 36px; position: relative; z-index: 2; box-shadow: 0 -4px 20px rgba(0,0,0,0.1); }
+          .rp-m-sub { font-size: 11px; color: #8a8a8a; margin: 0; }
+          /* mobile robot */
+          .rp-m-robo-wrap { flex-shrink: 0; width: 88px; height: 88px; position: relative; display: flex; align-items: center; justify-content: center; }
+          .rp-m-robo-img { width: 72px; height: 72px; object-fit: contain; position: relative; z-index: 2; animation: rp-robot-float 3.8s ease-in-out infinite; filter: drop-shadow(0 0 12px rgba(26,115,232,0.55)) drop-shadow(0 4px 10px rgba(0,0,0,0.5)); }
+          .rp-m-robo-rings { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; }
+          .rp-m-robo-ring { position: absolute; border-radius: 50%; border: 1px solid rgba(26,115,232,0.35); }
+          .rp-m-robo-ring-1 { width: 66px; height: 66px; animation: rp-ring-pulse 3.2s ease-in-out infinite 0s; }
+          .rp-m-robo-ring-2 { width: 88px; height: 88px; animation: rp-ring-pulse 3.2s ease-in-out infinite 0.8s; border-color: rgba(26,115,232,0.18); }
+          .rp-m-robo-orbit { position: absolute; width: 88px; height: 88px; animation: rp-orbit-spin 5s linear infinite; }
+          .rp-m-robo-orbit::after { content: ""; position: absolute; top: 0; left: 50%; width: 5px; height: 5px; border-radius: 50%; background: #1a73e8; transform: translateX(-50%); box-shadow: 0 0 6px 2px rgba(26,115,232,0.6); }
+          .rp-m-highlights { display: grid; grid-template-columns: 1fr 1fr; gap: 7px; position: relative; z-index: 1; margin-top: 0; }
+          .rp-m-highlight {
+            background: linear-gradient(145deg, rgba(255,255,255,0.11) 0%, rgba(255,255,255,0.04) 100%);
+            border: 1px solid rgba(255,255,255,0.18);
+            border-top-color: rgba(255,255,255,0.28);
+            border-bottom-color: rgba(255,255,255,0.06);
+            border-radius: 10px; padding: 9px 10px;
+            display: flex; align-items: center; gap: 8px;
+            backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);
+            box-shadow: 0 6px 16px rgba(0,0,0,0.4), inset 0 1px 0 rgba(255,255,255,0.16), inset 0 -1px 0 rgba(0,0,0,0.2);
+          }
+          .rp-m-hi-icon { font-size: 16px; flex-shrink: 0; }
+          .rp-m-hi-title { font-size: 11px; font-weight: 700; color: #f0f4ff; line-height: 1.2; }
+          .rp-m-hi-desc { font-size: 10px; color: rgba(200,210,235,0.7); margin-top: 1px; line-height: 1.3; }
+          .rp-m-form-body { flex: 1; background: #f5f5f0; border-radius: 20px 20px 0 0; margin-top: -10px; padding: 28px 22px 36px; position: relative; z-index: 2; box-shadow: 0 -4px 20px rgba(0,0,0,0.1); }
           .rp-m-heading { display: block; margin-bottom: 20px; }
           .rp-m-heading h2 { font-size: 20px; font-weight: 800; color: #2c2c2c; margin: 0 0 4px; }
           .rp-m-heading p  { font-size: 13px; color: #636363; margin: 0; }
@@ -634,7 +730,7 @@ export default function RegisterPage() {
                 <div className="rp-robo-orbit" />
               </div>
               <img
-                src="/Original-Logo.png"
+                src="/images/robotAI.png"
                 alt="AI Tutor Robot"
                 className="rp-robo-img"
                 draggable={false}
@@ -661,6 +757,9 @@ export default function RegisterPage() {
           <div className="rp-card">
 
             <div className="rp-m-banner">
+              {/* Mobile constellation */}
+              <canvas ref={mobileCanvasRef} className="rp-m-constellation" />
+
               <div className="rp-m-banner-hdr">
                 <div className="rp-m-banner-icon">🤖</div>
                 <div>
@@ -668,10 +767,37 @@ export default function RegisterPage() {
                   <p>Powered by SmartAI Tutor</p>
                 </div>
               </div>
-              <h2 className="rp-m-tagline">
-                Start your <span>AI learning journey</span>
-              </h2>
-              <p className="rp-m-sub">Join thousands of UK students learning smarter.</p>
+
+              {/* Hero row: tagline + robot */}
+              <div className="rp-m-hero-row">
+                <div className="rp-m-hero-text">
+                  <h2 className="rp-m-tagline">
+                    Start your <span>AI learning journey</span> today
+                  </h2>
+                  <p className="rp-m-sub">Join thousands of UK students learning smarter.</p>
+                </div>
+                <div className="rp-m-robo-wrap">
+                  <div className="rp-m-robo-rings">
+                    <div className="rp-m-robo-ring rp-m-robo-ring-1" />
+                    <div className="rp-m-robo-ring rp-m-robo-ring-2" />
+                    <div className="rp-m-robo-orbit" />
+                  </div>
+                  <img src="/images/robotAI.png" alt="AI Tutor Robot" className="rp-m-robo-img" draggable={false} />
+                </div>
+              </div>
+
+              {/* Mobile highlights grid */}
+              <div className="rp-m-highlights">
+                {HIGHLIGHTS.map((h) => (
+                  <div className="rp-m-highlight" key={h.title}>
+                    <span className="rp-m-hi-icon">{h.icon}</span>
+                    <div>
+                      <div className="rp-m-hi-title">{h.title}</div>
+                      <div className="rp-m-hi-desc">{h.desc}</div>
+                    </div>
+                  </div>
+                ))}
+              </div>
             </div>
 
             <div className="rp-m-form-body">
