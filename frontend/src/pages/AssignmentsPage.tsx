@@ -12,6 +12,25 @@ const TYPE_CONFIG: Record<string, { label: string; bg: string; color: string; ct
   revision: { label: "REVISION", bg: "#eff6ff", color: "#2563eb", cta: "Start Revision" },
 };
 
+const SUBJECT_STYLES: Record<string, { color: string; bg: string; icon: string }> = {
+  maths:              { color: "#f97316", bg: "#fff7ed", icon: "🧮" },
+  mathematics:        { color: "#f97316", bg: "#fff7ed", icon: "🧮" },
+  science:            { color: "#22c55e", bg: "#f0fdf4", icon: "🔬" },
+  biology:            { color: "#22c55e", bg: "#f0fdf4", icon: "🧬" },
+  chemistry:          { color: "#ec4899", bg: "#fdf2f8", icon: "⚗️" },
+  physics:            { color: "#06b6d4", bg: "#ecfeff", icon: "⚛️" },
+  english:            { color: "#3b82f6", bg: "#eff6ff", icon: "📚" },
+  history:            { color: "#a855f7", bg: "#faf5ff", icon: "🏛️" },
+  geography:          { color: "#10b981", bg: "#ecfdf5", icon: "🌍" },
+  art:                { color: "#f59e0b", bg: "#fffbeb", icon: "🎨" },
+  "computer science": { color: "#6366f1", bg: "#eef2ff", icon: "💻" },
+  computing:          { color: "#6366f1", bg: "#eef2ff", icon: "💻" },
+};
+
+function getSubjectStyle(subject: string) {
+  return SUBJECT_STYLES[subject.toLowerCase()] ?? { color: "#64748b", bg: "#f8fafc", icon: "📖" };
+}
+
 function formatDue(dateStr: string | null): { text: string; urgent: boolean } {
   if (!dateStr) return { text: "No due date", urgent: false };
   const due = new Date(dateStr);
@@ -70,10 +89,31 @@ export default function AssignmentsPage() {
       <style>{`
         .asgn-page { display: flex; height: 100vh; background: #f8fafc; }
         .asgn-main { flex: 1; display: flex; flex-direction: column; overflow-y: auto; }
-        .asgn-header { padding: 32px 40px 0; }
+        .asgn-header { padding: 0; }
         .asgn-header-row { display: flex; align-items: flex-start; justify-content: space-between; }
         .asgn-title { font-size: 26px; font-weight: 800; color: #0f172a; margin: 0 0 4px; }
         .asgn-subtitle { font-size: 14px; color: #64748b; margin: 0; }
+        .asgn-hero {
+          margin: 24px 24px 0;
+          background: linear-gradient(135deg, #f59e0b 0%, #f97316 100%);
+          border-radius: 16px;
+          padding: 20px 24px;
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          position: relative;
+          overflow: hidden;
+        }
+        .asgn-hero-deco1 {
+          position: absolute; top: -20px; right: 80px;
+          width: 90px; height: 90px; border-radius: 50%;
+          background: rgba(255,255,255,0.08); pointer-events: none;
+        }
+        .asgn-hero-deco2 {
+          position: absolute; bottom: -25px; right: 20px;
+          width: 110px; height: 110px; border-radius: 50%;
+          background: rgba(255,255,255,0.06); pointer-events: none;
+        }
         .asgn-cal-btn {
           display: flex; align-items: center; gap: 6px; padding: 8px 16px;
           background: white; border: 1.5px solid #e2e8f0; border-radius: 8px;
@@ -94,9 +134,15 @@ export default function AssignmentsPage() {
         .asgn-card {
           background: white; border-radius: 12px; border: 1.5px solid #e2e8f0;
           padding: 20px 24px; display: flex; align-items: flex-start;
-          gap: 18px; transition: box-shadow .15s;
+          gap: 18px; transition: box-shadow .15s, transform .15s;
+          border-left: 4px solid #e2e8f0;
         }
-        .asgn-card:hover { box-shadow: 0 4px 16px rgba(0,0,0,.08); }
+        .asgn-card:hover { box-shadow: 0 6px 20px rgba(0,0,0,.1); transform: translateY(-2px); }
+        .asgn-subject-bubble {
+          width: 44px; height: 44px; border-radius: 12px;
+          display: flex; align-items: center; justify-content: center;
+          font-size: 22px; flex-shrink: 0;
+        }
         .asgn-type-badge {
           padding: 3px 10px; border-radius: 999px; font-size: 11px;
           font-weight: 700; letter-spacing: .4px; white-space: nowrap;
@@ -147,17 +193,38 @@ export default function AssignmentsPage() {
         <Sidebar />
         <div className="asgn-main">
           <div className="asgn-header">
-            <div className="asgn-header-row">
-              <div>
-                <h1 className="asgn-title">Assignments</h1>
-                <p className="asgn-subtitle">Your homework and learning tasks from your teachers.</p>
+            <div className="asgn-hero">
+              <div className="asgn-hero-deco1" /><div className="asgn-hero-deco2" />
+              <div style={{ zIndex: 1 }}>
+                <h1 style={{ fontSize: 22, fontWeight: 800, color: "#fff", margin: "0 0 4px" }}>📝 Assignments</h1>
+                <p style={{ fontSize: 13, color: "rgba(255,255,255,0.85)", margin: 0 }}>
+                  Your homework and learning tasks from your teachers.
+                </p>
               </div>
-              <button
-                className="asgn-cal-btn"
-                onClick={() => { setCalendarToast(true); setTimeout(() => setCalendarToast(false), 2500); }}
-              >
-                <Calendar size={15} /> Calendar
-              </button>
+              <div style={{ display: "flex", alignItems: "center", gap: 10, zIndex: 1 }}>
+                <button
+                  className="asgn-cal-btn"
+                  style={{ background: "rgba(255,255,255,0.95)", borderColor: "transparent" }}
+                  onClick={() => { setCalendarToast(true); setTimeout(() => setCalendarToast(false), 2500); }}
+                >
+                  <Calendar size={15} /> Calendar
+                </button>
+              </div>
+              <img
+                src="/images/classroom-robot.png"
+                alt="Classroom robot"
+                draggable={false}
+                style={{
+                  width: 110,
+                  height: "auto",
+                  position: "absolute",
+                  right: 20,
+                  bottom: 0,
+                  pointerEvents: "none",
+                  objectFit: "contain",
+                  zIndex: 0,
+                }}
+              />
             </div>
           </div>
 
@@ -200,13 +267,22 @@ export default function AssignmentsPage() {
             {!loading && !error && displayed.map((a) => {
               const hw = a.homework;
               const cfg = TYPE_CONFIG[hw.assignment_type] ?? TYPE_CONFIG.homework;
+              const ss = getSubjectStyle(hw.subject);
               const due = formatDue(hw.due_date);
               const isDone = a.status === "completed";
 
               return (
-                <div key={a.id} className="asgn-card">
-                  <div style={{ paddingTop: 2 }}>
-                    <BookOpen size={22} color={cfg.color} />
+                <div
+                  key={a.id}
+                  className="asgn-card"
+                  style={{ borderLeftColor: isDone ? "#e2e8f0" : ss.color }}
+                >
+                  {/* Subject icon bubble */}
+                  <div
+                    className="asgn-subject-bubble"
+                    style={{ background: ss.bg, border: `1.5px solid ${ss.color}33` }}
+                  >
+                    {ss.icon}
                   </div>
                   <div className="asgn-card-content">
                     <div className="asgn-card-top">
@@ -215,6 +291,13 @@ export default function AssignmentsPage() {
                         style={{ background: cfg.bg, color: cfg.color }}
                       >
                         {cfg.label}
+                      </span>
+                      {/* Subject chip */}
+                      <span
+                        className="asgn-type-badge"
+                        style={{ background: ss.bg, color: ss.color }}
+                      >
+                        {hw.subject}
                       </span>
                       {isDone && (
                         <span className="asgn-type-badge" style={{ background: "#f0fdf4", color: "#16a34a" }}>
@@ -235,13 +318,11 @@ export default function AssignmentsPage() {
                           ? `${hw.estimated_minutes} min`
                           : `${Math.round(hw.estimated_minutes / 60)} hr`}
                       </span>
-                      <span className="asgn-meta-item">
-                        <BookOpen size={13} /> {hw.subject}
-                      </span>
                     </div>
                   </div>
                   <button
                     className={`asgn-cta-btn${isDone ? " done" : ""}`}
+                    style={isDone ? {} : { background: ss.color }}
                     onClick={() => !isDone && handleStart(a)}
                     disabled={isDone}
                   >

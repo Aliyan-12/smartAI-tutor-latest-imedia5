@@ -4,23 +4,28 @@ import Sidebar from "../components/Sidebar";
 import { appointmentsApi } from "../services/api";
 import type { Appointment } from "../types";
 
-const SUBJECT_ICONS: Record<string, string> = {
-  maths: "🔢",
-  mathematics: "🔢",
-  science: "🔬",
-  biology: "🔬",
-  chemistry: "🔬",
-  physics: "🔬",
-  english: "📖",
-  history: "🏛️",
-  geography: "🌍",
-  "computer science": "💻",
-  computing: "💻",
-  ict: "💻",
+const SUBJECT_CONFIG: Record<string, { icon: string; color: string; bg: string; border: string }> = {
+  maths:              { icon: "🧮", color: "#f97316", bg: "#fff7ed", border: "#fed7aa" },
+  mathematics:        { icon: "🧮", color: "#f97316", bg: "#fff7ed", border: "#fed7aa" },
+  science:            { icon: "🔬", color: "#22c55e", bg: "#f0fdf4", border: "#bbf7d0" },
+  biology:            { icon: "🧬", color: "#22c55e", bg: "#f0fdf4", border: "#bbf7d0" },
+  chemistry:          { icon: "⚗️", color: "#ec4899", bg: "#fdf2f8", border: "#f9a8d4" },
+  physics:            { icon: "⚛️", color: "#06b6d4", bg: "#ecfeff", border: "#a5f3fc" },
+  english:            { icon: "📚", color: "#3b82f6", bg: "#eff6ff", border: "#bfdbfe" },
+  history:            { icon: "🏛️", color: "#a855f7", bg: "#faf5ff", border: "#d8b4fe" },
+  geography:          { icon: "🌍", color: "#10b981", bg: "#ecfdf5", border: "#a7f3d0" },
+  art:                { icon: "🎨", color: "#f59e0b", bg: "#fffbeb", border: "#fcd34d" },
+  "computer science": { icon: "💻", color: "#6366f1", bg: "#eef2ff", border: "#a5b4fc" },
+  computing:          { icon: "💻", color: "#6366f1", bg: "#eef2ff", border: "#a5b4fc" },
+  ict:                { icon: "💻", color: "#6366f1", bg: "#eef2ff", border: "#a5b4fc" },
 };
 
+function getSubjectConfig(subject: string) {
+  return SUBJECT_CONFIG[subject.toLowerCase()] ?? { icon: "📖", color: "#64748b", bg: "#f8fafc", border: "#e2e8f0" };
+}
+
 function getSubjectIcon(subject: string): string {
-  return SUBJECT_ICONS[subject.toLowerCase()] ?? "📚";
+  return getSubjectConfig(subject).icon;
 }
 
 const STATUS_CONFIG: Record<
@@ -58,7 +63,7 @@ interface SessionCardProps {
 
 function SessionCard({ appointment: a, expanded, onToggle }: SessionCardProps) {
   const navigate = useNavigate();
-  const icon = getSubjectIcon(a.subject);
+  const sc = getSubjectConfig(a.subject);
   const st = STATUS_CONFIG[a.status] ?? { label: a.status.toUpperCase(), bg: "#f8fafc", color: "#64748b" };
   const score = getScorePercent(a);
   const isActive = ["confirmed", "started", "paused"].includes(a.status);
@@ -67,12 +72,13 @@ function SessionCard({ appointment: a, expanded, onToggle }: SessionCardProps) {
     <div
       style={{
         background: "#fff",
-        border: "1px solid #e2e8f0",
-        borderRadius: 10,
+        border: `1px solid ${sc.border}`,
+        borderRadius: 12,
         marginBottom: 10,
         overflow: "hidden",
-        boxShadow: "0 1px 3px rgba(0,0,0,0.04)",
-        borderLeft: isActive ? "3px solid #3b82f6" : "3px solid transparent",
+        boxShadow: "0 2px 6px rgba(0,0,0,0.05)",
+        borderLeft: `4px solid ${isActive ? sc.color : sc.border}`,
+        transition: "box-shadow 0.18s",
       }}
     >
       <div
@@ -87,22 +93,23 @@ function SessionCard({ appointment: a, expanded, onToggle }: SessionCardProps) {
       >
         <div
           style={{
-            width: 42,
-            height: 42,
-            borderRadius: 10,
-            background: "#f1f5f9",
+            width: 44,
+            height: 44,
+            borderRadius: 12,
+            background: sc.bg,
+            border: `1.5px solid ${sc.border}`,
             display: "flex",
             alignItems: "center",
             justifyContent: "center",
-            fontSize: 20,
+            fontSize: 22,
             flexShrink: 0,
           }}
         >
-          {icon}
+          {sc.icon}
         </div>
 
         <div style={{ flex: 1, minWidth: 0 }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", marginBottom: 3 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", marginBottom: 4 }}>
             <span style={{ fontSize: 15, fontWeight: 700, color: "#0f172a" }}>{a.title}</span>
             <span
               style={{
@@ -119,8 +126,16 @@ function SessionCard({ appointment: a, expanded, onToggle }: SessionCardProps) {
               {st.label}
             </span>
           </div>
-          <div style={{ fontSize: 12, color: "#64748b", display: "flex", gap: 10, flexWrap: "wrap" }}>
-            <span>{a.subject}</span>
+          <div style={{ fontSize: 12, color: "#64748b", display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+            <span style={{
+              background: sc.bg,
+              color: sc.color,
+              fontWeight: 700,
+              padding: "2px 8px",
+              borderRadius: 999,
+              fontSize: 11,
+              border: `1px solid ${sc.border}`,
+            }}>{a.subject}</span>
             {a.key_stage && <span>· {a.key_stage}</span>}
             {a.duration_minutes && <span>· {a.duration_minutes} min</span>}
             <span>· {formatDateUK(a.scheduled_at)}</span>
@@ -259,13 +274,40 @@ export default function SessionsPage() {
       <Sidebar />
       <div className="main-content">
         <div className="dashboard-content">
-          <div className="dashboard-page-header" style={{ marginBottom: 20 }}>
+          <div style={{
+            background: "linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%)",
+            borderRadius: 16,
+            padding: "20px 24px",
+            marginBottom: 20,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+            position: "relative",
+            overflow: "hidden",
+          }}>
+            <div style={{ position: "absolute", top: -15, right: 60, width: 90, height: 90, borderRadius: "50%", background: "rgba(255,255,255,0.07)", pointerEvents: "none" }} />
+            <div style={{ position: "absolute", bottom: -25, right: 20, width: 110, height: 110, borderRadius: "50%", background: "rgba(255,255,255,0.05)", pointerEvents: "none" }} />
             <div>
-              <h1 style={{ fontSize: 22, fontWeight: 800, color: "#0f172a", margin: 0 }}>My Sessions</h1>
-              <p style={{ fontSize: 14, color: "#64748b", margin: "4px 0 0" }}>
+              <h1 style={{ fontSize: 22, fontWeight: 800, color: "#fff", margin: 0 }}>📅 My Sessions</h1>
+              <p style={{ fontSize: 14, color: "rgba(255,255,255,0.8)", margin: "4px 0 0" }}>
                 Your learning journey, all in one place.
               </p>
             </div>
+            <img
+              src="/images/classroom-robot.png"
+              alt="Classroom robot"
+              draggable={false}
+              style={{
+                width: 110,
+                height: "auto",
+                position: "absolute",
+                right: 20,
+                bottom: 0,
+                pointerEvents: "none",
+                objectFit: "contain",
+                zIndex: 1,
+              }}
+            />
           </div>
 
           {loading && (
@@ -284,29 +326,51 @@ export default function SessionsPage() {
 
           {!loading && !error && (
             <>
-              {continueLearning && (
+              {continueLearning && (() => {
+                const clSc = getSubjectConfig(continueLearning.subject);
+                return (
                 <div
                   style={{
-                    background: "linear-gradient(135deg, #eff6ff, #dbeafe)",
-                    border: "1px solid #bfdbfe",
-                    borderRadius: 12,
+                    background: `linear-gradient(135deg, ${clSc.bg}, white)`,
+                    border: `1.5px solid ${clSc.border}`,
+                    borderLeft: `5px solid ${clSc.color}`,
+                    borderRadius: 14,
                     padding: "16px 20px",
                     marginBottom: 20,
                     display: "flex",
                     alignItems: "center",
                     gap: 16,
                     flexWrap: "wrap",
+                    boxShadow: `0 4px 16px ${clSc.color}14`,
                   }}
                 >
-                  <div style={{ fontSize: 28 }}>{getSubjectIcon(continueLearning.subject)}</div>
+                  <img
+                    src={
+                      ["science", "biology", "chemistry", "physics"].includes(
+                        continueLearning.subject.toLowerCase()
+                      )
+                        ? "/images/sci-robot.png"
+                        : "/images/teaching-robot.png"
+                    }
+                    alt="Subject robot"
+                    draggable={false}
+                    style={{
+                      width: 52,
+                      height: 52,
+                      objectFit: "contain",
+                      flexShrink: 0,
+                      pointerEvents: "none",
+                    }}
+                  />
                   <div style={{ flex: 1, minWidth: 200 }}>
-                    <div style={{ fontWeight: 700, fontSize: 15, color: "#1e40af", marginBottom: 2 }}>
+                    <div style={{ fontWeight: 800, fontSize: 15, color: "#0f172a", marginBottom: 3 }}>
                       {continueLearning.title}
                     </div>
-                    <div style={{ fontSize: 12, color: "#3b82f6" }}>
-                      {continueLearning.subject}
-                      {continueLearning.key_stage && ` · ${continueLearning.key_stage}`}
-                      {" · "}
+                    <div style={{ fontSize: 12, display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
+                      <span style={{ background: clSc.bg, color: clSc.color, fontWeight: 700, padding: "2px 8px", borderRadius: 999, fontSize: 11, border: `1px solid ${clSc.border}` }}>
+                        {continueLearning.subject}
+                      </span>
+                      {continueLearning.key_stage && <span style={{ color: "#64748b" }}>{continueLearning.key_stage}</span>}
                       <span
                         style={{
                           background: STATUS_CONFIG[continueLearning.status]?.bg,
@@ -335,9 +399,9 @@ export default function SessionsPage() {
                         fontSize: 13,
                         padding: "7px 14px",
                         background: "white",
-                        border: "1px solid #bfdbfe",
+                        border: `1px solid ${clSc.border}`,
                         borderRadius: 8,
-                        color: "#3b82f6",
+                        color: clSc.color,
                         fontWeight: 600,
                         cursor: "pointer",
                         fontFamily: "inherit",
@@ -352,7 +416,8 @@ export default function SessionsPage() {
                     </button>
                   </div>
                 </div>
-              )}
+                );
+              })()}
 
               <div
                 style={{

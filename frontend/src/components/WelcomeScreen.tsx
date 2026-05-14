@@ -8,6 +8,25 @@ interface Props {
   onPromptClick: (text: string) => void;
 }
 
+const SUBJECT_COLORS: Record<string, { color: string; bg: string; icon: string }> = {
+  maths:          { color: "#f97316", bg: "#fff7ed", icon: "🧮" },
+  mathematics:    { color: "#f97316", bg: "#fff7ed", icon: "🧮" },
+  science:        { color: "#22c55e", bg: "#f0fdf4", icon: "🔬" },
+  biology:        { color: "#22c55e", bg: "#f0fdf4", icon: "🧬" },
+  chemistry:      { color: "#ec4899", bg: "#fdf2f8", icon: "⚗️" },
+  physics:        { color: "#06b6d4", bg: "#ecfeff", icon: "⚛️" },
+  english:        { color: "#3b82f6", bg: "#eff6ff", icon: "📚" },
+  history:        { color: "#a855f7", bg: "#faf5ff", icon: "🏛️" },
+  geography:      { color: "#10b981", bg: "#ecfdf5", icon: "🌍" },
+  art:            { color: "#f59e0b", bg: "#fffbeb", icon: "🎨" },
+  "computer science": { color: "#6366f1", bg: "#eef2ff", icon: "💻" },
+  computing:      { color: "#6366f1", bg: "#eef2ff", icon: "💻" },
+};
+
+function getSubjectStyle(subject: string) {
+  return SUBJECT_COLORS[subject.toLowerCase()] ?? { color: "#64748b", bg: "#f8fafc", icon: "📖" };
+}
+
 function getGreeting(): string {
   const h = new Date().getHours();
   if (h < 12) return "Good morning";
@@ -453,6 +472,44 @@ export default function WelcomeScreen({ onPromptClick }: Props) {
           line-height: 1.5;
         }
 
+        /* Subject launch cards */
+        .ws-subject-cards {
+          display: flex;
+          gap: 10px;
+          flex-wrap: wrap;
+          justify-content: center;
+          margin: 14px 0 18px;
+        }
+
+        .ws-subject-card {
+          display: flex;
+          flex-direction: column;
+          align-items: center;
+          gap: 6px;
+          padding: 14px 18px;
+          border-radius: 14px;
+          cursor: pointer;
+          border: 2px solid transparent;
+          transition: transform 0.18s, box-shadow 0.18s;
+          min-width: 90px;
+          flex: 1 1 90px;
+          max-width: 130px;
+          animation: ws-subject-pop 0.4s ease both;
+        }
+
+        .ws-subject-card:hover {
+          transform: translateY(-4px);
+        }
+
+        @keyframes ws-subject-pop {
+          from { opacity: 0; transform: scale(0.85) translateY(8px); }
+          to { opacity: 1; transform: scale(1) translateY(0); }
+        }
+
+        .ws-subject-card-icon { font-size: 28px; line-height: 1; }
+        .ws-subject-card-name { font-size: 13px; font-weight: 700; color: #0f172a; }
+        .ws-subject-card-tag { font-size: 10px; font-weight: 500; color: #64748b; }
+
         /* ── Two-column grid ── */
         .ws-grid {
           display: grid;
@@ -489,6 +546,12 @@ export default function WelcomeScreen({ onPromptClick }: Props) {
           margin-bottom: 8px;
           background: #f8fafc;
           border: 1px solid #e2e8f0;
+          transition: background 0.15s, border-color 0.15s;
+        }
+
+        .ws-session-item:hover {
+          background: #f1f5f9;
+          border-color: #cbd5e1;
         }
 
         .ws-session-item:last-child { margin-bottom: 0; }
@@ -497,6 +560,18 @@ export default function WelcomeScreen({ onPromptClick }: Props) {
           width: 10px;
           height: 10px;
           border-radius: 50%;
+          flex-shrink: 0;
+          box-shadow: 0 0 0 3px rgba(255,255,255,0.9), 0 0 0 4px currentColor;
+        }
+
+        .ws-subject-icon-bubble {
+          width: 32px;
+          height: 32px;
+          border-radius: 8px;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          font-size: 16px;
           flex-shrink: 0;
         }
 
@@ -654,18 +729,31 @@ export default function WelcomeScreen({ onPromptClick }: Props) {
           font-weight: 700;
           color: #0f172a;
           cursor: pointer;
-          transition: border-color 0.15s, background 0.15s, box-shadow 0.15s;
+          transition: border-color 0.15s, background 0.15s, box-shadow 0.15s, transform 0.15s;
           font-family: inherit;
           text-align: center;
+          position: relative;
+          overflow: hidden;
         }
 
-        .ws-quick-btn .ws-q-icon { font-size: 20px; }
+        .ws-quick-btn .ws-q-icon {
+          font-size: 22px;
+          filter: drop-shadow(0 1px 3px rgba(0,0,0,0.15));
+        }
 
         .ws-quick-btn:hover {
-          border-color: #3b82f6;
-          background: #eff6ff;
-          box-shadow: 0 2px 6px rgba(59,130,246,0.1);
+          transform: translateY(-2px);
+          box-shadow: 0 4px 14px rgba(59,130,246,0.14);
         }
+
+        .ws-quick-btn--ai   { border-color: #bfdbfe; background: #eff6ff; }
+        .ws-quick-btn--ai:hover   { border-color: #3b82f6; background: #dbeafe; }
+        .ws-quick-btn--quiz { border-color: #d1fae5; background: #f0fdf4; }
+        .ws-quick-btn--quiz:hover { border-color: #22c55e; background: #dcfce7; }
+        .ws-quick-btn--sess { border-color: #e0e7ff; background: #eef2ff; }
+        .ws-quick-btn--sess:hover { border-color: #6366f1; background: #e0e7ff; }
+        .ws-quick-btn--prog { border-color: #fde68a; background: #fffbeb; }
+        .ws-quick-btn--prog:hover { border-color: #f59e0b; background: #fef3c7; }
 
         /* ── Buttons ── */
         .ws-btn {
@@ -874,13 +962,70 @@ export default function WelcomeScreen({ onPromptClick }: Props) {
             <p>
               Pick a subject and your AI tutor will personalise the lesson for you.
             </p>
+            {/* Teaching robot illustration */}
+            <img
+              src="/images/teaching-robot.png"
+              alt="Teaching robot"
+              draggable={false}
+              style={{
+                width: 100,
+                height: "auto",
+                margin: "0 auto 6px",
+                display: "block",
+                pointerEvents: "none",
+              }}
+            />
+            {/* Subject launch cards */}
+            <div className="ws-subject-cards">
+              {[
+                { icon: "🧮", name: "Maths",   tag: "Numbers & algebra",  color: "#f97316", bg: "#fff7ed", border: "#fed7aa" },
+                { icon: "🔬", name: "Science",  tag: "Explore the world",  color: "#22c55e", bg: "#f0fdf4", border: "#bbf7d0" },
+                { icon: "📚", name: "English",  tag: "Read & write",       color: "#3b82f6", bg: "#eff6ff", border: "#bfdbfe" },
+                { icon: "🏛️", name: "History",  tag: "Past events",        color: "#a855f7", bg: "#faf5ff", border: "#d8b4fe" },
+                { icon: "⚗️", name: "Chemistry",tag: "Elements & reactions",color: "#ec4899", bg: "#fdf2f8", border: "#f9a8d4" },
+              ].map((s, i) => (
+                <div
+                  key={s.name}
+                  className="ws-subject-card"
+                  style={{
+                    background: s.bg,
+                    borderColor: s.border,
+                    animationDelay: `${i * 0.07}s`,
+                  }}
+                  onClick={() =>
+                    onPromptClick(`I'd like to start learning ${s.name}. Can you help me pick a topic?`)
+                  }
+                  onMouseEnter={(e) => {
+                    (e.currentTarget as HTMLDivElement).style.boxShadow = `0 8px 20px ${s.color}30`;
+                    (e.currentTarget as HTMLDivElement).style.borderColor = s.color;
+                  }}
+                  onMouseLeave={(e) => {
+                    (e.currentTarget as HTMLDivElement).style.boxShadow = "";
+                    (e.currentTarget as HTMLDivElement).style.borderColor = s.border;
+                  }}
+                >
+                  {s.name === "Science" ? (
+                    <img
+                      src="/images/sci-robot.png"
+                      alt="Science robot"
+                      draggable={false}
+                      style={{ width: 36, height: 36, objectFit: "contain", pointerEvents: "none" }}
+                    />
+                  ) : (
+                    <span className="ws-subject-card-icon">{s.icon}</span>
+                  )}
+                  <span className="ws-subject-card-name">{s.name}</span>
+                  <span className="ws-subject-card-tag">{s.tag}</span>
+                </div>
+              ))}
+            </div>
             <button
               className="ws-btn ws-btn--orange"
               onClick={() =>
                 onPromptClick("Let's start a new topic. What subjects do you have materials for?")
               }
             >
-              Begin Learning
+              Browse All Subjects →
             </button>
           </div>
         )}
@@ -895,11 +1040,17 @@ export default function WelcomeScreen({ onPromptClick }: Props) {
                 <p className="ws-empty-plan">No active or upcoming sessions.</p>
               ) : (
                 <>
-                  {activeSessions.map((a) => (
+                  {activeSessions.map((a) => {
+                    const ss = getSubjectStyle(a.subject);
+                    return (
                     <div key={a.id} className="ws-session-item">
                       <div
+                        className="ws-subject-icon-bubble"
+                        style={{ background: ss.bg }}
+                      >{ss.icon}</div>
+                      <div
                         className="ws-session-dot"
-                        style={{ background: a.status === "paused" ? "#f59e0b" : "#10b981" }}
+                        style={{ background: a.status === "paused" ? "#f59e0b" : "#10b981", color: a.status === "paused" ? "#f59e0b" : "#10b981" }}
                       />
                       <div className="ws-session-info">
                         <p className="ws-session-title">{a.title}</p>
@@ -917,11 +1068,18 @@ export default function WelcomeScreen({ onPromptClick }: Props) {
                         {a.status === "paused" ? "Resume" : "Rejoin"}
                       </button>
                     </div>
-                  ))}
+                    );
+                  })}
 
-                  {upcomingSessions.slice(0, 3).map((a) => (
+                  {upcomingSessions.slice(0, 3).map((a) => {
+                    const ss = getSubjectStyle(a.subject);
+                    return (
                     <div key={a.id} className="ws-session-item">
-                      <div className="ws-session-dot" style={{ background: "#3b82f6" }} />
+                      <div
+                        className="ws-subject-icon-bubble"
+                        style={{ background: ss.bg }}
+                      >{ss.icon}</div>
+                      <div className="ws-session-dot" style={{ background: "#3b82f6", color: "#3b82f6" }} />
                       <div className="ws-session-info">
                         <p className="ws-session-title">{a.title}</p>
                         <p className="ws-session-meta">
@@ -936,7 +1094,8 @@ export default function WelcomeScreen({ onPromptClick }: Props) {
                         Join
                       </button>
                     </div>
-                  ))}
+                    );
+                  })}
                 </>
               )}
 
@@ -1076,7 +1235,7 @@ export default function WelcomeScreen({ onPromptClick }: Props) {
             <div className="ws-card-title">Quick Actions</div>
             <div className="ws-quick-grid">
               <button
-                className="ws-quick-btn"
+                className="ws-quick-btn ws-quick-btn--ai"
                 onClick={() =>
                   onPromptClick(
                     "Let's start a new topic. What subjects do you have materials for?"
@@ -1087,7 +1246,7 @@ export default function WelcomeScreen({ onPromptClick }: Props) {
                 Ask AI Tutor
               </button>
               <button
-                className="ws-quick-btn"
+                className="ws-quick-btn ws-quick-btn--quiz"
                 onClick={() =>
                   onPromptClick(
                     "Can you quiz me on something I haven't practised recently?"
@@ -1098,14 +1257,14 @@ export default function WelcomeScreen({ onPromptClick }: Props) {
                 Quick Quiz
               </button>
               <button
-                className="ws-quick-btn"
+                className="ws-quick-btn ws-quick-btn--sess"
                 onClick={() => navigate("/sessions")}
               >
                 <span className="ws-q-icon">📅</span>
                 My Sessions
               </button>
               <button
-                className="ws-quick-btn"
+                className="ws-quick-btn ws-quick-btn--prog"
                 onClick={() => navigate("/progress")}
               >
                 <span className="ws-q-icon">📊</span>

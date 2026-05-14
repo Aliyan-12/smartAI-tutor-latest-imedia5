@@ -6,6 +6,25 @@ import { useAuth } from "../context/AuthContext";
 import type { TopicMastery, StudentProfile, Assessment, Appointment } from "../types";
 import LottiePlayer, { LOTTIE_URLS } from "../components/LottiePlayer";
 
+const SUBJECT_PALETTE: Record<string, { color: string; bg: string; icon: string }> = {
+  maths:              { color: "#f97316", bg: "#fff7ed", icon: "🧮" },
+  mathematics:        { color: "#f97316", bg: "#fff7ed", icon: "🧮" },
+  science:            { color: "#22c55e", bg: "#f0fdf4", icon: "🔬" },
+  biology:            { color: "#22c55e", bg: "#f0fdf4", icon: "🧬" },
+  chemistry:          { color: "#ec4899", bg: "#fdf2f8", icon: "⚗️" },
+  physics:            { color: "#06b6d4", bg: "#ecfeff", icon: "⚛️" },
+  english:            { color: "#3b82f6", bg: "#eff6ff", icon: "📚" },
+  history:            { color: "#a855f7", bg: "#faf5ff", icon: "🏛️" },
+  geography:          { color: "#10b981", bg: "#ecfdf5", icon: "🌍" },
+  art:                { color: "#f59e0b", bg: "#fffbeb", icon: "🎨" },
+  "computer science": { color: "#6366f1", bg: "#eef2ff", icon: "💻" },
+  computing:          { color: "#6366f1", bg: "#eef2ff", icon: "💻" },
+};
+
+function getSubjectPalette(subject: string) {
+  return SUBJECT_PALETTE[subject.toLowerCase()] ?? { color: "#64748b", bg: "#f8fafc", icon: "📖" };
+}
+
 interface SubjectStats {
   subject: string;
   total: number;
@@ -279,13 +298,52 @@ export default function ProgressPage() {
       <Sidebar />
       <div className="main-content">
         <div className="dashboard-content">
-          <div className="dashboard-page-header" style={{ marginBottom: 20 }}>
+          <div style={{
+            background: "linear-gradient(135deg, #10b981 0%, #3b82f6 100%)",
+            borderRadius: 16,
+            padding: "20px 24px",
+            marginBottom: 20,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+            position: "relative",
+            overflow: "hidden",
+          }}>
+            <div style={{ position: "absolute", top: -20, right: 80, width: 100, height: 100, borderRadius: "50%", background: "rgba(255,255,255,0.08)", pointerEvents: "none" }} />
+            <div style={{ position: "absolute", bottom: -30, right: 25, width: 130, height: 130, borderRadius: "50%", background: "rgba(255,255,255,0.05)", pointerEvents: "none" }} />
             <div>
-              <h1 style={{ fontSize: 22, fontWeight: 800, color: "#0f172a", margin: 0 }}>My Progress</h1>
-              <p style={{ fontSize: 14, color: "#64748b", margin: "4px 0 0" }}>
-                See how you're improving, see where to focus more.
+              <h1 style={{ fontSize: 22, fontWeight: 800, color: "#fff", margin: 0 }}>📊 My Progress</h1>
+              <p style={{ fontSize: 14, color: "rgba(255,255,255,0.85)", margin: "4px 0 0" }}>
+                See how you're improving and where to focus more.
               </p>
             </div>
+            {profile && (
+              <div style={{
+                background: "rgba(255,255,255,0.18)",
+                borderRadius: 12,
+                padding: "10px 16px",
+                textAlign: "center",
+                zIndex: 1,
+              }}>
+                <div style={{ fontSize: 22, fontWeight: 800, color: "#fff" }}>Level {profile.xp_level}</div>
+                <div style={{ fontSize: 11, color: "rgba(255,255,255,0.85)", fontWeight: 600 }}>⭐ {profile.xp_total.toLocaleString()} XP</div>
+              </div>
+            )}
+            <img
+              src="/images/robotAI.png"
+              alt="AI tutor robot"
+              draggable={false}
+              style={{
+                width: 110,
+                height: "auto",
+                position: "absolute",
+                right: 20,
+                bottom: 0,
+                pointerEvents: "none",
+                objectFit: "contain",
+                zIndex: 0,
+              }}
+            />
           </div>
 
           {error && (
@@ -297,15 +355,31 @@ export default function ProgressPage() {
           {/* Stats Row */}
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))", gap: 12, marginBottom: 20 }}>
             {[
-              { icon: "📚", value: formatStudyTime(totalStudyMinutes), label: "Total Study Time" },
-              { icon: "✅", value: String(sessionsDone), label: "Sessions Done" },
-              { icon: "❓", value: accuracyPercent !== null ? `${accuracyPercent}%` : "—", label: "Questions Correct" },
-              { icon: "🗂️", value: String(totalTopics), label: "Topics Covered" },
+              { icon: "📚", value: formatStudyTime(totalStudyMinutes), label: "Total Study Time", color: "#3b82f6", bg: "#eff6ff" },
+              { icon: "✅", value: String(sessionsDone), label: "Sessions Done", color: "#10b981", bg: "#ecfdf5" },
+              { icon: "🎯", value: accuracyPercent !== null ? `${accuracyPercent}%` : "—", label: "Quiz Accuracy", color: "#f97316", bg: "#fff7ed" },
+              { icon: "🗂️", value: String(totalTopics), label: "Topics Covered", color: "#a855f7", bg: "#faf5ff" },
             ].map((s) => (
-              <div key={s.label} style={{ background: "#fff", border: "1px solid #e2e8f0", borderRadius: 10, padding: "16px 18px", boxShadow: "0 1px 3px rgba(0,0,0,0.04)" }}>
-                <div style={{ fontSize: 20, marginBottom: 6 }}>{s.icon}</div>
-                <div style={{ fontSize: 22, fontWeight: 800, color: "#0f172a", marginBottom: 2 }}>{s.value}</div>
-                <div style={{ fontSize: 12, color: "#64748b" }}>{s.label}</div>
+              <div key={s.label} style={{
+                background: "#fff",
+                border: `1px solid ${s.color}22`,
+                borderRadius: 12,
+                padding: "16px 18px",
+                boxShadow: "0 2px 6px rgba(0,0,0,0.05)",
+                borderTop: `3px solid ${s.color}`,
+                position: "relative",
+                overflow: "hidden",
+              }}>
+                <div style={{
+                  position: "absolute", top: 0, right: 0, width: 60, height: 60,
+                  borderRadius: "0 12px 0 60px",
+                  background: s.bg,
+                  display: "flex", alignItems: "flex-start", justifyContent: "flex-end",
+                  padding: "6px 8px",
+                  fontSize: 20,
+                }}>{s.icon}</div>
+                <div style={{ fontSize: 24, fontWeight: 800, color: s.color, marginBottom: 2 }}>{s.value}</div>
+                <div style={{ fontSize: 12, color: "#64748b", fontWeight: 600 }}>{s.label}</div>
               </div>
             ))}
           </div>
@@ -457,17 +531,27 @@ export default function ProgressPage() {
           {/* Subject progress + Strengths/Focus */}
           <div style={{ display: "flex", gap: 14, flexWrap: "wrap", marginBottom: 16 }}>
             {/* Progress by Subject */}
-            <div style={{ flex: "3 1 300px", background: "#fff", border: "1px solid #e2e8f0", borderRadius: 10, padding: "18px 20px", boxShadow: "0 1px 3px rgba(0,0,0,0.04)" }}>
-              <h3 style={{ fontSize: 14, fontWeight: 700, color: "#0f172a", marginBottom: 16 }}>Progress by Subject</h3>
+            <div style={{ flex: "3 1 300px", background: "#fff", border: "1px solid #e2e8f0", borderRadius: 12, padding: "18px 20px", boxShadow: "0 2px 8px rgba(0,0,0,0.05)" }}>
+              <h3 style={{ fontSize: 14, fontWeight: 800, color: "#0f172a", marginBottom: 16, display: "flex", alignItems: "center", gap: 6 }}>
+                <span style={{ fontSize: 18 }}>📊</span> Progress by Subject
+              </h3>
               {subjectStats.length === 0 ? (
                 <p style={{ fontSize: 13, color: "#94a3b8" }}>No subject data yet. Start a few AI sessions to track your progress.</p>
               ) : (
                 <>
-                  {visibleSubjects.map((s) => (
-                    <div key={s.subject} style={{ marginBottom: 16 }}>
-                      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 6 }}>
+                  {visibleSubjects.map((s) => {
+                    const pal = getSubjectPalette(s.subject);
+                    return (
+                    <div key={s.subject} style={{ marginBottom: 14 }}>
+                      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 7 }}>
                         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                          <span style={{ fontSize: 13, fontWeight: 600, color: "#0f172a" }}>{s.subject}</span>
+                          <div style={{
+                            width: 30, height: 30, borderRadius: 8,
+                            background: pal.bg, border: `1.5px solid ${pal.color}33`,
+                            display: "flex", alignItems: "center", justifyContent: "center",
+                            fontSize: 16, flexShrink: 0,
+                          }}>{pal.icon}</div>
+                          <span style={{ fontSize: 13, fontWeight: 700, color: "#0f172a" }}>{s.subject}</span>
                           {s.needsFocus && (
                             <span style={{ fontSize: 10, fontWeight: 700, color: "#f59e0b", background: "#fef3c7", padding: "2px 7px", borderRadius: 999 }}>
                               Needs Focus
@@ -478,20 +562,21 @@ export default function ProgressPage() {
                               src={LOTTIE_URLS.stars}
                               fallback="⭐"
                               loop={false}
-                              style={{ width: 32, height: 32, flexShrink: 0 }}
+                              style={{ width: 28, height: 28, flexShrink: 0 }}
                             />
                           )}
                         </div>
-                        <span style={{ fontSize: 12, color: "#64748b", fontWeight: 600 }}>
+                        <span style={{ fontSize: 12, fontWeight: 700, color: pal.color, background: pal.bg, padding: "2px 8px", borderRadius: 999 }}>
                           {s.mastered}/{s.total} · {s.percent}%
                         </span>
                       </div>
                       <ProgressBar
                         percent={s.percent}
-                        color={s.percent >= 75 ? "#22c55e" : s.percent >= 50 ? "#f59e0b" : "#ef4444"}
+                        color={pal.color}
                       />
                     </div>
-                  ))}
+                    );
+                  })}
                   {subjectStats.length > 5 && (
                     <button
                       onClick={() => setShowAllSubjects((v) => !v)}
