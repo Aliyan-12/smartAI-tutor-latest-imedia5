@@ -1,40 +1,6 @@
-import { useState, useRef, useEffect, useCallback, type FormEvent } from "react";
+import { useState, useRef, useEffect, type FormEvent } from "react";
 import { Link } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
-
-// ── Physics item ───────────────────────────────────────────────────────────────
-interface PhysItem {
-  id: number;
-  emoji: string;
-  label: string;
-  size: number;
-  x: number;
-  y: number;
-  vx: number;
-  vy: number;
-  rot: number;
-  angVel: number;
-  floatPhase: number;
-  floatAmp: number;
-  floatSpeed: number;
-  popScale: number;
-  popDecay: number;
-}
-
-const ITEMS_CFG = [
-  { id: 1,  emoji: "📚", label: "Books",   size: 38, xPct: 7,  yPct: 12 },
-  { id: 2,  emoji: "✏️", label: "Write",   size: 32, xPct: 54, yPct: 8  },
-  { id: 3,  emoji: "🧠", label: "Brain",   size: 42, xPct: 78, yPct: 18 },
-  { id: 4,  emoji: "⭐", label: "Star",    size: 36, xPct: 28, yPct: 30 },
-  { id: 5,  emoji: "🎯", label: "Goal",    size: 32, xPct: 66, yPct: 42 },
-  { id: 6,  emoji: "💡", label: "Idea",    size: 36, xPct: 10, yPct: 55 },
-  { id: 7,  emoji: "🔬", label: "Science", size: 32, xPct: 46, yPct: 64 },
-  { id: 8,  emoji: "🏆", label: "Trophy",  size: 40, xPct: 82, yPct: 60 },
-  { id: 9,  emoji: "🎲", label: "Play",    size: 32, xPct: 22, yPct: 78 },
-  { id: 10, emoji: "🚀", label: "Launch",  size: 38, xPct: 60, yPct: 82 },
-  { id: 11, emoji: "🧮", label: "Maths",   size: 34, xPct: 38, yPct: 47 },
-  { id: 12, emoji: "🎨", label: "Art",     size: 32, xPct: 72, yPct: 74 },
-];
 
 const ROLE_CARDS = [
   { icon: "🎓", role: "Student",  desc: "AI-powered lessons aligned to your curriculum" },
@@ -42,11 +8,6 @@ const ROLE_CARDS = [
   { icon: "👨‍👩‍👧", role: "Parent",   desc: "Book sessions and track your child's progress" },
   { icon: "🛡️", role: "Admin",    desc: "Manage school settings, users and knowledge base" },
 ];
-
-const FRICTION = 0.93;
-const BOUNCE   = 0.52;
-const ANG_FRICTION = 0.90;
-const MAX_VEL = 20;
 
 export default function LoginPage() {
   const { login } = useAuth();
@@ -58,22 +19,8 @@ export default function LoginPage() {
   const containerRef     = useRef<HTMLDivElement>(null);
   const canvasRef        = useRef<HTMLCanvasElement>(null);
   const mobileCanvasRef  = useRef<HTMLCanvasElement>(null);
-  const itemDivsRef      = useRef<Map<number, HTMLDivElement>>(new Map());
-  const physRef          = useRef<PhysItem[]>([]);
-  const rafRef           = useRef<number>(0);
   const consRafRef       = useRef<number>(0);
   const mobileConsRafRef = useRef<number>(0);
-  const frameRef         = useRef<number>(0);
-
-  const dragRef = useRef<{
-    id: number;
-    offsetX: number;
-    offsetY: number;
-    vxSamples: number[];
-    vySamples: number[];
-    lastX: number;
-    lastY: number;
-  } | null>(null);
 
   // ── Constellation canvas ──────────────────────────────────────────────────────
   useEffect(() => {
@@ -216,208 +163,6 @@ export default function LoginPage() {
     return () => cancelAnimationFrame(mobileConsRafRef.current);
   }, []);
 
-  // ── Apply transforms directly to DOM ─────────────────────────────────────────
-  const flushTransforms = () => {
-    for (const item of physRef.current) {
-      const el = itemDivsRef.current.get(item.id);
-      if (!el) continue;
-      const speed   = Math.sqrt(item.vx ** 2 + item.vy ** 2);
-      const isDrag  = dragRef.current?.id === item.id;
-      const stretchX = isDrag ? 1.0 : Math.max(0.7, 1 - speed * 0.018);
-      const stretchY = isDrag ? 1.0 : Math.min(1.35, 1 + speed * 0.022);
-      const glow     = Math.min(speed * 2.5, 22);
-      const ps       = item.popScale;
-
-      el.style.left      = `${item.x}px`;
-      el.style.top       = `${item.y}px`;
-      el.style.transform = `rotate(${item.rot}deg) scale(${(isDrag ? 1.38 : stretchX) * ps}, ${(isDrag ? 1.38 : stretchY) * ps})`;
-      el.style.filter    = speed > 1.2
-        ? `drop-shadow(0 0 ${glow}px rgba(26,115,232,0.85))`
-        : isDrag
-          ? "drop-shadow(0 10px 24px rgba(26,115,232,0.9)) brightness(1.3)"
-          : "";
-    }
-  };
-
-  // ── Physics loop ─────────────────────────────────────────────────────────────
-  const startLoop = useCallback(() => {
-    const tick = () => {
-      frameRef.current++;
-      const container = containerRef.current;
-      if (!container) { rafRef.current = requestAnimationFrame(tick); return; }
-      const W = container.clientWidth;
-      const H = container.clientHeight;
-
-      const items = physRef.current;
-      for (const item of items) {
-        if (dragRef.current?.id === item.id) continue;
-
-        const itemW = item.size + 28;
-        const itemH = item.size + 40;
-        const speed = Math.sqrt(item.vx ** 2 + item.vy ** 2);
-
-        if (speed < 0.6) {
-          item.floatPhase += item.floatSpeed;
-          item.vx += Math.cos(item.floatPhase * 0.73) * 0.014;
-          item.vy += Math.sin(item.floatPhase) * 0.018;
-          item.angVel += Math.sin(item.floatPhase * 1.4) * 0.012;
-        }
-
-        item.x   += item.vx;
-        item.y   += item.vy;
-        item.rot += item.angVel;
-
-        item.vx    *= FRICTION;
-        item.vy    *= FRICTION;
-        item.angVel *= ANG_FRICTION;
-
-        if (item.x < 0)           { item.x = 0;           item.vx =  Math.abs(item.vx) * BOUNCE; item.angVel *= -0.6; }
-        if (item.x > W - itemW)   { item.x = W - itemW;   item.vx = -Math.abs(item.vx) * BOUNCE; item.angVel *= -0.6; }
-        if (item.y < 0)           { item.y = 0;           item.vy =  Math.abs(item.vy) * BOUNCE; }
-        if (item.y > H - itemH)   { item.y = H - itemH;   item.vy = -Math.abs(item.vy) * BOUNCE; item.angVel *= -0.7; }
-
-        if (item.popScale !== 1) {
-          item.popScale += (1 - item.popScale) * item.popDecay;
-          if (Math.abs(item.popScale - 1) < 0.005) item.popScale = 1;
-        }
-      }
-
-      if (frameRef.current % 2 === 0) {
-        for (let i = 0; i < items.length; i++) {
-          for (let j = i + 1; j < items.length; j++) {
-            const a = items[i], b = items[j];
-            const ra = (a.size / 2) + 14;
-            const rb = (b.size / 2) + 14;
-            const ax = a.x + ra, ay = a.y + ra;
-            const bx = b.x + rb, by = b.y + rb;
-            const dx = bx - ax, dy = by - ay;
-            const dist = Math.sqrt(dx * dx + dy * dy);
-            const minD = ra + rb;
-            if (dist < minD && dist > 0.01) {
-              const nx = dx / dist, ny = dy / dist;
-              const overlap = (minD - dist) * 0.55;
-              a.x -= nx * overlap; a.y -= ny * overlap;
-              b.x += nx * overlap; b.y += ny * overlap;
-              const dvx = a.vx - b.vx, dvy = a.vy - b.vy;
-              const dot = dvx * nx + dvy * ny;
-              if (dot > 0) {
-                const imp = dot * 0.65;
-                a.vx -= imp * nx; a.vy -= imp * ny;
-                b.vx += imp * nx; b.vy += imp * ny;
-                a.angVel += (dvy * nx - dvx * ny) * 0.55;
-                b.angVel -= (dvy * nx - dvx * ny) * 0.55;
-                a.popScale = 1.22; a.popDecay = 0.18;
-                b.popScale = 1.22; b.popDecay = 0.18;
-              }
-            }
-          }
-        }
-      }
-
-      flushTransforms();
-      rafRef.current = requestAnimationFrame(tick);
-    };
-    rafRef.current = requestAnimationFrame(tick);
-  }, []);
-
-  // ── Init ──────────────────────────────────────────────────────────────────────
-  useEffect(() => {
-    const container = containerRef.current;
-    if (!container) return;
-    const W = container.clientWidth;
-    const H = container.clientHeight;
-
-    physRef.current = ITEMS_CFG.map((cfg) => ({
-      ...cfg,
-      x: (cfg.xPct / 100) * W,
-      y: (cfg.yPct / 100) * H,
-      vx: (Math.random() - 0.5) * 0.4,
-      vy: (Math.random() - 0.5) * 0.4,
-      rot: (Math.random() - 0.5) * 28,
-      angVel: (Math.random() - 0.5) * 0.4,
-      floatPhase: Math.random() * Math.PI * 2,
-      floatAmp:   2 + Math.random() * 3,
-      floatSpeed: 0.007 + Math.random() * 0.007,
-      popScale:   0.1,
-      popDecay:   0.12,
-    }));
-
-    physRef.current.forEach((item, idx) => {
-      setTimeout(() => { item.popScale = 1.55; item.popDecay = 0.15; }, idx * 60);
-    });
-
-    flushTransforms();
-    startLoop();
-    return () => cancelAnimationFrame(rafRef.current);
-  }, [startLoop]);
-
-  // ── Pointer handlers ──────────────────────────────────────────────────────────
-  const onPointerDown = (e: React.PointerEvent<HTMLDivElement>, id: number) => {
-    e.stopPropagation();
-    e.preventDefault();
-    (e.currentTarget as HTMLDivElement).setPointerCapture(e.pointerId);
-    const container = containerRef.current;
-    if (!container) return;
-    const rect = container.getBoundingClientRect();
-    const item = physRef.current.find((it) => it.id === id)!;
-    dragRef.current = {
-      id,
-      offsetX: (e.clientX - rect.left) - item.x,
-      offsetY: (e.clientY - rect.top)  - item.y,
-      vxSamples: [],
-      vySamples: [],
-      lastX: e.clientX,
-      lastY: e.clientY,
-    };
-    item.popScale = 1.18;
-    item.popDecay = 0.2;
-    const el = itemDivsRef.current.get(id);
-    if (el) el.style.zIndex = "100";
-  };
-
-  const onPointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
-    if (!dragRef.current || !containerRef.current) return;
-    const rect = containerRef.current.getBoundingClientRect();
-    const { id, offsetX, offsetY, vxSamples, vySamples, lastX, lastY } = dragRef.current;
-    const item = physRef.current.find((it) => it.id === id)!;
-    const itemW = item.size + 28;
-    const itemH = item.size + 40;
-
-    const nx = Math.max(0, Math.min(rect.width  - itemW, (e.clientX - rect.left) - offsetX));
-    const ny = Math.max(0, Math.min(rect.height - itemH, (e.clientY - rect.top)  - offsetY));
-
-    vxSamples.push(e.clientX - lastX);
-    vySamples.push(e.clientY - lastY);
-    if (vxSamples.length > 7) vxSamples.shift();
-    if (vySamples.length > 7) vySamples.shift();
-    dragRef.current.lastX = e.clientX;
-    dragRef.current.lastY = e.clientY;
-
-    const latestVx = vxSamples[vxSamples.length - 1] ?? 0;
-    item.x    = nx;
-    item.y    = ny;
-    item.rot += latestVx * 0.35;
-  };
-
-  const releaseDrag = () => {
-    if (!dragRef.current) return;
-    const { id, vxSamples, vySamples } = dragRef.current;
-    const item = physRef.current.find((it) => it.id === id)!;
-
-    const avgVx = vxSamples.length ? vxSamples.reduce((a, b) => a + b, 0) / vxSamples.length : 0;
-    const avgVy = vySamples.length ? vySamples.reduce((a, b) => a + b, 0) / vySamples.length : 0;
-
-    item.vx     = Math.max(-MAX_VEL, Math.min(MAX_VEL, avgVx * 1.6));
-    item.vy     = Math.max(-MAX_VEL, Math.min(MAX_VEL, avgVy * 1.6));
-    item.angVel = avgVx * 0.85;
-    item.popScale = 1.15;
-    item.popDecay = 0.17;
-
-    const el = itemDivsRef.current.get(id);
-    if (el) el.style.zIndex = "5";
-    dragRef.current = null;
-  };
-
   // ── Login ─────────────────────────────────────────────────────────────────────
   const handleSubmit = async (ev: FormEvent) => {
     ev.preventDefault();
@@ -469,10 +214,10 @@ export default function LoginPage() {
         /* Header */
         .lp-brand-hdr { display: flex; align-items: center; gap: 14px; position: relative; z-index: 10; pointer-events: none; }
         .lp-brand-badge {
-          width: 50px; height: 50px; border-radius: 13px; background: #1a73e8;
-          display: flex; align-items: center; justify-content: center;
-          font-size: 24px; flex-shrink: 0; box-shadow: 0 4px 18px rgba(26,115,232,0.45);
+          width: auto; height: 48px; border-radius: 0; background: none; box-shadow: none;
+          display: flex; align-items: center;
         }
+        .lp-brand-badge img { height: 48px; width: auto; object-fit: contain; }
         .lp-brand-hdr h1 { font-size: 19px; font-weight: 800; color: #fff; margin: 0; letter-spacing: -0.2px; }
         .lp-brand-hdr p  { font-size: 12px; color: #636363; margin: 2px 0 0; }
 
@@ -486,15 +231,6 @@ export default function LoginPage() {
         .lp-tagline { font-size: 36px; font-weight: 800; color: #fff; line-height: 1.18; margin: 0 0 12px; letter-spacing: -0.8px; }
         .lp-tagline span { color: #1a73e8; }
         .lp-sub { font-size: 15px; color: #b0b0c8; max-width: 360px; line-height: 1.6; margin: 0; }
-        .lp-hint {
-          margin-top: 14px; display: flex; align-items: center; gap: 7px;
-          font-size: 12px; color: rgba(255,255,255,0.35);
-        }
-        .lp-hint-dot {
-          width: 7px; height: 7px; border-radius: 50%; background: #1a73e8; flex-shrink: 0;
-          animation: lp-pulse 1.6s ease-in-out infinite;
-        }
-        @keyframes lp-pulse { 0%,100% { opacity: 0.4; transform: scale(1); } 50% { opacity: 1; transform: scale(1.5); } }
 
         /* Robot illustration */
         .lp-hero-robo {
@@ -502,7 +238,7 @@ export default function LoginPage() {
           position: relative; display: flex; align-items: center; justify-content: center;
         }
         .lp-robo-img {
-          width: 175px; height: 175px; object-fit: contain;
+          width: 190px; height: 190px; object-fit: contain;
           position: relative; z-index: 2;
           animation: lp-robot-float 3.8s ease-in-out infinite;
           filter: drop-shadow(0 0 28px rgba(26,115,232,0.55)) drop-shadow(0 8px 20px rgba(0,0,0,0.5));
@@ -562,30 +298,11 @@ export default function LoginPage() {
         .lp-role-info h4 { font-size: 13px; font-weight: 700; color: #f0f4ff; margin: 0 0 3px; }
         .lp-role-info p  { font-size: 11px; color: rgba(200,210,235,0.75); margin: 0; line-height: 1.4; }
 
-        /* ══ PHYSICS ITEMS ══ */
-        .lp-drag-item {
-          position: absolute;
-          display: flex; flex-direction: column; align-items: center; gap: 3px;
-          cursor: grab; touch-action: none;
-          border-radius: 14px; padding: 6px 8px;
-          will-change: transform, left, top, filter;
-          z-index: 5;
-        }
-        .lp-drag-item:hover { filter: drop-shadow(0 0 16px rgba(26,115,232,0.75)) !important; }
-        .lp-drag-item:active { cursor: grabbing; }
-        .lp-drag-emoji { line-height: 1; display: block; pointer-events: none; transition: transform 0.12s; }
-        .lp-drag-item:hover .lp-drag-emoji { transform: scale(1.18); }
-        .lp-drag-label {
-          font-size: 9px; font-weight: 700; color: rgba(255,255,255,0.6);
-          text-transform: uppercase; letter-spacing: 0.6px;
-          user-select: none; pointer-events: none; white-space: nowrap;
-        }
-
         /* ══ FORM PANEL ══ */
         .lp-form { flex: 0 0 42%; display: flex; align-items: center; justify-content: center; padding: 40px 32px; background: #f5f5f0; }
         .lp-card { width: 100%; max-width: 380px; }
         .lp-logo { display: flex; flex-direction: column; align-items: center; text-align: center; margin-bottom: 28px; }
-        .lp-logo img { width: 60px; height: 60px; object-fit: contain; margin-bottom: 12px; }
+        .lp-logo img { height: 70px; width: auto; object-fit: contain; margin-bottom: 12px; }
         .lp-logo h2 { font-size: 22px; font-weight: 800; color: #2c2c2c; margin: 0 0 4px; }
         .lp-logo p  { font-size: 13px; color: #636363; margin: 0; }
         .lp-m-banner  { display: none; }
@@ -632,7 +349,7 @@ export default function LoginPage() {
           .lp-m-banner { display: flex; flex-direction: column; background: linear-gradient(160deg, #0a0a15 0%, #111127 55%, #0d1a2e 100%); padding: 22px 22px 20px; position: relative; overflow: hidden; flex-shrink: 0; }
           .lp-m-constellation { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; z-index: 0; }
           .lp-m-banner-hdr { display: flex; align-items: center; gap: 11px; margin-bottom: 14px; position: relative; z-index: 1; }
-          .lp-m-banner-icon { width: 38px; height: 38px; border-radius: 10px; background: #1a73e8; display: flex; align-items: center; justify-content: center; font-size: 18px; flex-shrink: 0; box-shadow: 0 3px 10px rgba(26,115,232,0.4); }
+          .lp-m-banner-icon { width: 38px; height: 38px; border-radius: 10px; background: none; display: flex; align-items: center; justify-content: center; flex-shrink: 0; box-shadow: none; }
           .lp-m-banner-hdr h3 { font-size: 15px; font-weight: 800; color: #fff; margin: 0; }
           .lp-m-banner-hdr p  { font-size: 11px; color: #636363; margin: 2px 0 0; }
           /* hero row: text + robot side by side */
@@ -682,32 +399,15 @@ export default function LoginPage() {
         <div
           className="lp-brand"
           ref={containerRef}
-          onPointerMove={onPointerMove}
-          onPointerUp={releaseDrag}
-          onPointerLeave={releaseDrag}
         >
           {/* Constellation canvas — z-index 1, behind everything */}
           <canvas ref={canvasRef} className="lp-constellation" />
 
-          {/* Physics draggable items — z-index 5 */}
-          {ITEMS_CFG.map((cfg) => (
-            <div
-              key={cfg.id}
-              className="lp-drag-item"
-              ref={(el) => {
-                if (el) itemDivsRef.current.set(cfg.id, el);
-                else itemDivsRef.current.delete(cfg.id);
-              }}
-              onPointerDown={(e) => onPointerDown(e, cfg.id)}
-            >
-              <span className="lp-drag-emoji" style={{ fontSize: cfg.size }}>{cfg.emoji}</span>
-              <span className="lp-drag-label">{cfg.label}</span>
-            </div>
-          ))}
-
           {/* Brand header — z-index 10 */}
           <div className="lp-brand-hdr">
-            <div className="lp-brand-badge">🤖</div>
+            <div className="lp-brand-badge">
+              <img src="/images/aitutor 4 schools.png" alt="AI Tutor 4 Schools" />
+            </div>
             <div>
               <h1>AI Tutor 4 Schools</h1>
               <p>Powered by SmartAI Tutor</p>
@@ -725,13 +425,9 @@ export default function LoginPage() {
                 Your school's AI-powered learning platform — helping every
                 student reach their full potential, at their own pace.
               </p>
-              <p className="lp-hint">
-                <span className="lp-hint-dot" />
-                Throw the items — they bounce!
-              </p>
             </div>
 
-            {/* Robot illustration */}
+            {/* Logo illustration */}
             <div className="lp-hero-robo">
               <div className="lp-robo-rings">
                 <div className="lp-robo-ring lp-robo-ring-1" />
@@ -740,7 +436,7 @@ export default function LoginPage() {
                 <div className="lp-robo-orbit" />
               </div>
               <img
-                src="/images/robotAI.png"
+                src="/images/aitutor 4 schools-robo.png"
                 alt="AI Tutor Robot"
                 className="lp-robo-img"
                 draggable={false}
@@ -771,7 +467,9 @@ export default function LoginPage() {
               <canvas ref={mobileCanvasRef} className="lp-m-constellation" />
 
               <div className="lp-m-banner-hdr">
-                <div className="lp-m-banner-icon">🤖</div>
+                <div className="lp-m-banner-icon">
+                  <img src="/images/aitutor 4 schools.png" alt="AI Tutor 4 Schools" style={{ width: 38, height: 38, objectFit: "contain", borderRadius: 8 }} />
+                </div>
                 <div>
                   <h3>AI Tutor 4 Schools</h3>
                   <p>Powered by SmartAI Tutor</p>
@@ -793,7 +491,7 @@ export default function LoginPage() {
                     <div className="lp-m-robo-ring lp-m-robo-ring-2" />
                     <div className="lp-m-robo-orbit" />
                   </div>
-                  <img src="/images/robotAI.png" alt="AI Tutor Robot" className="lp-m-robo-img" draggable={false} />
+                  <img src="/images/aitutor 4 schools-robo.png" alt="AI Tutor Robot" className="lp-m-robo-img" draggable={false} />
                 </div>
               </div>
 
@@ -812,7 +510,7 @@ export default function LoginPage() {
 
             <div className="lp-m-form-body">
               <div className="lp-logo">
-                <img src="/Original-Logo.png" alt="SmartAI Tutor" />
+                <img src="/images/aitutor 4 schools.png" alt="AI Tutor 4 Schools" />
                 <h2>Welcome Back!</h2>
                 <p>Sign in to your learning platform</p>
               </div>

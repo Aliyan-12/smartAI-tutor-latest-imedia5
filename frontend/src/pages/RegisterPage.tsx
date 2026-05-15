@@ -1,39 +1,6 @@
-import { useState, useRef, useEffect, useCallback, type FormEvent } from "react";
+import { useState, useRef, useEffect, type FormEvent } from "react";
 import { Link } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
-
-// ── Physics item ───────────────────────────────────────────────────────────────
-interface PhysItem {
-  id: number;
-  emoji: string;
-  label: string;
-  size: number;
-  x: number;
-  y: number;
-  vx: number;
-  vy: number;
-  rot: number;
-  angVel: number;
-  floatPhase: number;
-  floatSpeed: number;
-  popScale: number;
-  popDecay: number;
-}
-
-const ITEMS_CFG = [
-  { id: 1,  emoji: "🎓", label: "Learn",   size: 38, xPct: 6,  yPct: 10 },
-  { id: 2,  emoji: "✏️", label: "Write",   size: 32, xPct: 52, yPct: 7  },
-  { id: 3,  emoji: "📊", label: "Stats",   size: 36, xPct: 76, yPct: 16 },
-  { id: 4,  emoji: "⭐", label: "XP",      size: 34, xPct: 25, yPct: 28 },
-  { id: 5,  emoji: "🔬", label: "Science", size: 32, xPct: 64, yPct: 40 },
-  { id: 6,  emoji: "💡", label: "Idea",    size: 36, xPct: 9,  yPct: 52 },
-  { id: 7,  emoji: "📚", label: "Books",   size: 32, xPct: 44, yPct: 62 },
-  { id: 8,  emoji: "🏆", label: "Trophy",  size: 40, xPct: 80, yPct: 56 },
-  { id: 9,  emoji: "🎯", label: "Goal",    size: 32, xPct: 20, yPct: 76 },
-  { id: 10, emoji: "🚀", label: "Launch",  size: 38, xPct: 58, yPct: 80 },
-  { id: 11, emoji: "🧠", label: "Brain",   size: 34, xPct: 36, yPct: 44 },
-  { id: 12, emoji: "🎨", label: "Create",  size: 32, xPct: 70, yPct: 72 },
-];
 
 const HIGHLIGHTS = [
   { icon: "🎓", title: "Personalised Learning", desc: "AI adapts to your pace and learning style" },
@@ -41,11 +8,6 @@ const HIGHLIGHTS = [
   { icon: "🧠", title: "UK Curriculum Aligned", desc: "GCSE, A-Level, Key Stage content built-in" },
   { icon: "🔊", title: "Voice Tutoring",         desc: "Real-time AI voice sessions coming soon" },
 ];
-
-const FRICTION    = 0.93;
-const BOUNCE      = 0.52;
-const ANG_FRICTION = 0.90;
-const MAX_VEL     = 20;
 
 export default function RegisterPage() {
   const { register } = useAuth();
@@ -59,22 +21,8 @@ export default function RegisterPage() {
   const containerRef     = useRef<HTMLDivElement>(null);
   const canvasRef        = useRef<HTMLCanvasElement>(null);
   const mobileCanvasRef  = useRef<HTMLCanvasElement>(null);
-  const itemDivsRef      = useRef<Map<number, HTMLDivElement>>(new Map());
-  const physRef          = useRef<PhysItem[]>([]);
-  const rafRef           = useRef<number>(0);
   const consRafRef       = useRef<number>(0);
   const mobileConsRafRef = useRef<number>(0);
-  const frameRef         = useRef<number>(0);
-
-  const dragRef = useRef<{
-    id: number;
-    offsetX: number;
-    offsetY: number;
-    vxSamples: number[];
-    vySamples: number[];
-    lastX: number;
-    lastY: number;
-  } | null>(null);
 
   // ── Constellation canvas ──────────────────────────────────────────────────────
   useEffect(() => {
@@ -213,207 +161,6 @@ export default function RegisterPage() {
     return () => cancelAnimationFrame(mobileConsRafRef.current);
   }, []);
 
-  // ── Apply transforms directly to DOM ─────────────────────────────────────────
-  const flushTransforms = () => {
-    for (const item of physRef.current) {
-      const el = itemDivsRef.current.get(item.id);
-      if (!el) continue;
-      const speed   = Math.sqrt(item.vx ** 2 + item.vy ** 2);
-      const isDrag  = dragRef.current?.id === item.id;
-      const sx = isDrag ? 1.0 : Math.max(0.7, 1 - speed * 0.018);
-      const sy = isDrag ? 1.0 : Math.min(1.35, 1 + speed * 0.022);
-      const glow = Math.min(speed * 2.5, 22);
-      const ps   = item.popScale;
-
-      el.style.left      = `${item.x}px`;
-      el.style.top       = `${item.y}px`;
-      el.style.transform = `rotate(${item.rot}deg) scale(${(isDrag ? 1.38 : sx) * ps}, ${(isDrag ? 1.38 : sy) * ps})`;
-      el.style.filter    = speed > 1.2
-        ? `drop-shadow(0 0 ${glow}px rgba(26,115,232,0.85))`
-        : isDrag
-          ? "drop-shadow(0 10px 24px rgba(26,115,232,0.9)) brightness(1.3)"
-          : "";
-    }
-  };
-
-  // ── Physics loop ─────────────────────────────────────────────────────────────
-  const startLoop = useCallback(() => {
-    const tick = () => {
-      frameRef.current++;
-      const container = containerRef.current;
-      if (!container) { rafRef.current = requestAnimationFrame(tick); return; }
-      const W = container.clientWidth;
-      const H = container.clientHeight;
-
-      const items = physRef.current;
-      for (const item of items) {
-        if (dragRef.current?.id === item.id) continue;
-
-        const itemW = item.size + 28;
-        const itemH = item.size + 40;
-        const speed = Math.sqrt(item.vx ** 2 + item.vy ** 2);
-
-        if (speed < 0.6) {
-          item.floatPhase += item.floatSpeed;
-          item.vx += Math.cos(item.floatPhase * 0.73) * 0.014;
-          item.vy += Math.sin(item.floatPhase) * 0.018;
-          item.angVel += Math.sin(item.floatPhase * 1.4) * 0.012;
-        }
-
-        item.x   += item.vx;
-        item.y   += item.vy;
-        item.rot += item.angVel;
-
-        item.vx     *= FRICTION;
-        item.vy     *= FRICTION;
-        item.angVel *= ANG_FRICTION;
-
-        if (item.x < 0)         { item.x = 0;         item.vx =  Math.abs(item.vx) * BOUNCE; item.angVel *= -0.6; }
-        if (item.x > W - itemW) { item.x = W - itemW; item.vx = -Math.abs(item.vx) * BOUNCE; item.angVel *= -0.6; }
-        if (item.y < 0)         { item.y = 0;         item.vy =  Math.abs(item.vy) * BOUNCE; }
-        if (item.y > H - itemH) { item.y = H - itemH; item.vy = -Math.abs(item.vy) * BOUNCE; item.angVel *= -0.7; }
-
-        if (item.popScale !== 1) {
-          item.popScale += (1 - item.popScale) * item.popDecay;
-          if (Math.abs(item.popScale - 1) < 0.005) item.popScale = 1;
-        }
-      }
-
-      // Circle collision every 2nd frame
-      if (frameRef.current % 2 === 0) {
-        for (let i = 0; i < items.length; i++) {
-          for (let j = i + 1; j < items.length; j++) {
-            const a = items[i], b = items[j];
-            const ra = (a.size / 2) + 14;
-            const rb = (b.size / 2) + 14;
-            const ax = a.x + ra, ay = a.y + ra;
-            const bx = b.x + rb, by = b.y + rb;
-            const dx = bx - ax, dy = by - ay;
-            const dist = Math.sqrt(dx * dx + dy * dy);
-            const minD = ra + rb;
-            if (dist < minD && dist > 0.01) {
-              const nx = dx / dist, ny = dy / dist;
-              const overlap = (minD - dist) * 0.55;
-              a.x -= nx * overlap; a.y -= ny * overlap;
-              b.x += nx * overlap; b.y += ny * overlap;
-              const dvx = a.vx - b.vx, dvy = a.vy - b.vy;
-              const dot = dvx * nx + dvy * ny;
-              if (dot > 0) {
-                const imp = dot * 0.65;
-                a.vx -= imp * nx; a.vy -= imp * ny;
-                b.vx += imp * nx; b.vy += imp * ny;
-                a.angVel += (dvy * nx - dvx * ny) * 0.55;
-                b.angVel -= (dvy * nx - dvx * ny) * 0.55;
-                a.popScale = 1.22; a.popDecay = 0.18;
-                b.popScale = 1.22; b.popDecay = 0.18;
-              }
-            }
-          }
-        }
-      }
-
-      flushTransforms();
-      rafRef.current = requestAnimationFrame(tick);
-    };
-    rafRef.current = requestAnimationFrame(tick);
-  }, []);
-
-  // ── Init ──────────────────────────────────────────────────────────────────────
-  useEffect(() => {
-    const container = containerRef.current;
-    if (!container) return;
-    const W = container.clientWidth;
-    const H = container.clientHeight;
-
-    physRef.current = ITEMS_CFG.map((cfg) => ({
-      ...cfg,
-      x: (cfg.xPct / 100) * W,
-      y: (cfg.yPct / 100) * H,
-      vx: (Math.random() - 0.5) * 0.4,
-      vy: (Math.random() - 0.5) * 0.4,
-      rot: (Math.random() - 0.5) * 28,
-      angVel: (Math.random() - 0.5) * 0.4,
-      floatPhase: Math.random() * Math.PI * 2,
-      floatSpeed: 0.007 + Math.random() * 0.007,
-      popScale:   0.1,
-      popDecay:   0.12,
-    }));
-
-    physRef.current.forEach((item, idx) => {
-      setTimeout(() => { item.popScale = 1.55; item.popDecay = 0.15; }, idx * 60);
-    });
-
-    flushTransforms();
-    startLoop();
-    return () => cancelAnimationFrame(rafRef.current);
-  }, [startLoop]);
-
-  // ── Pointer handlers ──────────────────────────────────────────────────────────
-  const onPointerDown = (e: React.PointerEvent<HTMLDivElement>, id: number) => {
-    e.stopPropagation();
-    e.preventDefault();
-    (e.currentTarget as HTMLDivElement).setPointerCapture(e.pointerId);
-    const container = containerRef.current;
-    if (!container) return;
-    const rect = container.getBoundingClientRect();
-    const item = physRef.current.find((it) => it.id === id)!;
-    dragRef.current = {
-      id,
-      offsetX: (e.clientX - rect.left) - item.x,
-      offsetY: (e.clientY - rect.top)  - item.y,
-      vxSamples: [],
-      vySamples: [],
-      lastX: e.clientX,
-      lastY: e.clientY,
-    };
-    item.popScale = 1.18;
-    item.popDecay = 0.2;
-    const el = itemDivsRef.current.get(id);
-    if (el) el.style.zIndex = "100";
-  };
-
-  const onPointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
-    if (!dragRef.current || !containerRef.current) return;
-    const rect = containerRef.current.getBoundingClientRect();
-    const { id, offsetX, offsetY, vxSamples, vySamples, lastX, lastY } = dragRef.current;
-    const item = physRef.current.find((it) => it.id === id)!;
-    const itemW = item.size + 28;
-    const itemH = item.size + 40;
-
-    const nx = Math.max(0, Math.min(rect.width  - itemW, (e.clientX - rect.left) - offsetX));
-    const ny = Math.max(0, Math.min(rect.height - itemH, (e.clientY - rect.top)  - offsetY));
-
-    vxSamples.push(e.clientX - lastX);
-    vySamples.push(e.clientY - lastY);
-    if (vxSamples.length > 7) vxSamples.shift();
-    if (vySamples.length > 7) vySamples.shift();
-    dragRef.current.lastX = e.clientX;
-    dragRef.current.lastY = e.clientY;
-
-    item.x    = nx;
-    item.y    = ny;
-    item.rot += (vxSamples[vxSamples.length - 1] ?? 0) * 0.35;
-  };
-
-  const releaseDrag = () => {
-    if (!dragRef.current) return;
-    const { id, vxSamples, vySamples } = dragRef.current;
-    const item = physRef.current.find((it) => it.id === id)!;
-
-    const avgVx = vxSamples.length ? vxSamples.reduce((a, b) => a + b, 0) / vxSamples.length : 0;
-    const avgVy = vySamples.length ? vySamples.reduce((a, b) => a + b, 0) / vySamples.length : 0;
-
-    item.vx     = Math.max(-MAX_VEL, Math.min(MAX_VEL, avgVx * 1.6));
-    item.vy     = Math.max(-MAX_VEL, Math.min(MAX_VEL, avgVy * 1.6));
-    item.angVel = avgVx * 0.85;
-    item.popScale = 1.15;
-    item.popDecay = 0.17;
-
-    const el = itemDivsRef.current.get(id);
-    if (el) el.style.zIndex = "5";
-    dragRef.current = null;
-  };
-
   // ── Register submit ───────────────────────────────────────────────────────────
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
@@ -468,10 +215,10 @@ export default function RegisterPage() {
           position: relative; z-index: 10; pointer-events: none;
         }
         .rp-brand-badge {
-          width: 50px; height: 50px; border-radius: 13px; background: #1a73e8;
-          display: flex; align-items: center; justify-content: center;
-          font-size: 24px; flex-shrink: 0; box-shadow: 0 4px 14px rgba(26,115,232,0.4);
+          width: auto; height: 48px; border-radius: 0; background: none; box-shadow: none;
+          display: flex; align-items: center;
         }
+        .rp-brand-badge img { height: 48px; width: auto; object-fit: contain; }
         .rp-brand-hdr h1 { font-size: 19px; font-weight: 800; color: #fff; margin: 0; letter-spacing: -0.2px; }
         .rp-brand-hdr p  { font-size: 12px; color: #636363; margin: 2px 0 0; }
 
@@ -495,7 +242,7 @@ export default function RegisterPage() {
           position: relative; display: flex; align-items: center; justify-content: center;
         }
         .rp-robo-img {
-          width: 175px; height: 175px; object-fit: contain;
+          width: 190px; height: 190px; object-fit: contain;
           position: relative; z-index: 2;
           animation: rp-robot-float 3.8s ease-in-out infinite;
           filter: drop-shadow(0 0 28px rgba(26,115,232,0.55)) drop-shadow(0 8px 20px rgba(0,0,0,0.5));
@@ -557,25 +304,6 @@ export default function RegisterPage() {
         .rp-hi-info h4 { font-size: 13px; font-weight: 700; color: #f0f4ff; margin: 0 0 3px; }
         .rp-hi-info p  { font-size: 11px; color: rgba(200,210,235,0.75); margin: 0; line-height: 1.4; }
 
-        /* ══ PHYSICS ITEMS ══ */
-        .rp-drag-item {
-          position: absolute;
-          display: flex; flex-direction: column; align-items: center; gap: 3px;
-          cursor: grab; touch-action: none;
-          border-radius: 14px; padding: 6px 8px;
-          will-change: transform, left, top, filter;
-          z-index: 5;
-        }
-        .rp-drag-item:hover { filter: drop-shadow(0 0 16px rgba(26,115,232,0.75)) !important; }
-        .rp-drag-item:active { cursor: grabbing; }
-        .rp-drag-emoji { line-height: 1; display: block; pointer-events: none; transition: transform 0.12s; }
-        .rp-drag-item:hover .rp-drag-emoji { transform: scale(1.18); }
-        .rp-drag-label {
-          font-size: 9px; font-weight: 700; color: rgba(255,255,255,0.6);
-          text-transform: uppercase; letter-spacing: 0.6px;
-          user-select: none; pointer-events: none; white-space: nowrap;
-        }
-
         /* ══ FORM PANEL ══ */
         .rp-form {
           flex: 0 0 42%; display: flex; align-items: center; justify-content: center;
@@ -583,7 +311,7 @@ export default function RegisterPage() {
         }
         .rp-card { width: 100%; max-width: 380px; }
         .rp-logo { display: flex; flex-direction: column; align-items: center; text-align: center; margin-bottom: 24px; }
-        .rp-logo img { width: 56px; height: 56px; object-fit: contain; margin-bottom: 10px; }
+        .rp-logo img { height: 70px; width: auto; object-fit: contain; margin-bottom: 10px; }
         .rp-logo h2 { font-size: 21px; font-weight: 800; color: #2c2c2c; margin: 0 0 4px; }
         .rp-logo p  { font-size: 13px; color: #636363; margin: 0; }
         .rp-m-banner  { display: none; }
@@ -627,7 +355,7 @@ export default function RegisterPage() {
           .rp-m-banner { display: block; background: linear-gradient(160deg, #0a0a15, #111127); padding: 22px 22px 20px; position: relative; overflow: hidden; flex-shrink: 0; }
           .rp-m-constellation { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; z-index: 0; }
           .rp-m-banner-hdr { display: flex; align-items: center; gap: 11px; margin-bottom: 14px; position: relative; z-index: 1; }
-          .rp-m-banner-icon { width: 38px; height: 38px; border-radius: 10px; background: #1a73e8; display: flex; align-items: center; justify-content: center; font-size: 18px; flex-shrink: 0; box-shadow: 0 3px 10px rgba(26,115,232,0.4); }
+          .rp-m-banner-icon { width: 38px; height: 38px; border-radius: 10px; background: none; display: flex; align-items: center; justify-content: center; flex-shrink: 0; box-shadow: none; }
           .rp-m-banner-hdr h3 { font-size: 15px; font-weight: 800; color: #fff; margin: 0; }
           .rp-m-banner-hdr p  { font-size: 11px; color: #636363; margin: 2px 0 0; }
           /* hero row: text + robot */
@@ -677,32 +405,15 @@ export default function RegisterPage() {
         <div
           className="rp-brand"
           ref={containerRef}
-          onPointerMove={onPointerMove}
-          onPointerUp={releaseDrag}
-          onPointerLeave={releaseDrag}
         >
           {/* Constellation canvas */}
           <canvas ref={canvasRef} className="rp-constellation" />
 
-          {/* Physics items */}
-          {ITEMS_CFG.map((cfg) => (
-            <div
-              key={cfg.id}
-              className="rp-drag-item"
-              ref={(el) => {
-                if (el) itemDivsRef.current.set(cfg.id, el);
-                else itemDivsRef.current.delete(cfg.id);
-              }}
-              onPointerDown={(e) => onPointerDown(e, cfg.id)}
-            >
-              <span className="rp-drag-emoji" style={{ fontSize: cfg.size }}>{cfg.emoji}</span>
-              <span className="rp-drag-label">{cfg.label}</span>
-            </div>
-          ))}
-
           {/* Brand header */}
           <div className="rp-brand-hdr">
-            <div className="rp-brand-badge">🤖</div>
+            <div className="rp-brand-badge">
+              <img src="/images/aitutor 4 schools.png" alt="AI Tutor 4 Schools" />
+            </div>
             <div>
               <h1>AI Tutor 4 Schools</h1>
               <p>Powered by SmartAI Tutor</p>
@@ -729,7 +440,7 @@ export default function RegisterPage() {
                 <div className="rp-robo-orbit" />
               </div>
               <img
-                src="/images/robotAI.png"
+                src="/images/aitutor 4 schools-robo.png"
                 alt="AI Tutor Robot"
                 className="rp-robo-img"
                 draggable={false}
@@ -760,7 +471,9 @@ export default function RegisterPage() {
               <canvas ref={mobileCanvasRef} className="rp-m-constellation" />
 
               <div className="rp-m-banner-hdr">
-                <div className="rp-m-banner-icon">🤖</div>
+                <div className="rp-m-banner-icon">
+                  <img src="/images/aitutor 4 schools.png" alt="AI Tutor 4 Schools" style={{ width: 38, height: 38, objectFit: "contain", borderRadius: 8 }} />
+                </div>
                 <div>
                   <h3>AI Tutor 4 Schools</h3>
                   <p>Powered by SmartAI Tutor</p>
@@ -781,7 +494,7 @@ export default function RegisterPage() {
                     <div className="rp-m-robo-ring rp-m-robo-ring-2" />
                     <div className="rp-m-robo-orbit" />
                   </div>
-                  <img src="/images/robotAI.png" alt="AI Tutor Robot" className="rp-m-robo-img" draggable={false} />
+                  <img src="/images/aitutor 4 schools-robo.png" alt="AI Tutor Robot" className="rp-m-robo-img" draggable={false} />
                 </div>
               </div>
 
@@ -801,7 +514,7 @@ export default function RegisterPage() {
 
             <div className="rp-m-form-body">
               <div className="rp-logo">
-                <img src="/Original-Logo.png" alt="SmartAI Tutor" />
+                <img src="/images/aitutor 4 schools.png" alt="AI Tutor 4 Schools" />
                 <h2>Create Account</h2>
                 <p>Join your school's AI tutoring platform</p>
               </div>
