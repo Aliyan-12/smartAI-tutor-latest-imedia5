@@ -15,6 +15,8 @@ class StudentProfileResponse(BaseModel):
     last_active_date: Optional[date] = None
     interests: Optional[List[str]] = None
     preferred_subjects: Optional[List[str]] = None
+    key_stage: Optional[str] = None
+    year_group: Optional[str] = None
 
 
 class TopicMasteryResponse(BaseModel):

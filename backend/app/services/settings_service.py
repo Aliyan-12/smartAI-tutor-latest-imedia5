@@ -80,9 +80,10 @@ async def update_profile(
     student_id: int,
     name: Optional[str] = None,
     year_group: Optional[str] = None,
+    key_stage: Optional[str] = None,
 ) -> Dict[str, Any]:
     """
-    Update the user's display name and/or year_group.
+    Update the user's display name and/or year_group and/or key_stage.
     Returns a combined profile dict.
     """
     # Update User.name if provided
@@ -100,11 +101,18 @@ async def update_profile(
         await db.flush()
         await db.refresh(profile)
 
+    if key_stage is not None:
+        profile.key_stage = key_stage
+        profile.updated_at = datetime.now(timezone.utc)
+        await db.flush()
+        await db.refresh(profile)
+
     return {
         "user_id": user_id,
         "name": user.name if user else "",
         "email": user.email if user else "",
         "year_group": profile.year_group,
+        "key_stage": profile.key_stage,
         "xp_total": profile.xp_total,
         "xp_level": profile.xp_level,
         "current_streak": profile.current_streak,

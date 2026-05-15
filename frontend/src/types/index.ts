@@ -177,6 +177,7 @@ export interface StudentProfile {
   xp_level: number;
   current_streak: number;
   longest_streak: number;
+  key_stage?: string | null;
   last_active_date: string | null;
   interests: string[] | null;
   preferred_subjects: string[] | null;
@@ -288,6 +289,7 @@ export interface LearningPreferences {
   interests: string[] | null;
   learning_goals: string | null;
   year_group: string | null;
+  key_stage?: string | null;
   default_session_length: number;
   voice_responses: boolean;
   show_hints: boolean;

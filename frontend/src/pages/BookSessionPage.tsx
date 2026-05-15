@@ -10,18 +10,18 @@ import { appointmentsApi, teacherApi, parentApi, lessonsApi } from "../services/
 import type { User as UserType } from "../types";
 
 const SESSION_TYPES = [
+  "Learn from Scratch",
   "Homework Help",
+  "Catch Up",
   "Revision",
-  "Exam Prep",
   "General Tutoring",
-  "Topic Introduction",
 ];
 
-const DURATIONS = [
-  { label: "30 minutes", value: "30" },
-  { label: "60 minutes", value: "60" },
-  { label: "90 minutes", value: "90" },
-  { label: "2 hours", value: "120" },
+const SESSION_TYPE_DURATIONS = [
+  { value: "20", emoji: "⚡", name: "Quick Boost",   sublabel: "20 mins",  desc: "Short focused support — homework, one concept, revision burst" },
+  { value: "40", emoji: "⭐", name: "Core Learning", sublabel: "40 mins",  desc: "Best balance of focus, teaching and retention", recommended: true },
+  { value: "60", emoji: "🚀", name: "Deep Learning", sublabel: "1 hour",   desc: "Serious progress — GCSE/A-Level topics" },
+  { value: "90", emoji: "🏆", name: "Intensive",     sublabel: "90 mins",  desc: "Exams & major catch-up — includes a brain break" },
 ];
 
 export default function BookSessionPage() {
@@ -49,7 +49,7 @@ export default function BookSessionPage() {
     title: "",
     date: "",
     time: "",
-    duration_minutes: "60",
+    duration_minutes: "40",
     description: "",
     payment_amount: "",
     passcode: "",
@@ -484,51 +484,36 @@ export default function BookSessionPage() {
           )}
         </div>
 
-        {/* Duration radio buttons */}
+        {/* Duration card grid */}
         <div>
           <label style={labelStyle}>Duration</label>
-          <div
-            style={{ display: "flex", gap: 10, flexWrap: "wrap", marginTop: 6 }}
-          >
-            {DURATIONS.map((d) => {
-              const selected = form.duration_minutes === d.value;
-              return (
-                <label
-                  key={d.value}
-                  style={{
-                    display: "flex",
-                    alignItems: "center",
-                    gap: 8,
-                    padding: "10px 16px",
-                    borderRadius: 8,
-                    border: selected
-                      ? "2px solid var(--accent)"
-                      : "1px solid var(--border)",
-                    background: selected
-                      ? "var(--accent-light)"
-                      : "var(--bg-secondary)",
-                    cursor: "pointer",
-                    transition: "all 0.15s",
-                    fontSize: 13,
-                    fontWeight: selected ? 700 : 500,
-                    color: selected ? "var(--accent)" : "var(--text-primary)",
-                  }}
-                >
-                  <input
-                    type="radio"
-                    name="duration"
-                    value={d.value}
-                    checked={selected}
-                    onChange={() =>
-                      setForm((f) => ({ ...f, duration_minutes: d.value }))
-                    }
-                    style={{ display: "none" }}
-                  />
-                  <Clock size={13} />
-                  {d.label}
-                </label>
-              );
-            })}
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginTop: 8 }}>
+            {SESSION_TYPE_DURATIONS.map((d) => (
+              <button
+                key={d.value}
+                type="button"
+                onClick={() => setForm((f) => ({ ...f, duration_minutes: d.value }))}
+                style={{
+                  border: `1.5px solid ${form.duration_minutes === d.value ? "#1a73e8" : "#e2e8f0"}`,
+                  borderRadius: 10,
+                  padding: "12px 14px",
+                  background: form.duration_minutes === d.value ? "#eff6ff" : "#fff",
+                  cursor: "pointer",
+                  textAlign: "left",
+                  position: "relative",
+                }}
+              >
+                {d.recommended && (
+                  <span style={{ position: "absolute", top: 8, right: 8, fontSize: 9, fontWeight: 800, background: "#10b981", color: "#fff", padding: "2px 7px", borderRadius: 999, textTransform: "uppercase" }}>
+                    Recommended
+                  </span>
+                )}
+                <div style={{ fontSize: 20 }}>{d.emoji}</div>
+                <div style={{ fontSize: 13, fontWeight: 800, color: "#0f172a", marginTop: 4 }}>{d.name}</div>
+                <div style={{ fontSize: 12, fontWeight: 600, color: "#1a73e8" }}>{d.sublabel}</div>
+                <div style={{ fontSize: 11, color: "#64748b", marginTop: 2, lineHeight: 1.4 }}>{d.desc}</div>
+              </button>
+            ))}
           </div>
         </div>
       </div>

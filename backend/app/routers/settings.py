@@ -48,13 +48,14 @@ async def update_profile(
     current_user: User = Depends(require_student),
     db: AsyncSession = Depends(get_db),
 ):
-    """Student: update their display name and/or year group."""
+    """Student: update their display name, year group, and/or key stage."""
     data = await settings_service.update_profile(
         db,
         user_id=current_user.id,
         student_id=current_user.id,
         name=payload.name,
         year_group=payload.year_group,
+        key_stage=payload.key_stage,
     )
     await db.commit()
     return ProfileResponse(**data)

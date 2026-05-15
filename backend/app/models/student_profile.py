@@ -34,6 +34,7 @@ class StudentProfile(Base):
     # e.g. {"step_by_step": true, "real_life_examples": true, "practice_as_we_go": true, "short_summaries": false, "analogies": false}
     learning_goals: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     year_group: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)
+    key_stage: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)
     default_session_length: Mapped[int] = mapped_column(Integer, default=60, nullable=False)
     voice_responses: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     show_hints: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)

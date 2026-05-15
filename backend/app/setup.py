@@ -89,6 +89,8 @@ async def run_setup(fresh: bool = False):
         # kb_type — separates course material from model training transcripts
         "ALTER TABLE documents ADD COLUMN IF NOT EXISTS kb_type VARCHAR(20) NOT NULL DEFAULT 'course_material'",
         "CREATE INDEX IF NOT EXISTS ix_documents_kb_type ON documents(kb_type)",
+        # student key stage (KS1/KS2/KS3/GCSE/A-Level/Degree) — determines available session lengths
+        "ALTER TABLE student_profiles ADD COLUMN IF NOT EXISTS key_stage VARCHAR(20)",
     ]
     async with engine.begin() as conn:
         for sql in _migrations:

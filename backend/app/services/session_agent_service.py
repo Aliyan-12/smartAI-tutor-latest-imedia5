@@ -159,24 +159,47 @@ async def _fetch_unit_kb_content_rag(
 
 
 def _get_lesson_plan(duration_minutes: int) -> str:
-    """Return the full session plan as a readable string for injection into the AI prompt."""
-    if duration_minutes <= 35:
+    """Return the full session plan for injection into the AI prompt."""
+    if duration_minutes <= 25:  # Quick Boost — 20 min
         return (
-            f"FULL {duration_minutes}-MINUTE LESSON PLAN:\n"
-            f"  • Phase 1 — Introduction     (0–3 min):   Warm greeting. State today's topic + learning goal in 1-2 sentences.\n"
-            f"  • Phase 2 — Core Teaching    (3–18 min):  Teach each key concept step by step. One concept per turn. Check understanding after each one.\n"
-            f"  • Phase 3 — Guided Practice  (18–25 min): Work through practice examples together. Guide the student — don't just give answers.\n"
-            f"  • Phase 4 — Quiz Time        (25–28 min): Offer a formal quiz (if QUIZ PHASE is active). Otherwise do quick recall questions.\n"
-            f"  • Phase 5 — Session Summary  (28–30 min): 2-3 sentence recap of what was learned. Encourage + suggest what to revisit."
+            f"SESSION TYPE: ⚡ QUICK BOOST ({duration_minutes} min) — Short, focused support.\n"
+            f"LESSON PLAN:\n"
+            f"  • Phase 1 — Hook & Goal      (0–2 min):   Quick greeting. State the ONE concept to cover today in one sentence.\n"
+            f"  • Phase 2 — Core Teaching    (2–12 min):  Teach ONE key concept with ONE clear example. Check understanding immediately after.\n"
+            f"  • Phase 3 — Quick Practice   (12–17 min): ONE short practice question. Guide the student through it — don't give the answer.\n"
+            f"  • Phase 4 — Confidence Close (17–{duration_minutes} min): Quick recap. Confidence-boosting summary. Warm, encouraging close."
         )
-    else:
+    elif duration_minutes <= 45:  # Core Learning — 40 min
         return (
-            f"FULL {duration_minutes}-MINUTE LESSON PLAN:\n"
-            f"  • Phase 1 — Warm-Up          (0–5 min):   Greet the student. Check prior knowledge with 1-2 questions to calibrate your teaching level.\n"
-            f"  • Phase 2 — Core Teaching    (5–30 min):  Teach all key concepts systematically. One concept per turn, check after each. Build from simple → complex.\n"
-            f"  • Phase 3 — Guided Practice  (30–45 min): Deep practice. Worked examples, past exam questions, step-by-step problem solving together.\n"
-            f"  • Phase 4 — Quiz Time        (45–55 min): Offer a formal quiz (if QUIZ PHASE is active). Focus on topics covered today.\n"
-            f"  • Phase 5 — Session Summary  (55–60 min): Full recap of all concepts. Praise strong performance. Set a clear focus for next session."
+            f"SESSION TYPE: ⭐ CORE LEARNING ({duration_minutes} min) — Recommended default. Best balance of focus and retention.\n"
+            f"LESSON PLAN:\n"
+            f"  • Phase 1 — Prior Knowledge  (0–5 min):   Greet student. Check what they already know with 1-2 questions.\n"
+            f"  • Phase 2 — Core Teaching    (5–25 min):  Step-by-step teaching. One concept per turn. Real-world examples. Check after each.\n"
+            f"  • Phase 3 — Guided Practice  (25–33 min): Work through practice examples together. Guide — don't just give answers.\n"
+            f"  • Phase 4 — Quiz Time        (33–37 min): Offer formal quiz if QUIZ PHASE active. Otherwise quick recall questions.\n"
+            f"  • Phase 5 — Summary          (37–{duration_minutes} min): 2-3 sentence recap. Encourage. Suggest one thing to revisit."
+        )
+    elif duration_minutes <= 65:  # Deep Learning — 60 min
+        return (
+            f"SESSION TYPE: 🚀 DEEP LEARNING ({duration_minutes} min) — For serious progress. GCSE/A-Level focus.\n"
+            f"LESSON PLAN:\n"
+            f"  • Phase 1 — Warm-Up          (0–5 min):   Greet student. Check prior knowledge with 1-2 questions.\n"
+            f"  • Phase 2 — Core Teaching    (5–30 min):  Teach all key concepts systematically. Simple → complex. Check after each.\n"
+            f"  • Phase 3 — Guided Practice  (30–45 min): Deep practice. Worked examples, exam-style questions, step-by-step problem solving.\n"
+            f"  • Phase 4 — Quiz Time        (45–55 min): Offer formal quiz if QUIZ PHASE active. Focus on today's topics.\n"
+            f"  • Phase 5 — Session Summary  (55–{duration_minutes} min): Full recap of all concepts. Praise strong performance. Set focus for next session."
+        )
+    else:  # Intensive — 90 min
+        return (
+            f"SESSION TYPE: 🏆 INTENSIVE LEARNING ({duration_minutes} min) — Deep support for exams and major catch-up.\n"
+            f"LESSON PLAN:\n"
+            f"  • Phase 1 — Activation       (0–5 min):   Energetic greeting. Quick prior knowledge check. Set ambitious session goals.\n"
+            f"  • Phase 2 — Deep Teaching    (5–35 min):  Thorough concept teaching. Multiple examples. Build from simple to complex.\n"
+            f"  • Phase 3 — Guided Practice  (35–55 min): Deep scaffolded practice. Exam questions. Step-by-step problem solving together.\n"
+            f"  • 🧠 BRAIN BREAK             (~55 min):   MANDATORY — tell student: 'Great work! Take 2 minutes to stretch and reset before we continue.'\n"
+            f"  • Phase 4 — Quiz Time        (57–75 min): Formal quiz (QUIZ PHASE active). Comprehensive testing of today's content.\n"
+            f"  • Phase 5 — Deep Review      (75–85 min): Detailed quiz feedback. Tackle weak areas. Exam strategy tips.\n"
+            f"  • Phase 6 — Final Summary    (85–{duration_minutes} min): Complete session recap. Personalised study plan. Strong encouragement."
         )
 
 
@@ -184,30 +207,55 @@ def _get_lesson_phase(elapsed_minutes: int, duration_minutes: int) -> dict:
     """Return the current lesson phase name and AI instruction based on elapsed time."""
     pct = elapsed_minutes / max(duration_minutes, 1) * 100
 
-    if duration_minutes <= 35:
-        # 30-minute lesson structure
-        if pct < 12:   # 0-3.5 min
-            return {"phase": "Introduction (Phase 1/5)", "instruction": "Greet the student warmly, state today's topic and what they'll learn by the end. Keep it to 2-3 sentences. Do NOT start teaching concepts yet."}
-        elif pct < 62:  # 3.5-18.5 min
-            return {"phase": "Core Teaching (Phase 2/5)", "instruction": "Teach the main concepts one at a time. After each concept, ask ONE short interaction question. Build gradually — do not rush."}
-        elif pct < 85:  # 18.5-25 min
-            return {"phase": "Guided Practice (Phase 3/5)", "instruction": "Move into practice. Give the student a worked example or short problem to try. Guide them through it — don't give the answer directly. Encourage effort."}
-        elif pct < 95:  # 25-28.5 min
-            return {"phase": "Quiz Time (Phase 4/5)", "instruction": "Teaching is complete. If QUIZ PHASE is active, offer the formal quiz now. Otherwise do 1-2 quick recall questions to consolidate."}
-        else:            # 28.5-30 min
-            return {"phase": "Session Summary (Phase 5/5)", "instruction": "Give a brief 2-3 sentence summary of exactly what was learned today. Tell the student one specific thing to review before next time. Be warm and encouraging."}
-    else:
-        # 60-minute lesson structure
-        if pct < 9:    # 0-5 min
-            return {"phase": "Warm-Up (Phase 1/5)", "instruction": "Greet the student. Ask 1-2 quick questions to check what they already know about today's topic. Use their answers to decide how basic or advanced to pitch your teaching."}
-        elif pct < 50:  # 5-30 min
-            return {"phase": "Core Teaching (Phase 2/5)", "instruction": "Teach all main concepts one at a time, from simple to complex. Use clear explanations and real-world examples. After each concept, ask ONE interaction question to confirm understanding before moving on."}
-        elif pct < 75:  # 30-45 min
-            return {"phase": "Guided Practice (Phase 3/5)", "instruction": "Move into deeper practice now. Give worked examples, guide problem-solving, or work through past exam questions together. Scaffold carefully — prompt thinking, don't give answers directly."}
-        elif pct < 92:  # 45-55 min
-            return {"phase": "Quiz Time (Phase 4/5)", "instruction": "The teaching phase is complete. If QUIZ PHASE is active, offer the formal quiz now to test everything covered today. Otherwise do targeted recall questions on the weakest areas."}
-        else:            # 55-60 min
-            return {"phase": "Session Summary (Phase 5/5)", "instruction": "Summarise all key concepts covered today in 3-4 sentences. Highlight what the student did particularly well. Suggest one specific topic to review or practise before the next session."}
+    if duration_minutes <= 25:  # Quick Boost 20 min
+        if pct < 10:
+            return {"phase": "Hook & Goal (Phase 1/4)", "instruction": "Quick energetic greeting. State the ONE concept you'll cover today in one sentence. Do NOT start teaching yet."}
+        elif pct < 60:
+            return {"phase": "Core Teaching (Phase 2/4)", "instruction": "Teach ONE key concept clearly and concisely. Give ONE example. After explaining, ask one short interaction question."}
+        elif pct < 85:
+            return {"phase": "Quick Practice (Phase 3/4)", "instruction": "Give the student ONE short practice question. Guide them through it — don't give the answer. Encourage their thinking."}
+        else:
+            return {"phase": "Confidence Close (Phase 4/4)", "instruction": "Quickly recap the one thing learned today. End with a positive confidence-building statement. Keep it warm and brief."}
+
+    elif duration_minutes <= 45:  # Core Learning 40 min
+        if pct < 13:
+            return {"phase": "Prior Knowledge (Phase 1/5)", "instruction": "Greet the student. Ask 1-2 quick questions to check what they already know about today's topic."}
+        elif pct < 63:
+            return {"phase": "Core Teaching (Phase 2/5)", "instruction": "Teach main concepts one at a time. Simple to complex. Use real-world examples. Check understanding after each concept."}
+        elif pct < 83:
+            return {"phase": "Guided Practice (Phase 3/5)", "instruction": "Move into practice. Work through examples together. Guide the student — don't just give answers. Encourage effort."}
+        elif pct < 93:
+            return {"phase": "Quiz Time (Phase 4/5)", "instruction": "Teaching complete. If QUIZ PHASE active, offer formal quiz now. Otherwise do 1-2 quick recall questions."}
+        else:
+            return {"phase": "Session Summary (Phase 5/5)", "instruction": "Give a 2-3 sentence summary of what was learned. Suggest one thing to review before next time. Be warm and encouraging."}
+
+    elif duration_minutes <= 65:  # Deep Learning 60 min
+        if pct < 9:
+            return {"phase": "Warm-Up (Phase 1/5)", "instruction": "Greet the student. Ask 1-2 quick questions to check what they already know about today's topic."}
+        elif pct < 50:
+            return {"phase": "Core Teaching (Phase 2/5)", "instruction": "Teach all main concepts one at a time. Simple to complex. Real-world examples. Check understanding after each concept."}
+        elif pct < 75:
+            return {"phase": "Guided Practice (Phase 3/5)", "instruction": "Move into deeper practice. Worked examples, past exam questions, step-by-step problem solving together."}
+        elif pct < 92:
+            return {"phase": "Quiz Time (Phase 4/5)", "instruction": "Teaching complete. If QUIZ PHASE active, offer formal quiz now. Otherwise do targeted recall questions on weakest areas."}
+        else:
+            return {"phase": "Session Summary (Phase 5/5)", "instruction": "Summarise all key concepts in 3-4 sentences. Highlight what the student did well. Suggest one specific topic to review."}
+
+    else:  # Intensive 90 min
+        if pct < 6:
+            return {"phase": "Activation (Phase 1/6)", "instruction": "Energetic greeting. Quick prior knowledge check. Set ambitious session goals — this is an intensive session."}
+        elif pct < 39:
+            return {"phase": "Deep Teaching (Phase 2/6)", "instruction": "Thorough concept teaching. Multiple examples. Build from simple to complex. Check after each concept."}
+        elif pct < 62:
+            return {"phase": "Guided Practice (Phase 3/6)", "instruction": "Deep scaffolded practice. Exam questions. Step-by-step problem solving together. Push the student gently."}
+        elif pct < 64:
+            return {"phase": "🧠 Brain Break (Phase 4/6)", "instruction": "BRAIN BREAK NOW — say: 'You've been working really hard! Take 2 minutes to stretch, get some water, and reset. Just let me know when you're ready for the second half!' Wait for their response before continuing."}
+        elif pct < 83:
+            return {"phase": "Quiz Time (Phase 5/6)", "instruction": "Second half of the intensive session. If QUIZ PHASE active, offer formal comprehensive quiz now. Test everything covered today."}
+        elif pct < 95:
+            return {"phase": "Deep Review (Phase 6a/6)", "instruction": "Detailed review of quiz results. Address weak areas with targeted explanations. Provide exam strategy tips specific to this topic."}
+        else:
+            return {"phase": "Final Summary (Phase 6b/6)", "instruction": "Complete recap of the entire session. Give personalised feedback on their performance today. Suggest a specific study plan for next time. Strong, genuine encouragement."}
 
 
 async def build_session_system_prompt(
@@ -258,25 +306,46 @@ async def build_session_system_prompt(
 
     # Map session type to specific AI behaviour instructions
     SESSION_TYPE_INSTRUCTIONS = {
+        # Primary session modes (new)
+        "Learn from Scratch": (
+            "LEARN FROM SCRATCH MODE: This is the student's FIRST encounter with this topic. "
+            "Start from zero assumptions. Build understanding from the ground up with clear analogies. "
+            "Go step-by-step — confirm understanding before each new concept. "
+            "For Maths: use the I do → We do → You do framework throughout. "
+            "For English: introduce topic/text first, then key ideas, then guided reading/writing. "
+            "For Science: hook question first → visual concept explanation → real-world example → challenge question."
+        ),
         "Homework Help": (
             "HOMEWORK HELP MODE: The student needs help with specific homework. "
-            "Ask what exact question or problem they are stuck on. Walk them through it step-by-step. "
-            "Don't just give the answer — guide them to understand the method."
+            "First ask: 'Which specific question or problem are you stuck on?' "
+            "Walk them through it step-by-step — don't just give the answer. Guide them to understand the method. "
+            "Then practice a similar question together to build confidence. "
+            "End with: 'Right, let's check that answer — are you happy with it?'"
+        ),
+        "Catch Up": (
+            "CATCH UP MODE: The student missed or didn't fully understand previous material. "
+            "Ask: 'Which topic or lesson do you need to catch up on?' "
+            "Give a clear, focused explanation of the missed content using simple language. "
+            "Use worked examples to rebuild their understanding quickly. "
+            "Finish with a quick check: 'Does that make sense now? Ready to move forward?'"
         ),
         "Revision": (
-            "REVISION MODE: The student is revisiting previously learned material. "
+            "REVISION MODE: The student is revisiting previously learned material, likely for an upcoming exam. "
             "Start by asking what they already remember about the topic — use their answer to gauge depth. "
-            "Reinforce key points, correct misconceptions, and fill gaps."
+            "Reinforce key points, correct misconceptions, fill gaps. "
+            "Use exam-style questions after each concept. Reference common exam mistakes for this topic. "
+            "End with a revision summary: 'The top 3 things to remember about this topic are...'"
         ),
-        "Exam Prep": (
-            "EXAM PREP MODE: Treat this like a focused exam practice session. "
-            "After explaining each concept, ask an exam-style question. Use precise, exam-board appropriate language. "
-            "Reference common mistakes students make in exams for this topic."
-        ),
+        # Backward compatibility with old session types
         "Topic Introduction": (
             "TOPIC INTRODUCTION MODE: This is the student's FIRST encounter with this topic. "
             "Start from zero assumptions. Build understanding from the ground up with clear analogies. "
             "Go extra slowly — confirm understanding before each next concept."
+        ),
+        "Exam Prep": (
+            "EXAM PREP MODE: Treat this like a focused exam practice session. "
+            "After explaining each concept, ask an exam-style question. Use precise exam-board appropriate language. "
+            "Reference common mistakes students make in exams for this topic."
         ),
         "General Tutoring": (
             "GENERAL TUTORING MODE: Cover the topic comprehensively at the student's pace. "
@@ -368,13 +437,19 @@ async def build_session_system_prompt(
         )
     session_quiz_str = "\n".join(session_quiz_lines) if session_quiz_lines else "  No quizzes completed in this session yet."
 
-    # Quiz timing gate — adjusted per session duration
-    if duration_minutes <= 35:
-        QUIZ_UNLOCK_AFTER_MINUTES = 20
+    # Quiz timing gate — adjusted per session duration (4 tiers)
+    if duration_minutes <= 25:      # Quick Boost 20 min
+        QUIZ_UNLOCK_AFTER_MINUTES = 13
+        QUIZ_UNLOCK_REMAINING_MINUTES = 5
+    elif duration_minutes <= 45:    # Core Learning 40 min
+        QUIZ_UNLOCK_AFTER_MINUTES = 28
         QUIZ_UNLOCK_REMAINING_MINUTES = 8
-    else:
+    elif duration_minutes <= 65:    # Deep Learning 60 min
         QUIZ_UNLOCK_AFTER_MINUTES = 40
         QUIZ_UNLOCK_REMAINING_MINUTES = 18
+    else:                           # Intensive 90 min
+        QUIZ_UNLOCK_AFTER_MINUTES = 57
+        QUIZ_UNLOCK_REMAINING_MINUTES = 20
 
     quiz_phase = (
         elapsed_minutes >= QUIZ_UNLOCK_AFTER_MINUTES
@@ -453,6 +528,32 @@ The following are real excerpts from an expert {subject} tutor. Study how they e
             logger.info(f"Session prompt: injected {len(style_examples)} training style examples")
     except Exception as e:
         logger.warning(f"Training style injection failed (non-fatal): {e}")
+
+    # Subject-specific teaching rules from curriculum document
+    _subj = (subject or "").lower()
+    if "math" in _subj or "maths" in _subj:
+        subject_rules = (
+            "MATHS TUTOR: ✅ Teach step-by-step ✅ Show worked examples always ✅ Scaffold difficulty (easy→hard) "
+            "✅ Use visual/spatial methods ✅ Never skip steps. Framework: I do → We do → You do. "
+            "Always show the working — never just give a final answer."
+        )
+    elif "english" in _subj:
+        subject_rules = (
+            "ENGLISH TUTOR: ✅ Ask reflective questions ✅ Encourage discussion and critical thinking "
+            "✅ Support vocabulary in context ✅ Guide writing structure ✅ Adapt reading difficulty to student level. "
+            "Avoid robotic explanations — be conversational and encouraging of the student's own ideas."
+        )
+    elif "science" in _subj or "biology" in _subj or "chemistry" in _subj or "physics" in _subj:
+        subject_rules = (
+            "SCIENCE TUTOR: ✅ Visualise concepts clearly ✅ Use real-world examples and applications "
+            "✅ Explain cause and effect relationships ✅ Challenge misconceptions gently "
+            "✅ Link theory to everyday life. Start with the 'why' before the 'how'."
+        )
+    else:
+        subject_rules = (
+            "✅ Build concepts logically ✅ Use real-world examples ✅ Check understanding regularly "
+            "✅ Adapt to the student's pace and level."
+        )
 
     prompt = f"""You are a live AI tutor conducting a real-time tutoring session on SmartAI Tutor.
 
@@ -554,6 +655,9 @@ SLIDE TRIGGER RULE — FOLLOW EXACTLY:
 
 SESSION-TYPE BEHAVIOUR:
 {session_type_instruction}
+
+SUBJECT-SPECIFIC TEACHING RULES:
+{subject_rules}
 
 {training_style_section}
 {start_instruction}

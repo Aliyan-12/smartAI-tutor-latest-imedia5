@@ -31,11 +31,13 @@ class LearningPreferencesResponse(BaseModel):
     interests: Optional[List[str]] = None
     preferred_subjects: Optional[List[str]] = None
     year_group: Optional[str] = None
+    key_stage: Optional[str] = None
 
 
 class ProfileUpdate(BaseModel):
     name: Optional[str] = None
     year_group: Optional[str] = None
+    key_stage: Optional[str] = None
 
 
 class ProfileResponse(BaseModel):
@@ -45,6 +47,7 @@ class ProfileResponse(BaseModel):
     name: str
     email: str
     year_group: Optional[str] = None
+    key_stage: Optional[str] = None
     xp_total: int = 0
     xp_level: int = 1
     current_streak: int = 0

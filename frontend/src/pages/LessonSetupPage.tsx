@@ -8,13 +8,29 @@ import type { StudentProfile, MyAssignment } from "../types";
 
 // ── Goal → session type mapping ─────────────────────────────────────────────
 
-type GoalId = "learn" | "practice" | "test";
+type GoalId = "learn_scratch" | "homework" | "catch_up" | "revision";
 
 function goalToSessionType(goal: GoalId): string {
-  if (goal === "learn") return "Topic Introduction";
-  if (goal === "practice") return "General Tutoring";
-  return "Exam Prep";
+  if (goal === "learn_scratch") return "Learn from Scratch";
+  if (goal === "homework") return "Homework Help";
+  if (goal === "catch_up") return "Catch Up";
+  return "Revision";
 }
+
+function getAvailableDurations(studentKeyStage: string): number[] {
+  if (!studentKeyStage || studentKeyStage === "KS1" || studentKeyStage === "KS2") {
+    return [20, 40];
+  }
+  if (studentKeyStage === "KS3") return [20, 40, 60];
+  return [20, 40, 60, 90]; // GCSE, A-Level, Degree
+}
+
+const SESSION_TYPE_CONFIG: Record<number, { emoji: string; label: string; sublabel: string; desc: string; recommended?: boolean }> = {
+  20: { emoji: "⚡", label: "Quick Boost",   sublabel: "20 mins", desc: "Short focused support — homework, one concept, revision burst" },
+  40: { emoji: "⭐", label: "Core Learning", sublabel: "40 mins", desc: "Best balance of focus, teaching and retention", recommended: true },
+  60: { emoji: "🚀", label: "Deep Learning", sublabel: "1 hour",  desc: "Serious progress — GCSE/A-Level topics, major practice" },
+  90: { emoji: "🏆", label: "Intensive",     sublabel: "90 mins", desc: "Exams and major catch-up — includes a brain break" },
+};
 
 // ── Lesson preview steps (static, goal-aware) ───────────────────────────────
 
@@ -48,8 +64,9 @@ export default function LessonSetupPage() {
   );
   const [keyStage, setKeyStage] = useState("");
   const [selectedTopics, setSelectedTopics] = useState<string[]>([]);
-  const [goal, setGoal] = useState<GoalId>(locationState.goal ?? "learn");
-  const [duration, setDuration] = useState<30 | 60>(30);
+  const [goal, setGoal] = useState<GoalId>(locationState.goal ?? "learn_scratch");
+  const [duration, setDuration] = useState<number>(40);
+  const [studentKeyStage, setStudentKeyStage] = useState<string>("");
   const [requirePasscode, setRequirePasscode] = useState(false);
   const [bookingPasscode, setBookingPasscode] = useState("");
   const [extraDetails, setExtraDetails] = useState("");
@@ -101,7 +118,16 @@ export default function LessonSetupPage() {
   useEffect(() => {
     gamificationApi
       .getProfile()
-      .then((data) => setProfile(data as StudentProfile))
+      .then((data) => {
+        const p = data as StudentProfile;
+        setProfile(p);
+        if (p.key_stage) {
+          setStudentKeyStage(p.key_stage);
+          // Set default duration based on key stage
+          const available = getAvailableDurations(p.key_stage);
+          setDuration(available.includes(40) ? 40 : available[0]);
+        }
+      })
       .catch(() => setProfile(null));
   }, []);
 
@@ -184,9 +210,10 @@ export default function LessonSetupPage() {
 
   // ── Goal card options ────────────────────────────────────────────────────
   const goalOptions: { id: GoalId; emoji: string; label: string; desc: string }[] = [
-    { id: "learn",    emoji: "🧠", label: "Learn from scratch",  desc: "I'm new to this topic"   },
-    { id: "practice", emoji: "🎯", label: "Practice & improve",  desc: "Strengthen my skills"    },
-    { id: "test",     emoji: "📋", label: "Prepare for test",    desc: "Exam or quiz prep"        },
+    { id: "learn_scratch", emoji: "🧠", label: "Learn from Scratch", desc: "I'm new to this topic"        },
+    { id: "homework",      emoji: "📝", label: "Homework Help",       desc: "Help with my assignment"      },
+    { id: "catch_up",      emoji: "⏩", label: "Catch Up",            desc: "Missed or unclear lessons"    },
+    { id: "revision",      emoji: "📋", label: "Revision",            desc: "Exam or quiz preparation"     },
   ];
 
   return (
@@ -424,29 +451,58 @@ export default function LessonSetupPage() {
                 <span style={s.stepNum}>3</span>
                 <span style={s.stepTitle}>How long would you like your session to be?</span>
               </div>
-              <div style={s.durationRow}>
-                <button
-                  type="button"
-                  style={{
-                    ...s.durationPill,
-                    ...(duration === 30 ? s.durationPillActive : {}),
-                  }}
-                  onClick={() => setDuration(30)}
-                >
-                  30 Minutes
-                  <span style={s.recommendedBadge}>Recommended</span>
-                </button>
-                <button
-                  type="button"
-                  style={{
-                    ...s.durationPill,
-                    ...(duration === 60 ? s.durationPillActive : {}),
-                  }}
-                  onClick={() => setDuration(60)}
-                >
-                  1 Hour
-                </button>
+              <style>{`
+                .lsp-dur-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 16px; }
+                @media (max-width: 500px) { .lsp-dur-grid { grid-template-columns: 1fr; } }
+                .lsp-dur-card {
+                  border: 1.5px solid #e2e8f0; border-radius: 12px; padding: 14px 16px;
+                  cursor: pointer; background: #fff; text-align: left;
+                  transition: border-color 0.15s, box-shadow 0.15s;
+                  position: relative; display: flex; flex-direction: column; gap: 4px;
+                  font-family: inherit;
+                }
+                .lsp-dur-card:hover:not(:disabled) { border-color: #1a73e8; box-shadow: 0 2px 8px rgba(26,115,232,0.12); }
+                .lsp-dur-card.active { border-color: #1a73e8; background: #eff6ff; box-shadow: 0 2px 8px rgba(26,115,232,0.15); }
+                .lsp-dur-card:disabled { opacity: 0.4; cursor: not-allowed; }
+                .lsp-dur-emoji { font-size: 22px; }
+                .lsp-dur-label { font-size: 14px; font-weight: 800; color: #0f172a; }
+                .lsp-dur-sub { font-size: 12px; font-weight: 600; color: #1a73e8; }
+                .lsp-dur-desc { font-size: 11px; color: #64748b; line-height: 1.4; }
+                .lsp-dur-badge {
+                  position: absolute; top: 10px; right: 10px;
+                  background: #10b981; color: #fff; font-size: 9px; font-weight: 800;
+                  padding: 2px 7px; border-radius: 999px; text-transform: uppercase; letter-spacing: 0.5px;
+                }
+                .lsp-ks-note { font-size: 12px; color: #64748b; margin-top: 2px; margin-bottom: 16px; padding: 8px 12px; background: #f8fafc; border-radius: 8px; border: 1px solid #e2e8f0; }
+              `}</style>
+              <div className="lsp-dur-grid">
+                {([20, 40, 60, 90] as number[]).map((mins) => {
+                  const cfg = SESSION_TYPE_CONFIG[mins];
+                  const available = getAvailableDurations(studentKeyStage);
+                  const isAvailable = available.includes(mins);
+                  return (
+                    <button
+                      key={mins}
+                      type="button"
+                      className={`lsp-dur-card${duration === mins ? " active" : ""}`}
+                      disabled={!isAvailable}
+                      onClick={() => isAvailable && setDuration(mins)}
+                      title={!isAvailable ? `Available for GCSE/A-Level and above` : undefined}
+                    >
+                      {cfg.recommended && <span className="lsp-dur-badge">Recommended</span>}
+                      <span className="lsp-dur-emoji">{cfg.emoji}</span>
+                      <span className="lsp-dur-label">{cfg.label}</span>
+                      <span className="lsp-dur-sub">{cfg.sublabel}</span>
+                      <span className="lsp-dur-desc">{cfg.desc}</span>
+                    </button>
+                  );
+                })}
               </div>
+              {!studentKeyStage && (
+                <p className="lsp-ks-note">
+                  Set your Key Stage in <strong>Settings &rarr; Profile</strong> to unlock all session lengths available to your level.
+                </p>
+              )}
 
               {/* Add more details accordion */}
               <button

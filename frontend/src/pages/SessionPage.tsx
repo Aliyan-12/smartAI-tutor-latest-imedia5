@@ -53,6 +53,13 @@ function playWrongSound() {
   } catch {}
 }
 
+const PHASES_20 = [
+  { label: "Intro",    end: 2  },
+  { label: "Teaching", end: 13 },
+  { label: "Practice", end: 16 },
+  { label: "Quiz",     end: 18 },
+  { label: "Summary",  end: 20 },
+];
 const PHASES_30 = [
   { label: "Intro",    end: 3  },
   { label: "Teaching", end: 18 },
@@ -67,6 +74,35 @@ const PHASES_60 = [
   { label: "Quiz",     end: 55 },
   { label: "Summary",  end: 60 },
 ];
+const PHASES_90 = [
+  { label: "Warm-Up",     end: 5  },
+  { label: "Teaching",    end: 40 },
+  { label: "Brain Break", end: 50 },
+  { label: "Practice",    end: 65 },
+  { label: "Quiz",        end: 80 },
+  { label: "Summary",     end: 90 },
+];
+
+function getPhasesForDuration(mins: number) {
+  if (mins <= 22) return PHASES_20;
+  if (mins <= 45) return PHASES_30;
+  if (mins <= 70) return PHASES_60;
+  return PHASES_90;
+}
+
+const DURATION_CONFIG: Record<number, { emoji: string; name: string; sublabel: string }> = {
+  20: { emoji: "⚡", name: "Quick Boost",   sublabel: "20 mins" },
+  40: { emoji: "⭐", name: "Core Learning", sublabel: "40 mins" },
+  60: { emoji: "🚀", name: "Deep Learning", sublabel: "1 hour"  },
+  90: { emoji: "🏆", name: "Intensive",     sublabel: "90 mins" },
+};
+
+const SUBJECT_EMOJIS: Record<string, string> = {
+  Maths: "🔢", Mathematics: "🔢", Math: "🔢",
+  Science: "🔬", Physics: "⚛️", Chemistry: "⚗️", Biology: "🧬",
+  English: "📖", History: "📜", Geography: "🌍",
+  "Computer Science": "💻", French: "🇫🇷", Spanish: "🇪🇸",
+};
 
 function getCurrentPhaseIndex(elapsedMin: number, phases: typeof PHASES_30) {
   for (let i = 0; i < phases.length; i++) {
@@ -136,6 +172,14 @@ export default function SessionPage() {
   const [voiceQuizTopic, setVoiceQuizTopic] = useState<string | null>(null);
 
   const [sessionKeyStage, setSessionKeyStage] = useState("");
+  const [previewAppt, setPreviewAppt] = useState<{
+    subject: string;
+    title: string;
+    key_stage: string;
+    duration_minutes: number;
+    description: string;
+    passcode: string | null;
+  } | null>(null);
   const [currentSlide, setCurrentSlide] = useState<SlideData | null>(null);
   const [slideHistory, setSlideHistory] = useState<SlideData[]>([]);
   const [slideIndex, setSlideIndex] = useState(0);
@@ -143,7 +187,7 @@ export default function SessionPage() {
 
   const apptId = appointmentId ? parseInt(appointmentId) : 0;
 
-  const sessionPhases = durationMinutes <= 30 ? PHASES_30 : PHASES_60;
+  const sessionPhases = getPhasesForDuration(durationMinutes);
   const phaseElapsedSeconds = durationMinutes * 60 - timeRemaining;
   const phaseElapsedMin = Math.floor(phaseElapsedSeconds / 60);
   const currentPhaseIdx = getCurrentPhaseIndex(phaseElapsedMin, sessionPhases);
@@ -211,16 +255,21 @@ export default function SessionPage() {
     gamificationApi.getProfile().then((p: any) => setXp(p?.xp_total ?? 0)).catch(() => {});
   }, []);
 
-  // On mount: check if appointment has a passcode. If not, skip passcode screen.
+  // On mount: always show pre-lesson summary screen with appointment details.
   useEffect(() => {
     if (!appointmentId) return;
     appointmentsApi.get(parseInt(appointmentId))
       .then((appt: any) => {
-        if (!appt.passcode) {
-          handleJoin("");
-        } else {
-          setSessionState("passcode");
-        }
+        setPreviewAppt({
+          subject: appt.subject || "",
+          title: appt.title || "",
+          key_stage: appt.key_stage || "",
+          duration_minutes: appt.duration_minutes || 60,
+          description: appt.description || "",
+          passcode: appt.passcode || null,
+        });
+        setDurationMinutes(appt.duration_minutes || 60);
+        setSessionState("passcode");
       })
       .catch(() => setSessionState("passcode"));
   }, [appointmentId]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -684,48 +733,148 @@ export default function SessionPage() {
   }
 
   if (sessionState === "passcode") {
+    const dur = previewAppt?.duration_minutes ?? 60;
+    const durKey = ([20, 40, 60, 90] as const).reduce((acc, v) => (Math.abs(dur - v) < Math.abs(dur - acc) ? v : acc), 60 as 20 | 40 | 60 | 90);
+    const durCfg = DURATION_CONFIG[durKey];
+    const phases = getPhasesForDuration(dur);
+    const desc = previewAppt?.description ?? "";
+    const topicsMatch = desc.match(/Topics:\s*([^\n]+)/);
+    const sessionTypeMatch = desc.match(/Session type:\s*([^\n]+)/);
+    const previewTopics = topicsMatch?.[1] ?? null;
+    const previewSessionType = sessionTypeMatch?.[1] ?? null;
+    const subjKey = Object.keys(SUBJECT_EMOJIS).find((k) => k.toLowerCase() === (previewAppt?.subject ?? "").toLowerCase()) ?? "";
+    const subjEmoji = SUBJECT_EMOJIS[subjKey] ?? "📚";
+
     return (
-      <div className="auth-page">
-        <div className="auth-card">
-          <div className="logo-section">
-            <img src="/Original-Logo.png" alt="SmartAI Tutor" className="auth-logo" />
-            <h1>Join Session</h1>
-            <p>Enter the passcode sent to your parent or teacher</p>
-          </div>
-          <div className="form-group">
-            <label>Session Passcode</label>
-            <input
-              type="text"
-              value={passcode}
-              onChange={(e) => setPasscode(e.target.value.toUpperCase())}
-              placeholder="e.g. ABC123"
-              onKeyDown={(e) => { if (e.key === "Enter") handleJoin(); }}
-              style={{
-                textAlign: "center",
-                fontSize: 22,
-                letterSpacing: 6,
-                fontWeight: 700,
-                fontFamily: "monospace",
-              }}
-            />
-          </div>
-          {joinError && <p className="error-text">{joinError}</p>}
+      <div style={{ minHeight: "100vh", background: "var(--bg-primary)", display: "flex", flexDirection: "column" }}>
+        <style>{`
+          @media (max-width: 600px) {
+            .prelession-header-row { flex-direction: column !important; gap: 14px !important; }
+            .prelession-dur-badge { align-self: flex-start !important; }
+            .prelession-phases { overflow-x: auto; padding-bottom: 6px; }
+          }
+        `}</style>
+
+        {/* Top nav */}
+        <div style={{ background: "var(--accent-blue, #1a73e8)", padding: "12px 20px", display: "flex", alignItems: "center", gap: 14, flexShrink: 0 }}>
           <button
-            className="auth-submit"
-            onClick={() => handleJoin()}
-            disabled={!passcode.trim()}
+            onClick={() => navigate("/student/dashboard")}
+            style={{ background: "rgba(255,255,255,0.18)", border: "1px solid rgba(255,255,255,0.35)", borderRadius: 8, color: "white", padding: "5px 12px", fontSize: 12, fontWeight: 700, cursor: "pointer", display: "flex", alignItems: "center", gap: 6 }}
           >
-            <Lock size={16} style={{ marginRight: 6, verticalAlign: "middle" }} />
-            Join Session
+            ← Dashboard
           </button>
-          <p className="auth-switch" style={{ marginTop: 16 }}>
-            <a
-              href="#"
-              onClick={(e) => { e.preventDefault(); navigate("/student/dashboard"); }}
-            >
-              Back to Dashboard
-            </a>
-          </p>
+          <span style={{ color: "rgba(255,255,255,0.9)", fontSize: 14, fontWeight: 600 }}>Lesson Preview</span>
+        </div>
+
+        {/* Centered content */}
+        <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", padding: "32px 16px" }}>
+          <div style={{ width: "100%", maxWidth: 620 }}>
+
+            {/* Hero session card */}
+            <div style={{ background: "linear-gradient(135deg, #1a73e8 0%, #6366f1 100%)", borderRadius: 20, padding: "26px 24px 22px", color: "white", marginBottom: 14, boxShadow: "0 8px 32px rgba(26,115,232,0.28)" }}>
+              <div className="prelession-header-row" style={{ display: "flex", alignItems: "flex-start", gap: 16 }}>
+                <div style={{ fontSize: 44, lineHeight: 1, flexShrink: 0 }}>{subjEmoji}</div>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  {previewAppt?.key_stage && (
+                    <div style={{ fontSize: 11, fontWeight: 600, opacity: 0.8, marginBottom: 4, textTransform: "uppercase", letterSpacing: "0.5px" }}>{previewAppt.key_stage}</div>
+                  )}
+                  <div style={{ fontSize: 22, fontWeight: 800, lineHeight: 1.15, marginBottom: 5 }}>{previewAppt?.subject || "Session"}</div>
+                  {previewAppt?.title && (
+                    <div style={{ fontSize: 14, opacity: 0.9, fontWeight: 500 }}>{previewAppt.title}</div>
+                  )}
+                </div>
+                {/* Duration badge */}
+                <div className="prelession-dur-badge" style={{ background: "rgba(255,255,255,0.22)", borderRadius: 14, padding: "10px 16px", textAlign: "center", backdropFilter: "blur(10px)", flexShrink: 0, minWidth: 88 }}>
+                  <div style={{ fontSize: 22 }}>{durCfg?.emoji ?? "⭐"}</div>
+                  <div style={{ fontSize: 11, fontWeight: 800, marginTop: 3 }}>{durCfg?.name ?? `${dur} min`}</div>
+                  <div style={{ fontSize: 10, opacity: 0.85 }}>{durCfg?.sublabel ?? `${dur} mins`}</div>
+                </div>
+              </div>
+
+              {/* Meta chips */}
+              {(previewSessionType || previewTopics) && (
+                <div style={{ display: "flex", flexWrap: "wrap", gap: 7, marginTop: 16 }}>
+                  {previewSessionType && (
+                    <span style={{ background: "rgba(255,255,255,0.22)", borderRadius: 99, padding: "4px 12px", fontSize: 12, fontWeight: 700, backdropFilter: "blur(10px)" }}>
+                      {previewSessionType}
+                    </span>
+                  )}
+                  {previewTopics && (
+                    <span style={{ background: "rgba(255,255,255,0.18)", borderRadius: 99, padding: "4px 12px", fontSize: 12, maxWidth: 300, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                      📚 {previewTopics}
+                    </span>
+                  )}
+                </div>
+              )}
+            </div>
+
+            {/* Lesson phase timeline */}
+            <div style={{ background: "var(--bg-secondary)", border: "1px solid var(--border)", borderRadius: 14, padding: "18px 20px", marginBottom: 14 }}>
+              <div style={{ fontSize: 11, fontWeight: 700, textTransform: "uppercase" as const, letterSpacing: "0.6px", color: "var(--text-muted)", marginBottom: 16 }}>Lesson Plan</div>
+              <div className="prelession-phases" style={{ display: "flex", alignItems: "flex-start" }}>
+                {phases.map((phase, i) => (
+                  <div key={i} style={{ display: "flex", alignItems: "center", flex: i < phases.length - 1 ? 1 : "0 0 auto" }}>
+                    <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 5, minWidth: 52 }}>
+                      <div style={{ width: 30, height: 30, borderRadius: "50%", background: "var(--accent-blue, #1a73e8)", color: "white", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 12, fontWeight: 800, boxShadow: "0 2px 8px rgba(26,115,232,0.3)", flexShrink: 0 }}>
+                        {i + 1}
+                      </div>
+                      <span style={{ fontSize: 10, fontWeight: 700, color: "var(--text-secondary)", whiteSpace: "nowrap", textAlign: "center" }}>{phase.label}</span>
+                      <span style={{ fontSize: 9, color: "var(--text-muted)" }}>{phase.end}m</span>
+                    </div>
+                    {i < phases.length - 1 && (
+                      <div style={{ flex: 1, height: 2, background: "var(--border)", margin: "0 2px", marginBottom: 28, minWidth: 12 }} />
+                    )}
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {/* Join / Passcode card */}
+            <div style={{ background: "var(--bg-secondary)", border: "1px solid var(--border)", borderRadius: 14, padding: "22px 22px 20px" }}>
+              {previewAppt?.passcode ? (
+                <>
+                  <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
+                    <Lock size={16} style={{ color: "var(--accent-blue, #1a73e8)", flexShrink: 0 }} />
+                    <span style={{ fontSize: 14, fontWeight: 700, color: "var(--text-primary)" }}>Passcode Required</span>
+                  </div>
+                  <p style={{ fontSize: 13, color: "var(--text-muted)", margin: "0 0 16px", lineHeight: 1.5 }}>Enter the passcode from your teacher or parent to join this session.</p>
+                  <input
+                    type="text"
+                    value={passcode}
+                    onChange={(e) => setPasscode(e.target.value.toUpperCase())}
+                    placeholder="e.g. ABC123"
+                    onKeyDown={(e) => { if (e.key === "Enter" && passcode.trim()) handleJoin(); }}
+                    style={{ width: "100%", padding: "12px 16px", textAlign: "center", fontSize: 22, letterSpacing: 7, fontWeight: 700, fontFamily: "monospace", background: "var(--bg-primary)", border: "2px solid var(--border)", borderRadius: 10, color: "var(--text-primary)", boxSizing: "border-box", marginBottom: 12 }}
+                  />
+                  {joinError && (
+                    <p style={{ fontSize: 12, color: "#ef4444", textAlign: "center", margin: "0 0 12px", fontWeight: 600 }}>{joinError}</p>
+                  )}
+                  <button
+                    onClick={() => handleJoin()}
+                    disabled={!passcode.trim()}
+                    style={{ width: "100%", padding: "13px 0", background: !passcode.trim() ? "var(--bg-tertiary)" : "var(--accent-blue, #1a73e8)", color: !passcode.trim() ? "var(--text-muted)" : "white", border: "none", borderRadius: 10, fontSize: 15, fontWeight: 800, cursor: !passcode.trim() ? "not-allowed" : "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: 8, transition: "background 0.2s", fontFamily: "inherit" }}
+                  >
+                    🚀 Join Session
+                  </button>
+                </>
+              ) : (
+                <>
+                  <div style={{ fontSize: 14, fontWeight: 700, color: "var(--text-primary)", marginBottom: 6 }}>Ready to start?</div>
+                  <p style={{ fontSize: 13, color: "var(--text-muted)", margin: "0 0 18px", lineHeight: 1.5 }}>Your AI tutor is prepared and waiting. Click below to begin your lesson.</p>
+                  {joinError && (
+                    <p style={{ fontSize: 12, color: "#ef4444", textAlign: "center", margin: "0 0 12px", fontWeight: 600 }}>{joinError}</p>
+                  )}
+                  <button
+                    onClick={() => handleJoin("")}
+                    style={{ width: "100%", padding: "13px 0", background: "var(--accent-blue, #1a73e8)", color: "white", border: "none", borderRadius: 10, fontSize: 15, fontWeight: 800, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: 8, fontFamily: "inherit", boxShadow: "0 4px 16px rgba(26,115,232,0.3)" }}
+                  >
+                    🚀 Join Session
+                  </button>
+                </>
+              )}
+            </div>
+
+          </div>
         </div>
       </div>
     );

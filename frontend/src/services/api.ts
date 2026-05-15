@@ -602,7 +602,7 @@ export const settingsApi = {
     });
     return handleResponse(res);
   },
-  async updateProfile(data: { name?: string; year_group?: string }) {
+  async updateProfile(data: { name?: string; year_group?: string; key_stage?: string }) {
     const res = await fetch(`${API_BASE}/settings/profile`, {
       method: "PATCH",
       headers: authHeaders(),
