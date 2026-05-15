@@ -24,6 +24,12 @@ const SESSION_TYPE_DURATIONS = [
   { value: "90", emoji: "🏆", name: "Intensive",     sublabel: "90 mins",  desc: "Exams & major catch-up — includes a brain break" },
 ];
 
+function getAvailableDurations(keyStage: string): number[] {
+  if (!keyStage || keyStage === "KS1" || keyStage === "KS2") return [20, 40];
+  if (keyStage === "KS3") return [20, 40, 60];
+  return [20, 40, 60, 90]; // GCSE, A-Level, Degree
+}
+
 export default function BookSessionPage() {
   const { user } = useAuth();
   const navigate = useNavigate();
@@ -34,6 +40,7 @@ export default function BookSessionPage() {
   const [teachers, setTeachers] = useState<UserType[]>([]);
   const [availability, setAvailability] = useState<{ used: number; limit: number } | null>(null);
   const [loadingAvailability, setLoadingAvailability] = useState(false);
+  const [studentKeyStage, setStudentKeyStage] = useState("");
 
   const [kbSubjects, setKbSubjects] = useState<string[]>([]);
   const [kbStages, setKbStages] = useState<string[]>([]);
@@ -120,14 +127,30 @@ export default function BookSessionPage() {
       const data = (await appointmentsApi.checkAvailability(studentId)) as {
         used: number;
         limit: number;
+        slots_used?: number;
+        slots_remaining?: number;
+        max_per_week?: number;
+        key_stage?: string | null;
       };
-      if (data && typeof data.used === "number" && typeof data.limit === "number") {
-        setAvailability(data);
+      // Support both old field names (used/limit) and new ones (slots_used/max_per_week)
+      const used = data.used ?? data.slots_used ?? 0;
+      const limit = data.limit ?? data.max_per_week ?? 0;
+      if (typeof used === "number" && typeof limit === "number") {
+        setAvailability({ used, limit });
       } else {
         setAvailability(null);
       }
+      const ks = data.key_stage ?? "";
+      setStudentKeyStage(ks);
+      // If the currently selected duration is not available for this student's key stage, reset to 40
+      const available = getAvailableDurations(ks);
+      setForm((f) => ({
+        ...f,
+        duration_minutes: available.includes(parseInt(f.duration_minutes)) ? f.duration_minutes : "40",
+      }));
     } catch {
       setAvailability(null);
+      setStudentKeyStage("");
     } finally {
       setLoadingAvailability(false);
     }
@@ -136,7 +159,7 @@ export default function BookSessionPage() {
   const handleStudentChange = (id: string) => {
     setForm((f) => ({ ...f, student_id: id }));
     if (id) checkAvailability(parseInt(id, 10));
-    else setAvailability(null);
+    else { setAvailability(null); setStudentKeyStage(""); }
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -488,33 +511,56 @@ export default function BookSessionPage() {
         <div>
           <label style={labelStyle}>Duration</label>
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginTop: 8 }}>
-            {SESSION_TYPE_DURATIONS.map((d) => (
-              <button
-                key={d.value}
-                type="button"
-                onClick={() => setForm((f) => ({ ...f, duration_minutes: d.value }))}
-                style={{
-                  border: `1.5px solid ${form.duration_minutes === d.value ? "#1a73e8" : "#e2e8f0"}`,
-                  borderRadius: 10,
-                  padding: "12px 14px",
-                  background: form.duration_minutes === d.value ? "#eff6ff" : "#fff",
-                  cursor: "pointer",
-                  textAlign: "left",
-                  position: "relative",
-                }}
-              >
-                {d.recommended && (
-                  <span style={{ position: "absolute", top: 8, right: 8, fontSize: 9, fontWeight: 800, background: "#10b981", color: "#fff", padding: "2px 7px", borderRadius: 999, textTransform: "uppercase" }}>
-                    Recommended
-                  </span>
-                )}
-                <div style={{ fontSize: 20 }}>{d.emoji}</div>
-                <div style={{ fontSize: 13, fontWeight: 800, color: "#0f172a", marginTop: 4 }}>{d.name}</div>
-                <div style={{ fontSize: 12, fontWeight: 600, color: "#1a73e8" }}>{d.sublabel}</div>
-                <div style={{ fontSize: 11, color: "#64748b", marginTop: 2, lineHeight: 1.4 }}>{d.desc}</div>
-              </button>
-            ))}
+            {SESSION_TYPE_DURATIONS.map((d) => {
+              const available = getAvailableDurations(studentKeyStage);
+              const isAvailable = !studentKeyStage || available.includes(parseInt(d.value));
+              const isSelected = form.duration_minutes === d.value;
+              return (
+                <button
+                  key={d.value}
+                  type="button"
+                  disabled={!isAvailable}
+                  onClick={() => isAvailable && setForm((f) => ({ ...f, duration_minutes: d.value }))}
+                  title={!isAvailable ? `Not available for ${studentKeyStage}` : undefined}
+                  style={{
+                    border: `1.5px solid ${isSelected ? "#1a73e8" : "#e2e8f0"}`,
+                    borderRadius: 10,
+                    padding: "12px 14px",
+                    background: !isAvailable ? "#f8fafc" : isSelected ? "#eff6ff" : "#fff",
+                    cursor: isAvailable ? "pointer" : "not-allowed",
+                    textAlign: "left",
+                    position: "relative",
+                    opacity: isAvailable ? 1 : 0.45,
+                  }}
+                >
+                  {d.recommended && isAvailable && (
+                    <span style={{ position: "absolute", top: 8, right: 8, fontSize: 9, fontWeight: 800, background: "#10b981", color: "#fff", padding: "2px 7px", borderRadius: 999, textTransform: "uppercase" }}>
+                      Recommended
+                    </span>
+                  )}
+                  {!isAvailable && (
+                    <span style={{ position: "absolute", top: 8, right: 8, fontSize: 9, fontWeight: 700, background: "#e2e8f0", color: "#64748b", padding: "2px 7px", borderRadius: 999, textTransform: "uppercase" }}>
+                      Locked
+                    </span>
+                  )}
+                  <div style={{ fontSize: 20, filter: isAvailable ? "none" : "grayscale(1)" }}>{d.emoji}</div>
+                  <div style={{ fontSize: 13, fontWeight: 800, color: isAvailable ? "#0f172a" : "#94a3b8", marginTop: 4 }}>{d.name}</div>
+                  <div style={{ fontSize: 12, fontWeight: 600, color: isAvailable ? "#1a73e8" : "#94a3b8" }}>{d.sublabel}</div>
+                  <div style={{ fontSize: 11, color: "#64748b", marginTop: 2, lineHeight: 1.4 }}>{d.desc}</div>
+                </button>
+              );
+            })}
           </div>
+          {studentKeyStage && getAvailableDurations(studentKeyStage).length < 4 && (
+            <p style={{ fontSize: 12, color: "#64748b", marginTop: 8 }}>
+              Showing sessions available for <strong>{studentKeyStage}</strong>. Locked options require a higher key stage.
+            </p>
+          )}
+          {form.student_id && !studentKeyStage && (
+            <p style={{ fontSize: 12, color: "#f59e0b", marginTop: 8 }}>
+              Student has no key stage set — all durations are available. They can set it in Settings → Profile.
+            </p>
+          )}
         </div>
       </div>
 

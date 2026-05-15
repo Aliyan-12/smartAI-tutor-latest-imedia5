@@ -8,6 +8,7 @@ from sqlalchemy.orm import selectinload
 
 from app.models.appointment import Appointment
 from app.models.user import User
+from app.models.student_profile import StudentProfile
 from app.core.config import settings
 
 logger = logging.getLogger(__name__)
@@ -296,8 +297,17 @@ async def check_availability(db: AsyncSession, student_id: int) -> dict:
     now = datetime.now(timezone.utc)
     used = await count_weekly_appointments(db, student_id, now)
     max_pw = settings.max_appointments_per_week
+
+    # Fetch student's key stage from their profile
+    profile_result = await db.execute(
+        select(StudentProfile).where(StudentProfile.student_id == student_id)
+    )
+    profile = profile_result.scalar_one_or_none()
+    key_stage = profile.key_stage if profile else None
+
     return {
         "slots_used": used,
         "slots_remaining": max(0, max_pw - used),
         "max_per_week": max_pw,
+        "key_stage": key_stage,
     }

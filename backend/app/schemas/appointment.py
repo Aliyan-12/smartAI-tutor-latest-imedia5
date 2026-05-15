@@ -55,3 +55,4 @@ class AvailabilityResponse(BaseModel):
     slots_used: int
     slots_remaining: int
     max_per_week: int
+    key_stage: Optional[str] = None
