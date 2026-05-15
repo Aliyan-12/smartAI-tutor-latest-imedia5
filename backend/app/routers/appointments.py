@@ -133,6 +133,17 @@ async def check_availability(
     return await appointment_service.check_availability(db, student_id)
 
 
+@router.get("/{appointment_id}/briefing")
+async def get_session_briefing(
+    appointment_id: int,
+    current_user: User = Depends(require_any_authenticated),
+    db: AsyncSession = Depends(get_db),
+):
+    """Return (and cache) an AI-generated session briefing for the pre-lesson page."""
+    from app.services.session_agent_service import generate_session_briefing
+    return await generate_session_briefing(db, appointment_id)
+
+
 @router.get("/{appointment_id}", response_model=AppointmentResponse)
 async def get_appointment(
     appointment_id: int,

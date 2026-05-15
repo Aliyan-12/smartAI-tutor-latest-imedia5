@@ -37,6 +37,7 @@ class Appointment(Base):
     total_paused_seconds: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
     meeting_link: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    ai_briefing: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
     )

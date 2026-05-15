@@ -159,6 +159,15 @@ export default function SessionPage() {
 
   const [isAiTyping, setIsAiTyping] = useState(false);
 
+  const [sessionBriefing, setSessionBriefing] = useState<{
+    hook?: string;
+    what_you_will_learn?: string[];
+    key_ideas?: Array<{ title: string; summary: string }>;
+    key_terms?: string[];
+    session_tip?: string;
+  } | null>(null);
+  const [briefingLoading, setBriefingLoading] = useState(false);
+
   const {
     messages, streaming, streamContent, sendMessage, stopStreaming,
     initSessionChat, activeSessionId, quizOffer, clearQuizOffer, sendQuizFeedback,
@@ -273,6 +282,15 @@ export default function SessionPage() {
       })
       .catch(() => setSessionState("passcode"));
   }, [appointmentId]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    if (sessionState !== "passcode" || !appointmentId) return;
+    setBriefingLoading(true);
+    appointmentsApi.getBriefing(parseInt(appointmentId))
+      .then((data: any) => setSessionBriefing(data))
+      .catch(() => setSessionBriefing(null))
+      .finally(() => setBriefingLoading(false));
+  }, [sessionState, appointmentId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     if (!quizOffer) return;
@@ -753,127 +771,212 @@ export default function SessionPage() {
             .prelession-dur-badge { align-self: flex-start !important; }
             .prelession-phases { overflow-x: auto; padding-bottom: 6px; }
           }
+          @keyframes briefingSkeleton {
+            0%, 100% { opacity: 0.4; }
+            50% { opacity: 0.8; }
+          }
         `}</style>
 
         {/* Top nav */}
-        <div style={{ background: "var(--accent-blue, #1a73e8)", padding: "12px 20px", display: "flex", alignItems: "center", gap: 14, flexShrink: 0 }}>
+        <div style={{ background: "linear-gradient(90deg, #1a73e8, #6366f1)", padding: "12px 28px", display: "flex", alignItems: "center", gap: 14, flexShrink: 0, boxShadow: "0 2px 12px rgba(26,115,232,0.25)" }}>
           <button
             onClick={() => navigate("/student/dashboard")}
-            style={{ background: "rgba(255,255,255,0.18)", border: "1px solid rgba(255,255,255,0.35)", borderRadius: 8, color: "white", padding: "5px 12px", fontSize: 12, fontWeight: 700, cursor: "pointer", display: "flex", alignItems: "center", gap: 6 }}
+            style={{ background: "rgba(255,255,255,0.18)", border: "1px solid rgba(255,255,255,0.35)", borderRadius: 8, color: "white", padding: "5px 14px", fontSize: 12, fontWeight: 700, cursor: "pointer", display: "flex", alignItems: "center", gap: 6, fontFamily: "inherit" }}
           >
-            ← Dashboard
+            ← Back
           </button>
-          <span style={{ color: "rgba(255,255,255,0.9)", fontSize: 14, fontWeight: 600 }}>Lesson Preview</span>
+          <div style={{ flex: 1, display: "flex", alignItems: "center", gap: 10 }}>
+            <span style={{ fontSize: 18 }}>{subjEmoji}</span>
+            <span style={{ color: "white", fontSize: 15, fontWeight: 700 }}>{previewAppt?.subject || "Session"}</span>
+            {previewAppt?.key_stage && <span style={{ background: "rgba(255,255,255,0.22)", borderRadius: 99, padding: "2px 10px", fontSize: 11, fontWeight: 700, color: "white" }}>{previewAppt.key_stage}</span>}
+          </div>
+          <div style={{ display: "flex", alignItems: "center", gap: 6, background: "rgba(255,255,255,0.18)", borderRadius: 99, padding: "4px 12px" }}>
+            <span>{durCfg?.emoji ?? "⭐"}</span>
+            <span style={{ fontSize: 12, fontWeight: 700, color: "white" }}>{durCfg?.sublabel ?? `${dur} min`}</span>
+          </div>
         </div>
 
-        {/* Centered content */}
-        <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", padding: "32px 16px" }}>
-          <div style={{ width: "100%", maxWidth: 620 }}>
+        {/* Main 2-column layout */}
+        <div style={{ flex: 1, overflowY: "auto", background: "linear-gradient(160deg, #f0f4ff 0%, #f8f9ff 50%, #fdf0ff 100%)" }}>
+          <div className="prelession-grid" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 24, padding: "28px 32px", maxWidth: 1200, margin: "0 auto" }}>
 
-            {/* Hero session card */}
-            <div style={{ background: "linear-gradient(135deg, #1a73e8 0%, #6366f1 100%)", borderRadius: 20, padding: "26px 24px 22px", color: "white", marginBottom: 14, boxShadow: "0 8px 32px rgba(26,115,232,0.28)" }}>
-              <div className="prelession-header-row" style={{ display: "flex", alignItems: "flex-start", gap: 16 }}>
-                <div style={{ fontSize: 44, lineHeight: 1, flexShrink: 0 }}>{subjEmoji}</div>
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  {previewAppt?.key_stage && (
-                    <div style={{ fontSize: 11, fontWeight: 600, opacity: 0.8, marginBottom: 4, textTransform: "uppercase", letterSpacing: "0.5px" }}>{previewAppt.key_stage}</div>
-                  )}
-                  <div style={{ fontSize: 22, fontWeight: 800, lineHeight: 1.15, marginBottom: 5 }}>{previewAppt?.subject || "Session"}</div>
-                  {previewAppt?.title && (
-                    <div style={{ fontSize: 14, opacity: 0.9, fontWeight: 500 }}>{previewAppt.title}</div>
-                  )}
-                </div>
-                {/* Duration badge */}
-                <div className="prelession-dur-badge" style={{ background: "rgba(255,255,255,0.22)", borderRadius: 14, padding: "10px 16px", textAlign: "center", backdropFilter: "blur(10px)", flexShrink: 0, minWidth: 88 }}>
-                  <div style={{ fontSize: 22 }}>{durCfg?.emoji ?? "⭐"}</div>
-                  <div style={{ fontSize: 11, fontWeight: 800, marginTop: 3 }}>{durCfg?.name ?? `${dur} min`}</div>
-                  <div style={{ fontSize: 10, opacity: 0.85 }}>{durCfg?.sublabel ?? `${dur} mins`}</div>
+            {/* ── LEFT COLUMN ── */}
+            <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+
+              {/* Hero card */}
+              <div style={{ background: "linear-gradient(135deg, #1a73e8 0%, #6366f1 100%)", borderRadius: 20, padding: "26px 24px", color: "white", boxShadow: "0 8px 32px rgba(26,115,232,0.28)", position: "relative", overflow: "hidden" }}>
+                {/* Decorative circles */}
+                <div style={{ position: "absolute", top: -20, right: -20, width: 120, height: 120, borderRadius: "50%", background: "rgba(255,255,255,0.07)" }} />
+                <div style={{ position: "absolute", bottom: -30, left: -10, width: 90, height: 90, borderRadius: "50%", background: "rgba(255,255,255,0.05)" }} />
+                <div style={{ position: "relative" }}>
+                  <div style={{ fontSize: 46, marginBottom: 10, lineHeight: 1 }}>{subjEmoji}</div>
+                  {previewAppt?.key_stage && <div style={{ fontSize: 11, fontWeight: 700, opacity: 0.8, marginBottom: 4, textTransform: "uppercase", letterSpacing: "0.6px" }}>{previewAppt.key_stage}</div>}
+                  <div style={{ fontSize: 24, fontWeight: 800, lineHeight: 1.15, marginBottom: 6 }}>{previewAppt?.subject || "Session"}</div>
+                  {previewAppt?.title && <div style={{ fontSize: 13, opacity: 0.88, fontWeight: 500, lineHeight: 1.45 }}>{previewAppt.title}</div>}
+                  <div style={{ display: "flex", flexWrap: "wrap", gap: 7, marginTop: 14 }}>
+                    {previewSessionType && <span style={{ background: "rgba(255,255,255,0.22)", borderRadius: 99, padding: "4px 12px", fontSize: 12, fontWeight: 700 }}>{previewSessionType}</span>}
+                    {previewTopics && <span style={{ background: "rgba(255,255,255,0.16)", borderRadius: 99, padding: "4px 12px", fontSize: 11, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: 220 }}>📚 {previewTopics}</span>}
+                  </div>
                 </div>
               </div>
 
-              {/* Meta chips */}
-              {(previewSessionType || previewTopics) && (
-                <div style={{ display: "flex", flexWrap: "wrap", gap: 7, marginTop: 16 }}>
-                  {previewSessionType && (
-                    <span style={{ background: "rgba(255,255,255,0.22)", borderRadius: 99, padding: "4px 12px", fontSize: 12, fontWeight: 700, backdropFilter: "blur(10px)" }}>
-                      {previewSessionType}
-                    </span>
-                  )}
-                  {previewTopics && (
-                    <span style={{ background: "rgba(255,255,255,0.18)", borderRadius: 99, padding: "4px 12px", fontSize: 12, maxWidth: 300, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                      📚 {previewTopics}
-                    </span>
-                  )}
-                </div>
-              )}
-            </div>
-
-            {/* Lesson phase timeline */}
-            <div style={{ background: "var(--bg-secondary)", border: "1px solid var(--border)", borderRadius: 14, padding: "18px 20px", marginBottom: 14 }}>
-              <div style={{ fontSize: 11, fontWeight: 700, textTransform: "uppercase" as const, letterSpacing: "0.6px", color: "var(--text-muted)", marginBottom: 16 }}>Lesson Plan</div>
-              <div className="prelession-phases" style={{ display: "flex", alignItems: "flex-start" }}>
-                {phases.map((phase, i) => (
-                  <div key={i} style={{ display: "flex", alignItems: "center", flex: i < phases.length - 1 ? 1 : "0 0 auto" }}>
-                    <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 5, minWidth: 52 }}>
-                      <div style={{ width: 30, height: 30, borderRadius: "50%", background: "var(--accent-blue, #1a73e8)", color: "white", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 12, fontWeight: 800, boxShadow: "0 2px 8px rgba(26,115,232,0.3)", flexShrink: 0 }}>
-                        {i + 1}
+              {/* Lesson phase timeline */}
+              <div style={{ background: "white", borderRadius: 16, padding: "20px 22px", boxShadow: "0 2px 12px rgba(0,0,0,0.06)" }}>
+                <div style={{ fontSize: 11, fontWeight: 700, textTransform: "uppercase" as const, letterSpacing: "0.7px", color: "#94a3b8", marginBottom: 18 }}>Today's Lesson Plan</div>
+                <div className="prelession-phases" style={{ display: "flex", alignItems: "flex-start" }}>
+                  {phases.map((phase, i) => {
+                    const phaseColors = ["#6366f1","#1a73e8","#10b981","#f59e0b","#ef4444","#8b5cf6"];
+                    const col = phaseColors[i % phaseColors.length];
+                    return (
+                      <div key={i} style={{ display: "flex", alignItems: "center", flex: i < phases.length - 1 ? 1 : "0 0 auto" }}>
+                        <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 5, minWidth: 50 }}>
+                          <div style={{ width: 32, height: 32, borderRadius: "50%", background: col, color: "white", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 12, fontWeight: 800, boxShadow: `0 3px 10px ${col}55`, flexShrink: 0 }}>
+                            {i + 1}
+                          </div>
+                          <span style={{ fontSize: 10, fontWeight: 700, color: "#334155", whiteSpace: "nowrap", textAlign: "center" }}>{phase.label}</span>
+                          <span style={{ fontSize: 9, color: "#94a3b8", fontWeight: 600 }}>{phase.end}m</span>
+                        </div>
+                        {i < phases.length - 1 && <div style={{ flex: 1, height: 2, background: "linear-gradient(90deg, " + col + "44, " + (phaseColors[(i+1) % phaseColors.length]) + "44)", margin: "0 2px", marginBottom: 28, minWidth: 10, borderRadius: 2 }} />}
                       </div>
-                      <span style={{ fontSize: 10, fontWeight: 700, color: "var(--text-secondary)", whiteSpace: "nowrap", textAlign: "center" }}>{phase.label}</span>
-                      <span style={{ fontSize: 9, color: "var(--text-muted)" }}>{phase.end}m</span>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* Join / Passcode card */}
+              <div style={{ background: "white", borderRadius: 16, padding: "22px", boxShadow: "0 2px 12px rgba(0,0,0,0.06)" }}>
+                {previewAppt?.passcode ? (
+                  <>
+                    <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
+                      <Lock size={16} style={{ color: "#1a73e8" }} />
+                      <span style={{ fontSize: 14, fontWeight: 700, color: "#0f172a" }}>Passcode Required</span>
                     </div>
-                    {i < phases.length - 1 && (
-                      <div style={{ flex: 1, height: 2, background: "var(--border)", margin: "0 2px", marginBottom: 28, minWidth: 12 }} />
-                    )}
-                  </div>
-                ))}
+                    <p style={{ fontSize: 12, color: "#64748b", margin: "0 0 14px", lineHeight: 1.5 }}>Enter the passcode from your teacher or parent.</p>
+                    <input
+                      type="text"
+                      value={passcode}
+                      onChange={(e) => setPasscode(e.target.value.toUpperCase())}
+                      placeholder="e.g. ABC123"
+                      onKeyDown={(e) => { if (e.key === "Enter" && passcode.trim()) handleJoin(); }}
+                      style={{ width: "100%", padding: "11px 16px", textAlign: "center", fontSize: 22, letterSpacing: 7, fontWeight: 700, fontFamily: "monospace", background: "#f8fafc", border: "2px solid #e2e8f0", borderRadius: 10, color: "#0f172a", boxSizing: "border-box", marginBottom: 10 }}
+                    />
+                    {joinError && <p style={{ fontSize: 12, color: "#ef4444", textAlign: "center", margin: "0 0 10px", fontWeight: 600 }}>{joinError}</p>}
+                    <button onClick={() => handleJoin()} disabled={!passcode.trim()} style={{ width: "100%", padding: "13px 0", background: !passcode.trim() ? "#e2e8f0" : "linear-gradient(90deg,#1a73e8,#6366f1)", color: !passcode.trim() ? "#94a3b8" : "white", border: "none", borderRadius: 10, fontSize: 15, fontWeight: 800, cursor: !passcode.trim() ? "not-allowed" : "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: 8, fontFamily: "inherit", boxShadow: !passcode.trim() ? "none" : "0 4px 14px rgba(26,115,232,0.35)" }}>
+                      🚀 Join Session
+                    </button>
+                  </>
+                ) : (
+                  <>
+                    <div style={{ fontSize: 14, fontWeight: 700, color: "#0f172a", marginBottom: 5 }}>Ready to start?</div>
+                    <p style={{ fontSize: 12, color: "#64748b", margin: "0 0 16px", lineHeight: 1.5 }}>Your AI tutor is prepared. Click below to begin.</p>
+                    {joinError && <p style={{ fontSize: 12, color: "#ef4444", textAlign: "center", margin: "0 0 10px", fontWeight: 600 }}>{joinError}</p>}
+                    <button onClick={() => handleJoin("")} style={{ width: "100%", padding: "13px 0", background: "linear-gradient(90deg,#1a73e8,#6366f1)", color: "white", border: "none", borderRadius: 10, fontSize: 15, fontWeight: 800, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: 8, fontFamily: "inherit", boxShadow: "0 4px 14px rgba(26,115,232,0.35)" }}>
+                      🚀 Join Session
+                    </button>
+                  </>
+                )}
               </div>
             </div>
 
-            {/* Join / Passcode card */}
-            <div style={{ background: "var(--bg-secondary)", border: "1px solid var(--border)", borderRadius: 14, padding: "22px 22px 20px" }}>
-              {previewAppt?.passcode ? (
+            {/* ── RIGHT COLUMN — AI Briefing ── */}
+            <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+
+              {/* Header */}
+              <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                <div style={{ width: 36, height: 36, borderRadius: "50%", background: "linear-gradient(135deg,#6366f1,#1a73e8)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 18, boxShadow: "0 3px 10px rgba(99,102,241,0.3)" }}>🤖</div>
+                <div>
+                  <div style={{ fontSize: 14, fontWeight: 800, color: "#0f172a" }}>AI Session Briefing</div>
+                  <div style={{ fontSize: 11, color: "#64748b" }}>{briefingLoading ? "Preparing your session..." : "Your personalised session preview"}</div>
+                </div>
+              </div>
+
+              {briefingLoading ? (
+                /* Skeleton cards */
                 <>
-                  <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
-                    <Lock size={16} style={{ color: "var(--accent-blue, #1a73e8)", flexShrink: 0 }} />
-                    <span style={{ fontSize: 14, fontWeight: 700, color: "var(--text-primary)" }}>Passcode Required</span>
-                  </div>
-                  <p style={{ fontSize: 13, color: "var(--text-muted)", margin: "0 0 16px", lineHeight: 1.5 }}>Enter the passcode from your teacher or parent to join this session.</p>
-                  <input
-                    type="text"
-                    value={passcode}
-                    onChange={(e) => setPasscode(e.target.value.toUpperCase())}
-                    placeholder="e.g. ABC123"
-                    onKeyDown={(e) => { if (e.key === "Enter" && passcode.trim()) handleJoin(); }}
-                    style={{ width: "100%", padding: "12px 16px", textAlign: "center", fontSize: 22, letterSpacing: 7, fontWeight: 700, fontFamily: "monospace", background: "var(--bg-primary)", border: "2px solid var(--border)", borderRadius: 10, color: "var(--text-primary)", boxSizing: "border-box", marginBottom: 12 }}
-                  />
-                  {joinError && (
-                    <p style={{ fontSize: 12, color: "#ef4444", textAlign: "center", margin: "0 0 12px", fontWeight: 600 }}>{joinError}</p>
+                  {[1,2,3,4].map((_, i) => (
+                    <div key={i} style={{ background: "white", borderRadius: 14, padding: "18px 20px", boxShadow: "0 2px 8px rgba(0,0,0,0.05)" }}>
+                      <div style={{ height: 10, borderRadius: 6, background: "#e2e8f0", width: "40%", marginBottom: 12, animation: "briefingSkeleton 1.4s ease-in-out infinite" }} />
+                      {[90,75,60].slice(0,i===3?1:3).map((w,j) => (
+                        <div key={j} style={{ height: 10, borderRadius: 6, background: "#f1f5f9", width: `${w}%`, marginBottom: 8, animation: "briefingSkeleton 1.4s ease-in-out infinite" }} />
+                      ))}
+                    </div>
+                  ))}
+                </>
+              ) : sessionBriefing ? (
+                <>
+                  {/* 1. Hook */}
+                  {sessionBriefing.hook && (
+                    <div style={{ background: "linear-gradient(135deg,#eff6ff,#f0f4ff)", borderRadius: 14, padding: "18px 20px", border: "1px solid #dbeafe" }}>
+                      <div style={{ fontSize: 11, fontWeight: 800, textTransform: "uppercase" as const, letterSpacing: "0.6px", color: "#3b82f6", marginBottom: 8 }}>🎯 Today's Hook</div>
+                      <p style={{ fontSize: 14, fontWeight: 600, color: "#1e3a5f", lineHeight: 1.6, margin: 0 }}>{sessionBriefing.hook}</p>
+                    </div>
                   )}
-                  <button
-                    onClick={() => handleJoin()}
-                    disabled={!passcode.trim()}
-                    style={{ width: "100%", padding: "13px 0", background: !passcode.trim() ? "var(--bg-tertiary)" : "var(--accent-blue, #1a73e8)", color: !passcode.trim() ? "var(--text-muted)" : "white", border: "none", borderRadius: 10, fontSize: 15, fontWeight: 800, cursor: !passcode.trim() ? "not-allowed" : "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: 8, transition: "background 0.2s", fontFamily: "inherit" }}
-                  >
-                    🚀 Join Session
-                  </button>
+
+                  {/* 2. What You'll Learn */}
+                  {sessionBriefing.what_you_will_learn && sessionBriefing.what_you_will_learn.length > 0 && (
+                    <div style={{ background: "white", borderRadius: 14, padding: "18px 20px", boxShadow: "0 2px 8px rgba(0,0,0,0.05)" }}>
+                      <div style={{ fontSize: 11, fontWeight: 800, textTransform: "uppercase" as const, letterSpacing: "0.6px", color: "#10b981", marginBottom: 12 }}>✅ What You'll Learn</div>
+                      <div style={{ display: "flex", flexDirection: "column" as const, gap: 8 }}>
+                        {sessionBriefing.what_you_will_learn.map((obj, i) => (
+                          <div key={i} style={{ display: "flex", alignItems: "flex-start", gap: 10 }}>
+                            <div style={{ width: 22, height: 22, borderRadius: "50%", background: "#d1fae5", color: "#059669", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 11, fontWeight: 800, flexShrink: 0, marginTop: 1 }}>{i + 1}</div>
+                            <span style={{ fontSize: 13, color: "#1e293b", lineHeight: 1.5, fontWeight: 500 }}>{obj}</span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* 3. Key Ideas */}
+                  {sessionBriefing.key_ideas && sessionBriefing.key_ideas.length > 0 && (
+                    <div style={{ background: "white", borderRadius: 14, padding: "18px 20px", boxShadow: "0 2px 8px rgba(0,0,0,0.05)" }}>
+                      <div style={{ fontSize: 11, fontWeight: 800, textTransform: "uppercase" as const, letterSpacing: "0.6px", color: "#8b5cf6", marginBottom: 12 }}>💡 Key Ideas</div>
+                      <div style={{ display: "flex", flexDirection: "column" as const, gap: 10 }}>
+                        {sessionBriefing.key_ideas.map((idea, i) => (
+                          <div key={i} style={{ display: "flex", gap: 12, alignItems: "flex-start" }}>
+                            <div style={{ width: 8, height: 8, borderRadius: "50%", background: "#8b5cf6", flexShrink: 0, marginTop: 5 }} />
+                            <div>
+                              <span style={{ fontSize: 13, fontWeight: 700, color: "#0f172a" }}>{idea.title}</span>
+                              <span style={{ fontSize: 12, color: "#64748b", marginLeft: 6 }}>— {idea.summary}</span>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* 4. Key Terms */}
+                  {sessionBriefing.key_terms && sessionBriefing.key_terms.length > 0 && (
+                    <div style={{ background: "white", borderRadius: 14, padding: "18px 20px", boxShadow: "0 2px 8px rgba(0,0,0,0.05)" }}>
+                      <div style={{ fontSize: 11, fontWeight: 800, textTransform: "uppercase" as const, letterSpacing: "0.6px", color: "#f59e0b", marginBottom: 12 }}>📖 Key Vocabulary</div>
+                      <div style={{ display: "flex", flexWrap: "wrap" as const, gap: 7 }}>
+                        {sessionBriefing.key_terms.map((term, i) => (
+                          <span key={i} style={{ background: "linear-gradient(135deg,#fffbeb,#fef3c7)", border: "1px solid #fde68a", borderRadius: 99, padding: "4px 12px", fontSize: 12, fontWeight: 700, color: "#92400e" }}>
+                            {term}
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* 5. Session Tip */}
+                  {sessionBriefing.session_tip && (
+                    <div style={{ background: "linear-gradient(135deg,#fff7ed,#fef3c7)", border: "1px solid #fed7aa", borderRadius: 14, padding: "16px 18px", display: "flex", gap: 12, alignItems: "flex-start" }}>
+                      <span style={{ fontSize: 22, flexShrink: 0 }}>💡</span>
+                      <div>
+                        <div style={{ fontSize: 11, fontWeight: 800, color: "#c2410c", textTransform: "uppercase" as const, letterSpacing: "0.5px", marginBottom: 4 }}>Session Tip</div>
+                        <p style={{ fontSize: 13, color: "#7c2d12", margin: 0, lineHeight: 1.55, fontWeight: 500 }}>{sessionBriefing.session_tip}</p>
+                      </div>
+                    </div>
+                  )}
                 </>
               ) : (
-                <>
-                  <div style={{ fontSize: 14, fontWeight: 700, color: "var(--text-primary)", marginBottom: 6 }}>Ready to start?</div>
-                  <p style={{ fontSize: 13, color: "var(--text-muted)", margin: "0 0 18px", lineHeight: 1.5 }}>Your AI tutor is prepared and waiting. Click below to begin your lesson.</p>
-                  {joinError && (
-                    <p style={{ fontSize: 12, color: "#ef4444", textAlign: "center", margin: "0 0 12px", fontWeight: 600 }}>{joinError}</p>
-                  )}
-                  <button
-                    onClick={() => handleJoin("")}
-                    style={{ width: "100%", padding: "13px 0", background: "var(--accent-blue, #1a73e8)", color: "white", border: "none", borderRadius: 10, fontSize: 15, fontWeight: 800, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: 8, fontFamily: "inherit", boxShadow: "0 4px 16px rgba(26,115,232,0.3)" }}
-                  >
-                    🚀 Join Session
-                  </button>
-                </>
+                <div style={{ background: "white", borderRadius: 14, padding: "32px 20px", textAlign: "center", boxShadow: "0 2px 8px rgba(0,0,0,0.05)" }}>
+                  <div style={{ fontSize: 32, marginBottom: 8 }}>🤖</div>
+                  <p style={{ fontSize: 13, color: "#94a3b8", margin: 0 }}>AI briefing will appear here shortly.</p>
+                </div>
               )}
             </div>
-
           </div>
         </div>
       </div>

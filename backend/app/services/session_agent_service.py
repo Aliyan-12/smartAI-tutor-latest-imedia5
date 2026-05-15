@@ -99,6 +99,87 @@ async def _count_appointment_assessments(
     return result.scalar_one() or 0
 
 
+async def generate_session_briefing(db: AsyncSession, appointment_id: int) -> dict:
+    """Generate and cache an AI session briefing for the pre-lesson page."""
+    import json as _json
+
+    result = await db.execute(
+        select(Appointment).where(Appointment.id == appointment_id)
+    )
+    appointment = result.scalar_one_or_none()
+    if not appointment:
+        return {}
+
+    # Return cached briefing if already generated
+    if appointment.ai_briefing:
+        try:
+            return _json.loads(appointment.ai_briefing)
+        except Exception:
+            pass
+
+    subject = appointment.subject or "General"
+    key_stage = appointment.key_stage or ""
+    title = appointment.title or subject
+    description = appointment.description or ""
+    duration = appointment.duration_minutes or 60
+
+    # Parse topics from description
+    topics_match = _re.search(r"Topics:\s*([^\n]+)", description)
+    topics_str = topics_match.group(1) if topics_match else ""
+    session_type_match = _re.search(r"Session type:\s*([^\n]+)", description)
+    session_type = session_type_match.group(1) if session_type_match else "General Tutoring"
+
+    prompt = f"""You are preparing a session briefing for a UK curriculum AI tutoring session.
+
+Session details:
+- Subject: {subject}
+- Key Stage: {key_stage}
+- Session Title: {title}
+- Session Type: {session_type}
+- Topics: {topics_str or subject}
+- Duration: {duration} minutes
+
+Generate a JSON briefing with exactly these fields:
+{{
+  "overview": "2-sentence friendly summary of what this session will cover and why it matters",
+  "objectives": ["learning objective 1", "learning objective 2", "learning objective 3"],
+  "key_terms": ["term1", "term2", "term3", "term4", "term5"],
+  "tip": "One practical study tip relevant to this topic/session type"
+}}
+
+Keep it concise, age-appropriate for {key_stage}, and curriculum-aligned. Return ONLY valid JSON."""
+
+    try:
+        raw = gemini_service.generate_response(
+            system_prompt="You are a UK curriculum expert. Always respond with valid JSON only.",
+            messages=[{"role": "user", "content": prompt}],
+            model=None,
+            stream=False,
+        )
+        # Strip markdown fences if present
+        raw = raw.strip()
+        if raw.startswith("```"):
+            raw = _re.sub(r"^```[a-z]*\n?", "", raw)
+            raw = _re.sub(r"\n?```$", "", raw)
+        briefing = _json.loads(raw.strip())
+    except Exception:
+        briefing = {
+            "overview": f"In this {duration}-minute session, you'll explore {topics_str or subject} at {key_stage} level.",
+            "objectives": [f"Understand core concepts in {subject}", "Build confidence with practice", "Complete session quiz"],
+            "key_terms": [],
+            "tip": "Have a pencil and paper ready for notes and working.",
+        }
+
+    # Cache to DB
+    try:
+        appointment.ai_briefing = _json.dumps(briefing)
+        await db.commit()
+    except Exception:
+        await db.rollback()
+
+    return briefing
+
+
 def _parse_unit_names(description: str) -> list[str]:
     """Extract unit names from 'Topics: X, Y, Z' in appointment description."""
     if not description:
@@ -373,7 +454,17 @@ async def build_session_system_prompt(
         started = appointment.session_started_at
         if started.tzinfo is None:
             started = started.replace(tzinfo=_dt.timezone.utc)
-        elapsed_minutes = max(0, int((now_utc - started).total_seconds() / 60))
+
+        # Subtract all paused time from elapsed to get active learning time
+        total_paused = appointment.total_paused_seconds or 0
+        if appointment.paused_at:
+            paused_at_ts = appointment.paused_at
+            if paused_at_ts.tzinfo is None:
+                paused_at_ts = paused_at_ts.replace(tzinfo=_dt.timezone.utc)
+            total_paused += int((now_utc - paused_at_ts).total_seconds())
+
+        raw_elapsed = (now_utc - started).total_seconds()
+        elapsed_minutes = max(0, int((raw_elapsed - total_paused) / 60))
         remaining_minutes = max(0, duration_minutes - elapsed_minutes)
 
     # Load student profile
@@ -736,3 +827,98 @@ async def generate_session_practice(
     # Reload with questions eager-loaded
     loaded = await assessment_service.get_assessment(db, assessment.id)
     return loaded
+
+
+async def generate_session_briefing(db: AsyncSession, appointment_id: int) -> dict:
+    """Generate and cache a structured AI briefing for the pre-lesson preview page."""
+    import json as _json
+
+    result = await db.execute(
+        select(Appointment).where(Appointment.id == appointment_id)
+    )
+    appointment = result.scalar_one_or_none()
+    if not appointment:
+        return {}
+
+    # Return cached result if already generated
+    if appointment.ai_briefing:
+        try:
+            return _json.loads(appointment.ai_briefing)
+        except Exception:
+            pass
+
+    subject = appointment.subject or "General"
+    key_stage = appointment.key_stage or ""
+    title = appointment.title or subject
+    description = appointment.description or ""
+    duration = appointment.duration_minutes or 60
+
+    topics_match = _re.search(r"Topics?:\s*([^\n]+)", description, _re.IGNORECASE)
+    topics_str = topics_match.group(1).strip() if topics_match else subject
+    type_match = _re.search(r"Session type:\s*([^\n]+)", description, _re.IGNORECASE)
+    session_type = type_match.group(1).strip() if type_match else "General Tutoring"
+
+    prompt = f"""You are a UK curriculum expert preparing a student briefing for an AI tutoring session.
+
+Session details:
+- Subject: {subject} | Key Stage: {key_stage}
+- Title: {title} | Type: {session_type}
+- Topics: {topics_str}
+- Duration: {duration} minutes
+
+Return ONLY valid JSON with exactly these 5 fields:
+{{
+  "hook": "One punchy sentence that grabs the student's curiosity about this topic (no spoilers)",
+  "what_you_will_learn": [
+    "Specific learning outcome 1 (start with a verb: Understand / Explain / Calculate / Analyse)",
+    "Specific learning outcome 2",
+    "Specific learning outcome 3"
+  ],
+  "key_ideas": [
+    {{"title": "Idea name (2-3 words)", "summary": "One sentence explaining this idea simply"}},
+    {{"title": "Idea name (2-3 words)", "summary": "One sentence explaining this idea simply"}},
+    {{"title": "Idea name (2-3 words)", "summary": "One sentence explaining this idea simply"}}
+  ],
+  "key_terms": ["term1", "term2", "term3", "term4", "term5"],
+  "session_tip": "One specific, actionable tip for this exact session type and topic"
+}}
+
+Be age-appropriate for {key_stage}. Return ONLY valid JSON, no markdown."""
+
+    try:
+        raw = gemini_service.generate_response(
+            system_prompt="You are a UK curriculum expert. Respond with valid JSON only.",
+            messages=[{"role": "user", "content": prompt}],
+            model=None,
+            stream=False,
+        )
+        raw = raw.strip()
+        if raw.startswith("```"):
+            raw = _re.sub(r"^```[a-z]*\n?", "", raw)
+            raw = _re.sub(r"\n?```$", "", raw)
+        briefing = _json.loads(raw.strip())
+    except Exception as e:
+        logger.warning(f"Briefing generation failed for appt {appointment_id}: {e}")
+        briefing = {
+            "hook": f"Get ready to dive into {topics_str} — this session is packed with interesting ideas!",
+            "what_you_will_learn": [
+                f"Understand the core concepts of {topics_str}",
+                "Build confidence through guided practice",
+                "Test your knowledge with a session quiz",
+            ],
+            "key_ideas": [
+                {"title": f"{subject} Fundamentals", "summary": f"The key building blocks you need to understand {topics_str}."},
+                {"title": "Real-World Connections", "summary": "How this topic connects to everyday life and exam questions."},
+                {"title": "Exam Skills", "summary": "Techniques to tackle questions about this topic confidently."},
+            ],
+            "key_terms": [],
+            "session_tip": f"Have a notepad ready — jotting down key ideas as you go helps with retention.",
+        }
+
+    try:
+        appointment.ai_briefing = _json.dumps(briefing)
+        await db.commit()
+    except Exception:
+        await db.rollback()
+
+    return briefing

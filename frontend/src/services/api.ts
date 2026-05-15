@@ -793,6 +793,10 @@ export const appointmentsApi = {
     const res = await fetch(`${API_BASE}/appointments/availability?student_id=${studentId}`, { headers: authHeaders() });
     return handleResponse(res);
   },
+  async getBriefing(appointmentId: number) {
+    const res = await fetch(`${API_BASE}/appointments/${appointmentId}/briefing`, { headers: authHeaders() });
+    return handleResponse(res);
+  },
   async joinSession(appointmentId: number, passcode: string) {
     const res = await fetch(`${API_BASE}/appointments/${appointmentId}/join`, {
       method: "POST",

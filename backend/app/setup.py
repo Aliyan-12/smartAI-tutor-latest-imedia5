@@ -91,6 +91,7 @@ async def run_setup(fresh: bool = False):
         "CREATE INDEX IF NOT EXISTS ix_documents_kb_type ON documents(kb_type)",
         # student key stage (KS1/KS2/KS3/GCSE/A-Level/Degree) — determines available session lengths
         "ALTER TABLE student_profiles ADD COLUMN IF NOT EXISTS key_stage VARCHAR(20)",
+        "ALTER TABLE appointments ADD COLUMN IF NOT EXISTS ai_briefing TEXT",
     ]
     async with engine.begin() as conn:
         for sql in _migrations:
