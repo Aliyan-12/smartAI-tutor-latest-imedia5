@@ -1,12 +1,29 @@
-import { useState, useRef, useEffect, type FormEvent } from "react";
+import { useState, useRef, useEffect, type FormEvent, type ReactNode } from "react";
 import { Link } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
 
+const UKFlag = () => (
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 60 30" width="22" height="14" style={{borderRadius:2,flexShrink:0,display:"inline-block"}}>
+    <rect width="60" height="30" fill="#012169"/>
+    <path d="M0 0l60 30m0-30L0 30" stroke="#fff" strokeWidth="9"/>
+    <path d="M0 0l60 30m0-30L0 30" stroke="#C8102E" strokeWidth="5"/>
+    <path d="M30 0v30M0 15h60" stroke="#fff" strokeWidth="11"/>
+    <path d="M30 0v30M0 15h60" stroke="#C8102E" strokeWidth="7"/>
+  </svg>
+);
+
 const ROLE_CARDS = [
-  { icon: "🎓", role: "Student",  desc: "AI-powered lessons aligned to your curriculum" },
-  { icon: "📋", role: "Teacher",  desc: "Upload resources and monitor AI session reports" },
-  { icon: "👨‍👩‍👧", role: "Parent",   desc: "Book sessions and track your child's progress" },
-  { icon: "🛡️", role: "Admin",    desc: "Manage school settings, users and knowledge base" },
+  { icon: "🎓", role: "Student",  desc: "AI-powered lessons aligned to your curriculum",    color: "#1a73e8" },
+  { icon: "📋", role: "Teacher",  desc: "Upload resources and monitor AI session reports",   color: "#f97316" },
+  { icon: "👨‍👩‍👧", role: "Parent",   desc: "Book sessions and track your child's progress",      color: "#10b981" },
+  { icon: "🛡️", role: "Admin",    desc: "Manage school settings, users and knowledge base", color: "#7c3aed" },
+];
+
+const TRUST_BADGES: { icon: ReactNode; title: string; desc: string }[] = [
+  { icon: "🛡️",        title: "Secure & Safe",   desc: "Your data is protected and never shared." },
+  { icon: <UKFlag />,  title: "UK Curriculum",   desc: "Aligned to national standards." },
+  { icon: "🤖",        title: "AI-Powered",      desc: "Smart. Personalised. Always improving." },
+  { icon: "📈",        title: "Better Outcomes", desc: "Track progress and achieve more." },
 ];
 
 export default function LoginPage() {
@@ -15,6 +32,7 @@ export default function LoginPage() {
   const [password, setPassword] = useState("");
   const [error,    setError]    = useState("");
   const [loading,  setLoading]  = useState(false);
+  const [showPw,   setShowPw]   = useState(false);
 
   const containerRef     = useRef<HTMLDivElement>(null);
   const canvasRef        = useRef<HTMLCanvasElement>(null);
@@ -409,7 +427,7 @@ export default function LoginPage() {
               <img src="/images/aitutor 4 schools.png" alt="AI Tutor 4 Schools" />
             </div>
             <div>
-              <h1>AI Tutor 4 Schools</h1>
+              <h1>AI Tutor <span style={{color:"#f97316"}}>4</span> Schools</h1>
               <p>Powered by SmartAI Tutor</p>
             </div>
           </div>
@@ -425,6 +443,7 @@ export default function LoginPage() {
                 Your school's AI-powered learning platform — helping every
                 student reach their full potential, at their own pace.
               </p>
+              <div style={{width:52,height:4,borderRadius:3,background:"linear-gradient(90deg,#f97316,#fb923c)",margin:"10px 0 0"}} />
             </div>
 
             {/* Logo illustration */}
@@ -447,14 +466,28 @@ export default function LoginPage() {
           {/* Role cards */}
           <div className="lp-role-cards">
             {ROLE_CARDS.map((card) => (
-              <div className="lp-role-card" key={card.role}>
-                <span className="lp-role-icon">{card.icon}</span>
-                <div className="lp-role-info">
+              <div className="lp-role-card" key={card.role} style={{display:"flex",alignItems:"flex-start",gap:10,padding:"13px 15px"}}>
+                <div style={{width:34,height:34,borderRadius:9,background:`${card.color}22`,border:`1px solid ${card.color}44`,display:"flex",alignItems:"center",justifyContent:"center",fontSize:16,flexShrink:0}}>
+                  {card.icon}
+                </div>
+                <div className="lp-role-info" style={{flex:1}}>
                   <h4>{card.role}</h4>
                   <p>{card.desc}</p>
                 </div>
+                <span style={{fontSize:14,color:"rgba(255,255,255,0.4)",alignSelf:"center",flexShrink:0}}>›</span>
               </div>
             ))}
+          </div>
+
+          {/* Brand panel bottom footer bar */}
+          <div style={{position:"relative",zIndex:10,display:"flex",alignItems:"center",justifyContent:"space-between",borderTop:"1px solid rgba(255,255,255,0.1)",paddingTop:14,marginTop:8,flexWrap:"wrap",gap:8}}>
+            <div style={{display:"flex",alignItems:"center",gap:7,fontSize:12,color:"rgba(255,255,255,0.5)"}}>
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+              Trusted by schools. Built for students. Backed by AI.
+            </div>
+            <div style={{fontSize:12,color:"rgba(255,255,255,0.5)",display:"flex",alignItems:"center",gap:5}}>
+              Proudly supporting schools across the UK <UKFlag />
+            </div>
           </div>
         </div>
 
@@ -471,7 +504,7 @@ export default function LoginPage() {
                   <img src="/images/aitutor 4 schools.png" alt="AI Tutor 4 Schools" style={{ width: 38, height: 38, objectFit: "contain", borderRadius: 8 }} />
                 </div>
                 <div>
-                  <h3>AI Tutor 4 Schools</h3>
+                  <h3>AI Tutor <span style={{color:"#f97316"}}>4</span> Schools</h3>
                   <p>Powered by SmartAI Tutor</p>
                 </div>
               </div>
@@ -484,6 +517,7 @@ export default function LoginPage() {
                     <span>for the UK curriculum</span>
                   </h2>
                   <p className="lp-m-sub">AI-powered learning, personalised for every student.</p>
+                  <div style={{width:52,height:4,borderRadius:3,background:"linear-gradient(90deg,#f97316,#fb923c)",margin:"10px 0 0"}} />
                 </div>
                 <div className="lp-m-robo-wrap">
                   <div className="lp-m-robo-rings">
@@ -523,21 +557,42 @@ export default function LoginPage() {
               <form onSubmit={handleSubmit}>
                 <div className="lp-field">
                   <label htmlFor="lp-email">Email address</label>
-                  <input
-                    id="lp-email" type="email" value={email}
-                    onChange={(e) => setEmail(e.target.value)}
-                    placeholder="you@school.ac.uk"
-                    required autoComplete="email"
-                  />
+                  <div style={{position:"relative"}}>
+                    <span style={{position:"absolute",left:12,top:"50%",transform:"translateY(-50%)",color:"#94a3b8",display:"flex",alignItems:"center",pointerEvents:"none"}}>
+                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="m22 7-8.97 5.7a1.94 1.94 0 0 1-2.06 0L2 7"/></svg>
+                    </span>
+                    <input
+                      id="lp-email" type="email" value={email}
+                      onChange={(e) => setEmail(e.target.value)}
+                      placeholder="you@school.ac.uk"
+                      required autoComplete="email"
+                      style={{paddingLeft:38}}
+                    />
+                    {email && email.includes("@") && (
+                      <span style={{position:"absolute",right:12,top:"50%",transform:"translateY(-50%)",color:"#10b981",fontSize:15}}>✓</span>
+                    )}
+                  </div>
                 </div>
                 <div className="lp-field">
                   <label htmlFor="lp-password">Password</label>
-                  <input
-                    id="lp-password" type="password" value={password}
-                    onChange={(e) => setPassword(e.target.value)}
-                    placeholder="Your password"
-                    required minLength={6} autoComplete="current-password"
-                  />
+                  <div style={{position:"relative"}}>
+                    <span style={{position:"absolute",left:12,top:"50%",transform:"translateY(-50%)",color:"#94a3b8",display:"flex",alignItems:"center",pointerEvents:"none"}}>
+                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+                    </span>
+                    <input
+                      id="lp-password" type={showPw ? "text" : "password"} value={password}
+                      onChange={(e) => setPassword(e.target.value)}
+                      placeholder="Your password"
+                      required minLength={6} autoComplete="current-password"
+                      style={{paddingLeft:38,paddingRight:38}}
+                    />
+                    <button type="button" onClick={() => setShowPw(p => !p)} style={{position:"absolute",right:10,top:"50%",transform:"translateY(-50%)",background:"none",border:"none",cursor:"pointer",color:"#94a3b8",padding:2,display:"flex",alignItems:"center"}}>
+                      {showPw
+                        ? <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"/><line x1="1" y1="1" x2="23" y2="23"/></svg>
+                        : <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+                      }
+                    </button>
+                  </div>
                   <div className="lp-field-meta">
                     <a href="#" className="lp-forgot">Forgot password?</a>
                   </div>
@@ -555,10 +610,29 @@ export default function LoginPage() {
               <p className="lp-register-row">
                 New student? <Link to="/register">Create your account</Link>
               </p>
-              <p className="lp-contact">
-                Don't have an account?<br />
-                Contact your school administrator to get access.
-              </p>
+
+              <div style={{display:"flex",alignItems:"center",gap:12,background:"#f8fafc",border:"1px solid #e2e8f0",borderRadius:10,padding:"12px 14px",margin:"14px 0"}}>
+                <span style={{fontSize:22,flexShrink:0}}>🎧</span>
+                <div style={{fontSize:12,lineHeight:1.5,color:"#475569"}}>
+                  <strong style={{color:"#1e293b",fontSize:13,display:"block",marginBottom:2}}>Need help?</strong>
+                  Contact your school administrator to get access.
+                </div>
+              </div>
+
+              <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:6,margin:"4px 0 10px"}}>
+                {TRUST_BADGES.map(b => (
+                  <div key={b.title} style={{display:"flex",flexDirection:"column",alignItems:"center",textAlign:"center",gap:4,padding:"10px 4px 8px",background:"#fff",border:"1px solid #e2e8f0",borderRadius:10}}>
+                    <span style={{fontSize:20}}>{b.icon}</span>
+                    <span style={{fontSize:10,fontWeight:700,color:"#1e293b",lineHeight:1.2}}>{b.title}</span>
+                    <span style={{fontSize:9,color:"#94a3b8",lineHeight:1.3}}>{b.desc}</span>
+                  </div>
+                ))}
+              </div>
+
+              <div style={{display:"flex",alignItems:"center",justifyContent:"center",gap:7,background:"#f0fdf4",border:"1px solid #bbf7d0",borderRadius:8,padding:"9px 12px",fontSize:11,color:"#166534",fontWeight:600,textAlign:"center",marginTop:4}}>
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+                Ofsted-ready. GDPR compliant. Used and trusted by schools across the UK
+              </div>
             </div>
           </div>
         </div>

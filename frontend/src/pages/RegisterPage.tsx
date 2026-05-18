@@ -1,22 +1,41 @@
-import { useState, useRef, useEffect, type FormEvent } from "react";
+import { useState, useRef, useEffect, type FormEvent, type ReactNode } from "react";
 import { Link } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
 
+const UKFlag = () => (
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 60 30" width="22" height="14" style={{borderRadius:2,flexShrink:0,display:"inline-block"}}>
+    <rect width="60" height="30" fill="#012169"/>
+    <path d="M0 0l60 30m0-30L0 30" stroke="#fff" strokeWidth="9"/>
+    <path d="M0 0l60 30m0-30L0 30" stroke="#C8102E" strokeWidth="5"/>
+    <path d="M30 0v30M0 15h60" stroke="#fff" strokeWidth="11"/>
+    <path d="M30 0v30M0 15h60" stroke="#C8102E" strokeWidth="7"/>
+  </svg>
+);
+
 const HIGHLIGHTS = [
-  { icon: "🎓", title: "Personalised Learning", desc: "AI adapts to your pace and learning style" },
-  { icon: "📊", title: "Track Your Progress",   desc: "XP, streaks, and detailed session reports" },
-  { icon: "🧠", title: "UK Curriculum Aligned", desc: "GCSE, A-Level, Key Stage content built-in" },
-  { icon: "🔊", title: "Voice Tutoring",         desc: "Real-time AI voice sessions coming soon" },
+  { icon: "🎓", title: "Personalised Learning", desc: "AI adapts to your pace and learning style",  color: "#1a73e8" },
+  { icon: "📊", title: "Track Your Progress",   desc: "XP, streaks, and detailed session reports",  color: "#f97316" },
+  { icon: "🧠", title: "UK Curriculum Aligned", desc: "GCSE, A-Level, Key Stage content built-in",  color: "#10b981" },
+  { icon: "🔊", title: "Voice Tutoring",         desc: "Real-time AI voice sessions coming soon",    color: "#7c3aed" },
+];
+
+const TRUST_BADGES: { icon: ReactNode; title: string; desc: string }[] = [
+  { icon: "🛡️",        title: "Secure & Safe",   desc: "Your data is protected and never shared." },
+  { icon: <UKFlag />,  title: "UK Curriculum",   desc: "Aligned to national standards." },
+  { icon: "🤖",        title: "AI-Powered",      desc: "Smart. Personalised. Always improving." },
+  { icon: "📈",        title: "Better Outcomes", desc: "Track progress and achieve more." },
 ];
 
 export default function RegisterPage() {
   const { register } = useAuth();
-  const [name,     setName]     = useState("");
-  const [email,    setEmail]    = useState("");
-  const [password, setPassword] = useState("");
-  const [confirm,  setConfirm]  = useState("");
-  const [error,    setError]    = useState("");
-  const [loading,  setLoading]  = useState(false);
+  const [name,        setName]        = useState("");
+  const [email,       setEmail]       = useState("");
+  const [password,    setPassword]    = useState("");
+  const [confirm,     setConfirm]     = useState("");
+  const [error,       setError]       = useState("");
+  const [loading,     setLoading]     = useState(false);
+  const [showPw,      setShowPw]      = useState(false);
+  const [showConfirm, setShowConfirm] = useState(false);
 
   const containerRef     = useRef<HTMLDivElement>(null);
   const canvasRef        = useRef<HTMLCanvasElement>(null);
@@ -415,7 +434,7 @@ export default function RegisterPage() {
               <img src="/images/aitutor 4 schools.png" alt="AI Tutor 4 Schools" />
             </div>
             <div>
-              <h1>AI Tutor 4 Schools</h1>
+              <h1>AI Tutor <span style={{color:"#f97316"}}>4</span> Schools</h1>
               <p>Powered by SmartAI Tutor</p>
             </div>
           </div>
@@ -430,6 +449,7 @@ export default function RegisterPage() {
                 Join thousands of students getting personalised AI tutoring
                 aligned to the UK curriculum.
               </p>
+              <div style={{width:52,height:4,borderRadius:3,background:"linear-gradient(90deg,#f97316,#fb923c)",margin:"10px 0 0"}} />
             </div>
 
             <div className="rp-hero-robo">
@@ -451,14 +471,28 @@ export default function RegisterPage() {
           {/* Highlights */}
           <div className="rp-highlights">
             {HIGHLIGHTS.map((h) => (
-              <div className="rp-highlight" key={h.title}>
-                <span className="rp-hi-icon">{h.icon}</span>
-                <div className="rp-hi-info">
+              <div className="rp-highlight" key={h.title} style={{display:"flex",alignItems:"flex-start",gap:10,padding:"13px 15px"}}>
+                <div style={{width:34,height:34,borderRadius:9,background:`${h.color}22`,border:`1px solid ${h.color}44`,display:"flex",alignItems:"center",justifyContent:"center",fontSize:16,flexShrink:0}}>
+                  {h.icon}
+                </div>
+                <div className="rp-hi-info" style={{flex:1}}>
                   <h4>{h.title}</h4>
                   <p>{h.desc}</p>
                 </div>
+                <span style={{fontSize:14,color:"rgba(255,255,255,0.4)",alignSelf:"center",flexShrink:0}}>›</span>
               </div>
             ))}
+          </div>
+
+          {/* Brand panel bottom footer bar */}
+          <div style={{position:"relative",zIndex:10,display:"flex",alignItems:"center",justifyContent:"space-between",borderTop:"1px solid rgba(255,255,255,0.1)",paddingTop:14,marginTop:8,flexWrap:"wrap",gap:8}}>
+            <div style={{display:"flex",alignItems:"center",gap:7,fontSize:12,color:"rgba(255,255,255,0.5)"}}>
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+              Trusted by schools. Built for students. Backed by AI.
+            </div>
+            <div style={{fontSize:12,color:"rgba(255,255,255,0.5)",display:"flex",alignItems:"center",gap:5}}>
+              Proudly supporting schools across the UK <UKFlag />
+            </div>
           </div>
         </div>
 
@@ -475,7 +509,7 @@ export default function RegisterPage() {
                   <img src="/images/aitutor 4 schools.png" alt="AI Tutor 4 Schools" style={{ width: 38, height: 38, objectFit: "contain", borderRadius: 8 }} />
                 </div>
                 <div>
-                  <h3>AI Tutor 4 Schools</h3>
+                  <h3>AI Tutor <span style={{color:"#f97316"}}>4</span> Schools</h3>
                   <p>Powered by SmartAI Tutor</p>
                 </div>
               </div>
@@ -487,6 +521,7 @@ export default function RegisterPage() {
                     Start your <span>AI learning journey</span> today
                   </h2>
                   <p className="rp-m-sub">Join thousands of UK students learning smarter.</p>
+                  <div style={{width:52,height:4,borderRadius:3,background:"linear-gradient(90deg,#f97316,#fb923c)",margin:"10px 0 0"}} />
                 </div>
                 <div className="rp-m-robo-wrap">
                   <div className="rp-m-robo-rings">
@@ -527,39 +562,78 @@ export default function RegisterPage() {
               <form onSubmit={handleSubmit}>
                 <div className="rp-field">
                   <label htmlFor="rp-name">Full Name</label>
-                  <input
-                    id="rp-name" type="text" value={name}
-                    onChange={(e) => setName(e.target.value)}
-                    placeholder="Alex Johnson"
-                    required minLength={2} autoComplete="name"
-                  />
+                  <div style={{position:"relative"}}>
+                    <span style={{position:"absolute",left:12,top:"50%",transform:"translateY(-50%)",color:"#94a3b8",display:"flex",alignItems:"center",pointerEvents:"none"}}>
+                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+                    </span>
+                    <input
+                      id="rp-name" type="text" value={name}
+                      onChange={(e) => setName(e.target.value)}
+                      placeholder="Alex Johnson"
+                      required minLength={2} autoComplete="name"
+                      style={{paddingLeft:38}}
+                    />
+                  </div>
                 </div>
                 <div className="rp-field">
                   <label htmlFor="rp-email">School Email</label>
-                  <input
-                    id="rp-email" type="email" value={email}
-                    onChange={(e) => setEmail(e.target.value)}
-                    placeholder="you@school.ac.uk"
-                    required autoComplete="email"
-                  />
+                  <div style={{position:"relative"}}>
+                    <span style={{position:"absolute",left:12,top:"50%",transform:"translateY(-50%)",color:"#94a3b8",display:"flex",alignItems:"center",pointerEvents:"none"}}>
+                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="m22 7-8.97 5.7a1.94 1.94 0 0 1-2.06 0L2 7"/></svg>
+                    </span>
+                    <input
+                      id="rp-email" type="email" value={email}
+                      onChange={(e) => setEmail(e.target.value)}
+                      placeholder="you@school.ac.uk"
+                      required autoComplete="email"
+                      style={{paddingLeft:38}}
+                    />
+                    {email && email.includes("@") && (
+                      <span style={{position:"absolute",right:12,top:"50%",transform:"translateY(-50%)",color:"#10b981",fontSize:15}}>✓</span>
+                    )}
+                  </div>
                 </div>
                 <div className="rp-field">
                   <label htmlFor="rp-password">Password</label>
-                  <input
-                    id="rp-password" type="password" value={password}
-                    onChange={(e) => setPassword(e.target.value)}
-                    placeholder="At least 6 characters"
-                    required minLength={6} autoComplete="new-password"
-                  />
+                  <div style={{position:"relative"}}>
+                    <span style={{position:"absolute",left:12,top:"50%",transform:"translateY(-50%)",color:"#94a3b8",display:"flex",alignItems:"center",pointerEvents:"none"}}>
+                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+                    </span>
+                    <input
+                      id="rp-password" type={showPw ? "text" : "password"} value={password}
+                      onChange={(e) => setPassword(e.target.value)}
+                      placeholder="At least 6 characters"
+                      required minLength={6} autoComplete="new-password"
+                      style={{paddingLeft:38,paddingRight:38}}
+                    />
+                    <button type="button" onClick={() => setShowPw(p => !p)} style={{position:"absolute",right:10,top:"50%",transform:"translateY(-50%)",background:"none",border:"none",cursor:"pointer",color:"#94a3b8",padding:2,display:"flex",alignItems:"center"}}>
+                      {showPw
+                        ? <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"/><line x1="1" y1="1" x2="23" y2="23"/></svg>
+                        : <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+                      }
+                    </button>
+                  </div>
                 </div>
                 <div className="rp-field">
                   <label htmlFor="rp-confirm">Confirm Password</label>
-                  <input
-                    id="rp-confirm" type="password" value={confirm}
-                    onChange={(e) => setConfirm(e.target.value)}
-                    placeholder="Repeat your password"
-                    required minLength={6} autoComplete="new-password"
-                  />
+                  <div style={{position:"relative"}}>
+                    <span style={{position:"absolute",left:12,top:"50%",transform:"translateY(-50%)",color:"#94a3b8",display:"flex",alignItems:"center",pointerEvents:"none"}}>
+                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+                    </span>
+                    <input
+                      id="rp-confirm" type={showConfirm ? "text" : "password"} value={confirm}
+                      onChange={(e) => setConfirm(e.target.value)}
+                      placeholder="Repeat your password"
+                      required minLength={6} autoComplete="new-password"
+                      style={{paddingLeft:38,paddingRight:38}}
+                    />
+                    <button type="button" onClick={() => setShowConfirm(p => !p)} style={{position:"absolute",right:10,top:"50%",transform:"translateY(-50%)",background:"none",border:"none",cursor:"pointer",color:"#94a3b8",padding:2,display:"flex",alignItems:"center"}}>
+                      {showConfirm
+                        ? <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"/><line x1="1" y1="1" x2="23" y2="23"/></svg>
+                        : <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+                      }
+                    </button>
+                  </div>
                 </div>
 
                 {error && <div className="rp-error">{error}</div>}
@@ -574,6 +648,29 @@ export default function RegisterPage() {
               <p className="rp-login-row">
                 <Link to="/login">Sign in to your account →</Link>
               </p>
+
+              <div style={{display:"flex",alignItems:"center",gap:12,background:"#f8fafc",border:"1px solid #e2e8f0",borderRadius:10,padding:"12px 14px",margin:"14px 0"}}>
+                <span style={{fontSize:22,flexShrink:0}}>🎧</span>
+                <div style={{fontSize:12,lineHeight:1.5,color:"#475569"}}>
+                  <strong style={{color:"#1e293b",fontSize:13,display:"block",marginBottom:2}}>Need help?</strong>
+                  Contact your school administrator to get access.
+                </div>
+              </div>
+
+              <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:6,margin:"4px 0 10px"}}>
+                {TRUST_BADGES.map(b => (
+                  <div key={b.title} style={{display:"flex",flexDirection:"column",alignItems:"center",textAlign:"center",gap:4,padding:"10px 4px 8px",background:"#fff",border:"1px solid #e2e8f0",borderRadius:10}}>
+                    <span style={{fontSize:20}}>{b.icon}</span>
+                    <span style={{fontSize:10,fontWeight:700,color:"#1e293b",lineHeight:1.2}}>{b.title}</span>
+                    <span style={{fontSize:9,color:"#94a3b8",lineHeight:1.3}}>{b.desc}</span>
+                  </div>
+                ))}
+              </div>
+
+              <div style={{display:"flex",alignItems:"center",justifyContent:"center",gap:7,background:"#f0fdf4",border:"1px solid #bbf7d0",borderRadius:8,padding:"9px 12px",fontSize:11,color:"#166534",fontWeight:600,textAlign:"center",marginTop:4}}>
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+                Ofsted-ready. GDPR compliant. Used and trusted by schools across the UK
+              </div>
             </div>
           </div>
         </div>
