@@ -56,68 +56,164 @@ function durationLabel(mins: number): string {
 
 // ── Dynamic lesson preview ───────────────────────────────────────────────────
 
-interface PreviewStep {
-  title: string;
-  desc: string;
+type StepColor = "green" | "blue" | "yellow" | "purple";
+
+interface PlanStep {
+  color: StepColor;
   time: number;
-  isFirst?: boolean;
+  title: string;
+  desc?: string;
 }
 
-function getDynamicPreview(
-  learnMode: LearnMode,
-  _goal: GoalId,
-  duration: number,
-  topicLabel: string
-): PreviewStep[] {
-  let stepTitles: Array<{ title: string; desc: string }>;
+const STEP_COLOR_HEX: Record<StepColor, string> = {
+  green:  "#22c55e",
+  blue:   "#3b82f6",
+  yellow: "#f59e0b",
+  purple: "#8b5cf6",
+};
 
-  switch (learnMode) {
-    case "slides":
-      stepTitles = [
-        { title: "Quick Recap", desc: "Review what you already know" },
-        { title: "Learn with Slides", desc: "AI explains using guided slides" },
-        { title: "Guided Questions", desc: "Test your understanding" },
-        { title: "Review & Next Steps", desc: "Summary and key takeaways" },
-      ];
-      break;
-    case "worksheet":
-      stepTitles = [
-        { title: "Introduction", desc: "Set the scene for today's work" },
-        { title: "Guided Worksheet", desc: "Work through questions step-by-step" },
-        { title: "Check Answers", desc: "Review with AI feedback" },
-        { title: "Summary", desc: "What you've learned today" },
-      ];
-      break;
-    case "quiz":
-      stepTitles = [
-        { title: "Warm Up", desc: "A couple of easy starter questions" },
-        { title: "Quiz & Test Me", desc: "Test your knowledge fully" },
-        { title: "Review Mistakes", desc: "Understand every wrong answer" },
-        { title: "Final Score", desc: "See how well you did" },
-      ];
-      break;
-    default: // ai_recommended
-      stepTitles = [
-        { title: "Quick Recap", desc: "Warm up and check prior knowledge" },
-        { title: `Learn: ${topicLabel || "Topic"}`, desc: "Structured explanation with examples" },
-        { title: "Guided Worksheet", desc: "Practice with step-by-step guidance" },
-        { title: "Quick Challenge Quiz", desc: "Test what you've learned" },
-        { title: "Review & Next Steps", desc: "Summary and recommended next topic" },
-      ];
-  }
+const LESSON_PLAN_DATA: Record<number, Record<GoalId, PlanStep[]>> = {
+  20: {
+    learn_scratch: [
+      { color: "green",  time: 2, title: "Quick Recap / Prior Knowledge", desc: "Warm up + identify what student already knows" },
+      { color: "blue",   time: 5, title: "Learn Topic",                   desc: "Clear step-by-step teaching with examples" },
+      { color: "blue",   time: 5, title: "Guided Practice",               desc: "AI and student solve together" },
+      { color: "blue",   time: 4, title: "Quick Challenge Quiz",          desc: "Independent confidence check" },
+      { color: "purple", time: 4, title: "Review & Next Steps",           desc: "Feedback + what to practise next" },
+    ],
+    homework: [
+      { color: "green",  time: 3, title: "Homework Review",       desc: "Understand task + identify struggles" },
+      { color: "blue",   time: 7, title: "Explain Difficult Parts", desc: "Break concepts down simply" },
+      { color: "blue",   time: 5, title: "Solve Together",         desc: "Step-by-step guided support" },
+      { color: "blue",   time: 3, title: "Fix Mistakes",           desc: "Correct misunderstandings" },
+      { color: "purple", time: 2, title: "Ready-to-Submit Check",  desc: "Final confidence boost" },
+    ],
+    catch_up: [
+      { color: "green",  time: 2, title: "What Was Missed" },
+      { color: "blue",   time: 7, title: "Teach Key Concept" },
+      { color: "blue",   time: 5, title: "Guided Examples" },
+      { color: "blue",   time: 3, title: "Understanding Check" },
+      { color: "purple", time: 3, title: "What Next" },
+    ],
+    revision: [
+      { color: "green",  time: 3, title: "Topic Recap" },
+      { color: "blue",   time: 6, title: "Quick Challenge Questions" },
+      { color: "blue",   time: 5, title: "Learn From Mistakes" },
+      { color: "blue",   time: 3, title: "Exam Confidence Boost" },
+      { color: "purple", time: 3, title: "Wrap-Up" },
+    ],
+  },
+  40: {
+    learn_scratch: [
+      { color: "green",  time: 5,  title: "Prior Knowledge Check",  desc: "Activate previous learning" },
+      { color: "blue",   time: 10, title: "Step-by-Step Teaching",  desc: "Clear structured explanation" },
+      { color: "blue",   time: 8,  title: "Worked Examples",        desc: '"I do"' },
+      { color: "blue",   time: 8,  title: "Guided Practice",        desc: '"We do"' },
+      { color: "blue",   time: 5,  title: "Independent Attempt",    desc: '"You do"' },
+      { color: "purple", time: 4,  title: "Quick Recap & Reflection" },
+    ],
+    homework: [
+      { color: "green",  time: 5,  title: "Homework Walkthrough" },
+      { color: "blue",   time: 10, title: "Explain Difficult Concepts" },
+      { color: "blue",   time: 10, title: "Guided Support" },
+      { color: "blue",   time: 8,  title: "Similar Practice Questions" },
+      { color: "purple", time: 7,  title: "Fix Mistakes + Confidence Check" },
+    ],
+    catch_up: [
+      { color: "green",  time: 5,  title: "Missed Lesson Recap" },
+      { color: "blue",   time: 12, title: "Teach Key Concepts" },
+      { color: "blue",   time: 8,  title: "Guided Examples" },
+      { color: "blue",   time: 8,  title: "Practice Together" },
+      { color: "purple", time: 7,  title: "Understanding Check + Revisit Plan" },
+    ],
+    revision: [
+      { color: "green",  time: 5,  title: "Topic Recap" },
+      { color: "blue",   time: 10, title: "Practice Questions" },
+      { color: "blue",   time: 8,  title: "Correct Mistakes" },
+      { color: "blue",   time: 8,  title: "Timed Challenge" },
+      { color: "purple", time: 9,  title: "Exam Strategy + Summary" },
+    ],
+  },
+  60: {
+    learn_scratch: [
+      { color: "green",  time: 5,  title: "Prior Knowledge Activation" },
+      { color: "blue",   time: 15, title: "Guided Teaching" },
+      { color: "blue",   time: 10, title: "Multiple Worked Examples" },
+      { color: "blue",   time: 10, title: "Scaffolded Practice" },
+      { color: "blue",   time: 8,  title: "Independent Questions" },
+      { color: "blue",   time: 5,  title: "Common Mistakes Review" },
+      { color: "blue",   time: 4,  title: "Quiz Understanding" },
+      { color: "purple", time: 3,  title: "Summary & Next Steps" },
+    ],
+    homework: [
+      { color: "green",  time: 5,  title: "Homework Review" },
+      { color: "blue",   time: 15, title: "Full Guided Walkthrough" },
+      { color: "blue",   time: 10, title: "Difficult Areas Explained" },
+      { color: "blue",   time: 10, title: "Practice Similar Questions" },
+      { color: "blue",   time: 8,  title: "Independent Confidence Check" },
+      { color: "purple", time: 12, title: "Final Review & Feedback" },
+    ],
+    catch_up: [
+      { color: "green",  time: 5,  title: "Missed Lesson Recap" },
+      { color: "blue",   time: 15, title: "Teach Missing Concepts" },
+      { color: "blue",   time: 10, title: "Interactive Explanation" },
+      { color: "blue",   time: 10, title: "Guided Examples" },
+      { color: "blue",   time: 7,  title: "Practice Questions" },
+      { color: "purple", time: 13, title: "Understanding Quiz + Summary" },
+    ],
+    revision: [
+      { color: "green",  time: 5,  title: "Topic Recap" },
+      { color: "blue",   time: 12, title: "Guided Exam Questions" },
+      { color: "blue",   time: 10, title: "Mistake Feedback" },
+      { color: "blue",   time: 10, title: "Harder Challenge Questions" },
+      { color: "blue",   time: 8,  title: "Exam Strategy + Timed Retrieval" },
+      { color: "purple", time: 15, title: "Confidence Check & Summary" },
+    ],
+  },
+  90: {
+    learn_scratch: [
+      { color: "green",  time: 8,  title: "Prior Knowledge Activation" },
+      { color: "blue",   time: 18, title: "Deep Teaching" },
+      { color: "blue",   time: 12, title: "Worked Examples" },
+      { color: "blue",   time: 12, title: "Practice Together" },
+      { color: "yellow", time: 5,  title: "Brain Break / Reset" },
+      { color: "blue",   time: 12, title: "Independent Challenge" },
+      { color: "blue",   time: 10, title: "Quiz Assessment" },
+      { color: "purple", time: 13, title: "Reflection & Mastery Review" },
+    ],
+    homework: [
+      { color: "green",  time: 8,  title: "Homework Review" },
+      { color: "blue",   time: 18, title: "Deep Explanation" },
+      { color: "blue",   time: 12, title: "Practice Similar Questions" },
+      { color: "yellow", time: 5,  title: "Reset Break" },
+      { color: "blue",   time: 15, title: "Independent Attempt" },
+      { color: "blue",   time: 10, title: "Tutor Feedback" },
+      { color: "purple", time: 22, title: "Final Review & Confidence Check" },
+    ],
+    catch_up: [
+      { color: "green",  time: 8,  title: "Lesson Recovery" },
+      { color: "blue",   time: 20, title: "Guided Teaching" },
+      { color: "blue",   time: 12, title: "Visual Explanation" },
+      { color: "blue",   time: 10, title: "Practice Together" },
+      { color: "yellow", time: 5,  title: "Break" },
+      { color: "blue",   time: 15, title: "Independent Confidence Building" },
+      { color: "purple", time: 20, title: "Quiz + What Next" },
+    ],
+    revision: [
+      { color: "green",  time: 8,  title: "Full Topic Recap" },
+      { color: "blue",   time: 18, title: "Exam-Style Questions" },
+      { color: "blue",   time: 12, title: "Marking & Feedback" },
+      { color: "yellow", time: 5,  title: "Break" },
+      { color: "blue",   time: 15, title: "Harder Challenge Questions" },
+      { color: "blue",   time: 12, title: "Timed Practice" },
+      { color: "purple", time: 20, title: "Exam Strategy + Final Confidence Review" },
+    ],
+  },
+};
 
-  const firstTime = 5;
-  const lastTime = 10;
-  const middleCount = stepTitles.length - 2;
-  const middleTime = middleCount > 0
-    ? Math.floor((duration - firstTime - lastTime) / middleCount)
-    : duration - firstTime - lastTime;
-
-  return stepTitles.map((s, i) => ({
-    ...s,
-    time: i === 0 ? firstTime : i === stepTitles.length - 1 ? lastTime : middleTime,
-    isFirst: i === 0,
-  }));
+function getDynamicPreview(goal: GoalId, duration: number): PlanStep[] {
+  const key = [20, 40, 60, 90].includes(duration) ? duration : 40;
+  return LESSON_PLAN_DATA[key]?.[goal] ?? LESSON_PLAN_DATA[40].learn_scratch;
 }
 
 // ── Focus checklist by goal ──────────────────────────────────────────────────
@@ -400,7 +496,7 @@ export default function LessonSetupPage() {
 
   // Derived sidebar data
   const topicLabel = selectedTopics[0] ?? subject;
-  const previewSteps = getDynamicPreview(learnMode, goal, duration, topicLabel);
+  const previewSteps = getDynamicPreview(goal, duration);
   const focusItems = FOCUS_ITEMS[goal];
   const goalLabel = goalOptions.find((g) => g.id === goal)?.label ?? "";
 
@@ -989,7 +1085,7 @@ export default function LessonSetupPage() {
                             borderRadius: 99,
                             fontSize: 10,
                             fontWeight: 700,
-                            background: step.isFirst ? "#10b981" : "#1a73e8",
+                            background: STEP_COLOR_HEX[step.color],
                             color: "#fff",
                             whiteSpace: "nowrap",
                           }}>

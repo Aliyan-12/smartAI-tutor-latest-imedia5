@@ -14,58 +14,16 @@ interface VoiceCallbacks {
   onQuizOffer?: (topic: string) => void;
 }
 
-function _splitAtSentenceBoundary(text: string, maxLen: number): string[] {
-  // If text has comma/sentence breaks, split at each punctuation boundary for faster TTS.
-  // "Hey, how are you? Fine." → ["Hey,", "how are you?", "Fine."]
-  if (/[,!?.]/.test(text)) {
-    const phrases: string[] = [];
-    // Split after each punctuation, keeping the mark with its phrase
-    const parts = text.split(/(?<=[,!?.])\s*/);
-    for (const part of parts) {
-      const trimmed = part.trim();
-      if (!trimmed || trimmed.length < 10) continue;
-      if (trimmed.length <= maxLen) {
-        phrases.push(trimmed);
-      } else {
-        // Phrase still too long — hard-chunk without recursion
-        let s = 0;
-        while (s < trimmed.length) {
-          const chunk = trimmed.slice(s, s + maxLen).trim();
-          if (chunk.length >= 10) phrases.push(chunk);
-          s += maxLen;
-        }
-      }
-    }
-    return phrases.filter(c => c.length >= 10);
-  }
-
-  // No punctuation — original maxLen chunking with sentence-boundary preference
-  if (text.length <= maxLen) return [text];
-  const chunks: string[] = [];
-  let start = 0;
-  while (start < text.length) {
-    const end = Math.min(start + maxLen, text.length);
-    if (end >= text.length) {
-      const tail = text.slice(start).trim();
-      if (tail.length >= 10) chunks.push(tail);
-      break;
-    }
-    let cutAt = -1;
-    for (let i = end; i > start + 40; i--) {
-      const ch = text[i - 1];
-      if ((ch === "." || ch === "!" || ch === "?") &&
-          (i >= text.length || text[i] === " " || text[i] === "\n")) {
-        cutAt = i;
-        break;
-      }
-    }
-    if (cutAt === -1) cutAt = end;
-    const chunk = text.slice(start, cutAt).trim();
-    if (chunk.length >= 10) chunks.push(chunk);
-    start = cutAt;
-    while (start < text.length && text[start] === " ") start++;
-  }
-  return chunks.filter(c => c.length >= 10);
+// Strips internal bracket markers from text before it is sent to TTS.
+// Handles: complete [MARKER], unclosed [MARKER at end (split mid-token),
+// and orphaned ] content at start (e.g. from [QUIZ_OFFER: split on ":").
+function _stripMarkersForTTS(text: string): string {
+  return text
+    .replace(/\[[^\]]*\]/g, "")
+    .replace(/\[[^\]]*$/g, "")
+    .replace(/^[^\[]*\]\s*/g, "")
+    .replace(/\s{2,}/g, " ")
+    .trim();
 }
 
 export function useVoice() {
@@ -448,15 +406,42 @@ export function useVoice() {
     if (!ttsActiveRef.current || ttsQueueRef.current.length === 0) setPlaying(false);
   }, []);
 
-  // Buffer incoming text tokens — flush only at stream end so the entire
-  // response is sent as a single TTS request, guaranteeing a consistent voice.
+  // As each token arrives, scan for sentence-boundary punctuation.
+  // Every complete phrase is dispatched to TTS immediately so audio
+  // starts playing within ~500ms of the first sentence completing.
   const feedStreamTTS = useCallback((chunk: string) => {
     if (!ttsActiveRef.current) return;
     sentenceBufRef.current += chunk;
-  }, []);
+
+    let buf = sentenceBufRef.current;
+    let dispatched = false;
+
+    while (true) {
+      const idx = buf.search(/[!?.,:\n]/);
+      if (idx === -1) break;
+      const phrase = _stripMarkersForTTS(buf.slice(0, idx + 1));
+      buf = buf.slice(idx + 1).trimStart();
+      if (phrase.length >= 3) {
+        ttsQueueRef.current.push(voiceApi.speak(phrase));
+        dispatched = true;
+      }
+    }
+
+    // Safety valve: flush if no punctuation arrives for a long stretch
+    if (buf.length >= 150) {
+      const safe = _stripMarkersForTTS(buf);
+      buf = "";
+      if (safe.length >= 3) {
+        ttsQueueRef.current.push(voiceApi.speak(safe));
+        dispatched = true;
+      }
+    }
+
+    sentenceBufRef.current = buf;
+    if (dispatched) _processTTSQueue();
+  }, [_processTTSQueue]);
 
   const startStreamTTS = useCallback(() => {
-    // Cancel any pending early-start timer from a previous response
     if (ttsDelayTimerRef.current) {
       clearTimeout(ttsDelayTimerRef.current);
       ttsDelayTimerRef.current = null;
@@ -467,34 +452,20 @@ export function useVoice() {
     sentenceBufRef.current = "";
     ttsProcessingRef.current = false;
     setPlaying(false);
+  }, []);
 
-    // After 1.5 seconds, flush whatever text has accumulated so TTS starts generating
-    // while the stream is still coming in. If stream ends first, endStreamTTS cancels
-    // this timer and sends everything as one call for perfect voice consistency.
-    ttsDelayTimerRef.current = setTimeout(() => {
-      ttsDelayTimerRef.current = null;
-      const buffered = sentenceBufRef.current.trim();
-      if (buffered.length >= 40 && ttsActiveRef.current) {
-        sentenceBufRef.current = "";
-        ttsQueueRef.current.push(voiceApi.speak(buffered));
-        _processTTSQueue();
-      }
-    }, 1500);
-  }, [_processTTSQueue]);
-
+  // Flush any trailing text that didn't end with punctuation
   const endStreamTTS = useCallback(() => {
     if (ttsDelayTimerRef.current) {
       clearTimeout(ttsDelayTimerRef.current);
       ttsDelayTimerRef.current = null;
     }
-    const fullText = sentenceBufRef.current.trim();
+    const remaining = _stripMarkersForTTS(sentenceBufRef.current);
     sentenceBufRef.current = "";
-    if (fullText.length < 20) return;
-    // Split at sentence boundaries and start all fetches in parallel so
-    // long responses resolve in ~6s instead of 15s+.
-    const chunks = _splitAtSentenceBoundary(fullText, 110);
-    chunks.forEach(chunk => ttsQueueRef.current.push(voiceApi.speak(chunk)));
-    _processTTSQueue();
+    if (remaining.length >= 3) {
+      ttsQueueRef.current.push(voiceApi.speak(remaining));
+      _processTTSQueue();
+    }
   }, [_processTTSQueue]);
 
   const cancelStreamTTS = useCallback(() => {

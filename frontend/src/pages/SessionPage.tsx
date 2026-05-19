@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { useParams, useNavigate } from "react-router-dom";
-import { Lock, X, Pause, Play } from "lucide-react";
+import { Lock, X, Pause, Play, Volume2, VolumeX } from "lucide-react";
 import { appointmentsApi, assessmentsApi, sessionsApi, gamificationApi, slidesApi } from "../services/api";
 import ChatWindow from "../components/ChatWindow";
 import ChatInput from "../components/ChatInput";
@@ -201,6 +201,11 @@ export default function SessionPage() {
   const phaseElapsedMin = Math.floor(phaseElapsedSeconds / 60);
   const currentPhaseIdx = getCurrentPhaseIndex(phaseElapsedMin, sessionPhases);
 
+  const [ttsEnabled, setTtsEnabled] = useState(true);
+  const ttsEnabledRef = useRef(true);
+  // Keep ref in sync so closures in useCallback always read the live value
+  useEffect(() => { ttsEnabledRef.current = ttsEnabled; }, [ttsEnabled]);
+
   const handleJoin = async (overrideCode?: string) => {
     if (!appointmentId) return;
     setJoinError("");
@@ -336,7 +341,7 @@ export default function SessionPage() {
     const q = testAssessment.questions[testCurrentQ];
     if (!q) return;
     const opts = q.options.map((o, i) => `${["A", "B", "C", "D"][i]}: ${o}.`).join(" ");
-    // Use streaming pipeline so all chunks fire in parallel — no 1.5s delay
+    if (!ttsEnabled) return;
     startStreamTTS();
     feedStreamTTS(`Question ${testCurrentQ + 1}: ${q.question_text}. Options are: ${opts}`);
     endStreamTTS();
@@ -348,7 +353,7 @@ export default function SessionPage() {
     const result = testFeedback.isCorrect ? "Correct!" : "Not quite.";
     const explanation = testFeedback.explanation ? ` ${testFeedback.explanation}` : "";
     const fullText = `${result}${explanation}`;
-    // Use streaming pipeline for parallel chunk fetching (faster for longer explanations)
+    if (!ttsEnabled) return;
     startStreamTTS();
     feedStreamTTS(fullText);
     endStreamTTS();
@@ -356,7 +361,7 @@ export default function SessionPage() {
 
   // Auto-read final test score via TTS (both chat and voice mode)
   useEffect(() => {
-    if (!testResult) return;
+    if (!testResult || !ttsEnabled) return;
     const weakMsg = testResult.weak.length > 0 ? `Areas to review: ${testResult.weak.join(", ")}.` : "Great job on all topics!";
     startStreamTTS();
     feedStreamTTS(`Quiz complete! You scored ${Math.round(testResult.score)} percent. ${weakMsg}`);
@@ -560,9 +565,9 @@ export default function SessionPage() {
         } else if (activeSessionId) {
           setIsAiTyping(true);
           sendQuizFeedback(activeSessionId, quizTopic, quizScore, quizStrong, quizWeak, {
-            onStreamStart: () => { setIsAiTyping(false); startStreamTTS(); },
+            onStreamStart: () => { setIsAiTyping(false); if (ttsEnabledRef.current) startStreamTTS(); },
             onToken: feedStreamTTS,
-            onStreamComplete: () => { setIsAiTyping(false); endStreamTTS(); },
+            onStreamComplete: () => { setIsAiTyping(false); if (ttsEnabledRef.current) endStreamTTS(); },
           }, questionDetails);
         }
       } catch (err: any) {
@@ -667,9 +672,9 @@ export default function SessionPage() {
       setIsAiTyping(true);
       sendMessage(text, {
         suppressNavigation: true,
-        onStreamStart: () => { setIsAiTyping(false); startStreamTTS(); },
+        onStreamStart: () => { setIsAiTyping(false); if (ttsEnabledRef.current) startStreamTTS(); },
         onToken: feedStreamTTS,
-        onStreamComplete: (aiText: string, hasSlideTrigger?: boolean) => { setIsAiTyping(false); endStreamTTS(); if (hasSlideTrigger) generateSlide(aiText); },
+        onStreamComplete: (aiText: string, hasSlideTrigger?: boolean) => { setIsAiTyping(false); if (ttsEnabledRef.current) endStreamTTS(); if (hasSlideTrigger) generateSlide(aiText); },
       });
     },
     [sendMessage, startStreamTTS, feedStreamTTS, endStreamTTS, generateSlide]
@@ -693,18 +698,21 @@ export default function SessionPage() {
           });
         },
         onAiTranscriptChunk: (chunk) => {
-          // Accumulate for QUIZ_OFFER detection on turn complete
           voiceAiTurnRef.current += chunk;
-          // Also accumulate full text for slide generation (unstripped)
           voiceAiTextForSlideRef.current += chunk;
-          // Strip marker from visible transcript
-          const cleanChunk = chunk.replace(/\[QUIZ_OFFER:\s*topic="[^"]*"\]/gi, "");
+          // Recompute full clean text from accumulated buffer so markers that
+          // arrive split across multiple chunks are still reliably stripped.
+          const displayText = voiceAiTurnRef.current
+            .replace(/\[SLIDE_TRIGGER\]/gi, "")
+            .replace(/\[QUIZ_OFFER[^\]]*\]/gi, "")
+            .replace(/\[[A-Z_:][^\]]*$/, "") // strip partial [...] still arriving
+            .trimEnd();
           setVoiceMessages((prev) => {
             const last = prev[prev.length - 1];
             if (last && last.role === "assistant") {
-              return [...prev.slice(0, -1), { role: "assistant", content: last.content + cleanChunk }];
+              return [...prev.slice(0, -1), { role: "assistant", content: displayText }];
             }
-            return cleanChunk ? [...prev, { role: "assistant", content: cleanChunk }] : prev;
+            return displayText ? [...prev, { role: "assistant", content: displayText }] : prev;
           });
         },
         onTurnComplete: () => {
@@ -1243,23 +1251,26 @@ export default function SessionPage() {
     <>
       <div style={styles.chatPanelHeader}>
         <span style={styles.chatPanelTitle}>Classroom Chat</span>
-        <span style={styles.handRaise}>✋ Raise Hand</span>
-      </div>
-
-      <div style={styles.quickActions}>
-        {(["I need help with this", "Can you explain that again?", "Please go slower"] as const).map((text, i) => (
+        <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
           <button
-            key={i}
+            title={ttsEnabled ? "Read aloud: on" : "Read aloud: off"}
+            onClick={() => setTtsEnabled(v => !v)}
             style={{
-              ...styles.quickBtn,
-              ...(isPaused ? styles.quickBtnDisabled : {}),
+              display: "flex", alignItems: "center", gap: 4,
+              padding: "3px 8px", borderRadius: 99, border: "none", cursor: "pointer",
+              fontSize: 11, fontWeight: 600,
+              background: ttsEnabled ? "rgba(26,115,232,0.12)" : "rgba(0,0,0,0.06)",
+              color: ttsEnabled ? "#1a73e8" : "var(--text-muted)",
+              transition: "all 0.18s",
             }}
-            onClick={() => !isPaused && sessionSend(text)}
-            disabled={isPaused}
           >
-            {["🙋 I need help", "🔄 Explain again", "🐢 Go slower"][i]}
+            {ttsEnabled
+              ? <Volume2 size={13} />
+              : <VolumeX size={13} />}
+            {ttsEnabled ? "Read aloud" : "Muted"}
           </button>
-        ))}
+          <span style={styles.handRaise}>✋ Raise Hand</span>
+        </div>
       </div>
 
       <div style={styles.chatMessages}>
@@ -1274,10 +1285,37 @@ export default function SessionPage() {
           </div>
         )}
         {!isPaused && messages.length === 0 && !streaming ? (
-          <div style={styles.chatEmpty}>
-            <p style={{ fontSize: 13, color: "var(--text-muted)", textAlign: "center" }}>
-              Session is active — ask your AI tutor anything!
-            </p>
+          <div style={{ padding: "20px 12px 12px", display: "flex", flexDirection: "column", alignItems: "center", gap: 10 }}>
+            <style>{`
+              @keyframes sp-float { 0%,100%{transform:translateY(0)} 50%{transform:translateY(-6px)} }
+              .sp-suggestion { background: var(--bg-primary, #fff); border: 1.5px solid var(--border-color, #e5e7eb); border-radius: 12px; padding: 10px 12px; cursor: pointer; text-align: left; transition: all 0.18s ease; width: 100%; }
+              .sp-suggestion:hover { border-color: #6366f1; box-shadow: 0 3px 12px rgba(99,102,241,0.12); transform: translateY(-1px); }
+            `}</style>
+            <img src="/images/teaching-robot.png" alt="AI Tutor"
+              style={{ width: 80, height: 80, objectFit: "contain", animation: "sp-float 3s ease-in-out infinite",
+                filter: "drop-shadow(0 4px 12px rgba(99,102,241,0.2))" }} />
+            <div style={{ textAlign: "center" }}>
+              <p style={{ margin: "0 0 3px", fontSize: 14, fontWeight: 800, color: "var(--text-primary)" }}>
+                Ask me anything! 🤖✨
+              </p>
+              <p style={{ margin: 0, fontSize: 11, color: "var(--text-muted)" }}>
+                Your AI tutor is ready — pick a starter or type your own question.
+              </p>
+            </div>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, width: "100%" }}>
+              {[
+                { icon: "💡", title: "Explain the topic",    body: "Can you explain today's topic step by step?" },
+                { icon: "📝", title: "Worked example",       body: "Can you give me a worked example?" },
+                { icon: "🎯", title: "Test my knowledge",    body: "Ask me a question to check my understanding." },
+                { icon: "🔍", title: "I'm confused",         body: "I need help understanding this — can you break it down?" },
+              ].map((p) => (
+                <button key={p.title} className="sp-suggestion" onClick={() => !isPaused && sessionSend(p.body)}>
+                  <div style={{ fontSize: 16, marginBottom: 3 }}>{p.icon}</div>
+                  <div style={{ fontSize: 11, fontWeight: 700, color: "var(--text-primary)", marginBottom: 2 }}>{p.title}</div>
+                  <div style={{ fontSize: 10, color: "var(--text-muted)", lineHeight: 1.4 }}>{p.body}</div>
+                </button>
+              ))}
+            </div>
           </div>
         ) : !isPaused ? (
           <ChatWindow
@@ -1401,35 +1439,38 @@ export default function SessionPage() {
       {sessionState === "active" && !isPaused && (
         <div style={{
           display: "flex", alignItems: "center", justifyContent: "center",
-          gap: 0, padding: "0 16px", height: 32,
-          background: "rgba(0,0,0,0.18)", borderBottom: "1px solid rgba(255,255,255,0.08)",
+          gap: 0, padding: "0 16px", height: 36,
+          background: "linear-gradient(135deg, #1565c0 0%, #1a73e8 60%, #4f46e5 100%)",
+          borderBottom: "2px solid rgba(255,255,255,0.15)",
         }}>
           {sessionPhases.map((phase, i) => (
             <div key={i} style={{ display: "flex", alignItems: "center" }}>
               <div style={{
-                display: "flex", alignItems: "center", gap: 5, padding: "3px 10px",
+                display: "flex", alignItems: "center", gap: 4,
+                padding: "4px 12px",
                 borderRadius: 99, fontSize: 11, fontWeight: i === currentPhaseIdx ? 700 : 500,
                 background: i < currentPhaseIdx
-                  ? "rgba(255,255,255,0.12)"
+                  ? "#22c55e"
                   : i === currentPhaseIdx
-                  ? "rgba(255,255,255,0.92)"
+                  ? "#ffffff"
                   : "transparent",
                 color: i < currentPhaseIdx
-                  ? "rgba(255,255,255,0.55)"
+                  ? "#ffffff"
                   : i === currentPhaseIdx
-                  ? "#1a73e8"
-                  : "rgba(255,255,255,0.45)",
-                transition: "all 0.4s ease",
+                  ? "#1a56db"
+                  : "rgba(255,255,255,0.65)",
+                boxShadow: i === currentPhaseIdx ? "0 2px 8px rgba(0,0,0,0.2)" : "none",
+                transition: "all 0.35s ease",
                 whiteSpace: "nowrap",
               }}>
-                {i < currentPhaseIdx && <span style={{ fontSize: 9 }}>✓</span>}
+                {i < currentPhaseIdx && <span style={{ fontSize: 9, fontWeight: 800 }}>✓</span>}
                 {phase.label}
               </div>
               {i < sessionPhases.length - 1 && (
                 <div style={{
-                  width: 24, height: 1,
-                  background: i < currentPhaseIdx ? "rgba(255,255,255,0.3)" : "rgba(255,255,255,0.12)",
-                  transition: "background 0.4s ease",
+                  width: 22, height: 1,
+                  background: i < currentPhaseIdx ? "rgba(34,197,94,0.6)" : "rgba(255,255,255,0.25)",
+                  transition: "background 0.35s ease",
                 }} />
               )}
             </div>
