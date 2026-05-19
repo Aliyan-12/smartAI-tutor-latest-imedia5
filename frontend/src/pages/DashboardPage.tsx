@@ -145,10 +145,7 @@ export default function DashboardPage() {
               @media (max-width: 640px) {
                 .db-hero-sub { display: none !important; }
                 .db-hero-robot { display: none !important; }
-                .db-hero-stats { margin-right: 0 !important; gap: 6px !important; }
-                .db-hero-stat-chip { min-width: unset !important; padding: 6px 8px !important; }
-                .db-hero-stat-chip span:first-child { font-size: 16px !important; }
-                .db-hero-xp { min-width: 120px !important; padding: 6px 8px !important; }
+                .db-hero-stats { margin-right: 0 !important; gap: 6px !important; flex-wrap: wrap; }
               }
             `}</style>
             <div>
@@ -159,44 +156,39 @@ export default function DashboardPage() {
                 Ready to learn something amazing today?
               </p>
             </div>
-            <div className="db-hero-stats" style={{ display: "flex", alignItems: "center", gap: 10, zIndex: 1, marginRight: 130 }}>
+            <div className="db-hero-stats" style={{ display: "flex", alignItems: "center", gap: 8, zIndex: 1, marginRight: 130 }}>
               {heroStats ? (
                 <>
-                  {/* Streak */}
-                  <div className="db-hero-stat-chip" style={{
-                    background: "rgba(255,255,255,0.14)", border: "1px solid rgba(255,255,255,0.25)",
-                    borderRadius: 12, padding: "8px 14px", backdropFilter: "blur(10px)",
-                    display: "flex", flexDirection: "column", alignItems: "center", gap: 2, minWidth: 64,
+                  {/* Streak pill */}
+                  <div style={{
+                    display: "flex", alignItems: "center", gap: 6,
+                    background: "rgba(255,255,255,0.18)", border: "1.5px solid rgba(255,255,255,0.3)",
+                    borderRadius: 999, padding: "7px 16px", backdropFilter: "blur(10px)",
                   }}>
-                    <span style={{ fontSize: 20 }}>🔥</span>
-                    <span style={{ fontSize: 14, fontWeight: 800, color: "#fff", lineHeight: 1 }}>{heroStats.streak}</span>
-                    <span style={{ fontSize: 10, color: "rgba(255,255,255,0.72)", fontWeight: 600 }}>day streak</span>
+                    <span style={{ fontSize: 16 }}>🔥</span>
+                    <span style={{ fontSize: 13, fontWeight: 700, color: "#fff", whiteSpace: "nowrap" }}>{heroStats.streak} Day Streak</span>
                   </div>
 
-                  {/* XP bar block */}
-                  <div className="db-hero-xp" style={{
-                    background: "rgba(255,255,255,0.14)", border: "1px solid rgba(255,255,255,0.25)",
-                    borderRadius: 12, padding: "8px 14px", backdropFilter: "blur(10px)", minWidth: 148,
+                  {/* XP pill */}
+                  <div style={{
+                    display: "flex", alignItems: "center", gap: 6,
+                    background: "rgba(255,255,255,0.18)", border: "1.5px solid rgba(255,255,255,0.3)",
+                    borderRadius: 999, padding: "7px 16px", backdropFilter: "blur(10px)",
                   }}>
-                    <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 5 }}>
-                      <span style={{ fontSize: 11, fontWeight: 700, color: "#fff" }}>⭐ {heroStats.xp.toLocaleString()} XP</span>
-                      <span style={{ fontSize: 11, fontWeight: 700, color: "#fde68a" }}>Lv {heroStats.level}</span>
-                    </div>
-                    <div style={{ height: 6, background: "rgba(255,255,255,0.2)", borderRadius: 999, overflow: "hidden" }}>
-                      <div style={{ height: "100%", background: "linear-gradient(90deg, #fbbf24, #f59e0b)", borderRadius: 999, width: `${heroStats.xpPct}%`, transition: "width 0.6s ease" }} />
-                    </div>
-                    <div style={{ fontSize: 10, color: "rgba(255,255,255,0.6)", marginTop: 4, textAlign: "right" }}>to next level</div>
+                    <span style={{ fontSize: 16 }}>⭐</span>
+                    <span style={{ fontSize: 13, fontWeight: 700, color: "#fff", whiteSpace: "nowrap" }}>{heroStats.xp.toLocaleString()} XP</span>
                   </div>
 
-                  {/* Level badge */}
-                  <div className="db-hero-stat-chip" style={{
-                    background: "rgba(255,255,255,0.14)", border: "1px solid rgba(255,255,255,0.25)",
-                    borderRadius: 12, padding: "8px 14px", backdropFilter: "blur(10px)",
-                    display: "flex", flexDirection: "column", alignItems: "center", gap: 2, minWidth: 64,
+                  {/* Level pill with inline progress bar */}
+                  <div style={{
+                    display: "flex", alignItems: "center", gap: 8,
+                    background: "rgba(255,255,255,0.18)", border: "1.5px solid rgba(255,255,255,0.3)",
+                    borderRadius: 999, padding: "7px 16px", backdropFilter: "blur(10px)",
                   }}>
-                    <span style={{ fontSize: 20 }}>🏅</span>
-                    <span style={{ fontSize: 14, fontWeight: 800, color: "#fff", lineHeight: 1 }}>Level {heroStats.level}</span>
-                    <span style={{ fontSize: 10, color: "rgba(255,255,255,0.72)", fontWeight: 600 }}>rank</span>
+                    <span style={{ fontSize: 13, fontWeight: 700, color: "#fff", whiteSpace: "nowrap" }}>Level {heroStats.level}</span>
+                    <div style={{ width: 64, height: 5, background: "rgba(255,255,255,0.25)", borderRadius: 999, overflow: "hidden" }}>
+                      <div style={{ height: "100%", background: "#fff", borderRadius: 999, width: `${heroStats.xpPct}%`, transition: "width 0.6s ease" }} />
+                    </div>
                   </div>
                 </>
               ) : (
