@@ -239,6 +239,43 @@ async def _fetch_unit_kb_content_rag(
     return "\n\n".join(all_content)[:max_chars]
 
 
+def _get_current_step(elapsed_minutes: int, steps: list[dict]) -> int:
+    """Return 1-based step number based on elapsed time."""
+    cumulative = 0
+    for i, step in enumerate(steps, start=1):
+        cumulative += step.get("duration_minutes", 0)
+        if elapsed_minutes < cumulative:
+            return i
+    return len(steps)
+
+
+LEARN_MODE_INSTRUCTIONS: dict[str, str] = {
+    "slides": (
+        "SLIDES TEACHING MODE: Present information like a structured presentation. "
+        "One concept per 'slide' — explain it clearly with a visual description or diagram description, "
+        "then check understanding before moving to the next concept. "
+        "Say things like 'Let me show you the next part...' to signal transitions."
+    ),
+    "worksheet": (
+        "WORKSHEET MODE: Work through practice problems together. "
+        "Always ask the student to attempt the question first before explaining. "
+        "Guide step-by-step: 'What would you try first?' → hint → solution together. "
+        "Every question answered correctly should be acknowledged with brief praise."
+    ),
+    "quiz": (
+        "QUIZ-FIRST MODE: After a brief 2-minute introduction to the topic, "
+        "move quickly to quiz questions to identify knowledge gaps. "
+        "Use quiz results to decide what to teach. Focus teaching time on weak areas only. "
+        "End with a second quiz to confirm improvement."
+    ),
+    "ai_recommended": (
+        "AI RECOMMENDED MODE: Use the optimal blend of explanation, worked examples, "
+        "guided practice, and assessment for this specific topic and student. "
+        "Follow the lesson structure steps above as your guide."
+    ),
+}
+
+
 def _get_lesson_plan(duration_minutes: int) -> str:
     """Return the full session plan for injection into the AI prompt."""
     if duration_minutes <= 25:  # Quick Boost — 20 min
@@ -576,6 +613,58 @@ async def build_session_system_prompt(
     lesson_phase_instruction = lesson_phase_info["instruction"]
     lesson_plan_str = _get_lesson_plan(duration_minutes)
 
+    # Load learn_mode from appointment (new field, default fallback)
+    learn_mode = getattr(appointment, "learn_mode", "ai_recommended") or "ai_recommended"
+    learn_mode_instruction = LEARN_MODE_INSTRUCTIONS.get(learn_mode, LEARN_MODE_INSTRUCTIONS["ai_recommended"])
+
+    # Load LessonPlan + plan_blocks for this appointment
+    lesson_plan_obj = None
+    plan_blocks_section = ""
+    materials_section = ""
+    try:
+        from app.models.lesson_plan import LessonPlan as _LP
+        lp_result = await db.execute(select(_LP).where(_LP.appointment_id == appointment_id))
+        lesson_plan_obj = lp_result.scalar_one_or_none()
+    except Exception as _lp_err:
+        logger.warning(f"Could not load LessonPlan for appointment {appointment_id}: {_lp_err}")
+
+    if lesson_plan_obj and lesson_plan_obj.plan_blocks:
+        pb = lesson_plan_obj.plan_blocks
+        steps = pb.get("steps", [])
+        if steps:
+            step_lines = "\n".join(
+                f"  Step {s['order']} ({s['duration_minutes']} min) — {s['title']}: {s.get('ai_instruction', '')}"
+                for s in steps
+            )
+            current_step_num = _get_current_step(elapsed_minutes, steps)
+            plan_blocks_section = f"""
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+LESSON STRUCTURE — FOLLOW THIS PLAN:
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+{step_lines}
+
+You are currently in Step {current_step_num} of {len(steps)}.
+Follow each step in order. Do not skip ahead.
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+"""
+
+    if lesson_plan_obj and lesson_plan_obj.materials_uploaded:
+        mat_lines = []
+        for mat in lesson_plan_obj.materials_uploaded:
+            mat_fname = mat.get("filename", "file")
+            mat_content = mat.get("text_content", "")[:2000]
+            if mat_content:
+                mat_lines.append(f"[{mat_fname}]:\n{mat_content}")
+        if mat_lines:
+            materials_section = f"""
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+STUDENT UPLOADED MATERIALS:
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+The student has uploaded the following material for this session. Reference it when relevant:
+{'---'.join(mat_lines)}
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+"""
+
     # Continuation vs fresh start
     is_continuation = history_len > 0
     if is_continuation:
@@ -652,17 +741,22 @@ SESSION CONTEXT:
 - Subject: {subject} | Key Stage: {key_stage}
 - Session Title: {title}
 - Session Type: {session_type_raw}
+- Learn Mode: {learn_mode.upper()}
 - Scheduled: {scheduled_str}
 - Duration: {duration_minutes} min | Elapsed: ~{elapsed_minutes} min | Remaining: ~{remaining_minutes} min
 - Current Lesson Phase: {lesson_phase_name}
 
-{lesson_plan_str}
+LEARN MODE: {learn_mode.upper()}
+{learn_mode_instruction}
+
+{plan_blocks_section}{lesson_plan_str}
 
 TOPICS TO COVER THIS SESSION:
 {topics_str}
 
 TUTOR NOTES FROM BOOKING:
 {tutor_notes}
+{materials_section}
 
 STUDENT PROFILE:
 - XP Level: {xp_level}/10 | Learning Style: {learning_style} | Pace: {teaching_pace}
@@ -858,6 +952,23 @@ async def generate_session_briefing(db: AsyncSession, appointment_id: int) -> di
     type_match = _re.search(r"Session type:\s*([^\n]+)", description, _re.IGNORECASE)
     session_type = type_match.group(1).strip() if type_match else "General Tutoring"
 
+    # Enrich briefing with learn_mode and plan step titles if available
+    learn_mode_line = ""
+    plan_steps_line = ""
+    try:
+        _lm = getattr(appointment, "learn_mode", None) or "ai_recommended"
+        learn_mode_line = f"- Learning Mode: {_lm}"
+        from app.models.lesson_plan import LessonPlan as _LP2
+        _lp_res = await db.execute(select(_LP2).where(_LP2.appointment_id == appointment_id))
+        _lp_obj = _lp_res.scalar_one_or_none()
+        if _lp_obj and _lp_obj.plan_blocks:
+            _steps = _lp_obj.plan_blocks.get("steps", [])
+            if _steps:
+                _titles = ", ".join(s["title"] for s in _steps)
+                plan_steps_line = f"- Lesson Steps: {_titles}"
+    except Exception:
+        pass
+
     prompt = f"""You are a UK curriculum expert preparing a student briefing for an AI tutoring session.
 
 Session details:
@@ -865,6 +976,8 @@ Session details:
 - Title: {title} | Type: {session_type}
 - Topics: {topics_str}
 - Duration: {duration} minutes
+{learn_mode_line}
+{plan_steps_line}
 
 Return ONLY valid JSON with exactly these 5 fields:
 {{

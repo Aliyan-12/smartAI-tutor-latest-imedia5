@@ -15,6 +15,7 @@ class AppointmentCreate(BaseModel):
     payment_amount: Optional[float] = 25.00
     passcode: Optional[str] = Field(None, max_length=16)
     notes: Optional[str] = None
+    learn_mode: str = Field(default="ai_recommended")
 
 
 class AppointmentStatusUpdate(BaseModel):
@@ -43,6 +44,7 @@ class AppointmentResponse(BaseModel):
     session_started_at: Optional[datetime] = None
     meeting_link: Optional[str] = None
     notes: Optional[str] = None
+    learn_mode: str = "ai_recommended"
     created_at: datetime
     updated_at: datetime
     student_name: Optional[str] = None

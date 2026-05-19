@@ -764,6 +764,7 @@ export const appointmentsApi = {
     student_id: number; teacher_id: number; subject: string; key_stage: string;
     title: string; scheduled_at: string; duration_minutes?: number;
     description?: string; payment_amount?: number; passcode?: string;
+    learn_mode?: string;
   }) {
     const res = await fetch(`${API_BASE}/appointments/book`, {
       method: "POST",
@@ -808,5 +809,15 @@ export const appointmentsApi = {
   async getReport(id: number) {
     const res = await fetch(`${API_BASE}/appointments/${id}/report`, { headers: authHeaders() });
     return handleResponse(res);
+  },
+  async uploadLessonFile(appointmentId: number, file: File): Promise<void> {
+    const formData = new FormData();
+    formData.append("file", file);
+    const token = getToken();
+    await fetch(`${API_BASE}/appointments/${appointmentId}/lesson-files`, {
+      method: "POST",
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+      body: formData,
+    });
   },
 };

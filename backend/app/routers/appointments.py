@@ -2,7 +2,7 @@ import logging
 from datetime import datetime, timezone
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, status, Query
+from fastapi import APIRouter, Depends, HTTPException, status, Query, File, UploadFile
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from sqlalchemy import select
@@ -10,6 +10,7 @@ from sqlalchemy import select
 from app.db.session import get_db
 from app.middleware.auth import require_parent_or_teacher, require_any_authenticated
 from app.models.user import User, ROLE_PARENT, ROLE_TEACHER, ROLE_STUDENT
+from app.models.appointment import Appointment
 from app.schemas.user import UserResponse
 from app.schemas.appointment import AppointmentCreate, AppointmentStatusUpdate, AppointmentResponse, AvailabilityResponse, SessionJoinRequest
 from app.services import appointment_service, email_service
@@ -73,6 +74,7 @@ async def book_appointment(
             payment_amount=payload.payment_amount,
             notes=payload.notes,
             passcode=payload.passcode,
+            learn_mode=payload.learn_mode,
         )
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(e))
@@ -82,6 +84,15 @@ async def book_appointment(
         appointment.status = "confirmed"
         await db.flush()
         await db.refresh(appointment)
+        try:
+            from app.services import lesson_structure_service
+            await lesson_structure_service.auto_create_lesson_plan(
+                db=db,
+                appointment=appointment,
+                student_id=current_user.id,
+            )
+        except Exception as _e:
+            logger.warning(f"Auto lesson plan generation failed (non-fatal): {_e}")
     else:
         parent_email = None
         if student.parent_id:
@@ -97,6 +108,9 @@ async def book_appointment(
             scheduled_at=payload.scheduled_at,
             parent_email=parent_email,
         )
+
+    await db.commit()
+    await db.refresh(appointment)
 
     resp = AppointmentResponse.model_validate(appointment)
     resp.student_name = student.name
@@ -131,6 +145,83 @@ async def check_availability(
     db: AsyncSession = Depends(get_db),
 ):
     return await appointment_service.check_availability(db, student_id)
+
+
+@router.post("/{appointment_id}/lesson-files")
+async def upload_lesson_file(
+    appointment_id: int,
+    file: UploadFile = File(...),
+    current_user: User = Depends(require_any_authenticated),
+    db: AsyncSession = Depends(get_db),
+):
+    """Accept a student-uploaded file and store its text content in the LessonPlan."""
+    import io
+
+    # Load appointment
+    result = await db.execute(select(Appointment).where(Appointment.id == appointment_id))
+    appointment = result.scalar_one_or_none()
+    if not appointment or appointment.student_id != current_user.id:
+        raise HTTPException(status_code=404, detail="Appointment not found")
+
+    # Extract text content
+    content_bytes = await file.read()
+    text_content = ""
+    fname = file.filename or "upload"
+    ct = (file.content_type or "").lower()
+
+    try:
+        if ct == "application/pdf" or fname.lower().endswith(".pdf"):
+            try:
+                import pdfplumber
+                with pdfplumber.open(io.BytesIO(content_bytes)) as pdf:
+                    text_content = "\n".join(p.extract_text() or "" for p in pdf.pages[:20])
+            except ImportError:
+                from pypdf import PdfReader
+                reader = PdfReader(io.BytesIO(content_bytes))
+                text_content = "\n".join(
+                    page.extract_text() or "" for page in reader.pages[:20]
+                )
+        elif (
+            ct == "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+            or fname.lower().endswith(".docx")
+        ):
+            from docx import Document
+            doc = Document(io.BytesIO(content_bytes))
+            text_content = "\n".join(p.text for p in doc.paragraphs if p.text.strip())
+        elif ct.startswith("text/") or fname.lower().endswith(".txt"):
+            text_content = content_bytes.decode("utf-8", errors="replace")
+        else:
+            text_content = f"[{fname} uploaded — binary file, no text content]"
+    except Exception as e:
+        text_content = f"[Error reading {fname}: {e}]"
+
+    # Store in LessonPlan.materials_uploaded
+    from app.models.lesson_plan import LessonPlan
+    lp_result = await db.execute(
+        select(LessonPlan).where(LessonPlan.appointment_id == appointment_id)
+    )
+    lesson_plan = lp_result.scalar_one_or_none()
+    if not lesson_plan:
+        lesson_plan = LessonPlan(
+            appointment_id=appointment_id,
+            student_id=current_user.id,
+            created_by=current_user.id,
+            subject=appointment.subject,
+            key_stage=appointment.key_stage,
+            goal="learn_scratch",
+            status="planned",
+        )
+        db.add(lesson_plan)
+
+    existing_materials = list(lesson_plan.materials_uploaded or [])
+    existing_materials.append({
+        "filename": fname,
+        "content_type": ct,
+        "text_content": text_content[:5000],  # cap at 5000 chars
+    })
+    lesson_plan.materials_uploaded = existing_materials
+    await db.commit()
+    return {"ok": True, "filename": fname}
 
 
 @router.get("/{appointment_id}/briefing")

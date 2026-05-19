@@ -38,6 +38,7 @@ class Appointment(Base):
     meeting_link: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     ai_briefing: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    learn_mode: Mapped[str] = mapped_column(String(20), default="ai_recommended", nullable=False)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
     )

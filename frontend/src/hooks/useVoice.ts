@@ -15,6 +15,31 @@ interface VoiceCallbacks {
 }
 
 function _splitAtSentenceBoundary(text: string, maxLen: number): string[] {
+  // If text has comma/sentence breaks, split at each punctuation boundary for faster TTS.
+  // "Hey, how are you? Fine." → ["Hey,", "how are you?", "Fine."]
+  if (/[,!?.]/.test(text)) {
+    const phrases: string[] = [];
+    // Split after each punctuation, keeping the mark with its phrase
+    const parts = text.split(/(?<=[,!?.])\s*/);
+    for (const part of parts) {
+      const trimmed = part.trim();
+      if (!trimmed || trimmed.length < 10) continue;
+      if (trimmed.length <= maxLen) {
+        phrases.push(trimmed);
+      } else {
+        // Phrase still too long — hard-chunk without recursion
+        let s = 0;
+        while (s < trimmed.length) {
+          const chunk = trimmed.slice(s, s + maxLen).trim();
+          if (chunk.length >= 10) phrases.push(chunk);
+          s += maxLen;
+        }
+      }
+    }
+    return phrases.filter(c => c.length >= 10);
+  }
+
+  // No punctuation — original maxLen chunking with sentence-boundary preference
   if (text.length <= maxLen) return [text];
   const chunks: string[] = [];
   let start = 0;

@@ -49,6 +49,7 @@ async def book_appointment(
     payment_amount: Optional[float] = 25.00,
     notes: Optional[str] = None,
     passcode: Optional[str] = None,
+    learn_mode: str = "ai_recommended",
 ) -> Appointment:
     appointment = Appointment(
         student_id=student_id,
@@ -65,6 +66,7 @@ async def book_appointment(
         passcode=passcode or None,
         status="booked",
         payment_status="pending",
+        learn_mode=learn_mode,
     )
     db.add(appointment)
     await db.flush()

@@ -92,6 +92,7 @@ async def run_setup(fresh: bool = False):
         # student key stage (KS1/KS2/KS3/GCSE/A-Level/Degree) — determines available session lengths
         "ALTER TABLE student_profiles ADD COLUMN IF NOT EXISTS key_stage VARCHAR(20)",
         "ALTER TABLE appointments ADD COLUMN IF NOT EXISTS ai_briefing TEXT",
+        "ALTER TABLE appointments ADD COLUMN IF NOT EXISTS learn_mode VARCHAR(20) NOT NULL DEFAULT 'ai_recommended'",
     ]
     async with engine.begin() as conn:
         for sql in _migrations:
