@@ -42,12 +42,12 @@ _STEP_META: dict[str, tuple[str, str]] = {
     "Warm Up":               ("recap",    "Ask ONE prior-knowledge question. Accept any answer — if the student says 'I don't know', reply 'No problem, we'll cover that!' and move straight to the next teaching step. Maximum 1-2 student exchanges, then MOVE ON."),
     "Introduction":          ("recap",    "In 1-2 sentences tell the student what they'll learn today. Ask what they already know about this topic, accept any answer, then move on to teaching."),
     # teach / slides
-    "Core Concept Introduction": ("teach",   "Explain this concept clearly in 2-3 sentences with one real-world example. Ask ONE short check question, accept any answer, give one-sentence feedback, then move on to the next step."),
-    "Missed Content Overview":   ("teach",   "Explain the missed concept clearly in 2-3 sentences with one real-world example. Ask ONE short check question, give one-sentence feedback, then move on."),
-    "Key Concept Review":        ("teach",   "Explain this concept clearly in 2-3 sentences — reinforce key points and correct any misconceptions. Ask ONE exam-style question, give one-sentence feedback, then move on."),
-    "Slide: Key Concepts":       ("teach",   "Present ONE key concept per response. Explain it in 2-3 sentences with an example. Ask ONE short check question, then move on to the next concept or step."),
-    "Slide: Worked Examples":    ("teach",   "Work through ONE example step-by-step out loud ('I do — watch me'). Then ask the student to state the next step before you show it. Move on once they've engaged."),
-    "Review Homework Problem":   ("teach",   "Ask which specific question the student is stuck on. Walk through the method step-by-step — ask 'What do you think the first step is?' before giving it. Move to practice once explained."),
+    "Core Concept Introduction": ("teach",   "TEACH ONLY — do NOT ask questions. Explain this concept clearly in 2-3 sentences with one real-world example. Then immediately move on to the next step."),
+    "Missed Content Overview":   ("teach",   "TEACH ONLY — do NOT ask questions. Explain the missed concept clearly in 2-3 sentences with one real-world example. Then immediately move on to the next step."),
+    "Key Concept Review":        ("teach",   "TEACH ONLY — do NOT ask questions. Explain this concept clearly in 2-3 sentences, reinforcing key points and correcting misconceptions. Then move on to the next step."),
+    "Slide: Key Concepts":       ("teach",   "TEACH ONLY — do NOT ask questions. Present ONE key concept per response. Explain it in 2-3 sentences with an example. Then move on."),
+    "Slide: Worked Examples":    ("teach",   "TEACH ONLY — do NOT ask questions. Work through ONE example step-by-step out loud ('I do — watch me'). Narrate each step clearly. Then move on to practice."),
+    "Review Homework Problem":   ("teach",   "Ask which specific question the student is stuck on. Walk through the method step-by-step — narrate each step clearly without asking questions mid-explanation. Move to practice once explained."),
     # practice / worksheet
     "Work Through Together":     ("practice", "Pose ONE practice question. Say 'Have a go — what would you do first?' Wait for their attempt. Guide step-by-step only if stuck. Give specific one-sentence feedback, then move on."),
     "Worked Examples":           ("practice", "Show ONE worked example fully ('I do'). Then say 'Now you try a similar one' and give them a parallel problem ('We do'). Give specific feedback, then move on to the next step."),
@@ -64,10 +64,10 @@ _STEP_META: dict[str, tuple[str, str]] = {
     "Quiz Round 1":              ("quiz",     "Offer an interactive quiz on this topic using the [QUIZ_OFFER] marker."),
     "Quiz Round 2":              ("quiz",     "Offer a second interactive quiz focusing on any gaps identified in Round 1 using the [QUIZ_OFFER] marker."),
     "Review Mistakes":           ("review",   "Go through any incorrect answers from the previous quiz. Clarify each misconception in 1-2 sentences. Move on once all reviewed."),
-    "Final Score & Next Steps":  ("review",   "Summarise the 3 most important things learned today. Give personalised encouragement and ONE clear next-steps recommendation."),
+    "Final Score & Next Steps":  ("review",   "Summarise the 3 most important things learned. Give personalised encouragement. Suggest one thing to review independently. Then continue — offer harder practice or move to a new topic. Do NOT say goodbye or imply the session is ending."),
     # review / summary
-    "Review & Next Steps":       ("review",   "Summarise the 3 most important things learned today. Highlight one thing the student did well. Give ONE clear next-steps recommendation. Then close warmly."),
-    "Summary":                   ("review",   "Summarise the 3 most important things learned today. Give ONE clear next-steps recommendation. Close warmly."),
+    "Review & Next Steps":       ("review",   "Give a brief mid-topic recap: 2-3 sentences summarising what was just covered. Highlight one thing the student did well. Then IMMEDIATELY continue — either move to the next topic in the TOPICS list, or deepen practice. Do NOT say goodbye, 'see you next time', or imply the session is ending. The student ends the session — you do not."),
+    "Summary":                   ("review",   "Give a brief mid-topic recap: 2-3 sentences summarising what was just covered. Then IMMEDIATELY continue to the next topic or offer harder practice. Do NOT say goodbye or imply the session is over."),
 }
 
 _DEFAULT_AI_INSTRUCTION = "Guide the student through this step clearly and check understanding before moving on."
