@@ -119,11 +119,26 @@ Dashboard → /lesson/setup → LessonSetupPage → creates appointment →
 - After join, if session is fresh (0 messages), auto-sends a human-readable start message after 800ms
 - The start message format: `"Let's start our lesson on {topicText}! I'm ready to begin."`
 
-### 5-Phase Lesson Structure (backend-enforced)
-Every AI session follows this structure (injected via `build_session_system_prompt()` in `session_agent_service.py`):
+### Goal-Specific Lesson Plan (backend-enforced)
+At booking time, `appointments.py` calls `lesson_structure_service.auto_create_lesson_plan()` which creates a `LessonPlan` record with `plan_blocks` — time-boxed steps specific to the chosen **goal** (learn_scratch, homework, catch_up, revision) × **duration** (20/40/60/90 min).
 
+`build_session_system_prompt()` in `session_agent_service.py` reads these plan_blocks and:
+- **When plan_blocks exist**: injects the goal-specific steps ONLY — suppresses the generic `lesson_plan_str` and MANDATORY 5-phase block entirely
+- **When plan_blocks absent**: falls back to the generic 5-phase duration-based structure
+
+Each step has a `type` (recap / teach / practice / quiz / review) and an `ai_instruction`.
+
+**Step type rules (enforced in system prompt):**
+- `recap` / `teach` steps: PURE TEACHING — AI never asks check questions
+- `practice` steps: AI asks ONE focused question per response, waits for answer
+- `review` steps: brief recap then IMMEDIATELY continues to next topic (no goodbye language)
+
+**Session never ends via AI** — the student ends it with the "End Lesson" button. After Review/Summary, AI continues to the next topic or deeper practice.
+
+### Generic Fallback — 5-Phase Structure
+Used only when no plan_blocks exist:
 1. **CONNECT** (10%) — warm opener, prior knowledge, goal-setting
-2. **TEACH** (40%) — step-by-step explanations, examples, checking questions
+2. **TEACH** (40%) — step-by-step explanations, examples
 3. **PRACTICE** (25%) — guided questions, adaptive difficulty, instant feedback
 4. **APPLY** (15%) — independent challenge, detailed feedback
 5. **REFLECT** (10%) — recap, strengths, next steps
@@ -142,8 +157,23 @@ The AI always leads; it never waits for the student to initiate.
 - Top-5 chunks retrieved per query at cosine similarity ≥ 0.3
 - Injected into Gemini system prompt as context
 
-### TTS Stale Closure Fix (SessionPage.tsx)
-`ttsEnabledRef = useRef(true)` + effect to sync it. All 4 callbacks read `ttsEnabledRef.current` (not the `ttsEnabled` state) to avoid stale closure bugs when muting mid-stream.
+### TTS Mute Fix (SessionPage.tsx)
+- `ttsEnabledRef = useRef(true)` + sync effect; all callbacks read `ttsEnabledRef.current` (not stale `ttsEnabled` state)
+- `cancelStreamTTS` is destructured from `useVoice` and called immediately when user mutes
+- `onToken` callbacks are gated: `(t: string) => { if (ttsEnabledRef.current) feedStreamTTS(t); }` — stops feeding the TTS API mid-stream if muted
+- When muted: zero calls to `/api/voice/speak`
+
+### Quiz QUIZ_OFFER Topic Rule
+The AI must write specific concepts taught in QUIZ_OFFER, not generic unit names:
+- ✅ `[QUIZ_OFFER: topic="eukaryotic vs prokaryotic cells, light microscope magnification"]`
+- ❌ `[QUIZ_OFFER: topic="Cell-structure-1, Cell-structure-and-using-a-light-microscope-"]`
+`gemini_service.generate_mcq_questions()` enforces topic scope even when KB content spans broader material.
+
+### Session Preview Screen (SessionPage.tsx)
+Before joining, student sees a 2-column briefing screen:
+- Left: gradient hero card (subject, key stage, topics, session type), lesson phase timeline, join/passcode card
+- Right: AI Session Briefing panel (hook, what you'll learn, key ideas, key terms, session tip) — fetched via `appointmentsApi.getBriefing()`
+State variables: `sessionBriefing`, `briefingLoading`
 
 ---
 

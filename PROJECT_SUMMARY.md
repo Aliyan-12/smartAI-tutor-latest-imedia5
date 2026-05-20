@@ -1,7 +1,7 @@
 # SmartAI Tutor — Project Summary
 
 > **Last updated:** 2026-05-20
-> **Recent changes:** Sidebar singleton dropdown · Session auto-start + 5-phase AI lesson · Dashboard redesign · BookSessionPage redesign · TTS stale closure fix
+> **Recent changes:** Sidebar singleton dropdown · Session auto-start + goal-specific lesson plan · TTS mute fix (cancelStreamTTS) · Dashboard redesign · BookSessionPage redesign · Session never-ends-early rule · Quiz topic specificity fix
 
 SmartAI Tutor is an AI-powered tutoring platform built for UK GCSE curriculum (Key Stages 1-5). It provides personalized learning through text chat and real-time voice conversation, grounded in actual course materials via a Retrieval-Augmented Generation (RAG) system. Teachers and admins upload curriculum content (PDF, DOCX, PPTX) organized by Key Stage, subject, exam board, and tier. When students ask questions, the system automatically retrieves relevant document chunks using pgvector similarity search and injects them into the Gemini AI prompt, producing accurate, curriculum-aligned answers.
 
@@ -484,9 +484,9 @@ Simple chat uses `SIMPLE_CHAT_SYSTEM_PROMPT` (no `[QUIZ_OFFER]` / `[SLIDE_TRIGGE
 - Empty state replaced with "Starting your lesson…" loading indicator (no "Ask me anything" prompt)
 - Passcode-only screen simplified (removed AI briefing right panel)
 
-### 5-Phase Lesson Structure (session_agent_service.py)
-- CONNECT (10%) → TEACH (40%) → PRACTICE (25%) → APPLY (15%) → REFLECT (10%) enforced via system prompt
-- AI always leads, checks understanding every 3–5 mins, never waits for student to initiate
+### Session AI Architecture (session_agent_service.py)
+- When `LessonPlan.plan_blocks` is present, AI follows the goal-specific step plan generated at booking time; generic CONNECT→TEACH→PRACTICE→APPLY→REFLECT structure is only used as fallback when no plan_blocks exist
+- AI always leads; never waits for the student to initiate; step transitions happen on task completion
 
 ### `__LESSON_START__` Intercept (chat.py)
 - Backend detects `message.content == "__LESSON_START__"`, skips DB save, substitutes lesson-start instruction to Gemini
@@ -498,9 +498,37 @@ Simple chat uses `SIMPLE_CHAT_SYSTEM_PROMPT` (no `[QUIZ_OFFER]` / `[SLIDE_TRIGGE
 - Added "Pick a Subject & Tutor" section — 3 subject cards linking to `/lesson/setup` with pre-filled subject state
 - All subject/lesson links → `/lesson/setup` (never `/chat`)
 
-### TTS Stale Closure Fix (SessionPage.tsx)
-- `ttsEnabledRef = useRef(true)` + sync effect; all 4 callbacks read `ttsEnabledRef.current` not stale `ttsEnabled`
-- Fixes mute button having no effect mid-stream
+### TTS Mute Fix (SessionPage.tsx)
+- `ttsEnabledRef = useRef(true)` + sync effect; all callbacks read `ttsEnabledRef.current` (not stale `ttsEnabled` state)
+- `cancelStreamTTS` destructured from `useVoice` and called **immediately** when mute is toggled off — stops any active in-flight TTS stream
+- All `onToken` callbacks gated: `if (!ttsEnabledRef.current) return;` before `feedStreamTTS(t)`
+- Fixes mute button having no effect mid-stream and stale closure bug
+
+### Goal-Specific Lesson Plan (session_agent_service.py + lesson_structure_service.py)
+- At booking time, `lesson_structure_service.auto_create_lesson_plan()` generates `LessonPlan.plan_blocks` — time-boxed steps matched to the chosen goal (Homework Help, Learn from Scratch, Catch Up, Revision) and learn mode (AI Recommended, Slides, Worksheet, Quiz)
+- `build_session_system_prompt()` now detects `has_plan_blocks`; when true, the goal-specific plan **fully replaces** the generic 5-phase structure and `lesson_plan_str` — eliminating the three competing structures that caused AI confusion
+- Plan block header rendered with box-drawing characters for emphasis: `YOUR LESSON PLAN (set at booking)` + `ACTIVE STEP: Step N of N` + `TIME REMAINING: ~M minutes`
+
+### TEACH vs PRACTICE Step Type Rule (session_agent_service.py)
+- `STEP TYPE RULE` added to TEACHING STYLE section: during `recap` or `teach` steps — **pure teaching only, no check questions**; during `practice` steps — **ask ONE focused question per response and wait**
+- Prevents AI from asking questions during explanation steps (root cause of premature comprehension checks)
+- `_STEP_META` in `lesson_structure_service.py` updated: teach-type entries explicitly say "TEACH ONLY — do NOT ask questions"; practice entries specify "Give 1 question, wait for attempt, give feedback, move on"
+
+### Session Never-Ends-Early Rule (session_agent_service.py)
+- `CRITICAL SESSION RULES` block added to plan_blocks section: AI must **never** say "See you next time", "goodbye", "that's all for today", or any phrase implying the session is over
+- After completing Review/Summary, AI **immediately continues** — moves to next topic or deepens practice
+- All topics in the TOPICS list must be taught before any final summary
+- Session ends **only** when the student says they want to stop or clicks the End Lesson button
+- `Review & Next Steps` and `Summary` step instructions in `_STEP_META` updated with explicit "Do NOT say goodbye" language
+
+### No Apology Language (session_agent_service.py)
+- `NEVER apologise` added to the ALWAYS block and QUIZ RULES
+- Expanded banned vague check-ins: removed "shall we move on?", "ready to continue?", "shall we get started?", "any questions so far?"
+
+### Quiz Topic Specificity Fix (session_agent_service.py + gemini_service.py)
+- `QUIZ_OFFER` topic must now be the **specific concepts taught** in the session (e.g. `"eukaryotic vs prokaryotic cells, light microscope magnification"`) — not generic booking unit names (e.g. `"Cell-structure-1"`)
+- `generate_mcq_questions()` in `gemini_service.py` strengthened with `STRICT TOPIC SCOPE` constraint in both the prompt and system instruction: "Do NOT write questions about other topics even if they appear in curriculum material"
+- Two-layer fix ensures quiz questions stay scoped to what was actually taught, not the full KB unit
 
 ### BookSessionPage.tsx — full page redesign
 - Gradient hero banner; numbered step cards (1–4); 5-column compact Session Goal cards
