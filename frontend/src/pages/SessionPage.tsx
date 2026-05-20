@@ -174,7 +174,7 @@ export default function SessionPage() {
     initSessionChat, activeSessionId, quizOffer, clearQuizOffer, sendQuizFeedback,
   } = useChat();
 
-  const { voiceStatus, playing, speakText, connectVoice, disconnectVoice, isVoiceActive, startStreamTTS, feedStreamTTS, endStreamTTS, sendQuizResult } = useVoice();
+  const { voiceStatus, playing, speakText, connectVoice, disconnectVoice, isVoiceActive, startStreamTTS, feedStreamTTS, endStreamTTS, cancelStreamTTS, sendQuizResult } = useVoice();
   const [voiceMessages, setVoiceMessages] = useState<{ role: string; content: string }[]>([]);
   const voiceMessagesRef = useRef<{ role: string; content: string }[]>([]);
   const voiceAiTurnRef = useRef("");
@@ -204,8 +204,11 @@ export default function SessionPage() {
 
   const [ttsEnabled, setTtsEnabled] = useState(true);
   const ttsEnabledRef = useRef(true);
-  // Keep ref in sync so closures in useCallback always read the live value
-  useEffect(() => { ttsEnabledRef.current = ttsEnabled; }, [ttsEnabled]);
+  // Keep ref in sync; cancel active TTS stream immediately when user mutes
+  useEffect(() => {
+    ttsEnabledRef.current = ttsEnabled;
+    if (!ttsEnabled) cancelStreamTTS();
+  }, [ttsEnabled]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleJoin = async (overrideCode?: string) => {
     if (!appointmentId) return;
@@ -357,7 +360,7 @@ export default function SessionPage() {
     const q = testAssessment.questions[testCurrentQ];
     if (!q) return;
     const opts = q.options.map((o, i) => `${["A", "B", "C", "D"][i]}: ${o}.`).join(" ");
-    if (!ttsEnabled) return;
+    if (!ttsEnabledRef.current) return;
     startStreamTTS();
     feedStreamTTS(`Question ${testCurrentQ + 1}: ${q.question_text}. Options are: ${opts}`);
     endStreamTTS();
@@ -369,7 +372,7 @@ export default function SessionPage() {
     const result = testFeedback.isCorrect ? "Correct!" : "Not quite.";
     const explanation = testFeedback.explanation ? ` ${testFeedback.explanation}` : "";
     const fullText = `${result}${explanation}`;
-    if (!ttsEnabled) return;
+    if (!ttsEnabledRef.current) return;
     startStreamTTS();
     feedStreamTTS(fullText);
     endStreamTTS();
@@ -377,7 +380,7 @@ export default function SessionPage() {
 
   // Auto-read final test score via TTS (both chat and voice mode)
   useEffect(() => {
-    if (!testResult || !ttsEnabled) return;
+    if (!testResult || !ttsEnabledRef.current) return;
     const weakMsg = testResult.weak.length > 0 ? `Areas to review: ${testResult.weak.join(", ")}.` : "Great job on all topics!";
     startStreamTTS();
     feedStreamTTS(`Quiz complete! You scored ${Math.round(testResult.score)} percent. ${weakMsg}`);
@@ -582,7 +585,7 @@ export default function SessionPage() {
           setIsAiTyping(true);
           sendQuizFeedback(activeSessionId, quizTopic, quizScore, quizStrong, quizWeak, {
             onStreamStart: () => { setIsAiTyping(false); if (ttsEnabledRef.current) startStreamTTS(); },
-            onToken: feedStreamTTS,
+            onToken: (t: string) => { if (ttsEnabledRef.current) feedStreamTTS(t); },
             onStreamComplete: () => { setIsAiTyping(false); if (ttsEnabledRef.current) endStreamTTS(); },
           }, questionDetails);
         }
@@ -689,7 +692,7 @@ export default function SessionPage() {
       sendMessage(text, {
         suppressNavigation: true,
         onStreamStart: () => { setIsAiTyping(false); if (ttsEnabledRef.current) startStreamTTS(); },
-        onToken: feedStreamTTS,
+        onToken: (t: string) => { if (ttsEnabledRef.current) feedStreamTTS(t); },
         onStreamComplete: (aiText: string, hasSlideTrigger?: boolean) => { setIsAiTyping(false); if (ttsEnabledRef.current) endStreamTTS(); if (hasSlideTrigger) generateSlide(aiText); },
       });
     },
