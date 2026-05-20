@@ -637,14 +637,19 @@ async def build_session_system_prompt(
                 for s in steps
             )
             current_step_num = _get_current_step(elapsed_minutes, steps)
+            next_step_hint = ""
+            if current_step_num < len(steps):
+                next_title = steps[current_step_num]["title"]
+                next_step_hint = f"\n  ➡ When Step {current_step_num} task is complete, move immediately to Step {current_step_num + 1}: {next_title}."
             plan_blocks_section = f"""
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-LESSON STRUCTURE — FOLLOW THIS PLAN:
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+╔══════════════════════════════════════╗
+  YOUR LESSON PLAN (set at booking)
+╚══════════════════════════════════════╝
 {step_lines}
 
-You are currently in Step {current_step_num} of {len(steps)}.
-Follow each step in order. Do not skip ahead.
+▶ ACTIVE STEP: Step {current_step_num} of {len(steps)}.
+Complete each step's task, then move to the next step WITHOUT WAITING.
+Task completion = move on. Do not linger. Do not repeat a step.{next_step_hint}
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 """
 
@@ -738,51 +743,24 @@ The following are real excerpts from an expert {subject} tutor. Study how they e
             "✅ Adapt to the student's pace and level."
         )
 
-    prompt = f"""You are a live AI tutor conducting a real-time tutoring session on SmartAI Tutor.
+    has_plan_blocks = bool(plan_blocks_section)
 
-SESSION CONTEXT:
-- Subject: {subject} | Key Stage: {key_stage}
-- Session Title: {title}
-- Session Type: {session_type_raw}
-- Learn Mode: {learn_mode.upper()}
-- Scheduled: {scheduled_str}
-- Duration: {duration_minutes} min | Elapsed: ~{elapsed_minutes} min | Remaining: ~{remaining_minutes} min
-- Current Lesson Phase: {lesson_phase_name}
+    if has_plan_blocks:
+        lesson_structure_block = f"""YOUR LESSON PLAN is defined above — follow THOSE STEPS EXACTLY, in order.
+Do NOT apply a generic 5-phase structure. The custom plan above IS your lesson structure.
+Complete each step's task, then move to the next step without hesitation.
 
-LEARN MODE: {learn_mode.upper()}
-{learn_mode_instruction}
-
-{plan_blocks_section}{lesson_plan_str}
-
-TOPICS TO COVER THIS SESSION:
-{topics_str}
-
-TUTOR NOTES FROM BOOKING:
-{tutor_notes}
-{materials_section}
-
-STUDENT PROFILE:
-- XP Level: {xp_level}/10 | Learning Style: {learning_style} | Pace: {teaching_pace}
-- Interests: {interests} | Preferences: {preferences_str}
-- Learning Goals: {learning_goals_str}
-
-STUDENT PROGRESS IN {subject.upper()}:
-- Strong: {strong_str}
-- Needs work: {weak_str}
-- Quiz average: {avg_score_str}
-
-THIS SESSION'S QUIZ RESULTS:
-{session_quiz_str}
-
-QUIZ STATUS: {quiz_timing_note}
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-CURRENT PHASE INSTRUCTION:
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-You are now in the **{lesson_phase_name}** phase of this session.
-{lesson_phase_instruction}
-
-═══════════════════════════════════════════════════════
+KEY RULES (enforce every lesson):
+• AI STARTS the lesson — never wait for the student to ask "what do we do?"
+• Stay ON TOPIC — only teach the topics listed above
+• Give INSTANT feedback — always explain why an answer is right or wrong
+• If student goes silent for 2+ turns, re-engage: "Still with me? Let's try this together..."
+• Lesson MUST end with the final Review/Summary step
+• Never say "What would you like to learn?" or "How can I help?" — YOU lead the lesson"""
+        phase_instruction_block = f"You are in the **{lesson_phase_name}** phase. {lesson_phase_instruction}"
+        structure_injection = plan_blocks_section
+    else:
+        lesson_structure_block = f"""═══════════════════════════════════════════════════════
 LESSON STRUCTURE — MANDATORY FOR EVERY SESSION
 ═══════════════════════════════════════════════════════
 
@@ -835,7 +813,55 @@ KEY RULES (enforce every lesson):
 • Give INSTANT feedback — always explain why an answer is right or wrong
 • If student goes silent for 2+ turns, re-engage: "Still with me? Let's try this together..."
 • Lesson MUST end with recap + strengths + next steps (Phase 5)
-• Never say "What would you like to learn?" or "How can I help?" — YOU lead the lesson
+• Never say "What would you like to learn?" or "How can I help?" — YOU lead the lesson"""
+        phase_instruction_block = f"""━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+CURRENT PHASE INSTRUCTION:
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+You are now in the **{lesson_phase_name}** phase of this session.
+{lesson_phase_instruction}"""
+        structure_injection = lesson_plan_str
+
+    prompt = f"""You are a live AI tutor conducting a real-time tutoring session on SmartAI Tutor.
+
+SESSION CONTEXT:
+- Subject: {subject} | Key Stage: {key_stage}
+- Session Title: {title}
+- Session Type: {session_type_raw}
+- Learn Mode: {learn_mode.upper()}
+- Scheduled: {scheduled_str}
+- Duration: {duration_minutes} min | Elapsed: ~{elapsed_minutes} min | Remaining: ~{remaining_minutes} min
+- Current Lesson Phase: {lesson_phase_name}
+
+LEARN MODE: {learn_mode.upper()}
+{learn_mode_instruction}
+
+{structure_injection}
+
+TOPICS TO COVER THIS SESSION:
+{topics_str}
+
+TUTOR NOTES FROM BOOKING:
+{tutor_notes}
+{materials_section}
+
+STUDENT PROFILE:
+- XP Level: {xp_level}/10 | Learning Style: {learning_style} | Pace: {teaching_pace}
+- Interests: {interests} | Preferences: {preferences_str}
+- Learning Goals: {learning_goals_str}
+
+STUDENT PROGRESS IN {subject.upper()}:
+- Strong: {strong_str}
+- Needs work: {weak_str}
+- Quiz average: {avg_score_str}
+
+THIS SESSION'S QUIZ RESULTS:
+{session_quiz_str}
+
+QUIZ STATUS: {quiz_timing_note}
+
+{phase_instruction_block}
+
+{lesson_structure_block}
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 TEACHING STYLE — FOLLOW THESE STRICTLY:
