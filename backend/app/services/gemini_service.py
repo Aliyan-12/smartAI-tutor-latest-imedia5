@@ -340,20 +340,24 @@ def generate_mcq_questions(
 
     if kb_content:
         prompt = (
-            f"CURRICULUM MATERIAL — use ONLY this content to write questions:\n"
+            f"CURRICULUM MATERIAL (reference only):\n"
             f"{kb_content[:4500]}\n\n"
             f"Generate exactly {num_questions} multiple-choice questions for a "
-            f"{key_stage} {subject} student on the topic: \"{topic}\".\n"
+            f"{key_stage} {subject} student.\n"
+            f"STRICT TOPIC SCOPE: Questions MUST be about \"{topic}\" ONLY.\n"
+            f"Do NOT write questions about other topics even if they appear in the curriculum material above.\n"
+            f"For example: if topic is 'eukaryotic vs prokaryotic cells', do NOT ask about mitochondria, "
+            f"chloroplasts, tissues, specialised cells, or any other topic not in the scope.\n"
             f"{units_line}"
-            f"Every question MUST be directly answerable from the curriculum material above. "
-            f"Do NOT draw on outside knowledge.\n\n"
+            f"Every question must test ONLY the concepts within \"{topic}\".\n\n"
             f"Return ONLY a valid JSON array — no markdown, no explanation, no text after the closing ].\n"
             f"Each item: {item_schema}\n"
-            f"Rules: correct_answer is 0-based index; topic_tag is a sub-topic from the material; "
+            f"Rules: correct_answer is 0-based index; topic_tag must be a sub-topic of \"{topic}\"; "
             f"explanation cites the material; all 4 options plausible."
         )
         system_instruction = (
-            "You generate quiz questions exclusively from the provided curriculum text. "
+            f"You generate quiz questions STRICTLY about '{topic}'. "
+            "Never write questions about topics outside the specified scope, even if curriculum material mentions them. "
             "Output only a valid JSON array. No text before or after the array."
         )
     elif unit_names:
