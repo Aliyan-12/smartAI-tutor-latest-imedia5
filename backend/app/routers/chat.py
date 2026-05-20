@@ -246,6 +246,17 @@ async def stream_message(
     _ensure_student(current_user)
     # await _ensure_credits(db, current_user)
 
+    # Intercept the lesson auto-start trigger — don't persist it as a user message
+    is_lesson_start = payload.message.strip() == "__LESSON_START__"
+    if is_lesson_start:
+        # Internal instruction sent to the AI — never saved to DB or shown in chat
+        lesson_start_instruction = (
+            "BEGIN_LESSON: Start the lesson right now. "
+            "Do NOT greet or ask what the student wants. "
+            "Jump immediately into the CONNECT phase: recall prior knowledge, set the lesson goal, and make it engaging. "
+            "Follow the full lesson structure: Connect → Teach → Practice → Apply → Reflect."
+        )
+
     if payload.session_id:
         chat = await chat_service.get_chat_by_session(db, payload.session_id, current_user.id)
         if not chat:
@@ -253,7 +264,9 @@ async def stream_message(
     else:
         chat = await chat_service.create_chat(db, current_user.id)
 
-    await chat_service.add_message(db, chat.id, "user", payload.message)
+    # Only save the user message if this is NOT the hidden lesson auto-start trigger
+    if not is_lesson_start:
+        await chat_service.add_message(db, chat.id, "user", payload.message)
     history, rag_chunks = await chat_service.build_context(db, chat.id, user_query=payload.message)
 
     # Resolve appointment_id: prefer the FK column, fall back to parsing the chat title
@@ -309,9 +322,14 @@ async def stream_message(
         full_response = []
         yield f"data: {json.dumps({'type': 'start', 'session_id': chat.session_id})}\n\n"
 
+        # Use the internal lesson instruction as the AI prompt when auto-starting a lesson;
+        # for a lesson start the history has no user message appended so pass it as-is.
+        _ai_user_content = lesson_start_instruction if is_lesson_start else payload.message
+        _history_slice = history if is_lesson_start else history[:-1]
+
         async for token in gemini_service.stream_response_async(
-            history[:-1],
-            payload.message,
+            _history_slice,
+            _ai_user_content,
             rag_chunks=rag_chunks,
             student_preferences=student_prefs,
             system_prompt_override=session_system_prompt,

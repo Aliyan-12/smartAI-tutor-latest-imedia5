@@ -406,8 +406,7 @@ export default function Sidebar({
   const location = useLocation();
   const [buyToast, setBuyToast] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
-  const [chatsExpanded, setChatsExpanded] = useState(true);
-  const [sessionsExpanded, setSessionsExpanded] = useState(true);
+  const [openDropdown, setOpenDropdown] = useState<string | null>(null);
   const [internalChats, setInternalChats] = useState<ChatListItem[]>(chatList);
 
   const loadInternalChats = () => {
@@ -462,6 +461,7 @@ export default function Sidebar({
 
   const isActive = (path: string) => location.pathname === path;
   const avatarLetter = user?.name ? user.name.charAt(0).toUpperCase() : "?";
+  const toggleDropdown = (id: string) => setOpenDropdown((prev) => (prev === id ? null : id));
 
   const handleBuyTime = () => {
     setBuyToast(true);
@@ -560,16 +560,16 @@ export default function Sidebar({
           {/* Chats dropdown */}
           <button
             className={`sb-nav-item${location.pathname.startsWith("/chat") ? " active" : ""}`}
-            onClick={() => { setChatsExpanded((v) => !v); }}
+            onClick={() => toggleDropdown("chats")}
             style={{ justifyContent: "space-between" }}
           >
             <span style={{ display: "flex", alignItems: "center", gap: 10 }}>
               <MessageCircle size={16} /><span>Chats</span>
             </span>
-            <span style={{ fontSize: 10, color: "#64748b", transition: "transform 0.2s", transform: chatsExpanded ? "rotate(180deg)" : "none" }}>▼</span>
+            <span style={{ fontSize: 10, color: "#64748b", transition: "transform 0.2s", transform: openDropdown === "chats" ? "rotate(180deg)" : "none" }}>▼</span>
           </button>
 
-          {chatsExpanded && (
+          {openDropdown === "chats" && (
             <div style={{ paddingLeft: 12, display: "flex", flexDirection: "column", gap: 1 }}>
               <button
                 className="sb-nav-item"
@@ -618,16 +618,16 @@ export default function Sidebar({
           {/* Sessions dropdown */}
           <button
             className={`sb-nav-item${location.pathname.startsWith("/sessions") || location.pathname.startsWith("/session") || isActive("/lesson/setup") ? " active" : ""}`}
-            onClick={() => setSessionsExpanded((v) => !v)}
+            onClick={() => toggleDropdown("sessions")}
             style={{ justifyContent: "space-between" }}
           >
             <span style={{ display: "flex", alignItems: "center", gap: 10 }}>
               <BookOpen size={16} /><span>Sessions</span>
             </span>
-            <span style={{ fontSize: 10, color: "#64748b", transition: "transform 0.2s", transform: sessionsExpanded ? "rotate(180deg)" : "none" }}>▼</span>
+            <span style={{ fontSize: 10, color: "#64748b", transition: "transform 0.2s", transform: openDropdown === "sessions" ? "rotate(180deg)" : "none" }}>▼</span>
           </button>
 
-          {sessionsExpanded && (
+          {openDropdown === "sessions" && (
             <div style={{ paddingLeft: 12, display: "flex", flexDirection: "column", gap: 1 }}>
               <button
                 className={`sb-nav-item${isActive("/lesson/setup") ? " active" : ""}`}
@@ -730,16 +730,16 @@ export default function Sidebar({
           {/* Sessions dropdown */}
           <button
             className={`sb-nav-item${(location.pathname.startsWith("/appointments") || isActive("/teacher/reports")) ? " active" : ""}`}
-            onClick={() => setSessionsExpanded((v) => !v)}
+            onClick={() => toggleDropdown("sessions")}
             style={{ justifyContent: "space-between" }}
           >
             <span style={{ display: "flex", alignItems: "center", gap: 10 }}>
               <Calendar size={16} /><span>Sessions</span>
             </span>
-            <span style={{ fontSize: 10, color: "#64748b", transition: "transform 0.2s", transform: sessionsExpanded ? "rotate(180deg)" : "none" }}>▼</span>
+            <span style={{ fontSize: 10, color: "#64748b", transition: "transform 0.2s", transform: openDropdown === "sessions" ? "rotate(180deg)" : "none" }}>▼</span>
           </button>
 
-          {sessionsExpanded && (
+          {openDropdown === "sessions" && (
             <div style={{ paddingLeft: 12, display: "flex", flexDirection: "column", gap: 1 }}>
               <button
                 className={`sb-nav-item${isActive("/appointments/new") ? " active" : ""}`}
@@ -832,16 +832,16 @@ export default function Sidebar({
           {/* Sessions dropdown */}
           <button
             className={`sb-nav-item${(location.pathname.startsWith("/appointments") || isActive("/parent/reports")) ? " active" : ""}`}
-            onClick={() => setSessionsExpanded((v) => !v)}
+            onClick={() => toggleDropdown("sessions")}
             style={{ justifyContent: "space-between" }}
           >
             <span style={{ display: "flex", alignItems: "center", gap: 10 }}>
               <Calendar size={16} /><span>Sessions</span>
             </span>
-            <span style={{ fontSize: 10, color: "#64748b", transition: "transform 0.2s", transform: sessionsExpanded ? "rotate(180deg)" : "none" }}>▼</span>
+            <span style={{ fontSize: 10, color: "#64748b", transition: "transform 0.2s", transform: openDropdown === "sessions" ? "rotate(180deg)" : "none" }}>▼</span>
           </button>
 
-          {sessionsExpanded && (
+          {openDropdown === "sessions" && (
             <div style={{ paddingLeft: 12, display: "flex", flexDirection: "column", gap: 1 }}>
               <button
                 className={`sb-nav-item${isActive("/appointments/new") ? " active" : ""}`}

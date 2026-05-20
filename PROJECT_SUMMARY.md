@@ -1,7 +1,7 @@
 # SmartAI Tutor — Project Summary
 
 > **Last updated:** 2026-05-20
-> **Recent changes:** Dashboard redesign · LessonSetupPage UI overhaul · BookSessionPage full redesign · TTS stale closure fix · `/dashboard` redirect alias added
+> **Recent changes:** Sidebar singleton dropdown · Session auto-start + 5-phase AI lesson · Dashboard redesign · BookSessionPage redesign · TTS stale closure fix
 
 SmartAI Tutor is an AI-powered tutoring platform built for UK GCSE curriculum (Key Stages 1-5). It provides personalized learning through text chat and real-time voice conversation, grounded in actual course materials via a Retrieval-Augmented Generation (RAG) system. Teachers and admins upload curriculum content (PDF, DOCX, PPTX) organized by Key Stage, subject, exam board, and tier. When students ask questions, the system automatically retrieves relevant document chunks using pgvector similarity search and injects them into the Gemini AI prompt, producing accurate, curriculum-aligned answers.
 
@@ -439,7 +439,7 @@ Simple chat uses `SIMPLE_CHAT_SYSTEM_PROMPT` (no `[QUIZ_OFFER]` / `[SLIDE_TRIGGE
 
 | Role | Landing page after login | Dashboard route |
 |------|--------------------------|-----------------|
-| Student | /student/dashboard | /student/dashboard (alias /dashboard redirects here) |
+| Student | /dashboard | /dashboard |
 | Teacher | /teacher/dashboard | /teacher/dashboard |
 | Parent | /parent/dashboard | /parent/dashboard |
 | Admin | /admin/dashboard | /admin/dashboard |
@@ -470,43 +470,52 @@ Simple chat uses `SIMPLE_CHAT_SYSTEM_PROMPT` (no `[QUIZ_OFFER]` / `[SLIDE_TRIGGE
 
 ---
 
-## Recent UI Changes (2026-05-20)
+## Recent Changes (2026-05-20)
+
+### Sidebar (Sidebar.tsx)
+- **Singleton dropdown** — replaced separate `chatsExpanded`/`sessionsExpanded` booleans with a single `openDropdown: string | null` state
+- `toggleDropdown(id)` closes the current open dropdown and opens the new one; clicking the same one toggles it off
+- All dropdowns **closed by default** (null) — no auto-open on page load
+- Full sidebar content preserved: Chats dropdown + Sessions dropdown + Learning Time widget for student; Sessions dropdown for teacher + parent
+
+### Session Flow (SessionPage.tsx)
+- **No briefing screen** — session auto-joins immediately if no passcode required
+- **Auto-start** — after join, if 0 messages, sends human-readable lesson start message after 800ms: `"Let's start our lesson on {topic}! I'm ready to begin."`
+- Empty state replaced with "Starting your lesson…" loading indicator (no "Ask me anything" prompt)
+- Passcode-only screen simplified (removed AI briefing right panel)
+
+### 5-Phase Lesson Structure (session_agent_service.py)
+- CONNECT (10%) → TEACH (40%) → PRACTICE (25%) → APPLY (15%) → REFLECT (10%) enforced via system prompt
+- AI always leads, checks understanding every 3–5 mins, never waits for student to initiate
+
+### `__LESSON_START__` Intercept (chat.py)
+- Backend detects `message.content == "__LESSON_START__"`, skips DB save, substitutes lesson-start instruction to Gemini
+- Frontend sends human-readable text instead of the raw trigger
 
 ### Dashboard (DashboardPage.tsx + WelcomeScreen.tsx)
-- Hero banner stats redesigned from card boxes to pill badges (🔥 X Day Streak, ⭐ XP, Level N + progress bar) matching LessonSetupPage style
-- Kept top 4 QUICK_ACTIONS cards (Start a Lesson, My Progress, My Sessions, Assignments)
-- Removed: 4 stat boxes below QUICK_ACTIONS, Today's Study Plan section, Quick Actions grid, AI Tip card, bottom navigation links row
-- Added "Pick a Subject & Tutor" section with 3 subject cards (Maths, Science, English) — all link to `/lesson/setup` with pre-populated subject state
-- All subject/lesson links navigate to `/lesson/setup` (never `/chat` for structured content)
-- "Continue Learning" button navigates to active session or `/lesson/setup`
+- Hero banner stats redesigned to pill badges (🔥 Streak, ⭐ XP, Level + progress bar)
+- Kept 4 QUICK_ACTIONS cards (Start a Lesson, My Progress, My Sessions, Assignments)
+- Added "Pick a Subject & Tutor" section — 3 subject cards linking to `/lesson/setup` with pre-filled subject state
+- All subject/lesson links → `/lesson/setup` (never `/chat`)
 
 ### TTS Stale Closure Fix (SessionPage.tsx)
-- Added `ttsEnabledRef = useRef(true)` + `useEffect(() => { ttsEnabledRef.current = ttsEnabled }, [ttsEnabled])`
-- All 4 callback closures now read `ttsEnabledRef.current` instead of the stale `ttsEnabled`
-- Fixes mute button having no effect — TTS API calls were firing regardless of toggle state
-
-### LessonSetupPage.tsx — Step UI overhaul
-- Goal cards (Step 2): replaced full-width vertical list with **4-column compact horizontal grid** — radio circle (top-left), colored icon, label, description
-- Learn mode (Step 4): replaced wide flex cards with **4-column compact grid** with radio circles and "Recommended" badge
-- Removed: Step 5 file upload section, "+ Add more details" accordion, passcode checkbox — cleaner 4-step flow
+- `ttsEnabledRef = useRef(true)` + sync effect; all 4 callbacks read `ttsEnabledRef.current` not stale `ttsEnabled`
+- Fixes mute button having no effect mid-stream
 
 ### BookSessionPage.tsx — full page redesign
-- Replaced plain page header with gradient hero banner (same style as LessonSetupPage)
-- All 4 form sections wrapped in numbered step cards (Step 1–4)
-- Session Goal selector changed from dropdown to **5-column compact cards** with icons (Sprout, BookOpen, RefreshCw, GraduationCap, Sparkles)
-- Right sidebar redesigned: "Session Preview" with live lesson plan step pills (green/blue/yellow/purple) + Session Summary + What Happens Next + Availability progress bar
-- Submit button moved to sticky bottom bar: "Confirm & Book Session →" with status summary pills
+- Gradient hero banner; numbered step cards (1–4); 5-column compact Session Goal cards
+- Right sidebar: live lesson plan preview + Session Summary + availability bar
+- Sticky "Confirm & Book Session →" bottom bar
 
 ### ChatPage.tsx
-- Added "Start a structured lesson →" button above subject pills (navigates to `/lesson/setup`)
-- Updated heading subtext to "Quick questions, homework help, or explore a topic."
+- Added "Start a structured lesson →" button above subject pills → `/lesson/setup`
 
 ### PostSessionScreen.tsx
-- Fixed broken routes: "Back to Dashboard" → `/dashboard`, "Ask AI Tutor" → `/chat`
-- Added "Start New Lesson" button → `/lesson/setup`
+- Fixed routes: "Back to Dashboard" → `/dashboard`, "Ask AI Tutor" → `/chat`; added "Start New Lesson" → `/lesson/setup`
 
-### App.tsx
-- Added `/dashboard` as a `<Navigate>` alias that redirects to `/student/dashboard`
+### Navigation Rule
+- Student dashboard is `/dashboard` (not `/student/dashboard`)
+- All structured learning links → `/lesson/setup` (not `/chat`)
 
 ---
 

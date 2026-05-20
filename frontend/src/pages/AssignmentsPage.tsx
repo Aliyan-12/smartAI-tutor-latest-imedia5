@@ -77,9 +77,23 @@ export default function AssignmentsPage() {
     if (a.status === "assigned") {
       await assignmentsApi.startAssignment(a.homework_id).catch(() => {});
     }
-    navigate(
-      `/lesson/setup?subject=${encodeURIComponent(a.homework.subject)}&topic=${encodeURIComponent(a.homework.topic)}&goal=practice`
-    );
+    // If the assignment has a linked session/appointment, go directly to that session
+    if ((a as any).session_id) {
+      navigate(`/session/${(a as any).session_id}`);
+      return;
+    }
+    if ((a as any).appointment_id) {
+      navigate(`/session/${(a as any).appointment_id}`);
+      return;
+    }
+    // Otherwise open lesson setup in teacher_homework mode
+    navigate("/lesson/setup", {
+      state: {
+        mode: "teacher_homework",
+        assignment: a,
+        subject: a.homework?.subject,
+      },
+    });
   };
 
   const handleAskAI = () => navigate("/chat");
