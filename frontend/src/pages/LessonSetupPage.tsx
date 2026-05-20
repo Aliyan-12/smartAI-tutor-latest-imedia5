@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect } from "react";
 import { useNavigate, useLocation, useSearchParams } from "react-router-dom";
 import {
   ChevronDown,
@@ -13,8 +13,6 @@ import {
   Sprout,
   RefreshCw,
   GraduationCap,
-  Upload,
-  Lightbulb,
 } from "lucide-react";
 import Sidebar from "../components/Sidebar";
 import { useAuth } from "../context/AuthContext";
@@ -241,8 +239,6 @@ export default function LessonSetupPage() {
   const location = useLocation();
   const [searchParams] = useSearchParams();
   const locationState = (location.state ?? {}) as LocationState;
-  const fileInputRef = useRef<HTMLInputElement>(null);
-
   // ── Form state ──────────────────────────────────────────────────────────
   const [subject, setSubject] = useState(
     locationState.subject ?? searchParams.get("subject") ?? ""
@@ -254,7 +250,6 @@ export default function LessonSetupPage() {
   const [duration, setDuration] = useState<number>(40);
   const [studentKeyStage, setStudentKeyStage] = useState<string>("");
   const [extraDetails, setExtraDetails] = useState("");
-  const [uploadedFiles, setUploadedFiles] = useState<File[]>([]);
   const [requirePasscode, setRequirePasscode] = useState(false);
   const [bookingPasscode, setBookingPasscode] = useState("");
   const [showExtra, setShowExtra] = useState(false);
@@ -353,17 +348,6 @@ export default function LessonSetupPage() {
     setGoal("homework");
   };
 
-  // File upload handler
-  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (e.target.files) {
-      setUploadedFiles((prev) => [...prev, ...Array.from(e.target.files!)]);
-    }
-  };
-
-  const removeFile = (idx: number) => {
-    setUploadedFiles((prev) => prev.filter((_, i) => i !== idx));
-  };
-
   // ── Submit: create appointment then navigate to session ─────────────────
   const handleSubmit = async () => {
     if (!canSubmit || !user) return;
@@ -394,13 +378,6 @@ export default function LessonSetupPage() {
         passcode: requirePasscode && bookingPasscode.trim() ? bookingPasscode.trim() : undefined,
       }) as { id: number };
 
-      // Upload any lesson files
-      if (uploadedFiles.length > 0) {
-        await Promise.allSettled(
-          uploadedFiles.map(f => appointmentsApi.uploadLessonFile(appointment.id, f))
-        );
-      }
-
       navigate(`/session/${appointment.id}`);
     } catch (err) {
       setSubmitError(err instanceof Error ? err.message : "Failed to start lesson. Please try again.");
@@ -422,6 +399,8 @@ export default function LessonSetupPage() {
     desc: string;
     color: string;
     bg: string;
+    cardBg: string;
+    cardBorder: string;
   }[] = [
     {
       id: "homework",
@@ -429,7 +408,9 @@ export default function LessonSetupPage() {
       label: "Homework Help",
       desc: "Help me with my homework",
       color: "#6366f1",
-      bg: "rgba(99,102,241,0.1)",
+      bg: "rgba(99,102,241,0.15)",
+      cardBg: "#f5f3ff",
+      cardBorder: "#c4b5fd",
     },
     {
       id: "learn_scratch",
@@ -437,7 +418,9 @@ export default function LessonSetupPage() {
       label: "Learn from Scratch",
       desc: "Start from the basics",
       color: "#10b981",
-      bg: "rgba(16,185,129,0.1)",
+      bg: "rgba(16,185,129,0.15)",
+      cardBg: "#ecfdf5",
+      cardBorder: "#6ee7b7",
     },
     {
       id: "catch_up",
@@ -445,7 +428,9 @@ export default function LessonSetupPage() {
       label: "Catch Up",
       desc: "I missed a lesson or need to catch up",
       color: "#f59e0b",
-      bg: "rgba(245,158,11,0.1)",
+      bg: "rgba(245,158,11,0.15)",
+      cardBg: "#fffbeb",
+      cardBorder: "#fcd34d",
     },
     {
       id: "revision",
@@ -453,7 +438,9 @@ export default function LessonSetupPage() {
       label: "Exam Revision",
       desc: "Prepare for a test or exam",
       color: "#ef4444",
-      bg: "rgba(239,68,68,0.1)",
+      bg: "rgba(239,68,68,0.15)",
+      cardBg: "#fff5f5",
+      cardBorder: "#fca5a5",
     },
   ];
 
@@ -465,6 +452,10 @@ export default function LessonSetupPage() {
     desc: string;
     badge?: string;
     subLine?: string;
+    color: string;
+    iconBg: string;
+    cardBg: string;
+    cardBorder: string;
   }[] = [
     {
       id: "ai_recommended",
@@ -473,24 +464,40 @@ export default function LessonSetupPage() {
       desc: "Best lesson plan for this topic and your learning style.",
       badge: "Recommended",
       subLine: "Slides → Worksheet → Quiz",
+      color: "#1a73e8",
+      iconBg: "rgba(26,115,232,0.12)",
+      cardBg: "#eff6ff",
+      cardBorder: "#93c5fd",
     },
     {
       id: "slides",
       icon: <Presentation size={18} />,
       label: "Learn with Slides",
       desc: "AI explains using guided slides",
+      color: "#8b5cf6",
+      iconBg: "rgba(139,92,246,0.12)",
+      cardBg: "#f5f3ff",
+      cardBorder: "#c4b5fd",
     },
     {
       id: "worksheet",
       icon: <ClipboardList size={18} />,
       label: "Practice with Worksheet",
       desc: "Work through questions step-by-step",
+      color: "#f97316",
+      iconBg: "rgba(249,115,22,0.12)",
+      cardBg: "#fff7ed",
+      cardBorder: "#fed7aa",
     },
     {
       id: "quiz",
       icon: <Target size={18} />,
       label: "Quiz & Test Me",
       desc: "Test your knowledge with a quiz",
+      color: "#14b8a6",
+      iconBg: "rgba(20,184,166,0.12)",
+      cardBg: "#f0fdfa",
+      cardBorder: "#99f6e4",
     },
   ];
 
@@ -768,7 +775,7 @@ export default function LessonSetupPage() {
                   </div>
                 </div>
 
-                <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 10 }}>
                   {goalOptions.map((g) => {
                     const sel = goal === g.id;
                     return (
@@ -777,44 +784,39 @@ export default function LessonSetupPage() {
                         type="button"
                         onClick={() => setGoal(g.id)}
                         style={{
-                          display: "flex", alignItems: "center", gap: 14,
-                          padding: "14px 16px",
-                          border: `1.5px solid ${sel ? "#1a73e8" : "#e2e8f0"}`,
-                          borderRadius: 10,
-                          background: sel ? "#eff6ff" : "var(--bg-primary)",
-                          cursor: "pointer",
-                          textAlign: "left",
-                          transition: "all 0.15s",
-                          fontFamily: "inherit",
+                          display: "flex", flexDirection: "column", alignItems: "center",
+                          padding: "16px 10px 14px", gap: 8,
+                          border: `2px solid ${sel ? "#1a73e8" : g.cardBorder}`,
+                          borderRadius: 12,
+                          background: sel ? "#eff6ff" : g.cardBg,
+                          cursor: "pointer", textAlign: "center", fontFamily: "inherit",
+                          position: "relative", transition: "all 0.15s",
                         }}
                       >
-                        <span style={{
-                          width: 36, height: 36, borderRadius: 8,
-                          background: g.bg,
-                          color: g.color,
+                        <div style={{
+                          position: "absolute", top: 10, left: 10,
+                          width: 16, height: 16, borderRadius: "50%",
+                          border: `2px solid ${sel ? "#1a73e8" : g.color}`,
+                          background: sel ? "#1a73e8" : "transparent",
                           display: "flex", alignItems: "center", justifyContent: "center",
-                          flexShrink: 0,
+                          transition: "all 0.15s",
+                        }}>
+                          {sel && <div style={{ width: 6, height: 6, borderRadius: "50%", background: "#fff" }} />}
+                        </div>
+                        <span style={{
+                          width: 44, height: 44, borderRadius: 10,
+                          background: sel ? "rgba(26,115,232,0.12)" : g.bg, color: g.color,
+                          display: "flex", alignItems: "center", justifyContent: "center",
+                          marginTop: 4, flexShrink: 0,
                         }}>
                           {g.icon}
                         </span>
-                        <span style={{ flex: 1, minWidth: 0 }}>
-                          <span style={{ display: "block", fontSize: 14, fontWeight: 700, color: sel ? "#1a73e8" : "var(--text-primary)", marginBottom: 2 }}>
-                            {g.label}
-                          </span>
-                          <span style={{ display: "block", fontSize: 12, color: "var(--text-muted)" }}>
-                            {g.desc}
-                          </span>
+                        <span style={{ fontSize: 13, fontWeight: 700, color: sel ? "#1a73e8" : "var(--text-primary)", lineHeight: 1.2 }}>
+                          {g.label}
                         </span>
-                        {sel && (
-                          <span style={{
-                            width: 18, height: 18, borderRadius: "50%",
-                            background: "#1a73e8", color: "#fff",
-                            display: "flex", alignItems: "center", justifyContent: "center",
-                            fontSize: 11, fontWeight: 800, flexShrink: 0,
-                          }}>
-                            ✓
-                          </span>
-                        )}
+                        <span style={{ fontSize: 11, color: "var(--text-muted)", lineHeight: 1.4 }}>
+                          {g.desc}
+                        </span>
                       </button>
                     );
                   })}
@@ -867,188 +869,113 @@ export default function LessonSetupPage() {
                   </div>
                 </div>
 
-                <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-                  {learnModeOptions.map((m) => (
-                    <button
-                      key={m.id}
-                      type="button"
-                      className={`lsp-mode-card${learnMode === m.id ? " active" : ""}`}
-                      onClick={() => setLearnMode(m.id)}
-                    >
-                      {m.badge && <span className="lsp-mode-badge">{m.badge}</span>}
-                      <span style={{
-                        color: learnMode === m.id ? "#1a73e8" : "var(--text-secondary)",
-                        display: "flex", alignItems: "center",
-                      }}>
-                        {m.icon}
-                      </span>
-                      <span style={{ fontSize: 13, fontWeight: 700, color: learnMode === m.id ? "#1a73e8" : "var(--text-primary)" }}>
-                        {m.label}
-                      </span>
-                      <span style={{ fontSize: 11, color: "var(--text-muted)", lineHeight: 1.4 }}>{m.desc}</span>
-                      {m.subLine && (
-                        <span style={{ fontSize: 10, color: "#10b981", fontWeight: 700, marginTop: 2 }}>{m.subLine}</span>
-                      )}
-                    </button>
-                  ))}
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 10 }}>
+                  {learnModeOptions.map((m) => {
+                    const sel = learnMode === m.id;
+                    return (
+                      <button
+                        key={m.id}
+                        type="button"
+                        onClick={() => setLearnMode(m.id)}
+                        style={{
+                          display: "flex", flexDirection: "column", alignItems: "center",
+                          padding: "14px 10px 12px", gap: 6,
+                          border: `2px solid ${sel ? "#1a73e8" : m.cardBorder}`,
+                          borderRadius: 12,
+                          background: sel ? "#eff6ff" : m.cardBg,
+                          cursor: "pointer", textAlign: "center", fontFamily: "inherit",
+                          position: "relative", transition: "all 0.15s",
+                        }}
+                      >
+                        <div style={{
+                          position: "absolute", top: 8, left: 8,
+                          width: 14, height: 14, borderRadius: "50%",
+                          border: `2px solid ${sel ? "#1a73e8" : m.color}`,
+                          background: sel ? "#1a73e8" : "transparent",
+                          display: "flex", alignItems: "center", justifyContent: "center",
+                        }}>
+                          {sel && <div style={{ width: 5, height: 5, borderRadius: "50%", background: "#fff" }} />}
+                        </div>
+                        <span style={{
+                          width: 44, height: 44, borderRadius: 10,
+                          background: sel ? "rgba(26,115,232,0.12)" : m.iconBg,
+                          color: sel ? "#1a73e8" : m.color,
+                          display: "flex", alignItems: "center", justifyContent: "center",
+                          marginTop: 4, flexShrink: 0,
+                        }}>
+                          {m.icon}
+                        </span>
+                        <span style={{ fontSize: 12, fontWeight: 700, color: sel ? "#1a73e8" : "var(--text-primary)" }}>
+                          {m.label}
+                        </span>
+                        {m.badge && (
+                          <span style={{ fontSize: 10, fontWeight: 700, color: "#10b981", background: "rgba(16,185,129,0.1)", padding: "2px 6px", borderRadius: 99 }}>
+                            {m.badge}
+                          </span>
+                        )}
+                        <span style={{ fontSize: 11, color: "var(--text-muted)", lineHeight: 1.4 }}>{m.desc}</span>
+                      </button>
+                    );
+                  })}
                 </div>
               </div>
 
-              {/* STEP 5 — File Upload */}
+              {/* STEP 5 — Additional Settings */}
               <div style={s.stepCard}>
                 <div style={s.stepHeader}>
                   <span style={s.stepNum as React.CSSProperties}>5</span>
                   <div>
-                    <div style={s.stepTitle}>
-                      Add school work
-                      <span style={{ fontSize: 12, fontWeight: 400, color: "var(--text-muted)", marginLeft: 6 }}>(optional)</span>
-                    </div>
-                    <div style={s.stepSubtitle}>Upload anything your tutor should go through with you.</div>
+                    <div style={s.stepTitle}>Additional settings</div>
+                    <div style={s.stepSubtitle}>Optional details and session access settings.</div>
                   </div>
                 </div>
 
-                <div style={{ display: "flex", gap: 16, alignItems: "flex-start", flexWrap: "wrap" }}>
-                  {/* Drop zone */}
-                  <div
-                    className="lsp-upload-area"
-                    style={{ flex: 2, minWidth: 220 }}
-                    onClick={() => fileInputRef.current?.click()}
-                  >
-                    <Upload size={28} style={{ color: "#94a3b8", flexShrink: 0 }} />
-                    <div>
-                      <p style={{ margin: "0 0 3px", fontSize: 13, color: "var(--text-secondary)" }}>
-                        Drag and drop files here or{" "}
-                        <strong style={{ color: "#1a73e8" }}>click to browse</strong>
-                      </p>
-                      <p style={{ margin: 0, fontSize: 11, color: "var(--text-muted)" }}>
-                        PDF, PPTX, DOCX, Images — Max 25 MB
-                      </p>
-                    </div>
+                {/* Add more details accordion */}
+                <button
+                  type="button"
+                  style={s.accordionBtn as React.CSSProperties}
+                  onClick={() => setShowExtra((v) => !v)}
+                >
+                  <ChevronDown
+                    size={14}
+                    style={{ transform: showExtra ? "rotate(180deg)" : "none", transition: "transform 0.2s", marginRight: 6 }}
+                  />
+                  + Add more details (optional)
+                </button>
+                {showExtra && (
+                  <textarea
+                    style={s.textarea as React.CSSProperties}
+                    value={extraDetails}
+                    onChange={(e) => setExtraDetails(e.target.value)}
+                    placeholder="Any extra context, materials, or specific areas to focus on..."
+                    rows={4}
+                  />
+                )}
+
+                {/* Passcode */}
+                <div style={{ marginTop: 8 }}>
+                  <label style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer", marginBottom: 8 }}>
                     <input
-                      ref={fileInputRef}
-                      type="file"
-                      multiple
-                      accept=".pdf,.pptx,.docx,.png,.jpg,.jpeg"
-                      style={{ display: "none" }}
-                      onChange={handleFileChange}
+                      type="checkbox"
+                      checked={requirePasscode}
+                      onChange={(e) => { setRequirePasscode(e.target.checked); if (!e.target.checked) setBookingPasscode(""); }}
+                      style={{ width: 15, height: 15, accentColor: "#1a73e8", cursor: "pointer" }}
                     />
-                  </div>
-
-                  {/* Supported formats info */}
-                  <div style={{
-                    flex: 1, minWidth: 160,
-                    background: "#f8fafc",
-                    border: "1px solid #e2e8f0",
-                    borderRadius: 8,
-                    padding: "12px 14px",
-                  }}>
-                    <p style={{ margin: "0 0 6px", fontSize: 12, fontWeight: 700, color: "var(--text-secondary)" }}>
-                      Supported files:
-                    </p>
-                    {["PDF", "PPTX", "DOCX", "Images"].map((fmt) => (
-                      <span key={fmt} style={{
-                        display: "inline-block",
-                        margin: "2px 4px 2px 0",
-                        padding: "2px 8px",
-                        background: "#e2e8f0",
-                        borderRadius: 99,
-                        fontSize: 11,
-                        fontWeight: 600,
-                        color: "#475569",
-                      }}>
-                        {fmt}
-                      </span>
-                    ))}
-                    <p style={{ margin: "8px 0 0", fontSize: 11, color: "var(--text-muted)" }}>
-                      Max file size: 25 MB
-                    </p>
-                  </div>
+                    <span style={{ fontSize: 13, fontWeight: 600, color: "var(--text-primary)" }}>
+                      Require passcode to join
+                    </span>
+                  </label>
+                  {requirePasscode && (
+                    <input
+                      type="text"
+                      placeholder="e.g. ABC123"
+                      value={bookingPasscode}
+                      onChange={(e) => setBookingPasscode(e.target.value.toUpperCase())}
+                      maxLength={16}
+                      style={{ ...(s.input as React.CSSProperties), letterSpacing: 3, width: 200, fontWeight: 700 }}
+                    />
+                  )}
                 </div>
-
-                {/* Selected files list */}
-                {uploadedFiles.length > 0 && (
-                  <div style={{ marginTop: 10, display: "flex", flexDirection: "column", gap: 6 }}>
-                    {uploadedFiles.map((f, i) => (
-                      <div key={i} style={{
-                        display: "flex", alignItems: "center", justifyContent: "space-between",
-                        padding: "7px 12px",
-                        background: "#f0f9ff",
-                        border: "1px solid #bae6fd",
-                        borderRadius: 7,
-                        fontSize: 12,
-                        color: "#0369a1",
-                      }}>
-                        <span style={{ fontWeight: 600 }}>{f.name}</span>
-                        <button
-                          type="button"
-                          onClick={() => removeFile(i)}
-                          style={{ background: "none", border: "none", cursor: "pointer", color: "#94a3b8", fontSize: 14, padding: "0 0 0 8px", fontFamily: "inherit" }}
-                        >
-                          ✕
-                        </button>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-
-              {/* Add more details accordion */}
-              <button
-                type="button"
-                style={s.accordionBtn as React.CSSProperties}
-                onClick={() => setShowExtra((v) => !v)}
-              >
-                <ChevronDown
-                  size={14}
-                  style={{
-                    transform: showExtra ? "rotate(180deg)" : "none",
-                    transition: "transform 0.2s",
-                    marginRight: 6,
-                  }}
-                />
-                + Add more details (optional)
-              </button>
-              {showExtra && (
-                <textarea
-                  style={s.textarea as React.CSSProperties}
-                  value={extraDetails}
-                  onChange={(e) => setExtraDetails(e.target.value)}
-                  placeholder="Any extra context, materials, or specific areas to focus on..."
-                  rows={4}
-                />
-              )}
-
-              {/* Passcode */}
-              <div style={{ marginTop: 16 }}>
-                <label style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer", marginBottom: 8 }}>
-                  <input
-                    type="checkbox"
-                    checked={requirePasscode}
-                    onChange={(e) => {
-                      setRequirePasscode(e.target.checked);
-                      if (!e.target.checked) setBookingPasscode("");
-                    }}
-                    style={{ width: 15, height: 15, accentColor: "#1a73e8", cursor: "pointer" }}
-                  />
-                  <span style={{ fontSize: 13, fontWeight: 600, color: "var(--text-primary)" }}>
-                    Require passcode to join
-                  </span>
-                </label>
-                {requirePasscode && (
-                  <input
-                    type="text"
-                    placeholder="e.g. ABC123"
-                    value={bookingPasscode}
-                    onChange={(e) => setBookingPasscode(e.target.value.toUpperCase())}
-                    maxLength={16}
-                    style={{
-                      ...(s.input as React.CSSProperties),
-                      letterSpacing: 3,
-                      width: 200,
-                      fontWeight: 700,
-                    }}
-                  />
-                )}
               </div>
 
               {/* Error message */}

@@ -1,6 +1,6 @@
 import { useEffect, useState, useCallback, useRef } from "react";
 import { useParams, useNavigate, useLocation } from "react-router-dom";
-import { X } from "lucide-react";
+import { X, BookOpen } from "lucide-react";
 import Sidebar from "../components/Sidebar";
 import ChatWindow from "../components/ChatWindow";
 import ChatInput from "../components/ChatInput";
@@ -273,9 +273,27 @@ export default function ChatPage() {
                   Ask me anything! 🤖✨
                 </h2>
                 <p style={{ margin: 0, fontSize: 14, color: "#6b7280", maxWidth: 380 }}>
-                  Your AI tutor is ready. Pick a subject below or type your own question.
+                  Quick questions, homework help, or explore a topic.
                 </p>
               </div>
+
+              {/* Start a structured lesson shortcut */}
+              <button
+                onClick={() => navigate("/lesson/setup")}
+                style={{
+                  display: "flex", alignItems: "center", gap: 8,
+                  padding: "10px 20px", borderRadius: 999,
+                  background: "linear-gradient(135deg, #1a73e8, #6366f1)",
+                  color: "#fff", border: "none", fontSize: 13, fontWeight: 700,
+                  cursor: "pointer", boxShadow: "0 4px 14px rgba(26,115,232,0.3)",
+                  transition: "transform 0.15s, box-shadow 0.15s",
+                }}
+                onMouseEnter={(e) => { e.currentTarget.style.transform = "translateY(-1px)"; e.currentTarget.style.boxShadow = "0 6px 20px rgba(26,115,232,0.4)"; }}
+                onMouseLeave={(e) => { e.currentTarget.style.transform = ""; e.currentTarget.style.boxShadow = "0 4px 14px rgba(26,115,232,0.3)"; }}
+              >
+                <BookOpen size={14} />
+                Start a structured lesson →
+              </button>
 
               {/* Subject quick-starters */}
               <div style={{ display: "flex", flexWrap: "wrap", gap: 8, justifyContent: "center", maxWidth: 480 }}>

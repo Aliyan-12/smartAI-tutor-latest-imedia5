@@ -710,33 +710,6 @@ export default function WelcomeScreen({ onPromptClick, onStatsLoaded }: Props) {
       `}</style>
 
       <div className="ws-root">
-        {/* Study Stats Row */}
-        <div className="ws-study-stats">
-          <div className="ws-study-stat-card">
-            <div className="ws-stat-label">Sessions Done</div>
-            <div className="ws-stat-value">{completedSessions.length}</div>
-            <div className="ws-stat-sub">all time</div>
-          </div>
-          <div className="ws-study-stat-card">
-            <div className="ws-stat-label">Time Studied</div>
-            <div className="ws-stat-value">
-              {totalTimeStudied >= 60
-                ? `${Math.floor(totalTimeStudied / 60)}h ${totalTimeStudied % 60}m`
-                : `${totalTimeStudied}m`}
-            </div>
-            <div className="ws-stat-sub">total minutes</div>
-          </div>
-          <div className="ws-study-stat-card">
-            <div className="ws-stat-label">Assignments</div>
-            <div className="ws-stat-value">{pendingAssignments.length}</div>
-            <div className="ws-stat-sub">pending</div>
-          </div>
-          <div className="ws-study-stat-card">
-            <div className="ws-stat-label">Upcoming</div>
-            <div className="ws-stat-value">{upcomingSessions.length}</div>
-            <div className="ws-stat-sub">confirmed sessions</div>
-          </div>
-        </div>
 
         {/* Active session alert */}
         {activeSessions.length > 0 && (
@@ -795,23 +768,22 @@ export default function WelcomeScreen({ onPromptClick, onStatsLoaded }: Props) {
               <div className="ws-continue-actions">
                 <button
                   className="ws-btn ws-btn--primary"
-                  onClick={() =>
-                    onPromptClick(
-                      `Let's continue where we left off. Topic: ${continue_learning.topic} (${continue_learning.subject}, ${continue_learning.key_stage})`
-                    )
-                  }
+                  onClick={() => {
+                    const active = activeSessions[0];
+                    if (active) {
+                      navigate(`/session/${active.id}`);
+                    } else {
+                      navigate("/lesson/setup");
+                    }
+                  }}
                 >
                   ▶ Resume Lesson
                 </button>
                 <button
                   className="ws-btn ws-btn--ghost"
-                  onClick={() =>
-                    onPromptClick(
-                      `I'd like to study a different topic in ${continue_learning.subject} for ${continue_learning.key_stage}.`
-                    )
-                  }
+                  onClick={() => navigate("/lesson/setup")}
                 >
-                  Different Topic
+                  Start Different Topic
                 </button>
                 <button
                   className="ws-btn ws-btn--outline"
@@ -845,23 +817,17 @@ export default function WelcomeScreen({ onPromptClick, onStatsLoaded }: Props) {
             {/* Subject launch cards */}
             <div className="ws-subject-cards">
               {[
-                { icon: "🧮", name: "Maths",   tag: "Numbers & algebra",  color: "#f97316", bg: "#fff7ed", border: "#fed7aa" },
-                { icon: "🔬", name: "Science",  tag: "Explore the world",  color: "#22c55e", bg: "#f0fdf4", border: "#bbf7d0" },
-                { icon: "📚", name: "English",  tag: "Read & write",       color: "#3b82f6", bg: "#eff6ff", border: "#bfdbfe" },
-                { icon: "🏛️", name: "History",  tag: "Past events",        color: "#a855f7", bg: "#faf5ff", border: "#d8b4fe" },
-                { icon: "⚗️", name: "Chemistry",tag: "Elements & reactions",color: "#ec4899", bg: "#fdf2f8", border: "#f9a8d4" },
+                { icon: "🧮", name: "Maths",    tag: "Numbers & algebra",   color: "#f97316", bg: "#fff7ed", border: "#fed7aa" },
+                { icon: "🔬", name: "Science",   tag: "Explore the world",   color: "#22c55e", bg: "#f0fdf4", border: "#bbf7d0" },
+                { icon: "📚", name: "English",   tag: "Read & write",        color: "#3b82f6", bg: "#eff6ff", border: "#bfdbfe" },
+                { icon: "🏛️", name: "History",   tag: "Past events",         color: "#a855f7", bg: "#faf5ff", border: "#d8b4fe" },
+                { icon: "⚗️", name: "Chemistry", tag: "Elements & reactions", color: "#ec4899", bg: "#fdf2f8", border: "#f9a8d4" },
               ].map((s, i) => (
                 <div
                   key={s.name}
                   className="ws-subject-card"
-                  style={{
-                    background: s.bg,
-                    borderColor: s.border,
-                    animationDelay: `${i * 0.07}s`,
-                  }}
-                  onClick={() =>
-                    onPromptClick(`I'd like to start learning ${s.name}. Can you help me pick a topic?`)
-                  }
+                  style={{ background: s.bg, borderColor: s.border, animationDelay: `${i * 0.07}s` }}
+                  onClick={() => navigate("/lesson/setup", { state: { subject: s.name } })}
                   onMouseEnter={(e) => {
                     (e.currentTarget as HTMLDivElement).style.boxShadow = `0 8px 20px ${s.color}30`;
                     (e.currentTarget as HTMLDivElement).style.borderColor = s.color;
@@ -872,12 +838,8 @@ export default function WelcomeScreen({ onPromptClick, onStatsLoaded }: Props) {
                   }}
                 >
                   {s.name === "Science" ? (
-                    <img
-                      src="/images/sci-robot.png"
-                      alt="Science robot"
-                      draggable={false}
-                      style={{ width: 36, height: 36, objectFit: "contain", pointerEvents: "none" }}
-                    />
+                    <img src="/images/sci-robot.png" alt="Science robot" draggable={false}
+                      style={{ width: 36, height: 36, objectFit: "contain", pointerEvents: "none" }} />
                   ) : (
                     <span className="ws-subject-card-icon">{s.icon}</span>
                   )}
@@ -888,9 +850,7 @@ export default function WelcomeScreen({ onPromptClick, onStatsLoaded }: Props) {
             </div>
             <button
               className="ws-btn ws-btn--orange"
-              onClick={() =>
-                onPromptClick("Let's start a new topic. What subjects do you have materials for?")
-              }
+              onClick={() => navigate("/lesson/setup")}
             >
               Browse All Subjects →
             </button>
@@ -1025,161 +985,63 @@ export default function WelcomeScreen({ onPromptClick, onStatsLoaded }: Props) {
             </div>
         </div>
 
-        {/* Two-column: Today's Plan + Quick Actions */}
-        <div className="ws-grid">
-          <div className="ws-card">
-            <div className="ws-card-title">Today's Study Plan</div>
 
-            {daily_plan.weak_spots.length === 0 &&
-              daily_plan.spaced_review.length === 0 &&
-              daily_plan.confidence_boost.length === 0 ? (
-                <p className="ws-empty-plan">
-                  No recommendations yet. Complete a lesson to unlock your personalised plan.
-                </p>
-              ) : null}
-
-            {daily_plan.weak_spots.map((ws, i) => (
-              <div
-                key={i}
-                className="ws-plan-item ws-plan-item--weak"
-                onClick={() =>
-                  onPromptClick(
-                    `I need help improving on ${ws.topic} in ${ws.subject}. Please teach me with targeted questions.`
-                  )
-                }
-              >
-                <span className="ws-plan-icon">🔧</span>
-                <div className="ws-plan-body">
-                  <p className="ws-plan-topic">{ws.topic}</p>
-                  <p className="ws-plan-sub">{ws.subject} · Needs practice</p>
-                </div>
-                <span className="ws-plan-arrow">›</span>
-              </div>
-            ))}
-
-            {daily_plan.spaced_review.map((sr, i) => (
-              <div
-                key={i}
-                className="ws-plan-item ws-plan-item--review"
-                onClick={() =>
-                  onPromptClick(
-                    `Let's do a spaced-repetition review of ${sr.topic} in ${sr.subject}.`
-                  )
-                }
-              >
-                <span className="ws-plan-icon">📅</span>
-                <div className="ws-plan-body">
-                  <p className="ws-plan-topic">{sr.topic}</p>
-                  <p className="ws-plan-sub">
-                    {sr.subject} · Last practised {sr.days_since}d ago
-                  </p>
-                </div>
-                <span className="ws-plan-arrow">›</span>
-              </div>
-            ))}
-
-            {daily_plan.confidence_boost.map((cb, i) => (
-              <div
-                key={i}
-                className="ws-plan-item ws-plan-item--boost"
-                onClick={() =>
-                  onPromptClick(
-                    `Let's build confidence on ${cb.topic} in ${cb.subject}. Quiz me on it.`
-                  )
-                }
-              >
-                <span className="ws-plan-icon">⚡</span>
-                <div className="ws-plan-body">
-                  <p className="ws-plan-topic">{cb.topic}</p>
-                  <p className="ws-plan-sub">{cb.subject} · Build momentum</p>
-                </div>
-                <span className="ws-plan-arrow">›</span>
-              </div>
-            ))}
-          </div>
-
-          <div className="ws-card">
-            <div className="ws-card-title">Quick Actions</div>
-            <div className="ws-quick-grid">
-              <button
-                className="ws-quick-btn ws-quick-btn--ai"
-                onClick={() =>
-                  onPromptClick(
-                    "Let's start a new topic. What subjects do you have materials for?"
-                  )
-                }
-              >
-                <span className="ws-q-icon">🤖</span>
-                Ask AI Tutor
-              </button>
-              <button
-                className="ws-quick-btn ws-quick-btn--quiz"
-                onClick={() =>
-                  onPromptClick(
-                    "Can you quiz me on something I haven't practised recently?"
-                  )
-                }
-              >
-                <span className="ws-q-icon">⚡</span>
-                Quick Quiz
-              </button>
-              <button
-                className="ws-quick-btn ws-quick-btn--sess"
-                onClick={() => navigate("/sessions")}
-              >
-                <span className="ws-q-icon">📅</span>
-                My Sessions
-              </button>
-              <button
-                className="ws-quick-btn ws-quick-btn--prog"
-                onClick={() => navigate("/progress")}
-              >
-                <span className="ws-q-icon">📊</span>
-                My Progress
-              </button>
-            </div>
-          </div>
-        </div>
-
-        {/* AI Tutor Tip */}
-        <div style={{ padding: "14px 18px", background: "#f0fdf4", border: "1px solid #bbf7d0", borderRadius: 10, display: "flex", alignItems: "center", gap: 12, marginBottom: 20, flexWrap: "wrap" }}>
-          <span style={{ fontSize: 18 }}>🤖</span>
-          <p style={{ flex: 1, fontSize: 13, color: "#166534", margin: 0, fontStyle: "italic" }}>
-            <strong>AI Tip: </strong>
-            {daily_plan.weak_spots.length > 0
-              ? `Focus on improving "${daily_plan.weak_spots[0].topic}" in ${daily_plan.weak_spots[0].subject} — it needs the most attention right now.`
-              : daily_plan.spaced_review.length > 0
-              ? `You haven't practised "${daily_plan.spaced_review[0].topic}" in a while — a quick review will reinforce your memory.`
-              : "Keep up the great work! Regular daily practice is the key to long-term learning success."}
-          </p>
-          <button
-            onClick={() => onPromptClick("What should I focus on studying today based on my progress?")}
-            style={{ fontSize: 13, fontWeight: 600, color: "#16a34a", background: "white", border: "1px solid #bbf7d0", borderRadius: 7, padding: "5px 14px", cursor: "pointer", fontFamily: "inherit", whiteSpace: "nowrap" }}
-          >
-            Ask AI →
-          </button>
-        </div>
-
-        {/* Bottom links row */}
-        <div style={{ display: "flex", gap: 10, marginBottom: 32, flexWrap: "wrap" }}>
-          {[
-            { icon: "📊", label: "My Progress", path: "/progress" },
-            { icon: "📅", label: "My Sessions", path: "/sessions" },
-            { icon: "📝", label: "Assignments", path: "/assignments" },
-            { icon: "⚙️", label: "Settings", path: "/settings" },
-          ].map((item) => (
+        {/* ── Pick a Subject & Tutor ── */}
+        <div style={{ marginBottom: 32 }}>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 14 }}>
+            <h3 style={{ fontSize: 15, fontWeight: 800, color: "#0f172a", margin: 0 }}>Pick a Subject & Tutor</h3>
             <button
-              key={item.path}
-              onClick={() => navigate(item.path)}
-              style={{ flex: "1 1 120px", display: "flex", alignItems: "center", gap: 8, padding: "11px 14px", background: "#fff", border: "1px solid #e2e8f0", borderRadius: 10, fontSize: 13, fontWeight: 600, color: "#0f172a", cursor: "pointer", fontFamily: "inherit", transition: "border-color 0.15s, box-shadow 0.15s", boxShadow: "0 1px 3px rgba(0,0,0,0.04)" }}
-              onMouseEnter={(e) => { e.currentTarget.style.borderColor = "#3b82f6"; e.currentTarget.style.boxShadow = "0 2px 8px rgba(59,130,246,0.12)"; }}
-              onMouseLeave={(e) => { e.currentTarget.style.borderColor = "#e2e8f0"; e.currentTarget.style.boxShadow = "0 1px 3px rgba(0,0,0,0.04)"; }}
+              onClick={() => navigate("/lesson/setup")}
+              style={{ fontSize: 12, fontWeight: 600, color: "#1a73e8", background: "none", border: "none", cursor: "pointer", fontFamily: "inherit" }}
             >
-              <span style={{ fontSize: 18 }}>{item.icon}</span>
-              {item.label}
+              View all subjects →
             </button>
-          ))}
+          </div>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 14 }}>
+            {[
+              { name: "Maths",   desc: "Build confidence and solve problems, step by step", color: "#f97316", bg: "#fff7ed", border: "#fed7aa",  img: "/images/robotAI.png" },
+              { name: "Science", desc: "Explore ideas and understand how the world works",  color: "#22c55e", bg: "#f0fdf4", border: "#bbf7d0",  img: "/images/sci-robot.png" },
+              { name: "English", desc: "Improve your reading, writing and communication",   color: "#3b82f6", bg: "#eff6ff", border: "#bfdbfe",  img: null },
+            ].map((s) => (
+              <div
+                key={s.name}
+                style={{
+                  background: s.bg, border: `1.5px solid ${s.border}`, borderRadius: 16,
+                  padding: "20px 16px", display: "flex", flexDirection: "column",
+                  alignItems: "center", gap: 10, cursor: "pointer",
+                  transition: "transform 0.18s, box-shadow 0.18s",
+                }}
+                onClick={() => navigate("/lesson/setup", { state: { subject: s.name } })}
+                onMouseEnter={(e) => {
+                  (e.currentTarget as HTMLDivElement).style.transform = "translateY(-3px)";
+                  (e.currentTarget as HTMLDivElement).style.boxShadow = `0 8px 24px ${s.color}28`;
+                }}
+                onMouseLeave={(e) => {
+                  (e.currentTarget as HTMLDivElement).style.transform = "";
+                  (e.currentTarget as HTMLDivElement).style.boxShadow = "";
+                }}
+              >
+                {s.img
+                  ? <img src={s.img} alt={s.name} draggable={false} style={{ width: 72, height: 72, objectFit: "contain", pointerEvents: "none" }} />
+                  : <span style={{ fontSize: 52 }}>📚</span>
+                }
+                <span style={{ fontSize: 15, fontWeight: 800, color: "#0f172a" }}>{s.name}</span>
+                <span style={{ fontSize: 11, color: "#64748b", textAlign: "center", lineHeight: 1.5 }}>{s.desc}</span>
+                <button
+                  style={{
+                    marginTop: 4, padding: "8px 20px", borderRadius: 999,
+                    background: s.color, color: "#fff", border: "none",
+                    fontSize: 13, fontWeight: 700, cursor: "pointer", fontFamily: "inherit",
+                    boxShadow: `0 3px 10px ${s.color}44`,
+                  }}
+                >
+                  Choose {s.name} →
+                </button>
+              </div>
+            ))}
+          </div>
         </div>
+
       </div>
     </>
   );

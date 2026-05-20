@@ -107,6 +107,7 @@ export default function App() {
           <Route path="/appointments" element={<ProtectedRoute allowedRoles={["admin", "teacher", "parent"]}><AppointmentsPage /></ProtectedRoute>} />
           <Route path="/appointments/new" element={<ProtectedRoute allowedRoles={["teacher", "parent"]}><BookSessionPage /></ProtectedRoute>} />
           <Route path="/admin/assessments" element={<ProtectedRoute allowedRoles={["admin"]}><AdminDashboard /></ProtectedRoute>} />
+          <Route path="/dashboard" element={<Navigate to="/student/dashboard" replace />} />
           <Route
             path="/student/dashboard"
             element={
