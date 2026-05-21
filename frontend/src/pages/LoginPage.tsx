@@ -199,7 +199,7 @@ export default function LoginPage() {
         .lp-root {
           display: flex; min-height: 100vh;
           font-family: "DM Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-          background: #f5f5f0;
+          background: #f8fafc;
         }
 
         /* ══ BRAND PANEL ══ */
@@ -317,7 +317,7 @@ export default function LoginPage() {
         .lp-role-info p  { font-size: 11px; color: rgba(200,210,235,0.75); margin: 0; line-height: 1.4; }
 
         /* ══ FORM PANEL ══ */
-        .lp-form { flex: 0 0 42%; display: flex; align-items: center; justify-content: center; padding: 40px 32px; background: #f5f5f0; }
+        .lp-form { flex: 0 0 42%; display: flex; align-items: center; justify-content: center; padding: 40px 32px; background: #f8fafc; }
         .lp-card { width: 100%; max-width: 380px; }
         .lp-logo { display: flex; flex-direction: column; align-items: center; text-align: center; margin-bottom: 28px; }
         .lp-logo img { height: 70px; width: auto; object-fit: contain; margin-bottom: 12px; }
@@ -327,7 +327,7 @@ export default function LoginPage() {
         .lp-m-heading { display: none; }
         .lp-field { margin-bottom: 14px; }
         .lp-field label { display: block; font-size: 12px; font-weight: 700; color: #2c2c2c; margin-bottom: 5px; letter-spacing: 0.3px; text-transform: uppercase; }
-        .lp-field input { width: 100%; padding: 11px 13px; background: #fff; border: 1.5px solid #d9d9cf; border-radius: 8px; color: #2c2c2c; font-size: 14px; font-family: inherit; transition: border-color 0.2s, box-shadow 0.2s; }
+        .lp-field input { width: 100%; padding: 11px 13px; background: #fff; border: 1.5px solid #e2e8f0; border-radius: 8px; color: #2c2c2c; font-size: 14px; font-family: inherit; transition: border-color 0.2s, box-shadow 0.2s; }
         .lp-field input:focus { border-color: #1a73e8; box-shadow: 0 0 0 3px rgba(26,115,232,0.1); outline: none; }
         .lp-field-meta { display: flex; justify-content: flex-end; margin-top: 5px; }
         .lp-forgot { font-size: 12px; color: #1a73e8; text-decoration: none; font-weight: 600; }
@@ -337,7 +337,7 @@ export default function LoginPage() {
         .lp-submit:hover:not(:disabled) { background: #1557b0; transform: translateY(-1px); }
         .lp-submit:disabled { opacity: 0.6; cursor: not-allowed; transform: none; }
         .lp-divider { display: flex; align-items: center; gap: 10px; margin: 20px 0 16px; }
-        .lp-divider::before, .lp-divider::after { content: ""; flex: 1; height: 1px; background: #d9d9cf; }
+        .lp-divider::before, .lp-divider::after { content: ""; flex: 1; height: 1px; background: #e2e8f0; }
         .lp-divider span { font-size: 11px; color: #999; font-weight: 500; white-space: nowrap; }
         .lp-register-row { text-align: center; font-size: 13px; color: #636363; margin-bottom: 10px; }
         .lp-register-row a { color: #1a73e8; font-weight: 700; text-decoration: none; }
@@ -399,7 +399,7 @@ export default function LoginPage() {
           .lp-m-chip-icon { font-size: 16px; flex-shrink: 0; }
           .lp-m-chip-title { font-size: 11px; font-weight: 700; color: #f0f4ff; line-height: 1.2; }
           .lp-m-chip-desc { font-size: 10px; color: rgba(200,210,235,0.7); margin-top: 1px; line-height: 1.3; }
-          .lp-m-form-body { flex: 1; background: #f5f5f0; border-radius: 20px 20px 0 0; margin-top: -10px; padding: 28px 22px 36px; position: relative; z-index: 2; box-shadow: 0 -4px 20px rgba(0,0,0,0.1); }
+          .lp-m-form-body { flex: 1; background: #f8fafc; border-radius: 20px 20px 0 0; margin-top: -10px; padding: 28px 22px 36px; position: relative; z-index: 2; box-shadow: 0 -4px 20px rgba(0,0,0,0.1); }
           .lp-m-heading { display: block; margin-bottom: 22px; }
           .lp-m-heading h2 { font-size: 20px; font-weight: 800; color: #2c2c2c; margin: 0 0 4px; }
           .lp-m-heading p  { font-size: 13px; color: #636363; margin: 0; }

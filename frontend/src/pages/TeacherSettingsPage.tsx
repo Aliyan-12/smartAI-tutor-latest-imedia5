@@ -106,7 +106,7 @@ export default function TeacherSettingsPage() {
   return (
     <>
       <style>{`
-        .ts-page  { display: flex; height: 100vh; background: #f5f5f0; font-family: "DM Sans", -apple-system, sans-serif; }
+        .ts-page  { display: flex; height: 100vh; background: #f8fafc; font-family: "DM Sans", -apple-system, sans-serif; }
         .ts-main  { flex: 1; overflow-y: auto; }
         .ts-inner { padding: 32px 40px; max-width: 880px; }
 

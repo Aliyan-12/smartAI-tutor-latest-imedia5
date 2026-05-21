@@ -199,7 +199,7 @@ export default function RegisterPage() {
         .rp-root {
           display: flex; min-height: 100vh;
           font-family: "DM Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-          background: #f5f5f0;
+          background: #f8fafc;
         }
 
         /* ══ BRAND PANEL ══ */
@@ -326,7 +326,7 @@ export default function RegisterPage() {
         /* ══ FORM PANEL ══ */
         .rp-form {
           flex: 0 0 42%; display: flex; align-items: center; justify-content: center;
-          padding: 40px 32px; background: #f5f5f0; overflow-y: auto;
+          padding: 40px 32px; background: #f8fafc; overflow-y: auto;
         }
         .rp-card { width: 100%; max-width: 380px; }
         .rp-logo { display: flex; flex-direction: column; align-items: center; text-align: center; margin-bottom: 24px; }
@@ -337,7 +337,7 @@ export default function RegisterPage() {
         .rp-m-heading { display: none; }
         .rp-field { margin-bottom: 13px; }
         .rp-field label { display: block; font-size: 12px; font-weight: 700; color: #2c2c2c; margin-bottom: 5px; letter-spacing: 0.3px; text-transform: uppercase; }
-        .rp-field input { width: 100%; padding: 11px 13px; background: #fff; border: 1.5px solid #d9d9cf; border-radius: 8px; color: #2c2c2c; font-size: 14px; font-family: inherit; transition: border-color 0.2s, box-shadow 0.2s; }
+        .rp-field input { width: 100%; padding: 11px 13px; background: #fff; border: 1.5px solid #e2e8f0; border-radius: 8px; color: #2c2c2c; font-size: 14px; font-family: inherit; transition: border-color 0.2s, box-shadow 0.2s; }
         .rp-field input:focus { border-color: #1a73e8; box-shadow: 0 0 0 3px rgba(26,115,232,0.1); outline: none; }
         .rp-hint { font-size: 11px; color: #999; margin-top: 4px; }
         .rp-error { background: #fef2f2; border: 1px solid #fca5a5; color: #dc2626; border-radius: 7px; padding: 10px 12px; font-size: 13px; margin-bottom: 12px; }
@@ -345,7 +345,7 @@ export default function RegisterPage() {
         .rp-submit:hover:not(:disabled) { background: #1557b0; transform: translateY(-1px); }
         .rp-submit:disabled { opacity: 0.6; cursor: not-allowed; transform: none; }
         .rp-divider { display: flex; align-items: center; gap: 10px; margin: 18px 0 14px; }
-        .rp-divider::before, .rp-divider::after { content: ""; flex: 1; height: 1px; background: #d9d9cf; }
+        .rp-divider::before, .rp-divider::after { content: ""; flex: 1; height: 1px; background: #e2e8f0; }
         .rp-divider span { font-size: 11px; color: #999; font-weight: 500; white-space: nowrap; }
         .rp-login-row { text-align: center; font-size: 13px; color: #636363; }
         .rp-login-row a { color: #1a73e8; font-weight: 700; text-decoration: none; }
@@ -406,7 +406,7 @@ export default function RegisterPage() {
           .rp-m-hi-icon { font-size: 16px; flex-shrink: 0; }
           .rp-m-hi-title { font-size: 11px; font-weight: 700; color: #f0f4ff; line-height: 1.2; }
           .rp-m-hi-desc { font-size: 10px; color: rgba(200,210,235,0.7); margin-top: 1px; line-height: 1.3; }
-          .rp-m-form-body { flex: 1; background: #f5f5f0; border-radius: 20px 20px 0 0; margin-top: -10px; padding: 28px 22px 36px; position: relative; z-index: 2; box-shadow: 0 -4px 20px rgba(0,0,0,0.1); }
+          .rp-m-form-body { flex: 1; background: #f8fafc; border-radius: 20px 20px 0 0; margin-top: -10px; padding: 28px 22px 36px; position: relative; z-index: 2; box-shadow: 0 -4px 20px rgba(0,0,0,0.1); }
           .rp-m-heading { display: block; margin-bottom: 20px; }
           .rp-m-heading h2 { font-size: 20px; font-weight: 800; color: #2c2c2c; margin: 0 0 4px; }
           .rp-m-heading p  { font-size: 13px; color: #636363; margin: 0; }

@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
 import { gamificationApi, appointmentsApi, assignmentsApi } from "../services/api";
@@ -105,6 +105,9 @@ export default function WelcomeScreen({ onPromptClick, onStatsLoaded }: Props) {
     load();
   }, [load]);
 
+  const [helpInput, setHelpInput] = useState("");
+  const helpInputRef = useRef<HTMLInputElement>(null);
+
   const firstName = user?.name?.split(" ")[0] ?? "there";
 
   if (loading) {
@@ -155,7 +158,7 @@ export default function WelcomeScreen({ onPromptClick, onStatsLoaded }: Props) {
     <>
       <style>{`
         .ws-root {
-          padding: 24px 20px 40px;
+          padding: 20px 24px 40px;
           width: 100%;
           font-family: "DM Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
           box-sizing: border-box;
@@ -186,479 +189,6 @@ export default function WelcomeScreen({ onPromptClick, onStatsLoaded }: Props) {
           from { transform: rotate(0deg); }
           to { transform: rotate(360deg); }
         }
-
-        /* ── Stats summary row ── */
-        .ws-study-stats {
-          display: grid;
-          grid-template-columns: repeat(4, 1fr);
-          gap: 12px;
-          margin-bottom: 20px;
-        }
-
-        .ws-study-stat-card {
-          background: #fff;
-          border: 1px solid #e2e8f0;
-          border-radius: 12px;
-          padding: 16px 18px;
-          box-shadow: 0 1px 4px rgba(0,0,0,0.04);
-        }
-
-        .ws-stat-label {
-          font-size: 11px;
-          font-weight: 700;
-          text-transform: uppercase;
-          letter-spacing: 0.5px;
-          color: #94a3b8;
-          margin-bottom: 8px;
-        }
-
-        .ws-stat-value {
-          font-size: 26px;
-          font-weight: 800;
-          color: #0f172a;
-          line-height: 1;
-        }
-
-        .ws-stat-sub {
-          font-size: 12px;
-          color: #64748b;
-          margin-top: 4px;
-        }
-
-        /* ── Active session alert ── */
-        .ws-active-session-alert {
-          background: linear-gradient(135deg, #ecfdf5, #d1fae5);
-          border: 1.5px solid #6ee7b7;
-          border-left: 5px solid #10b981;
-          border-radius: 14px;
-          padding: 16px 20px;
-          margin-bottom: 20px;
-          display: flex;
-          align-items: center;
-          gap: 14px;
-          flex-wrap: wrap;
-        }
-
-        .ws-active-pulse {
-          width: 12px;
-          height: 12px;
-          border-radius: 50%;
-          background: #10b981;
-          flex-shrink: 0;
-          animation: ws-pulse 1.5s ease-in-out infinite;
-        }
-
-        @keyframes ws-pulse {
-          0%, 100% { box-shadow: 0 0 0 0 rgba(16,185,129,0.4); }
-          50% { box-shadow: 0 0 0 8px rgba(16,185,129,0); }
-        }
-
-        .ws-active-info { flex: 1; min-width: 0; }
-
-        .ws-active-info strong {
-          font-size: 15px;
-          font-weight: 800;
-          color: #064e3b;
-          display: block;
-          margin-bottom: 2px;
-        }
-
-        .ws-active-info span {
-          font-size: 12px;
-          color: #065f46;
-        }
-
-        /* ── Continue learning ── */
-        .ws-continue-card {
-          background: linear-gradient(135deg, #fff 60%, #eff6ff);
-          border: 1.5px solid #bfdbfe;
-          border-left: 5px solid #3b82f6;
-          border-radius: 14px;
-          padding: 20px 24px;
-          margin-bottom: 20px;
-          box-shadow: 0 1px 4px rgba(59,130,246,0.08);
-        }
-
-        .ws-continue-tag {
-          display: inline-flex;
-          align-items: center;
-          gap: 5px;
-          font-size: 11px;
-          font-weight: 800;
-          text-transform: uppercase;
-          letter-spacing: 0.6px;
-          color: #3b82f6;
-          background: #dbeafe;
-          padding: 3px 10px;
-          border-radius: 999px;
-          margin-bottom: 12px;
-        }
-
-        .ws-continue-inner {
-          display: flex;
-          align-items: flex-start;
-          gap: 16px;
-          flex-wrap: wrap;
-        }
-
-        .ws-robot-icon {
-          font-size: 40px;
-          flex-shrink: 0;
-          line-height: 1;
-          margin-top: 2px;
-        }
-
-        .ws-continue-info {
-          flex: 1;
-          min-width: 200px;
-        }
-
-        .ws-continue-topic {
-          font-size: 20px;
-          font-weight: 800;
-          color: #0f172a;
-          margin: 0 0 3px;
-        }
-
-        .ws-continue-subject {
-          font-size: 13px;
-          color: #64748b;
-          margin-bottom: 10px;
-        }
-
-        .ws-continue-progress {
-          display: flex;
-          align-items: center;
-          gap: 10px;
-          margin-bottom: 8px;
-        }
-
-        .ws-prog-track {
-          flex: 1;
-          height: 9px;
-          background: #dbeafe;
-          border-radius: 999px;
-          overflow: hidden;
-        }
-
-        .ws-prog-fill {
-          height: 100%;
-          border-radius: 999px;
-          background: linear-gradient(90deg, #3b82f6, #60a5fa);
-        }
-
-        .ws-prog-pct {
-          font-size: 12px;
-          font-weight: 700;
-          color: #3b82f6;
-          white-space: nowrap;
-        }
-
-        .ws-continue-last {
-          font-size: 12px;
-          color: #94a3b8;
-          font-style: italic;
-        }
-
-        .ws-continue-actions {
-          display: flex;
-          flex-direction: column;
-          gap: 8px;
-          flex-shrink: 0;
-          min-width: 140px;
-        }
-
-        .ws-start-cta {
-          background: #fff;
-          border: 1.5px dashed #cbd5e1;
-          border-radius: 14px;
-          padding: 28px 24px;
-          text-align: center;
-          margin-bottom: 20px;
-        }
-
-        /* Subject launch cards */
-        .ws-subject-cards {
-          display: flex;
-          gap: 10px;
-          flex-wrap: wrap;
-          justify-content: center;
-          margin: 14px 0 18px;
-        }
-
-        .ws-subject-card {
-          display: flex;
-          flex-direction: column;
-          align-items: center;
-          gap: 6px;
-          padding: 14px 18px;
-          border-radius: 14px;
-          cursor: pointer;
-          border: 2px solid transparent;
-          transition: transform 0.18s, box-shadow 0.18s;
-          min-width: 90px;
-          flex: 1 1 90px;
-          max-width: 130px;
-          animation: ws-subject-pop 0.4s ease both;
-        }
-
-        .ws-subject-card:hover {
-          transform: translateY(-4px);
-        }
-
-        @keyframes ws-subject-pop {
-          from { opacity: 0; transform: scale(0.85) translateY(8px); }
-          to { opacity: 1; transform: scale(1) translateY(0); }
-        }
-
-        .ws-subject-card-icon { font-size: 28px; line-height: 1; }
-        .ws-subject-card-name { font-size: 13px; font-weight: 700; color: #0f172a; }
-        .ws-subject-card-tag { font-size: 10px; font-weight: 500; color: #64748b; }
-
-        /* ── Two-column grid ── */
-        .ws-grid {
-          display: grid;
-          grid-template-columns: 1fr 1fr;
-          gap: 16px;
-          margin-bottom: 20px;
-        }
-
-        /* ── Generic card ── */
-        .ws-card {
-          background: #fff;
-          border: 1px solid #e2e8f0;
-          border-radius: 14px;
-          padding: 18px 20px;
-          box-shadow: 0 1px 4px rgba(0,0,0,0.05);
-        }
-
-        .ws-card-title {
-          font-size: 11px;
-          font-weight: 800;
-          text-transform: uppercase;
-          letter-spacing: 0.5px;
-          color: #94a3b8;
-          margin-bottom: 14px;
-        }
-
-        /* ── Session list items ── */
-        .ws-session-item {
-          display: flex;
-          align-items: center;
-          gap: 10px;
-          padding: 10px 12px;
-          border-radius: 10px;
-          margin-bottom: 8px;
-          background: #f8fafc;
-          border: 1px solid #e2e8f0;
-          transition: background 0.15s, border-color 0.15s;
-        }
-
-        .ws-session-item:hover {
-          background: #f1f5f9;
-          border-color: #cbd5e1;
-        }
-
-        .ws-session-item:last-child { margin-bottom: 0; }
-
-        .ws-session-dot {
-          width: 10px;
-          height: 10px;
-          border-radius: 50%;
-          flex-shrink: 0;
-          box-shadow: 0 0 0 3px rgba(255,255,255,0.9), 0 0 0 4px currentColor;
-        }
-
-        .ws-subject-icon-bubble {
-          width: 32px;
-          height: 32px;
-          border-radius: 8px;
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          font-size: 16px;
-          flex-shrink: 0;
-        }
-
-        .ws-session-info { flex: 1; min-width: 0; }
-
-        .ws-session-title {
-          font-size: 13px;
-          font-weight: 700;
-          color: #0f172a;
-          margin: 0 0 2px;
-          white-space: nowrap;
-          overflow: hidden;
-          text-overflow: ellipsis;
-        }
-
-        .ws-session-meta {
-          font-size: 11px;
-          color: #64748b;
-          margin: 0;
-        }
-
-        .ws-session-badge {
-          font-size: 10px;
-          font-weight: 700;
-          padding: 2px 8px;
-          border-radius: 999px;
-          white-space: nowrap;
-          flex-shrink: 0;
-        }
-
-        .ws-badge--started { background: #d1fae5; color: #065f46; }
-        .ws-badge--paused { background: #fef3c7; color: #92400e; }
-        .ws-badge--confirmed { background: #dbeafe; color: #1e40af; }
-
-        /* ── Assignment items ── */
-        .ws-assign-item {
-          display: flex;
-          align-items: flex-start;
-          gap: 10px;
-          padding: 10px 12px;
-          border-radius: 10px;
-          margin-bottom: 8px;
-          background: #f8fafc;
-          border-left: 3px solid #f59e0b;
-          border-top: 1px solid #e2e8f0;
-          border-right: 1px solid #e2e8f0;
-          border-bottom: 1px solid #e2e8f0;
-        }
-
-        .ws-assign-item:last-child { margin-bottom: 0; }
-
-        .ws-assign-icon { font-size: 18px; flex-shrink: 0; }
-
-        .ws-assign-info { flex: 1; min-width: 0; }
-
-        .ws-assign-title {
-          font-size: 13px;
-          font-weight: 700;
-          color: #0f172a;
-          margin: 0 0 2px;
-          white-space: nowrap;
-          overflow: hidden;
-          text-overflow: ellipsis;
-        }
-
-        .ws-assign-meta {
-          font-size: 11px;
-          color: #64748b;
-          margin: 0;
-        }
-
-        .ws-assign-due {
-          font-size: 11px;
-          font-weight: 700;
-          color: #d97706;
-          white-space: nowrap;
-          flex-shrink: 0;
-        }
-
-        .ws-assign-due--overdue { color: #dc2626; }
-
-        /* ── Daily plan items ── */
-        .ws-plan-item {
-          display: flex;
-          align-items: center;
-          gap: 10px;
-          padding: 9px 12px;
-          border-radius: 8px;
-          margin-bottom: 6px;
-          cursor: pointer;
-          border-left: 3px solid transparent;
-          transition: background 0.15s;
-          background: #f8fafc;
-        }
-
-        .ws-plan-item:last-child { margin-bottom: 0; }
-
-        .ws-plan-item--weak { border-left-color: #ef4444; background: #fff5f5; }
-        .ws-plan-item--weak:hover { background: #fee2e2; }
-
-        .ws-plan-item--review { border-left-color: #3b82f6; background: #f0f6ff; }
-        .ws-plan-item--review:hover { background: #dbeafe; }
-
-        .ws-plan-item--boost { border-left-color: #22c55e; background: #f0faf4; }
-        .ws-plan-item--boost:hover { background: #dcfce7; }
-
-        .ws-plan-icon { font-size: 16px; flex-shrink: 0; }
-
-        .ws-plan-body { flex: 1; min-width: 0; }
-
-        .ws-plan-topic {
-          font-size: 13px;
-          font-weight: 600;
-          color: #0f172a;
-          white-space: nowrap;
-          overflow: hidden;
-          text-overflow: ellipsis;
-          margin: 0 0 2px;
-        }
-
-        .ws-plan-sub {
-          font-size: 11px;
-          color: #64748b;
-          margin: 0;
-        }
-
-        .ws-plan-arrow { color: #cbd5e1; font-size: 16px; }
-
-        .ws-empty-plan {
-          font-size: 13px;
-          color: #94a3b8;
-          text-align: center;
-          padding: 16px 0;
-          line-height: 1.5;
-        }
-
-        /* ── Quick actions ── */
-        .ws-quick-grid {
-          display: grid;
-          grid-template-columns: 1fr 1fr;
-          gap: 8px;
-        }
-
-        .ws-quick-btn {
-          display: flex;
-          flex-direction: column;
-          align-items: center;
-          justify-content: center;
-          gap: 6px;
-          padding: 14px 8px;
-          background: #f8fafc;
-          border: 1.5px solid #e2e8f0;
-          border-radius: 10px;
-          font-size: 12px;
-          font-weight: 700;
-          color: #0f172a;
-          cursor: pointer;
-          transition: border-color 0.15s, background 0.15s, box-shadow 0.15s, transform 0.15s;
-          font-family: inherit;
-          text-align: center;
-          position: relative;
-          overflow: hidden;
-        }
-
-        .ws-quick-btn .ws-q-icon {
-          font-size: 22px;
-          filter: drop-shadow(0 1px 3px rgba(0,0,0,0.15));
-        }
-
-        .ws-quick-btn:hover {
-          transform: translateY(-2px);
-          box-shadow: 0 4px 14px rgba(59,130,246,0.14);
-        }
-
-        .ws-quick-btn--ai   { border-color: #bfdbfe; background: #eff6ff; }
-        .ws-quick-btn--ai:hover   { border-color: #3b82f6; background: #dbeafe; }
-        .ws-quick-btn--quiz { border-color: #d1fae5; background: #f0fdf4; }
-        .ws-quick-btn--quiz:hover { border-color: #22c55e; background: #dcfce7; }
-        .ws-quick-btn--sess { border-color: #e0e7ff; background: #eef2ff; }
-        .ws-quick-btn--sess:hover { border-color: #6366f1; background: #e0e7ff; }
-        .ws-quick-btn--prog { border-color: #fde68a; background: #fffbeb; }
-        .ws-quick-btn--prog:hover { border-color: #f59e0b; background: #fef3c7; }
 
         /* ── Buttons ── */
         .ws-btn {
@@ -694,106 +224,596 @@ export default function WelcomeScreen({ onPromptClick, onStatsLoaded }: Props) {
 
         .ws-btn--sm { padding: 7px 12px; font-size: 12px; }
 
+        /* ── Section 1: Continue Learning card ── */
+        .ws-cl-card {
+          background: #fff;
+          border: 1.5px solid #e2e8f0;
+          border-radius: 16px;
+          box-shadow: 0 2px 12px rgba(0,0,0,0.06);
+          padding: 24px 28px;
+          margin-bottom: 20px;
+          display: flex;
+          flex-direction: column;
+        }
+
+        .ws-cl-badge {
+          font-size: 11px;
+          font-weight: 800;
+          text-transform: uppercase;
+          letter-spacing: 0.8px;
+          color: #1a73e8;
+          background: #eff6ff;
+          padding: 3px 10px;
+          border-radius: 999px;
+          display: inline-block;
+          margin-bottom: 12px;
+          align-self: flex-start;
+        }
+
+        .ws-cl-body {
+          display: flex;
+          align-items: flex-start;
+          gap: 20px;
+        }
+
+        .ws-cl-info {
+          flex: 1;
+          min-width: 0;
+        }
+
+        .ws-cl-topic {
+          font-size: 22px;
+          font-weight: 800;
+          color: #0f172a;
+          margin: 0 0 4px;
+        }
+
+        .ws-cl-subject {
+          font-size: 13px;
+          color: #64748b;
+          margin: 0 0 12px;
+        }
+
+        .ws-cl-prog-row {
+          display: flex;
+          align-items: center;
+          gap: 10px;
+          margin-bottom: 10px;
+        }
+
+        .ws-cl-prog-label {
+          font-size: 12px;
+          color: #64748b;
+          white-space: nowrap;
+        }
+
+        .ws-cl-prog-track {
+          height: 8px;
+          background: #e2e8f0;
+          border-radius: 999px;
+          flex: 1;
+          max-width: 180px;
+          overflow: hidden;
+        }
+
+        .ws-cl-prog-fill {
+          height: 100%;
+          border-radius: 999px;
+          background: linear-gradient(90deg, #1a73e8, #60a5fa);
+        }
+
+        .ws-cl-prog-mins {
+          font-size: 12px;
+          color: #64748b;
+          white-space: nowrap;
+        }
+
+        .ws-cl-last-msg {
+          background: #f8fafc;
+          border: 1px solid #e2e8f0;
+          border-radius: 10px;
+          padding: 10px 14px;
+          font-size: 12px;
+          color: #64748b;
+          margin-top: 10px;
+          line-height: 1.5;
+        }
+
+        .ws-cl-robot {
+          width: 130px;
+          flex-shrink: 0;
+          object-fit: contain;
+          align-self: center;
+        }
+
+        .ws-cl-actions {
+          display: flex;
+          flex-direction: column;
+          gap: 8px;
+          flex-shrink: 0;
+          min-width: 170px;
+          align-self: center;
+        }
+
+        .ws-cl-btn-primary {
+          background: #1a73e8;
+          color: #fff;
+          padding: 11px 20px;
+          border-radius: 8px;
+          font-weight: 700;
+          font-size: 13px;
+          border: none;
+          cursor: pointer;
+          font-family: inherit;
+          transition: background 0.18s;
+        }
+
+        .ws-cl-btn-primary:hover { background: #1557b0; }
+
+        .ws-cl-btn-secondary {
+          background: #fff;
+          color: #0f172a;
+          border: 1.5px solid #e2e8f0;
+          padding: 10px 20px;
+          border-radius: 8px;
+          font-weight: 700;
+          font-size: 13px;
+          cursor: pointer;
+          font-family: inherit;
+          transition: border-color 0.18s, background 0.18s;
+        }
+
+        .ws-cl-btn-secondary:hover { border-color: #94a3b8; background: #f8fafc; }
+
+        /* ── Section 2: Recommended for You ── */
+        .ws-rec-row {
+          display: grid;
+          grid-template-columns: 3fr 2fr;
+          gap: 16px;
+          margin-bottom: 20px;
+        }
+
+        .ws-rec-left-header {
+          font-size: 15px;
+          font-weight: 800;
+          color: #0f172a;
+          margin: 0 0 12px;
+        }
+
+        .ws-rec-card {
+          background: #fff;
+          border: 1px solid #e2e8f0;
+          border-radius: 12px;
+          padding: 14px 16px;
+          margin-bottom: 10px;
+          display: flex;
+          align-items: center;
+          gap: 12px;
+        }
+
+        .ws-rec-card:last-child { margin-bottom: 0; }
+
+        .ws-rec-icon-bubble {
+          width: 40px;
+          height: 40px;
+          border-radius: 10px;
+          background: #f1f5f9;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          font-size: 20px;
+          flex-shrink: 0;
+        }
+
+        .ws-rec-body { flex: 1; min-width: 0; }
+
+        .ws-rec-label {
+          font-size: 10px;
+          font-weight: 700;
+          text-transform: uppercase;
+          padding: 2px 8px;
+          border-radius: 4px;
+          display: inline-block;
+          margin-bottom: 4px;
+        }
+
+        .ws-rec-title {
+          font-size: 13px;
+          font-weight: 700;
+          color: #0f172a;
+          margin: 0 0 2px;
+          white-space: nowrap;
+          overflow: hidden;
+          text-overflow: ellipsis;
+        }
+
+        .ws-rec-desc {
+          font-size: 11px;
+          color: #64748b;
+          margin: 0;
+        }
+
+        .ws-rec-right {
+          display: flex;
+          flex-direction: column;
+          align-items: flex-end;
+          gap: 6px;
+          flex-shrink: 0;
+        }
+
+        .ws-rec-mins {
+          font-size: 11px;
+          font-weight: 700;
+          color: #64748b;
+          white-space: nowrap;
+        }
+
+        .ws-rec-start-btn {
+          padding: 8px 14px;
+          border-radius: 8px;
+          font-size: 12px;
+          font-weight: 700;
+          border: none;
+          cursor: pointer;
+          font-family: inherit;
+          color: #fff;
+          white-space: nowrap;
+          transition: opacity 0.18s;
+        }
+
+        .ws-rec-start-btn:hover { opacity: 0.88; }
+
+        .ws-promo-card {
+          background: linear-gradient(135deg, #1e3a5f 0%, #1a73e8 100%);
+          border-radius: 16px;
+          padding: 24px;
+          color: #fff;
+          height: 100%;
+          display: flex;
+          flex-direction: column;
+          justify-content: space-between;
+          box-sizing: border-box;
+        }
+
+        .ws-promo-support {
+          font-size: 12px;
+          opacity: 0.8;
+          margin: 0 0 8px;
+        }
+
+        .ws-promo-heading {
+          font-size: 17px;
+          font-weight: 800;
+          margin: 0 0 12px;
+          line-height: 1.3;
+        }
+
+        .ws-promo-list {
+          list-style: none;
+          padding: 0;
+          margin: 0 0 16px;
+          display: flex;
+          flex-direction: column;
+          gap: 5px;
+        }
+
+        .ws-promo-list li {
+          font-size: 13px;
+          opacity: 0.9;
+        }
+
+        .ws-promo-btn {
+          background: #fff;
+          color: #1a73e8;
+          border: none;
+          padding: 10px 20px;
+          border-radius: 8px;
+          font-weight: 700;
+          font-size: 13px;
+          cursor: pointer;
+          align-self: flex-start;
+          font-family: inherit;
+          transition: opacity 0.18s;
+        }
+
+        .ws-promo-btn:hover { opacity: 0.88; }
+
+        /* ── Section 3: Pick a Subject ── */
+        .ws-subj-grid {
+          display: grid;
+          grid-template-columns: repeat(3, 1fr);
+          gap: 16px;
+          margin-bottom: 20px;
+        }
+
+        .ws-subj-card {
+          border-radius: 16px;
+          padding: 20px 18px;
+          cursor: pointer;
+          transition: transform 0.18s, box-shadow 0.18s;
+          display: flex;
+          flex-direction: column;
+          align-items: center;
+          gap: 0;
+        }
+
+        .ws-subj-card:hover { transform: translateY(-3px); }
+
+        .ws-subj-img {
+          width: 80px;
+          height: 80px;
+          object-fit: contain;
+        }
+
+        .ws-subj-name {
+          font-size: 18px;
+          font-weight: 800;
+          color: #0f172a;
+          margin: 10px 0 6px;
+        }
+
+        .ws-subj-desc {
+          font-size: 12px;
+          color: #64748b;
+          line-height: 1.5;
+          margin-bottom: 14px;
+          flex: 1;
+          text-align: center;
+        }
+
+        .ws-subj-btn {
+          width: 100%;
+          border-radius: 999px;
+          padding: 9px 0;
+          font-weight: 700;
+          font-size: 13px;
+          border: none;
+          cursor: pointer;
+          font-family: inherit;
+          color: #fff;
+          transition: opacity 0.18s;
+        }
+
+        .ws-subj-btn:hover { opacity: 0.88; }
+
+        /* ── Section 4: Need Help bar ── */
+        .ws-help-bar {
+          background: #fff;
+          border: 1px solid #e2e8f0;
+          border-radius: 16px;
+          padding: 16px 20px;
+          display: flex;
+          align-items: center;
+          gap: 20px;
+          margin-top: 8px;
+        }
+
+        .ws-help-left {
+          display: flex;
+          align-items: center;
+          gap: 12px;
+          flex: 1;
+        }
+
+        .ws-help-text-heading {
+          font-size: 14px;
+          font-weight: 700;
+          color: #0f172a;
+          margin: 0 0 2px;
+        }
+
+        .ws-help-text-sub {
+          font-size: 12px;
+          color: #64748b;
+          margin: 0;
+        }
+
+        .ws-help-right {
+          display: flex;
+          align-items: center;
+          gap: 8px;
+          flex-shrink: 0;
+        }
+
+        .ws-help-input {
+          background: #f8fafc;
+          border: 1.5px solid #e2e8f0;
+          border-radius: 8px;
+          padding: 10px 14px;
+          font-size: 13px;
+          font-family: inherit;
+          outline: none;
+          width: 300px;
+          transition: border-color 0.18s;
+        }
+
+        .ws-help-input:focus { border-color: #1a73e8; }
+
+        .ws-help-send {
+          width: 40px;
+          height: 40px;
+          background: #1a73e8;
+          color: #fff;
+          border: none;
+          border-radius: 50%;
+          font-size: 18px;
+          cursor: pointer;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          flex-shrink: 0;
+          transition: background 0.18s;
+        }
+
+        .ws-help-send:hover { background: #1557b0; }
+
+        /* ── Start CTA (no sessions yet) ── */
+        .ws-start-cta {
+          background: #fff;
+          border: 1.5px dashed #cbd5e1;
+          border-radius: 14px;
+          padding: 28px 24px;
+          text-align: center;
+          margin-bottom: 20px;
+        }
+
         @media (max-width: 900px) {
-          .ws-study-stats { grid-template-columns: repeat(2, 1fr); }
+          .ws-rec-row { grid-template-columns: 1fr; }
+          .ws-subj-grid { grid-template-columns: 1fr 1fr; }
         }
 
-        @media (max-width: 720px) {
-          .ws-grid { grid-template-columns: 1fr; }
-          .ws-study-stats { grid-template-columns: repeat(2, 1fr); }
-          .ws-continue-actions { flex-direction: row; flex-wrap: wrap; min-width: unset; width: 100%; }
-        }
-
-        @media (max-width: 480px) {
-          .ws-study-stats { grid-template-columns: 1fr 1fr; }
+        @media (max-width: 640px) {
+          .ws-subj-grid { grid-template-columns: 1fr; }
+          .ws-help-bar { flex-direction: column; align-items: flex-start; }
+          .ws-help-input { width: 100%; }
+          .ws-cl-robot { display: none; }
+          .ws-cl-actions { min-width: unset; width: 100%; }
         }
       `}</style>
 
       <div className="ws-root">
 
-        {/* Active session alert */}
-        {activeSessions.length > 0 && (
-          <div className="ws-active-session-alert">
-            <div className="ws-active-pulse" />
-            <div className="ws-active-info">
-              <strong>
-                {activeSessions[0].status === "paused" ? "⏸ Paused" : "▶ Live"}: {activeSessions[0].title}
-              </strong>
-              <span>
-                {activeSessions[0].subject} ·{" "}
-                {activeSessions[0].status === "paused"
-                  ? "Session is paused — resume where you left off"
-                  : "Session is in progress"}
-              </span>
-            </div>
-            <button
-              className="ws-btn ws-btn--green"
-              onClick={() => navigate(`/session/${activeSessions[0].id}`)}
-            >
-              {activeSessions[0].status === "paused" ? "Resume" : "Rejoin"} →
-            </button>
-          </div>
-        )}
-
-        {/* Continue learning / Start CTA */}
-        {continue_learning ? (
-          <div className="ws-continue-card">
-            <div className="ws-continue-tag">▶ Continue Learning</div>
-            <div className="ws-continue-inner">
-              <div className="ws-robot-icon">🤖</div>
-              <div className="ws-continue-info">
-                <h2 className="ws-continue-topic">{continue_learning.topic}</h2>
-                <p className="ws-continue-subject">
+        {/* ── Section 1: Active Sessions / Continue Learning / Start CTA ── */}
+        {activeSessions.length > 0 ? (
+          <>
+          {activeSessions.slice(0, 2).map((session) => {
+            const startTime = session.session_started_at
+              ? new Date(session.session_started_at).getTime()
+              : null;
+            const elapsedMins = startTime
+              ? Math.max(0, Math.round((Date.now() - startTime) / 60000))
+              : 0;
+            const progressPct =
+              session.duration_minutes > 0
+                ? Math.min(100, Math.round((elapsedMins / session.duration_minutes) * 100))
+                : 0;
+            const isPaused = session.status === "paused";
+            return (
+              <div key={session.id} className="ws-cl-card" style={{ marginBottom: 16 }}>
+                <span className="ws-cl-badge" style={isPaused ? { background: "#fef3c7", color: "#b45309" } : undefined}>
+                  {isPaused ? "⏸ Paused" : "▶ Continue Learning"}
+                </span>
+                <div className="ws-cl-body">
+                  <div className="ws-cl-info">
+                    <h2 className="ws-cl-topic">{session.title}</h2>
+                    <p className="ws-cl-subject">
+                      {session.subject} · {session.key_stage}
+                    </p>
+                    <div className="ws-cl-prog-row">
+                      <span className="ws-cl-prog-label">
+                        You're {progressPct > 0 ? `${progressPct}%` : "just starting"} through this lesson
+                      </span>
+                      <div className="ws-cl-prog-track">
+                        <div
+                          className="ws-cl-prog-fill"
+                          style={{ width: `${Math.max(progressPct, 2)}%` }}
+                        />
+                      </div>
+                      {elapsedMins > 0 && (
+                        <span className="ws-cl-prog-mins">{elapsedMins} mins completed</span>
+                      )}
+                    </div>
+                    {session.description && (
+                      <div className="ws-cl-last-msg">
+                        💬 Last message: "{session.description}"
+                      </div>
+                    )}
+                  </div>
+                  <img
+                    src="/images/robotAI.png"
+                    alt="AI tutor"
+                    draggable={false}
+                    className="ws-cl-robot"
+                  />
+                  <div className="ws-cl-actions">
+                    <button
+                      className="ws-cl-btn-primary"
+                      onClick={() => navigate(`/session/${session.id}`)}
+                    >
+                      ▶ Resume Lesson
+                    </button>
+                    <button
+                      className="ws-cl-btn-secondary"
+                      onClick={() => navigate(`/session/${session.id}`)}
+                    >
+                      View Last Message
+                    </button>
+                    <button
+                      className="ws-cl-btn-secondary"
+                      onClick={() => navigate("/lesson/setup")}
+                    >
+                      Start a Different Topic
+                    </button>
+                  </div>
+                </div>
+              </div>
+            );
+          })}
+          <button
+            onClick={() => navigate("/sessions")}
+            style={{
+              display: "block", width: "100%", padding: "10px 0",
+              background: "#f8fafc", border: "1.5px solid #e2e8f0",
+              borderRadius: 10, fontSize: 13, fontWeight: 700,
+              color: "#1a73e8", cursor: "pointer", fontFamily: "inherit",
+              marginBottom: 20, transition: "background 0.15s",
+            }}
+            onMouseEnter={(e) => ((e.currentTarget as HTMLButtonElement).style.background = "#eff6ff")}
+            onMouseLeave={(e) => ((e.currentTarget as HTMLButtonElement).style.background = "#f8fafc")}
+          >
+            View all sessions →
+          </button>
+          </>
+        ) : continue_learning ? (
+          <div className="ws-cl-card">
+            <span className="ws-cl-badge">Continue Learning</span>
+            <div className="ws-cl-body">
+              <div className="ws-cl-info">
+                <h2 className="ws-cl-topic">{continue_learning.topic}</h2>
+                <p className="ws-cl-subject">
                   {continue_learning.subject} · {continue_learning.key_stage}
                 </p>
-                <div className="ws-continue-progress">
-                  <div className="ws-prog-track">
+                <div className="ws-cl-prog-row">
+                  <span className="ws-cl-prog-label">
+                    You're {continue_learning.mastery > 0 ? `${continue_learning.mastery}%` : "just starting"} through this lesson
+                  </span>
+                  <div className="ws-cl-prog-track">
                     <div
-                      className="ws-prog-fill"
+                      className="ws-cl-prog-fill"
                       style={{ width: `${Math.max(continue_learning.mastery, 2)}%` }}
                     />
                   </div>
-                  <span className="ws-prog-pct">
-                    {continue_learning.mastery > 0
-                      ? `${continue_learning.mastery}% mastery`
-                      : "Just started"}
-                  </span>
                 </div>
                 {continue_learning.last_mistake && (
-                  <p className="ws-continue-last">
-                    Last note: "{continue_learning.last_mistake}"
-                  </p>
+                  <div className="ws-cl-last-msg">
+                    💬 {continue_learning.last_mistake}
+                  </div>
                 )}
               </div>
-              <div className="ws-continue-actions">
+              <img
+                src="/images/robotAI.png"
+                alt="AI tutor"
+                draggable={false}
+                className="ws-cl-robot"
+              />
+              <div className="ws-cl-actions">
                 <button
-                  className="ws-btn ws-btn--primary"
-                  onClick={() => {
-                    const active = activeSessions[0];
-                    if (active) {
-                      navigate(`/session/${active.id}`);
-                    } else {
-                      navigate("/lesson/setup");
-                    }
-                  }}
+                  className="ws-cl-btn-primary"
+                  onClick={() => navigate("/lesson/setup")}
                 >
                   ▶ Resume Lesson
                 </button>
                 <button
-                  className="ws-btn ws-btn--ghost"
+                  className="ws-cl-btn-secondary"
                   onClick={() => navigate("/lesson/setup")}
                 >
-                  Start Different Topic
+                  View Last Message
                 </button>
                 <button
-                  className="ws-btn ws-btn--outline"
-                  onClick={() =>
-                    onPromptClick(
-                      `Quiz me on ${continue_learning.topic} (${continue_learning.subject}).`
-                    )
-                  }
+                  className="ws-cl-btn-secondary"
+                  onClick={() => navigate("/lesson/setup")}
                 >
-                  ⚡ Quick Quiz
+                  Start a Different Topic
                 </button>
               </div>
             </div>
@@ -814,40 +834,6 @@ export default function WelcomeScreen({ onPromptClick, onStatsLoaded }: Props) {
                 </p>
               </div>
             </div>
-            {/* Subject launch cards */}
-            <div className="ws-subject-cards">
-              {[
-                { icon: "🧮", name: "Maths",    tag: "Numbers & algebra",   color: "#f97316", bg: "#fff7ed", border: "#fed7aa" },
-                { icon: "🔬", name: "Science",   tag: "Explore the world",   color: "#22c55e", bg: "#f0fdf4", border: "#bbf7d0" },
-                { icon: "📚", name: "English",   tag: "Read & write",        color: "#3b82f6", bg: "#eff6ff", border: "#bfdbfe" },
-                { icon: "🏛️", name: "History",   tag: "Past events",         color: "#a855f7", bg: "#faf5ff", border: "#d8b4fe" },
-                { icon: "⚗️", name: "Chemistry", tag: "Elements & reactions", color: "#ec4899", bg: "#fdf2f8", border: "#f9a8d4" },
-              ].map((s, i) => (
-                <div
-                  key={s.name}
-                  className="ws-subject-card"
-                  style={{ background: s.bg, borderColor: s.border, animationDelay: `${i * 0.07}s` }}
-                  onClick={() => navigate("/lesson/setup", { state: { subject: s.name } })}
-                  onMouseEnter={(e) => {
-                    (e.currentTarget as HTMLDivElement).style.boxShadow = `0 8px 20px ${s.color}30`;
-                    (e.currentTarget as HTMLDivElement).style.borderColor = s.color;
-                  }}
-                  onMouseLeave={(e) => {
-                    (e.currentTarget as HTMLDivElement).style.boxShadow = "";
-                    (e.currentTarget as HTMLDivElement).style.borderColor = s.border;
-                  }}
-                >
-                  {s.name === "Science" ? (
-                    <img src="/images/sci-robot.png" alt="Science robot" draggable={false}
-                      style={{ width: 36, height: 36, objectFit: "contain", pointerEvents: "none" }} />
-                  ) : (
-                    <span className="ws-subject-card-icon">{s.icon}</span>
-                  )}
-                  <span className="ws-subject-card-name">{s.name}</span>
-                  <span className="ws-subject-card-tag">{s.tag}</span>
-                </div>
-              ))}
-            </div>
             <button
               className="ws-btn ws-btn--orange"
               onClick={() => navigate("/lesson/setup")}
@@ -857,137 +843,121 @@ export default function WelcomeScreen({ onPromptClick, onStatsLoaded }: Props) {
           </div>
         )}
 
-        {/* Two-column: Sessions + Assignments — always shown */}
-        <div className="ws-grid" style={{ marginBottom: 20 }}>
-            {/* Upcoming / Active Sessions */}
-            <div className="ws-card">
-              <div className="ws-card-title">Your Sessions</div>
+        {/* ── Section 2: Recommended for You ── */}
+        <div className="ws-rec-row">
+          {/* Left column */}
+          <div>
+            <h3 className="ws-rec-left-header">← Recommended for You</h3>
 
-              {activeSessions.length === 0 && upcomingSessions.length === 0 ? (
-                <p className="ws-empty-plan">No active or upcoming sessions.</p>
-              ) : (
-                <>
-                  {activeSessions.map((a) => {
-                    const ss = getSubjectStyle(a.subject);
-                    return (
-                    <div key={a.id} className="ws-session-item">
-                      <div
-                        className="ws-subject-icon-bubble"
-                        style={{ background: ss.bg }}
-                      >{ss.icon}</div>
-                      <div
-                        className="ws-session-dot"
-                        style={{ background: a.status === "paused" ? "#f59e0b" : "#10b981", color: a.status === "paused" ? "#f59e0b" : "#10b981" }}
-                      />
-                      <div className="ws-session-info">
-                        <p className="ws-session-title">{a.title}</p>
-                        <p className="ws-session-meta">
-                          {a.subject} · {a.teacher_name ?? "Teacher"}
-                        </p>
-                      </div>
-                      <span className={`ws-session-badge ws-badge--${a.status}`}>
-                        {a.status === "paused" ? "Paused" : "Live"}
-                      </span>
-                      <button
-                        className="ws-btn ws-btn--green ws-btn--sm"
-                        onClick={() => navigate(`/session/${a.id}`)}
-                      >
-                        {a.status === "paused" ? "Resume" : "Rejoin"}
-                      </button>
-                    </div>
-                    );
-                  })}
+            {pendingAssignments.length > 0 && (
+              <div className="ws-rec-card">
+                <div className="ws-rec-icon-bubble">📋</div>
+                <div className="ws-rec-body">
+                  <span className="ws-rec-label" style={{ color: "#1a73e8", background: "#eff6ff" }}>
+                    Teacher Assigned
+                  </span>
+                  <p className="ws-rec-title">
+                    Homework: {pendingAssignments[0].homework.subject} — {pendingAssignments[0].homework.title}
+                  </p>
+                  <p className="ws-rec-desc">
+                    Complete this assignment set by your teacher
+                  </p>
+                </div>
+                <div className="ws-rec-right">
+                  {pendingAssignments[0].homework.estimated_minutes && (
+                    <span className="ws-rec-mins">{pendingAssignments[0].homework.estimated_minutes} mins</span>
+                  )}
+                  <button
+                    className="ws-rec-start-btn"
+                    style={{ background: "#1a73e8" }}
+                    onClick={() =>
+                      navigate("/lesson/setup", {
+                        state: { subject: pendingAssignments[0].homework.subject },
+                      })
+                    }
+                  >
+                    Start Session
+                  </button>
+                </div>
+              </div>
+            )}
 
-                  {upcomingSessions.slice(0, 3).map((a) => {
-                    const ss = getSubjectStyle(a.subject);
-                    return (
-                    <div key={a.id} className="ws-session-item">
-                      <div
-                        className="ws-subject-icon-bubble"
-                        style={{ background: ss.bg }}
-                      >{ss.icon}</div>
-                      <div className="ws-session-dot" style={{ background: "#3b82f6", color: "#3b82f6" }} />
-                      <div className="ws-session-info">
-                        <p className="ws-session-title">{a.title}</p>
-                        <p className="ws-session-meta">
-                          {a.subject} · {formatDate(a.scheduled_at)}
-                        </p>
-                      </div>
-                      <span className="ws-session-badge ws-badge--confirmed">Confirmed</span>
-                      <button
-                        className="ws-btn ws-btn--primary ws-btn--sm"
-                        onClick={() => navigate(`/session/${a.id}`)}
-                      >
-                        Join
-                      </button>
-                    </div>
-                    );
-                  })}
-                </>
-              )}
+            {daily_plan.weak_spots.length > 0 && (
+              <div className="ws-rec-card">
+                <div className="ws-rec-icon-bubble">🎯</div>
+                <div className="ws-rec-body">
+                  <span className="ws-rec-label" style={{ color: "#7c3aed", background: "#f5f3ff" }}>
+                    Recommended Learning
+                  </span>
+                  <p className="ws-rec-title">
+                    Improve in {daily_plan.weak_spots[0].subject} — {daily_plan.weak_spots[0].topic}
+                  </p>
+                  <p className="ws-rec-desc">
+                    Based on your recent performance, we recommend practising this topic.
+                  </p>
+                </div>
+                <div className="ws-rec-right">
+                  <span className="ws-rec-mins">30 Minutes</span>
+                  <button
+                    className="ws-rec-start-btn"
+                    style={{ background: "#7c3aed" }}
+                    onClick={() =>
+                      navigate("/lesson/setup", {
+                        state: { subject: daily_plan.weak_spots[0].subject },
+                      })
+                    }
+                  >
+                    Start Session
+                  </button>
+                </div>
+              </div>
+            )}
 
-              <button
-                className="ws-btn ws-btn--ghost ws-btn--sm"
-                style={{ width: "100%", marginTop: 10 }}
-                onClick={() => navigate("/sessions")}
-              >
-                View All Sessions →
-              </button>
+            {pendingAssignments.length === 0 && daily_plan.weak_spots.length === 0 && (
+              <div className="ws-rec-card">
+                <div className="ws-rec-icon-bubble">✨</div>
+                <div className="ws-rec-body">
+                  <span className="ws-rec-label" style={{ color: "#1a73e8", background: "#eff6ff" }}>
+                    Keep Going
+                  </span>
+                  <p className="ws-rec-title">Explore a new topic today</p>
+                  <p className="ws-rec-desc">No specific recommendations right now — pick any subject to continue learning.</p>
+                </div>
+                <div className="ws-rec-right">
+                  <button
+                    className="ws-rec-start-btn"
+                    style={{ background: "#1a73e8" }}
+                    onClick={() => navigate("/lesson/setup")}
+                  >
+                    Start Session
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* Right column — promo card */}
+          <div className="ws-promo-card">
+            <div>
+              <p className="ws-promo-support">Need more support?</p>
+              <h3 className="ws-promo-heading">Book a 1:1 session with SmartTuition.org</h3>
+              <ul className="ws-promo-list">
+                <li>✓ Expert tutors</li>
+                <li>✓ Personalised support</li>
+                <li>✓ Achieve your goals</li>
+              </ul>
             </div>
-
-            {/* Assignments */}
-            <div className="ws-card">
-              <div className="ws-card-title">Assignments Due</div>
-
-              {pendingAssignments.length === 0 ? (
-                <p className="ws-empty-plan">No pending assignments. You're all caught up!</p>
-              ) : (
-                pendingAssignments.slice(0, 4).map((a) => {
-                  const isOverdue =
-                    a.homework.due_date && new Date(a.homework.due_date) < new Date();
-                  return (
-                    <div key={a.id} className="ws-assign-item">
-                      <span className="ws-assign-icon">
-                        {a.homework.assignment_type === "reading"
-                          ? "📖"
-                          : a.homework.assignment_type === "revision"
-                          ? "📝"
-                          : a.homework.assignment_type === "prep"
-                          ? "🎯"
-                          : "📚"}
-                      </span>
-                      <div className="ws-assign-info">
-                        <p className="ws-assign-title">{a.homework.title}</p>
-                        <p className="ws-assign-meta">
-                          {a.homework.subject} · {a.homework.estimated_minutes}min ·{" "}
-                          {a.status === "started" ? "In progress" : "Not started"}
-                        </p>
-                      </div>
-                      {a.homework.due_date && (
-                        <span
-                          className={`ws-assign-due${isOverdue ? " ws-assign-due--overdue" : ""}`}
-                        >
-                          {formatDueDate(a.homework.due_date)}
-                        </span>
-                      )}
-                    </div>
-                  );
-                })
-              )}
-
-              <button
-                className="ws-btn ws-btn--ghost ws-btn--sm"
-                style={{ width: "100%", marginTop: 10 }}
-                onClick={() => navigate("/assignments")}
-              >
-                View All Assignments →
-              </button>
-            </div>
+            <button
+              className="ws-promo-btn"
+              onClick={() => window.open("https://smarttuition.org", "_blank")}
+            >
+              Book Now →
+            </button>
+          </div>
         </div>
 
-
-        {/* ── Pick a Subject & Tutor ── */}
-        <div style={{ marginBottom: 32 }}>
+        {/* ── Section 3: Pick a Subject & Tutor ── */}
+        <div style={{ marginBottom: 20 }}>
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 14 }}>
             <h3 style={{ fontSize: 15, fontWeight: 800, color: "#0f172a", margin: 0 }}>Pick a Subject & Tutor</h3>
             <button
@@ -997,48 +967,113 @@ export default function WelcomeScreen({ onPromptClick, onStatsLoaded }: Props) {
               View all subjects →
             </button>
           </div>
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 14 }}>
+          <div className="ws-subj-grid">
             {[
-              { name: "Maths",   desc: "Build confidence and solve problems, step by step", color: "#f97316", bg: "#fff7ed", border: "#fed7aa",  img: "/images/robotAI.png" },
-              { name: "Science", desc: "Explore ideas and understand how the world works",  color: "#22c55e", bg: "#f0fdf4", border: "#bbf7d0",  img: "/images/sci-robot.png" },
-              { name: "English", desc: "Improve your reading, writing and communication",   color: "#3b82f6", bg: "#eff6ff", border: "#bfdbfe",  img: null },
+              {
+                name: "Maths",
+                desc: "Build confidence and solve problems, step by step",
+                bg: "#f0fdf4",
+                border: "#bbf7d0",
+                btnBg: "#22c55e",
+                img: "/images/robotAI.png",
+              },
+              {
+                name: "Science",
+                desc: "Explore ideas and understand how the world works",
+                bg: "#eff6ff",
+                border: "#bfdbfe",
+                btnBg: "#1a73e8",
+                img: "/images/sci-robot.png",
+              },
+              {
+                name: "English",
+                desc: "Improve your reading, writing and communication",
+                bg: "#fff7ed",
+                border: "#fed7aa",
+                btnBg: "#f97316",
+                img: null,
+              },
             ].map((s) => (
               <div
                 key={s.name}
-                style={{
-                  background: s.bg, border: `1.5px solid ${s.border}`, borderRadius: 16,
-                  padding: "20px 16px", display: "flex", flexDirection: "column",
-                  alignItems: "center", gap: 10, cursor: "pointer",
-                  transition: "transform 0.18s, box-shadow 0.18s",
-                }}
+                className="ws-subj-card"
+                style={{ background: s.bg, border: `1.5px solid ${s.border}` }}
                 onClick={() => navigate("/lesson/setup", { state: { subject: s.name } })}
                 onMouseEnter={(e) => {
-                  (e.currentTarget as HTMLDivElement).style.transform = "translateY(-3px)";
-                  (e.currentTarget as HTMLDivElement).style.boxShadow = `0 8px 24px ${s.color}28`;
+                  (e.currentTarget as HTMLDivElement).style.boxShadow = `0 8px 24px rgba(0,0,0,0.12)`;
                 }}
                 onMouseLeave={(e) => {
-                  (e.currentTarget as HTMLDivElement).style.transform = "";
                   (e.currentTarget as HTMLDivElement).style.boxShadow = "";
                 }}
               >
-                {s.img
-                  ? <img src={s.img} alt={s.name} draggable={false} style={{ width: 72, height: 72, objectFit: "contain", pointerEvents: "none" }} />
-                  : <span style={{ fontSize: 52 }}>📚</span>
-                }
-                <span style={{ fontSize: 15, fontWeight: 800, color: "#0f172a" }}>{s.name}</span>
-                <span style={{ fontSize: 11, color: "#64748b", textAlign: "center", lineHeight: 1.5 }}>{s.desc}</span>
+                {s.img ? (
+                  <img
+                    src={s.img}
+                    alt={s.name}
+                    draggable={false}
+                    className="ws-subj-img"
+                  />
+                ) : (
+                  <span style={{ fontSize: 52, lineHeight: 1 }}>📚</span>
+                )}
+                <span className="ws-subj-name">{s.name}</span>
+                <span className="ws-subj-desc">{s.desc}</span>
                 <button
-                  style={{
-                    marginTop: 4, padding: "8px 20px", borderRadius: 999,
-                    background: s.color, color: "#fff", border: "none",
-                    fontSize: 13, fontWeight: 700, cursor: "pointer", fontFamily: "inherit",
-                    boxShadow: `0 3px 10px ${s.color}44`,
+                  className="ws-subj-btn"
+                  style={{ background: s.btnBg }}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    navigate("/lesson/setup", { state: { subject: s.name } });
                   }}
                 >
                   Choose {s.name} →
                 </button>
               </div>
             ))}
+          </div>
+        </div>
+
+        {/* ── Section 4: Need Help Bar ── */}
+        <div className="ws-help-bar">
+          <div className="ws-help-left">
+            <img
+              src="/images/robotAI.png"
+              width={40}
+              height={40}
+              draggable={false}
+              style={{ objectFit: "contain", borderRadius: 10, background: "#eff6ff", padding: 6 }}
+              alt="AI tutor"
+            />
+            <div>
+              <p className="ws-help-text-heading">Need help with something?</p>
+              <p className="ws-help-text-sub">Ask me anything about your studies...</p>
+            </div>
+          </div>
+          <div className="ws-help-right">
+            <input
+              ref={helpInputRef}
+              className="ws-help-input"
+              placeholder="Type your question..."
+              value={helpInput}
+              onChange={(e) => setHelpInput(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && helpInput.trim()) {
+                  onPromptClick(helpInput.trim());
+                  setHelpInput("");
+                }
+              }}
+            />
+            <button
+              className="ws-help-send"
+              onClick={() => {
+                if (helpInput.trim()) {
+                  onPromptClick(helpInput.trim());
+                  setHelpInput("");
+                }
+              }}
+            >
+              ➤
+            </button>
           </div>
         </div>
 

@@ -130,7 +130,7 @@ export default function ParentSettingsPage() {
   return (
     <>
       <style>{`
-        .ps-page { display: flex; height: 100vh; background: #f5f5f0; }
+        .ps-page { display: flex; height: 100vh; background: #f8fafc; }
         .ps-main { flex: 1; display: flex; flex-direction: column; overflow-y: auto; }
         .ps-header { padding: 32px 40px 0; }
         .ps-header h1 { font-size: 26px; font-weight: 800; color: #0f172a; margin: 0 0 4px; }
