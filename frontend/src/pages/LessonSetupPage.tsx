@@ -1,18 +1,10 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useNavigate, useLocation, useSearchParams } from "react-router-dom";
 import {
   ChevronDown,
   ChevronRight,
   LayoutGrid,
   Bot,
-  Sparkles,
-  Presentation,
-  ClipboardList,
-  Target,
-  BookOpen,
-  Sprout,
-  RefreshCw,
-  GraduationCap,
 } from "lucide-react";
 import Sidebar from "../components/Sidebar";
 import { useAuth } from "../context/AuthContext";
@@ -30,6 +22,25 @@ const SESSION_TYPE_CONFIG: Record<number, { emoji: string; label: string; sublab
   60: { emoji: "🚀", label: "Deep Learning", sublabel: "1 hour",  desc: "Serious progress — GCSE/A-Level topics, major practice" },
   90: { emoji: "🏆", label: "Intensive",     sublabel: "90 mins", desc: "Exams and major catch-up — includes a brain break" },
 };
+
+const SUBJECT_EMOJIS: Record<string, string> = {
+  "Mathematics": "📐", "Maths": "📐",
+  "English": "📖", "English Literature": "📖", "English Language": "📖",
+  "Science": "🔬", "Combined Science": "🔬",
+  "Biology": "🧬", "Chemistry": "⚗️", "Physics": "⚛️",
+  "History": "🏛️", "Geography": "🌍",
+  "Computer Science": "💻", "ICT": "💻",
+  "Religious Studies": "🕊️", "RE": "🕊️",
+  "French": "🇫🇷", "Spanish": "🇪🇸", "German": "🇩🇪",
+  "Art & Design": "🎨", "Art": "🎨",
+  "Music": "🎵", "Drama": "🎭",
+  "Physical Education": "⚽", "PE": "⚽",
+  "Business Studies": "💼", "Business": "💼",
+  "Economics": "📊", "Psychology": "🧠", "Sociology": "👥",
+};
+function getSubjectEmoji(name: string): string {
+  return SUBJECT_EMOJIS[name] ?? "📚";
+}
 
 function goalToSessionType(goal: GoalId): string {
   if (goal === "learn_scratch") return "Learn from Scratch";
@@ -253,6 +264,11 @@ export default function LessonSetupPage() {
   const [requirePasscode, setRequirePasscode] = useState(false);
   const [bookingPasscode, setBookingPasscode] = useState("");
   const [showExtra, setShowExtra] = useState(false);
+  const [topicDropdownOpen, setTopicDropdownOpen] = useState(false);
+  const [uploadedFiles, setUploadedFiles] = useState<File[]>([]);
+  const [isDragging, setIsDragging] = useState(false);
+  const topicDropdownRef = useRef<HTMLDivElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   // ── KB data state ───────────────────────────────────────────────────────
   const [kbSubjects, setKbSubjects] = useState<string[]>([]);
@@ -295,6 +311,18 @@ export default function LessonSetupPage() {
       })
       .catch(() => setKbUnits([]));
   }, [subject, keyStage]);
+
+  // Close topic dropdown on outside click
+  useEffect(() => {
+    if (!topicDropdownOpen) return;
+    const handler = (e: MouseEvent) => {
+      if (topicDropdownRef.current && !topicDropdownRef.current.contains(e.target as Node)) {
+        setTopicDropdownOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, [topicDropdownOpen]);
 
   // Fetch gamification profile for stats bar
   useEffect(() => {
@@ -348,6 +376,27 @@ export default function LessonSetupPage() {
     setGoal("homework");
   };
 
+  const handleFiles = (files: FileList | null) => {
+    if (!files) return;
+    setUploadedFiles(prev => {
+      const existing = new Set(prev.map(f => f.name + f.size));
+      const next = Array.from(files).filter(f => !existing.has(f.name + f.size));
+      return [...prev, ...next];
+    });
+  };
+
+  const removeFile = (idx: number) => setUploadedFiles(prev => prev.filter((_, i) => i !== idx));
+
+  const fileIcon = (type: string) => {
+    if (type.includes("pdf")) return "📄";
+    if (type.includes("word") || type.includes("document")) return "📝";
+    if (type.includes("presentation") || type.includes("powerpoint")) return "📊";
+    if (type.includes("image")) return "🖼️";
+    return "📎";
+  };
+
+  const fmtSize = (b: number) => b < 1024 * 1024 ? `${(b / 1024).toFixed(1)} KB` : `${(b / (1024 * 1024)).toFixed(1)} MB`;
+
   // ── Submit: create appointment then navigate to session ─────────────────
   const handleSubmit = async () => {
     if (!canSubmit || !user) return;
@@ -394,110 +443,88 @@ export default function LessonSetupPage() {
   // ── Goal options ────────────────────────────────────────────────────────
   const goalOptions: {
     id: GoalId;
-    icon: React.ReactNode;
+    emoji: string;
     label: string;
     desc: string;
     color: string;
-    bg: string;
-    cardBg: string;
-    cardBorder: string;
+    iconBg: string;
   }[] = [
     {
-      id: "homework",
-      icon: <BookOpen size={18} />,
-      label: "Homework Help",
-      desc: "Help me with my homework",
-      color: "#6366f1",
-      bg: "rgba(99,102,241,0.15)",
-      cardBg: "#f5f3ff",
-      cardBorder: "#c4b5fd",
+      id: "learn_scratch",
+      emoji: "🧠",
+      label: "Learn from Scratch",
+      desc: "I'm new to this topic",
+      color: "#10b981",
+      iconBg: "rgba(16,185,129,0.12)",
     },
     {
-      id: "learn_scratch",
-      icon: <Sprout size={18} />,
-      label: "Learn from Scratch",
-      desc: "Start from the basics",
-      color: "#10b981",
-      bg: "rgba(16,185,129,0.15)",
-      cardBg: "#ecfdf5",
-      cardBorder: "#6ee7b7",
+      id: "homework",
+      emoji: "🎯",
+      label: "Practice & Improve",
+      desc: "Strengthen my skills",
+      color: "#6366f1",
+      iconBg: "rgba(99,102,241,0.12)",
     },
     {
       id: "catch_up",
-      icon: <RefreshCw size={18} />,
+      emoji: "♻️",
       label: "Catch Up",
       desc: "I missed a lesson or need to catch up",
       color: "#f59e0b",
-      bg: "rgba(245,158,11,0.15)",
-      cardBg: "#fffbeb",
-      cardBorder: "#fcd34d",
+      iconBg: "rgba(245,158,11,0.12)",
     },
     {
       id: "revision",
-      icon: <GraduationCap size={18} />,
+      emoji: "🎓",
       label: "Exam Revision",
       desc: "Prepare for a test or exam",
       color: "#ef4444",
-      bg: "rgba(239,68,68,0.15)",
-      cardBg: "#fff5f5",
-      cardBorder: "#fca5a5",
+      iconBg: "rgba(239,68,68,0.12)",
     },
   ];
 
   // ── Learn mode options ──────────────────────────────────────────────────
   const learnModeOptions: {
     id: LearnMode;
-    icon: React.ReactNode;
+    emoji: string;
     label: string;
     desc: string;
     badge?: string;
-    subLine?: string;
     color: string;
     iconBg: string;
-    cardBg: string;
-    cardBorder: string;
   }[] = [
     {
       id: "ai_recommended",
-      icon: <Sparkles size={18} />,
+      emoji: "✨",
       label: "AI Recommended",
       desc: "Best lesson plan for this topic and your learning style.",
       badge: "Recommended",
-      subLine: "Slides → Worksheet → Quiz",
       color: "#1a73e8",
       iconBg: "rgba(26,115,232,0.12)",
-      cardBg: "#eff6ff",
-      cardBorder: "#93c5fd",
     },
     {
       id: "slides",
-      icon: <Presentation size={18} />,
+      emoji: "🖥️",
       label: "Learn with Slides",
       desc: "AI explains using guided slides",
       color: "#8b5cf6",
       iconBg: "rgba(139,92,246,0.12)",
-      cardBg: "#f5f3ff",
-      cardBorder: "#c4b5fd",
     },
     {
       id: "worksheet",
-      icon: <ClipboardList size={18} />,
+      emoji: "📄",
       label: "Practice with Worksheet",
       desc: "Work through questions step-by-step",
       color: "#f97316",
       iconBg: "rgba(249,115,22,0.12)",
-      cardBg: "#fff7ed",
-      cardBorder: "#fed7aa",
     },
     {
       id: "quiz",
-      icon: <Target size={18} />,
+      emoji: "🎯",
       label: "Quiz & Test Me",
       desc: "Test your knowledge with a quiz",
       color: "#14b8a6",
       iconBg: "rgba(20,184,166,0.12)",
-      cardBg: "#f0fdfa",
-      cardBorder: "#99f6e4",
     },
   ];
 
@@ -508,7 +535,7 @@ export default function LessonSetupPage() {
   const goalLabel = goalOptions.find((g) => g.id === goal)?.label ?? "";
 
   return (
-    <div style={{ display: "flex", height: "100vh", overflow: "hidden", background: "var(--bg-primary)" }}>
+    <div style={{ display: "flex", height: "100vh", overflow: "hidden", background: "#f8fafc" }}>
       <Sidebar />
 
       <main style={{ flex: 1, minWidth: 0, overflowY: "auto", height: "100%", display: "flex", flexDirection: "column" }}>
@@ -538,6 +565,7 @@ export default function LessonSetupPage() {
           }
           .lsp-upload-area:hover { border-color: #1a73e8; background: #eff6ff; }
           .lsp-step-connector { width: 2px; height: 12px; background: #e2e8f0; margin: 0 auto; }
+          .lsp-two-col select:focus, .lsp-two-col input:focus { border-color: #1a73e8 !important; box-shadow: 0 0 0 3px rgba(26,115,232,0.12) !important; outline: none; }
           .lsp-dur-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 16px; }
           @media (max-width: 500px) { .lsp-dur-grid { grid-template-columns: 1fr; } }
           .lsp-dur-card {
@@ -562,81 +590,81 @@ export default function LessonSetupPage() {
           .lsp-ks-note { font-size: 12px; color: #64748b; margin-top: 2px; margin-bottom: 16px; padding: 8px 12px; background: #f8fafc; border-radius: 8px; border: 1px solid #e2e8f0; }
         `}</style>
 
-        {/* ── Hero banner ─────────────────────────────────────────────────── */}
+        {/* ── Page header ─────────────────────────────────────────── */}
         <div style={{
-          background: "linear-gradient(135deg, #1a73e8 0%, #6366f1 60%, #8b5cf6 100%)",
-          width: "100%",
-          padding: "18px 28px",
-          position: "relative",
-          overflow: "hidden",
+          background: "#fff",
+          borderBottom: "1px solid #e2e8f0",
+          padding: "20px 32px 18px",
           display: "flex",
           alignItems: "center",
           justifyContent: "space-between",
-          boxSizing: "border-box",
           flexShrink: 0,
+          gap: 16,
+          flexWrap: "wrap",
         }}>
-          {/* Decorative circles */}
-          <div style={{
-            position: "absolute", top: -40, left: -40,
-            width: 180, height: 180, borderRadius: "50%",
-            background: "rgba(255,255,255,0.07)", pointerEvents: "none",
-          }} />
-          <div style={{
-            position: "absolute", bottom: -30, left: 200,
-            width: 120, height: 120, borderRadius: "50%",
-            background: "rgba(255,255,255,0.07)", pointerEvents: "none",
-          }} />
-
-          {/* Left: heading + subtitle */}
-          <div style={{ position: "relative", zIndex: 1 }}>
-            <h1 style={{ fontSize: 22, fontWeight: 800, color: "#fff", margin: "0 0 4px", lineHeight: 1.2 }}>
+          {/* Left: title */}
+          <div>
+            <h1 style={{ fontSize: 22, fontWeight: 800, color: "#0f172a", margin: "0 0 4px", lineHeight: 1.2 }}>
               Let's set up your lesson 👋
             </h1>
-            <p style={{ fontSize: 13, color: "rgba(255,255,255,0.85)", margin: 0 }}>
+            <p style={{ fontSize: 13, color: "#64748b", margin: 0 }}>
               Your AI Tutor will personalise the lesson just for you.
             </p>
           </div>
 
-          {/* Right: stat chips */}
-          <div style={{
-            display: "flex", alignItems: "center", gap: 10,
-            position: "relative", zIndex: 1, paddingRight: 120,
-          }}>
-            {/* Session length chip — uses live duration */}
-            <span style={chipStyle}>
-              ⏱ Session — {durationLabel(duration)}
-            </span>
-            <span style={chipStyle}>🔥 {streak} Day Streak</span>
-            <span style={chipStyle}>⭐ {xpTotal} XP</span>
-            <span style={{
-              display: "flex", alignItems: "center", gap: 8,
-              background: "rgba(255,255,255,0.15)",
-              backdropFilter: "blur(8px)",
-              border: "1px solid rgba(255,255,255,0.25)",
-              borderRadius: 99, padding: "5px 12px",
-            }}>
-              <span style={{ fontSize: 13, fontWeight: 700, color: "#fff", whiteSpace: "nowrap" }}>
-                Level {xpLevel}
-              </span>
-              <div style={{ width: 64, height: 6, borderRadius: 99, background: "rgba(255,255,255,0.25)", overflow: "hidden" }}>
-                <div style={{
-                  height: "100%", borderRadius: 99, background: "#fff",
-                  width: `${xpInCurrentLevel}%`, transition: "width 0.4s ease",
-                }} />
+          {/* Right: stat items */}
+          <div style={{ display: "flex", alignItems: "center", gap: 20, flexWrap: "wrap" }}>
+            {/* Session length */}
+            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              <div style={{
+                width: 36, height: 36, borderRadius: 10,
+                background: "#eff6ff", display: "flex", alignItems: "center", justifyContent: "center",
+              }}>
+                <span style={{ fontSize: 18 }}>⏱</span>
               </div>
-            </span>
-          </div>
+              <div>
+                <div style={{ fontSize: 11, color: "#94a3b8", fontWeight: 600, textTransform: "uppercase" as const, letterSpacing: "0.4px" }}>Session Length</div>
+                <div style={{ fontSize: 14, fontWeight: 800, color: "#0f172a", lineHeight: 1.2 }}>{durationLabel(duration)}</div>
+                <div style={{ fontSize: 10, color: "#94a3b8" }}>(+10 min leeway)</div>
+              </div>
+            </div>
 
-          {/* Robot image */}
-          <img
-            src="/images/robotAI.png"
-            alt=""
-            style={{ position: "absolute", bottom: 0, right: 16, width: 110, pointerEvents: "none", zIndex: 1 }}
-          />
+            <div style={{ width: 1, height: 36, background: "#e2e8f0" }} />
+
+            {/* Streak */}
+            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              <div style={{
+                width: 36, height: 36, borderRadius: 10,
+                background: "#fff7ed", display: "flex", alignItems: "center", justifyContent: "center",
+              }}>
+                <span style={{ fontSize: 18 }}>🔥</span>
+              </div>
+              <div>
+                <div style={{ fontSize: 11, color: "#94a3b8", fontWeight: 600, textTransform: "uppercase" as const, letterSpacing: "0.4px" }}>Day Streak</div>
+                <div style={{ fontSize: 18, fontWeight: 800, color: "#0f172a", lineHeight: 1 }}>{streak}</div>
+              </div>
+            </div>
+
+            <div style={{ width: 1, height: 36, background: "#e2e8f0" }} />
+
+            {/* XP */}
+            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              <div style={{
+                width: 36, height: 36, borderRadius: 10,
+                background: "#fefce8", display: "flex", alignItems: "center", justifyContent: "center",
+              }}>
+                <span style={{ fontSize: 18 }}>⭐</span>
+              </div>
+              <div>
+                <div style={{ fontSize: 11, color: "#94a3b8", fontWeight: 600, textTransform: "uppercase" as const, letterSpacing: "0.4px" }}>XP</div>
+                <div style={{ fontSize: 18, fontWeight: 800, color: "#0f172a", lineHeight: 1 }}>{xpTotal}</div>
+              </div>
+            </div>
+          </div>
         </div>
 
         {/* ── Scrollable body ─────────────────────────────────────────────── */}
-        <div style={{ flex: 1, overflowY: "auto", minHeight: 0 }}>
+        <div style={{ flex: 1, overflowY: "auto", minHeight: 0, background: "#f8fafc" }}>
           {/* ── Two-column layout ─────────────────────────────────────────── */}
           <div style={s.twoCol} className="lsp-two-col">
 
@@ -666,7 +694,7 @@ export default function LessonSetupPage() {
                       >
                         <option value="">Select subject...</option>
                         {kbSubjects.map((sub) => (
-                          <option key={sub} value={sub}>{sub}</option>
+                          <option key={sub} value={sub}>{getSubjectEmoji(sub)} {sub}</option>
                         ))}
                       </select>
                       <ChevronDown size={15} style={s.selectArrow as React.CSSProperties} />
@@ -693,11 +721,11 @@ export default function LessonSetupPage() {
                   </div>
                 </div>
 
-                {/* Topics — multi-select chips */}
+                {/* Topics — multiselect dropdown */}
                 {keyStage && (
                   <div style={{ marginTop: 14 }}>
                     <label style={s.label}>
-                      Topics
+                      Topic
                       {selectedTopics.length > 0 && (
                         <span style={{ fontWeight: 400, color: "#1a73e8", marginLeft: 6 }}>
                           {selectedTopics.length} selected
@@ -705,41 +733,111 @@ export default function LessonSetupPage() {
                       )}
                     </label>
                     {kbUnits.length === 0 ? (
-                      <p style={{ fontSize: 13, color: "var(--text-muted)", margin: "4px 0 0" }}>
+                      <p style={{ fontSize: 13, color: "#94a3b8", margin: "4px 0 0" }}>
                         No topics available for this combination.
                       </p>
                     ) : (
-                      <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 6 }}>
-                        {kbUnits.map((unit) => {
-                          const sel = selectedTopics.includes(unit.unit_name);
-                          return (
-                            <button
-                              key={unit.id}
-                              type="button"
-                              onClick={() => {
-                                setSelectedTopics((prev) =>
-                                  prev.includes(unit.unit_name)
-                                    ? prev.filter((t) => t !== unit.unit_name)
-                                    : [...prev, unit.unit_name]
-                                );
-                              }}
-                              style={{
-                                padding: "5px 12px",
-                                borderRadius: 99,
-                                fontSize: 12,
-                                fontWeight: 600,
-                                border: `1.5px solid ${sel ? "#1a73e8" : "var(--border-color,#e2e8f0)"}`,
-                                background: sel ? "rgba(26,115,232,0.1)" : "var(--bg-primary)",
-                                color: sel ? "#1a73e8" : "var(--text-secondary)",
-                                cursor: "pointer",
-                                fontFamily: "inherit",
-                                transition: "border-color 0.15s, background 0.15s",
-                              }}
-                            >
-                              {unit.title}
-                            </button>
-                          );
-                        })}
+                      <div style={{ position: "relative" }} ref={topicDropdownRef}>
+                        {/* Trigger button */}
+                        <button
+                          type="button"
+                          onClick={() => setTopicDropdownOpen(v => !v)}
+                          style={{
+                            width: "100%", padding: "10px 36px 10px 12px",
+                            border: `1.5px solid ${topicDropdownOpen ? "#1a73e8" : "#e2e8f0"}`,
+                            borderRadius: 8, background: "#fff", cursor: "pointer",
+                            display: "flex", alignItems: "center", justifyContent: "space-between",
+                            fontSize: 14, color: selectedTopics.length > 0 ? "#0f172a" : "#94a3b8",
+                            fontFamily: "inherit", textAlign: "left",
+                            transition: "border-color 0.15s",
+                            boxShadow: topicDropdownOpen ? "0 0 0 3px rgba(26,115,232,0.12)" : "none",
+                          }}
+                        >
+                          <span>
+                            {selectedTopics.length === 0
+                              ? "Select topics..."
+                              : `${selectedTopics.length} topic${selectedTopics.length > 1 ? "s" : ""} selected`}
+                          </span>
+                          <ChevronDown
+                            size={15}
+                            style={{
+                              position: "absolute", right: 12, top: "50%", transform: `translateY(-50%) ${topicDropdownOpen ? "rotate(180deg)" : "rotate(0deg)"}`,
+                              transition: "transform 0.2s", color: "#64748b", pointerEvents: "none",
+                            }}
+                          />
+                        </button>
+
+                        {/* Dropdown panel */}
+                        {topicDropdownOpen && (
+                          <div style={{
+                            position: "absolute", top: "calc(100% + 4px)", left: 0, right: 0, zIndex: 50,
+                            background: "#fff", border: "1.5px solid #e2e8f0", borderRadius: 10,
+                            boxShadow: "0 8px 24px rgba(0,0,0,0.1)", maxHeight: 240, overflowY: "auto",
+                            padding: "4px 0",
+                          }}>
+                            {kbUnits.map((unit) => {
+                              const sel = selectedTopics.includes(unit.unit_name);
+                              return (
+                                <button
+                                  key={unit.id}
+                                  type="button"
+                                  onClick={() => setSelectedTopics(prev =>
+                                    prev.includes(unit.unit_name)
+                                      ? prev.filter(t => t !== unit.unit_name)
+                                      : [...prev, unit.unit_name]
+                                  )}
+                                  style={{
+                                    display: "flex", alignItems: "center", gap: 10,
+                                    width: "100%", padding: "9px 14px",
+                                    background: sel ? "#eff6ff" : "transparent",
+                                    border: "none", cursor: "pointer", textAlign: "left",
+                                    fontFamily: "inherit", transition: "background 0.1s",
+                                  }}
+                                  onMouseEnter={e => { if (!sel) (e.currentTarget as HTMLButtonElement).style.background = "#f8fafc"; }}
+                                  onMouseLeave={e => { if (!sel) (e.currentTarget as HTMLButtonElement).style.background = "transparent"; }}
+                                >
+                                  <div style={{
+                                    width: 17, height: 17, borderRadius: 4, flexShrink: 0,
+                                    border: `2px solid ${sel ? "#1a73e8" : "#cbd5e1"}`,
+                                    background: sel ? "#1a73e8" : "transparent",
+                                    display: "flex", alignItems: "center", justifyContent: "center",
+                                    transition: "all 0.15s",
+                                  }}>
+                                    {sel && <span style={{ color: "#fff", fontSize: 10, fontWeight: 900, lineHeight: 1 }}>✓</span>}
+                                  </div>
+                                  <span style={{ fontSize: 13, color: sel ? "#1a73e8" : "#0f172a", fontWeight: sel ? 600 : 400, lineHeight: 1.3 }}>
+                                    {unit.title}
+                                  </span>
+                                </button>
+                              );
+                            })}
+                          </div>
+                        )}
+
+                        {/* Selected chips */}
+                        {selectedTopics.length > 0 && (
+                          <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 8 }}>
+                            {selectedTopics.map(topic => (
+                              <span key={topic} style={{
+                                display: "inline-flex", alignItems: "center", gap: 4,
+                                padding: "3px 6px 3px 10px",
+                                background: "#eff6ff", borderRadius: 99,
+                                border: "1px solid #bfdbfe", fontSize: 12, color: "#1a73e8", fontWeight: 600,
+                              }}>
+                                {kbUnits.find(u => u.unit_name === topic)?.title ?? topic}
+                                <button
+                                  type="button"
+                                  onClick={() => setSelectedTopics(prev => prev.filter(t => t !== topic))}
+                                  style={{
+                                    background: "none", border: "none", cursor: "pointer",
+                                    padding: "0 3px", color: "#93c5fd", fontSize: 16, lineHeight: 1,
+                                    fontFamily: "inherit", display: "flex", alignItems: "center",
+                                  }}
+                                >×</button>
+                              </span>
+                            ))}
+                          </div>
+                        )}
                       </div>
                     )}
                   </div>
@@ -770,8 +868,8 @@ export default function LessonSetupPage() {
                 <div style={s.stepHeader}>
                   <span style={s.stepNum as React.CSSProperties}>2</span>
                   <div>
-                    <div style={s.stepTitle}>What is your goal?</div>
-                    <div style={s.stepSubtitle}>This helps your tutor teach in the right way.</div>
+                    <div style={s.stepTitle}>What help do you need today?</div>
+                    <div style={s.stepSubtitle}>Choose your goal.</div>
                   </div>
                 </div>
 
@@ -786,17 +884,18 @@ export default function LessonSetupPage() {
                         style={{
                           display: "flex", flexDirection: "column", alignItems: "center",
                           padding: "16px 10px 14px", gap: 8,
-                          border: `2px solid ${sel ? "#1a73e8" : g.cardBorder}`,
+                          border: `2px solid ${sel ? "#1a73e8" : "#e2e8f0"}`,
                           borderRadius: 12,
-                          background: sel ? "#eff6ff" : g.cardBg,
+                          background: sel ? "#eff6ff" : "#fff",
                           cursor: "pointer", textAlign: "center", fontFamily: "inherit",
                           position: "relative", transition: "all 0.15s",
+                          boxShadow: sel ? "0 2px 8px rgba(26,115,232,0.12)" : "0 1px 3px rgba(0,0,0,0.06)",
                         }}
                       >
                         <div style={{
                           position: "absolute", top: 10, left: 10,
                           width: 16, height: 16, borderRadius: "50%",
-                          border: `2px solid ${sel ? "#1a73e8" : g.color}`,
+                          border: `2px solid ${sel ? "#1a73e8" : "#cbd5e1"}`,
                           background: sel ? "#1a73e8" : "transparent",
                           display: "flex", alignItems: "center", justifyContent: "center",
                           transition: "all 0.15s",
@@ -804,17 +903,17 @@ export default function LessonSetupPage() {
                           {sel && <div style={{ width: 6, height: 6, borderRadius: "50%", background: "#fff" }} />}
                         </div>
                         <span style={{
-                          width: 44, height: 44, borderRadius: 10,
-                          background: sel ? "rgba(26,115,232,0.12)" : g.bg, color: g.color,
+                          width: 48, height: 48, borderRadius: 12,
+                          background: sel ? "rgba(26,115,232,0.1)" : g.iconBg,
                           display: "flex", alignItems: "center", justifyContent: "center",
-                          marginTop: 4, flexShrink: 0,
+                          marginTop: 4, flexShrink: 0, fontSize: 24,
                         }}>
-                          {g.icon}
+                          {g.emoji}
                         </span>
-                        <span style={{ fontSize: 13, fontWeight: 700, color: sel ? "#1a73e8" : "var(--text-primary)", lineHeight: 1.2 }}>
+                        <span style={{ fontSize: 13, fontWeight: 700, color: sel ? "#1a73e8" : "#0f172a", lineHeight: 1.2 }}>
                           {g.label}
                         </span>
-                        <span style={{ fontSize: 11, color: "var(--text-muted)", lineHeight: 1.4 }}>
+                        <span style={{ fontSize: 11, color: "#64748b", lineHeight: 1.4 }}>
                           {g.desc}
                         </span>
                       </button>
@@ -864,8 +963,8 @@ export default function LessonSetupPage() {
                 <div style={s.stepHeader}>
                   <span style={s.stepNum as React.CSSProperties}>4</span>
                   <div>
-                    <div style={s.stepTitle}>How should we learn this today?</div>
-                    <div style={s.stepSubtitle}>Choose how you'd like your tutor to help.</div>
+                    <div style={s.stepTitle}>How would you like to learn?</div>
+                    <div style={s.stepSubtitle}>Choose how you'd like your tutor to help. (optional)</div>
                   </div>
                 </div>
 
@@ -880,32 +979,32 @@ export default function LessonSetupPage() {
                         style={{
                           display: "flex", flexDirection: "column", alignItems: "center",
                           padding: "14px 10px 12px", gap: 6,
-                          border: `2px solid ${sel ? "#1a73e8" : m.cardBorder}`,
+                          border: `2px solid ${sel ? "#1a73e8" : "#e2e8f0"}`,
                           borderRadius: 12,
-                          background: sel ? "#eff6ff" : m.cardBg,
+                          background: sel ? "#eff6ff" : "#fff",
                           cursor: "pointer", textAlign: "center", fontFamily: "inherit",
                           position: "relative", transition: "all 0.15s",
+                          boxShadow: sel ? "0 2px 8px rgba(26,115,232,0.12)" : "0 1px 3px rgba(0,0,0,0.06)",
                         }}
                       >
                         <div style={{
                           position: "absolute", top: 8, left: 8,
                           width: 14, height: 14, borderRadius: "50%",
-                          border: `2px solid ${sel ? "#1a73e8" : m.color}`,
+                          border: `2px solid ${sel ? "#1a73e8" : "#cbd5e1"}`,
                           background: sel ? "#1a73e8" : "transparent",
                           display: "flex", alignItems: "center", justifyContent: "center",
                         }}>
                           {sel && <div style={{ width: 5, height: 5, borderRadius: "50%", background: "#fff" }} />}
                         </div>
                         <span style={{
-                          width: 44, height: 44, borderRadius: 10,
-                          background: sel ? "rgba(26,115,232,0.12)" : m.iconBg,
-                          color: sel ? "#1a73e8" : m.color,
+                          width: 48, height: 48, borderRadius: 12,
+                          background: sel ? "rgba(26,115,232,0.1)" : m.iconBg,
                           display: "flex", alignItems: "center", justifyContent: "center",
-                          marginTop: 4, flexShrink: 0,
+                          marginTop: 4, flexShrink: 0, fontSize: 24,
                         }}>
-                          {m.icon}
+                          {m.emoji}
                         </span>
-                        <span style={{ fontSize: 12, fontWeight: 700, color: sel ? "#1a73e8" : "var(--text-primary)" }}>
+                        <span style={{ fontSize: 12, fontWeight: 700, color: sel ? "#1a73e8" : "#0f172a" }}>
                           {m.label}
                         </span>
                         {m.badge && (
@@ -913,17 +1012,99 @@ export default function LessonSetupPage() {
                             {m.badge}
                           </span>
                         )}
-                        <span style={{ fontSize: 11, color: "var(--text-muted)", lineHeight: 1.4 }}>{m.desc}</span>
+                        <span style={{ fontSize: 11, color: "#64748b", lineHeight: 1.4 }}>{m.desc}</span>
                       </button>
                     );
                   })}
                 </div>
               </div>
 
-              {/* STEP 5 — Additional Settings */}
+              {/* STEP 5 — Upload materials */}
               <div style={s.stepCard}>
                 <div style={s.stepHeader}>
                   <span style={s.stepNum as React.CSSProperties}>5</span>
+                  <div>
+                    <div style={s.stepTitle}>Upload materials <span style={{ fontSize: 12, fontWeight: 500, color: "#94a3b8" }}>(optional)</span></div>
+                    <div style={s.stepSubtitle}>Share notes, worksheets, or any files with your AI Tutor.</div>
+                  </div>
+                </div>
+
+                {/* Drop zone */}
+                <div
+                  onClick={() => fileInputRef.current?.click()}
+                  onDragOver={e => { e.preventDefault(); setIsDragging(true); }}
+                  onDragLeave={() => setIsDragging(false)}
+                  onDrop={e => { e.preventDefault(); setIsDragging(false); handleFiles(e.dataTransfer.files); }}
+                  style={{
+                    border: `2px dashed ${isDragging ? "#1a73e8" : "#cbd5e1"}`,
+                    borderRadius: 12, padding: "22px 20px",
+                    display: "flex", flexDirection: "column", alignItems: "center", gap: 8,
+                    cursor: "pointer", background: isDragging ? "#eff6ff" : "#fafbfc",
+                    transition: "border-color 0.15s, background 0.15s",
+                    textAlign: "center",
+                  }}
+                >
+                  <span style={{ fontSize: 32 }}>📁</span>
+                  <div>
+                    <span style={{ fontSize: 14, fontWeight: 600, color: "#0f172a" }}>Drag &amp; drop files here</span>
+                    <span style={{ fontSize: 13, color: "#64748b" }}> or </span>
+                    <span style={{ fontSize: 14, fontWeight: 700, color: "#1a73e8" }}>click to browse</span>
+                  </div>
+                  <p style={{ margin: 0, fontSize: 11, color: "#94a3b8" }}>
+                    PDF, Word, PowerPoint, images — multiple files supported
+                  </p>
+                </div>
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  multiple
+                  accept=".pdf,.doc,.docx,.ppt,.pptx,.png,.jpg,.jpeg,.gif,.txt"
+                  style={{ display: "none" }}
+                  onChange={e => handleFiles(e.target.files)}
+                />
+
+                {/* File list */}
+                {uploadedFiles.length > 0 && (
+                  <div style={{ marginTop: 12, display: "flex", flexDirection: "column", gap: 8 }}>
+                    {uploadedFiles.map((file, idx) => (
+                      <div key={idx} style={{
+                        display: "flex", alignItems: "center", gap: 10,
+                        padding: "10px 12px", background: "#fff",
+                        border: "1px solid #e2e8f0", borderRadius: 9,
+                      }}>
+                        <span style={{ fontSize: 22, flexShrink: 0 }}>{fileIcon(file.type)}</span>
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <div style={{ fontSize: 13, fontWeight: 600, color: "#0f172a", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                            {file.name}
+                          </div>
+                          <div style={{ fontSize: 11, color: "#94a3b8", marginTop: 1 }}>{fmtSize(file.size)}</div>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => removeFile(idx)}
+                          style={{
+                            background: "none", border: "none", cursor: "pointer",
+                            color: "#94a3b8", padding: "4px 6px", borderRadius: 6,
+                            fontSize: 18, lineHeight: 1, fontFamily: "inherit",
+                            transition: "color 0.15s",
+                          }}
+                          onMouseEnter={e => (e.currentTarget.style.color = "#ef4444")}
+                          onMouseLeave={e => (e.currentTarget.style.color = "#94a3b8")}
+                          title="Remove file"
+                        >×</button>
+                      </div>
+                    ))}
+                    <p style={{ margin: 0, fontSize: 12, color: "#94a3b8" }}>
+                      {uploadedFiles.length} file{uploadedFiles.length > 1 ? "s" : ""} ready — your AI Tutor will use these during the session.
+                    </p>
+                  </div>
+                )}
+              </div>
+
+              {/* STEP 6 — Additional Settings */}
+              <div style={s.stepCard}>
+                <div style={s.stepHeader}>
+                  <span style={s.stepNum as React.CSSProperties}>6</span>
                   <div>
                     <div style={s.stepTitle}>Additional settings</div>
                     <div style={s.stepSubtitle}>Optional details and session access settings.</div>
@@ -1209,20 +1390,6 @@ export default function LessonSetupPage() {
   );
 }
 
-// ── Shared chip style for hero ───────────────────────────────────────────────
-
-const chipStyle: React.CSSProperties = {
-  fontSize: 13,
-  fontWeight: 600,
-  color: "#fff",
-  background: "rgba(255,255,255,0.15)",
-  backdropFilter: "blur(8px)",
-  border: "1px solid rgba(255,255,255,0.25)",
-  borderRadius: 99,
-  padding: "5px 12px",
-  whiteSpace: "nowrap",
-};
-
 // ── Styles ───────────────────────────────────────────────────────────────────
 
 const s: Record<string, React.CSSProperties> = {
@@ -1230,7 +1397,7 @@ const s: Record<string, React.CSSProperties> = {
   twoCol: {
     display: "flex",
     gap: 24,
-    padding: "24px 28px 32px",
+    padding: "24px 32px 32px",
     alignItems: "flex-start",
   },
   leftCol: {
@@ -1241,7 +1408,7 @@ const s: Record<string, React.CSSProperties> = {
     minWidth: 0,
   },
   rightCol: {
-    width: 300,
+    width: 320,
     flexShrink: 0,
     display: "flex",
     flexDirection: "column",
@@ -1303,15 +1470,17 @@ const s: Record<string, React.CSSProperties> = {
   select: {
     width: "100%",
     padding: "10px 36px 10px 12px",
-    border: "1px solid var(--border-color)",
+    border: "1.5px solid #e2e8f0",
     borderRadius: 8,
-    background: "var(--bg-primary)",
-    color: "var(--text-primary)",
+    background: "#fff",
+    color: "#0f172a",
     fontSize: 14,
     appearance: "none",
     cursor: "pointer",
     outline: "none",
     fontFamily: "inherit",
+    boxShadow: "0 1px 3px rgba(0,0,0,0.05)",
+    transition: "border-color 0.15s, box-shadow 0.15s",
   },
   selectArrow: {
     position: "absolute",

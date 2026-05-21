@@ -26,7 +26,8 @@ interface Props {
 const SHARED_STYLES = `
   .sb {
     width: 270px;
-    background: #292929;
+    background: #ffffff;
+    border-right: 1px solid #e2e8f0;
     display: flex;
     flex-direction: column;
     flex-shrink: 0;
@@ -38,7 +39,7 @@ const SHARED_STYLES = `
 
   .sb-header {
     padding: 18px 16px 14px;
-    border-bottom: 1px solid rgba(255,255,255,0.06);
+    border-bottom: 1px solid #e2e8f0;
   }
 
   .sb-brand {
@@ -66,7 +67,7 @@ const SHARED_STYLES = `
   .sb-brand-name {
     font-size: 14px;
     font-weight: 800;
-    color: #fff;
+    color: #0f172a;
     line-height: 1.2;
     white-space: nowrap;
     overflow: hidden;
@@ -75,7 +76,7 @@ const SHARED_STYLES = `
 
   .sb-school-name {
     font-size: 11px;
-    color: #636363;
+    color: #94a3b8;
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
@@ -98,7 +99,7 @@ const SHARED_STYLES = `
     border-radius: 7px;
     font-size: 13.5px;
     font-weight: 500;
-    color: #94a3b8;
+    color: #64748b;
     cursor: pointer;
     transition: background 0.15s, color 0.15s;
     position: relative;
@@ -111,13 +112,13 @@ const SHARED_STYLES = `
   }
 
   .sb-nav-item:hover {
-    background: rgba(255,255,255,0.05);
-    color: #cbd5e1;
+    background: rgba(26,115,232,0.06);
+    color: #1e293b;
   }
 
   .sb-nav-item.active {
-    background: rgba(26,115,232,0.15);
-    color: #4d96f0;
+    background: rgba(26,115,232,0.1);
+    color: #1a73e8;
     font-weight: 700;
     border-left: 3px solid #1a73e8;
     padding-left: 9px;
@@ -143,7 +144,7 @@ const SHARED_STYLES = `
 
   .sb-soon-badge {
     margin-left: auto;
-    background: rgba(255,255,255,0.08);
+    background: rgba(0,0,0,0.05);
     color: #64748b;
     font-size: 10px;
     font-weight: 600;
@@ -154,7 +155,7 @@ const SHARED_STYLES = `
 
   .sb-divider {
     height: 1px;
-    background: rgba(255,255,255,0.06);
+    background: #e2e8f0;
     margin: 6px 12px;
   }
 
@@ -169,15 +170,15 @@ const SHARED_STYLES = `
     padding: 12px 14px 4px;
     font-size: 10px;
     font-weight: 700;
-    color: #4a4a4a;
+    color: #94a3b8;
     text-transform: uppercase;
     letter-spacing: 0.6px;
   }
 
   .sb-time-widget {
     margin: 8px 12px;
-    background: rgba(255,255,255,0.04);
-    border: 1px solid rgba(255,255,255,0.07);
+    background: #f8fafc;
+    border: 1px solid #e2e8f0;
     border-radius: 10px;
     padding: 14px;
   }
@@ -196,7 +197,7 @@ const SHARED_STYLES = `
 
   .sb-time-bar-track {
     height: 8px;
-    background: rgba(255,255,255,0.07);
+    background: #e2e8f0;
     border-radius: 999px;
     overflow: hidden;
     margin-bottom: 7px;
@@ -215,7 +216,7 @@ const SHARED_STYLES = `
     margin-bottom: 10px;
   }
 
-  .sb-time-used { font-weight: 700; color: #e2e8f0; }
+  .sb-time-used { font-weight: 700; color: #0f172a; }
   .sb-time-total { color: #475569; }
 
   .sb-buy-btn {
@@ -238,7 +239,7 @@ const SHARED_STYLES = `
 
   .sb-footer {
     padding: 12px 14px;
-    border-top: 1px solid rgba(255,255,255,0.06);
+    border-top: 1px solid #e2e8f0;
     display: flex;
     align-items: center;
     gap: 10px;
@@ -263,7 +264,7 @@ const SHARED_STYLES = `
   .sb-user-name {
     font-size: 13px;
     font-weight: 600;
-    color: #e2e8f0;
+    color: #0f172a;
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
@@ -285,7 +286,7 @@ const SHARED_STYLES = `
   .sb-logout-btn {
     background: none;
     border: none;
-    color: rgba(255,255,255,0.25);
+    color: #94a3b8;
     padding: 5px;
     border-radius: 6px;
     cursor: pointer;
@@ -319,11 +320,11 @@ const SHARED_STYLES = `
     top: 12px;
     left: 12px;
     z-index: 1001;
-    background: #1e1e1e;
-    border: 1px solid rgba(255,255,255,0.12);
+    background: #fff;
+    border: 1px solid #e2e8f0;
     border-radius: 9px;
     padding: 8px 11px;
-    color: #e2e8f0;
+    color: #0f172a;
     cursor: pointer;
     align-items: center;
     justify-content: center;
@@ -334,7 +335,7 @@ const SHARED_STYLES = `
     box-shadow: 0 2px 14px rgba(0,0,0,0.45);
     transition: background 0.15s, border-color 0.15s;
   }
-  .sb-hamburger:hover { background: #292929; border-color: rgba(255,255,255,0.2); }
+  .sb-hamburger:hover { background: #f1f5f9; border-color: #cbd5e1; }
 
   /* ── Backdrop overlay ── */
   .sb-backdrop {
@@ -355,7 +356,7 @@ const SHARED_STYLES = `
     display: none;
     background: none;
     border: none;
-    color: rgba(255,255,255,0.35);
+    color: #64748b;
     cursor: pointer;
     padding: 5px;
     border-radius: 6px;
@@ -365,7 +366,7 @@ const SHARED_STYLES = `
     margin-left: auto;
     transition: color 0.15s, background 0.15s;
   }
-  .sb-close-btn:hover { color: #fff; background: rgba(255,255,255,0.08); }
+  .sb-close-btn:hover { color: #0f172a; background: rgba(0,0,0,0.05); }
 
   /* ── Responsive breakpoints ── */
   @media (max-width: 1023px) {
@@ -378,8 +379,8 @@ const SHARED_STYLES = `
       height: 100dvh;
       z-index: 999;
       transform: translateX(-100%);
-      box-shadow: 6px 0 40px rgba(0,0,0,0.55);
-      border-right: 1px solid rgba(255,255,255,0.05);
+      box-shadow: 6px 0 40px rgba(0,0,0,0.12);
+      border-right: 1px solid #e2e8f0;
     }
     .sb.sb-open { transform: translateX(0); }
   }
@@ -600,12 +601,12 @@ export default function Sidebar({
                     onClick={(e) => { e.stopPropagation(); handleDeleteChat(chat.session_id); }}
                     title="Delete chat"
                     style={{
-                      background: "none", border: "none", color: "rgba(255,255,255,0.2)",
+                      background: "none", border: "none", color: "#cbd5e1",
                       cursor: "pointer", padding: "4px 5px", borderRadius: 5, flexShrink: 0,
                       fontSize: 13, lineHeight: 1, transition: "color 0.15s",
                     }}
                     onMouseEnter={(e) => (e.currentTarget.style.color = "#ef4444")}
-                    onMouseLeave={(e) => (e.currentTarget.style.color = "rgba(255,255,255,0.2)")}
+                    onMouseLeave={(e) => (e.currentTarget.style.color = "#cbd5e1")}
                   >
                     ×
                   </button>
