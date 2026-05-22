@@ -467,7 +467,7 @@ export default function LessonSetupPage() {
     },
     {
       id: "catch_up",
-      emoji: "♻️",
+      emoji: "↩️",
       label: "Catch Up",
       desc: "I missed a lesson or need to catch up",
       color: "#f59e0b",
@@ -543,6 +543,7 @@ export default function LessonSetupPage() {
           @media (max-width: 768px) {
             .lsp-two-col { flex-direction: column !important; padding: 16px 16px 120px !important; gap: 16px !important; }
             .lsp-right-col { display: none !important; }
+            .lsp-step1-row { flex-direction: column !important; }
           }
           .lsp-mode-card {
             flex: 1; position: relative; display: flex; flex-direction: column; gap: 6px;
@@ -681,10 +682,10 @@ export default function LessonSetupPage() {
                   </div>
                 </div>
 
-                {/* Three dropdowns in a row */}
-                <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
+                {/* Subject · Key Stage · Topic — single row */}
+                <div className="lsp-step1-row" style={{ display: "flex", gap: 12, alignItems: "flex-start" }}>
                   {/* Subject */}
-                  <div style={{ flex: 1, minWidth: 140 }}>
+                  <div style={{ flex: 1, minWidth: 120 }}>
                     <label style={s.label}>Subject</label>
                     <div style={s.selectWrap}>
                       <select
@@ -702,7 +703,7 @@ export default function LessonSetupPage() {
                   </div>
 
                   {/* Key Stage */}
-                  <div style={{ flex: 1, minWidth: 140 }}>
+                  <div style={{ flex: 1, minWidth: 120 }}>
                     <label style={s.label}>Key Stage</label>
                     <div style={s.selectWrap}>
                       <select
@@ -719,11 +720,9 @@ export default function LessonSetupPage() {
                       <ChevronDown size={15} style={s.selectArrow as React.CSSProperties} />
                     </div>
                   </div>
-                </div>
 
-                {/* Topics — multiselect dropdown */}
-                {keyStage && (
-                  <div style={{ marginTop: 14 }}>
+                  {/* Topic — always visible, disabled until subject + key stage chosen */}
+                  <div style={{ flex: 2, minWidth: 180 }}>
                     <label style={s.label}>
                       Topic
                       {selectedTopics.length > 0 && (
@@ -732,116 +731,120 @@ export default function LessonSetupPage() {
                         </span>
                       )}
                     </label>
-                    {kbUnits.length === 0 ? (
-                      <p style={{ fontSize: 13, color: "#94a3b8", margin: "4px 0 0" }}>
-                        No topics available for this combination.
-                      </p>
-                    ) : (
-                      <div style={{ position: "relative" }} ref={topicDropdownRef}>
-                        {/* Trigger button */}
-                        <button
-                          type="button"
-                          onClick={() => setTopicDropdownOpen(v => !v)}
+                    <div style={{ position: "relative" }} ref={topicDropdownRef}>
+                      {/* Trigger button */}
+                      <button
+                        type="button"
+                        disabled={!subject || !keyStage}
+                        onClick={() => (subject && keyStage) && setTopicDropdownOpen(v => !v)}
+                        style={{
+                          width: "100%", padding: "10px 36px 10px 12px",
+                          border: `1.5px solid ${topicDropdownOpen ? "#1a73e8" : "#e2e8f0"}`,
+                          borderRadius: 8,
+                          background: (!subject || !keyStage) ? "#f8fafc" : "#fff",
+                          cursor: (!subject || !keyStage) ? "not-allowed" : "pointer",
+                          opacity: (!subject || !keyStage) ? 0.6 : 1,
+                          display: "flex", alignItems: "center", justifyContent: "space-between",
+                          fontSize: 14,
+                          color: selectedTopics.length > 0 ? "#0f172a" : "#94a3b8",
+                          fontFamily: "inherit", textAlign: "left",
+                          transition: "border-color 0.15s",
+                          boxShadow: topicDropdownOpen ? "0 0 0 3px rgba(26,115,232,0.12)" : "none",
+                        }}
+                      >
+                        <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                          {!subject || !keyStage
+                            ? "Select subject & key stage first"
+                            : kbUnits.length === 0 && subject && keyStage
+                              ? "No topics available"
+                              : selectedTopics.length === 0
+                                ? "Select topics..."
+                                : `${selectedTopics.length} topic${selectedTopics.length > 1 ? "s" : ""} selected`}
+                        </span>
+                        <ChevronDown
+                          size={15}
                           style={{
-                            width: "100%", padding: "10px 36px 10px 12px",
-                            border: `1.5px solid ${topicDropdownOpen ? "#1a73e8" : "#e2e8f0"}`,
-                            borderRadius: 8, background: "#fff", cursor: "pointer",
-                            display: "flex", alignItems: "center", justifyContent: "space-between",
-                            fontSize: 14, color: selectedTopics.length > 0 ? "#0f172a" : "#94a3b8",
-                            fontFamily: "inherit", textAlign: "left",
-                            transition: "border-color 0.15s",
-                            boxShadow: topicDropdownOpen ? "0 0 0 3px rgba(26,115,232,0.12)" : "none",
+                            position: "absolute", right: 12, top: "50%",
+                            transform: `translateY(-50%) ${topicDropdownOpen ? "rotate(180deg)" : "rotate(0deg)"}`,
+                            transition: "transform 0.2s", color: "#64748b", pointerEvents: "none",
                           }}
-                        >
-                          <span>
-                            {selectedTopics.length === 0
-                              ? "Select topics..."
-                              : `${selectedTopics.length} topic${selectedTopics.length > 1 ? "s" : ""} selected`}
-                          </span>
-                          <ChevronDown
-                            size={15}
-                            style={{
-                              position: "absolute", right: 12, top: "50%", transform: `translateY(-50%) ${topicDropdownOpen ? "rotate(180deg)" : "rotate(0deg)"}`,
-                              transition: "transform 0.2s", color: "#64748b", pointerEvents: "none",
-                            }}
-                          />
-                        </button>
+                        />
+                      </button>
 
-                        {/* Dropdown panel */}
-                        {topicDropdownOpen && (
-                          <div style={{
-                            position: "absolute", top: "calc(100% + 4px)", left: 0, right: 0, zIndex: 50,
-                            background: "#fff", border: "1.5px solid #e2e8f0", borderRadius: 10,
-                            boxShadow: "0 8px 24px rgba(0,0,0,0.1)", maxHeight: 240, overflowY: "auto",
-                            padding: "4px 0",
+                      {/* Dropdown panel */}
+                      {topicDropdownOpen && kbUnits.length > 0 && (
+                        <div style={{
+                          position: "absolute", top: "calc(100% + 4px)", left: 0, right: 0, zIndex: 50,
+                          background: "#fff", border: "1.5px solid #e2e8f0", borderRadius: 10,
+                          boxShadow: "0 8px 24px rgba(0,0,0,0.1)", maxHeight: 240, overflowY: "auto",
+                          padding: "4px 0",
+                        }}>
+                          {kbUnits.map((unit) => {
+                            const sel = selectedTopics.includes(unit.unit_name);
+                            return (
+                              <button
+                                key={unit.id}
+                                type="button"
+                                onClick={() => setSelectedTopics(prev =>
+                                  prev.includes(unit.unit_name)
+                                    ? prev.filter(t => t !== unit.unit_name)
+                                    : [...prev, unit.unit_name]
+                                )}
+                                style={{
+                                  display: "flex", alignItems: "center", gap: 10,
+                                  width: "100%", padding: "9px 14px",
+                                  background: sel ? "#eff6ff" : "transparent",
+                                  border: "none", cursor: "pointer", textAlign: "left",
+                                  fontFamily: "inherit", transition: "background 0.1s",
+                                }}
+                                onMouseEnter={e => { if (!sel) (e.currentTarget as HTMLButtonElement).style.background = "#f8fafc"; }}
+                                onMouseLeave={e => { if (!sel) (e.currentTarget as HTMLButtonElement).style.background = "transparent"; }}
+                              >
+                                <div style={{
+                                  width: 17, height: 17, borderRadius: 4, flexShrink: 0,
+                                  border: `2px solid ${sel ? "#1a73e8" : "#cbd5e1"}`,
+                                  background: sel ? "#1a73e8" : "transparent",
+                                  display: "flex", alignItems: "center", justifyContent: "center",
+                                  transition: "all 0.15s",
+                                }}>
+                                  {sel && <span style={{ color: "#fff", fontSize: 10, fontWeight: 900, lineHeight: 1 }}>✓</span>}
+                                </div>
+                                <span style={{ fontSize: 13, color: sel ? "#1a73e8" : "#0f172a", fontWeight: sel ? 600 : 400, lineHeight: 1.3 }}>
+                                  {unit.title}
+                                </span>
+                              </button>
+                            );
+                          })}
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Selected topic chips — below the row */}
+                    {selectedTopics.length > 0 && (
+                      <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 8 }}>
+                        {selectedTopics.map(topic => (
+                          <span key={topic} style={{
+                            display: "inline-flex", alignItems: "center", gap: 4,
+                            padding: "3px 6px 3px 10px",
+                            background: "#eff6ff", borderRadius: 99,
+                            border: "1px solid #bfdbfe", fontSize: 12, color: "#1a73e8", fontWeight: 600,
                           }}>
-                            {kbUnits.map((unit) => {
-                              const sel = selectedTopics.includes(unit.unit_name);
-                              return (
-                                <button
-                                  key={unit.id}
-                                  type="button"
-                                  onClick={() => setSelectedTopics(prev =>
-                                    prev.includes(unit.unit_name)
-                                      ? prev.filter(t => t !== unit.unit_name)
-                                      : [...prev, unit.unit_name]
-                                  )}
-                                  style={{
-                                    display: "flex", alignItems: "center", gap: 10,
-                                    width: "100%", padding: "9px 14px",
-                                    background: sel ? "#eff6ff" : "transparent",
-                                    border: "none", cursor: "pointer", textAlign: "left",
-                                    fontFamily: "inherit", transition: "background 0.1s",
-                                  }}
-                                  onMouseEnter={e => { if (!sel) (e.currentTarget as HTMLButtonElement).style.background = "#f8fafc"; }}
-                                  onMouseLeave={e => { if (!sel) (e.currentTarget as HTMLButtonElement).style.background = "transparent"; }}
-                                >
-                                  <div style={{
-                                    width: 17, height: 17, borderRadius: 4, flexShrink: 0,
-                                    border: `2px solid ${sel ? "#1a73e8" : "#cbd5e1"}`,
-                                    background: sel ? "#1a73e8" : "transparent",
-                                    display: "flex", alignItems: "center", justifyContent: "center",
-                                    transition: "all 0.15s",
-                                  }}>
-                                    {sel && <span style={{ color: "#fff", fontSize: 10, fontWeight: 900, lineHeight: 1 }}>✓</span>}
-                                  </div>
-                                  <span style={{ fontSize: 13, color: sel ? "#1a73e8" : "#0f172a", fontWeight: sel ? 600 : 400, lineHeight: 1.3 }}>
-                                    {unit.title}
-                                  </span>
-                                </button>
-                              );
-                            })}
-                          </div>
-                        )}
-
-                        {/* Selected chips */}
-                        {selectedTopics.length > 0 && (
-                          <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 8 }}>
-                            {selectedTopics.map(topic => (
-                              <span key={topic} style={{
-                                display: "inline-flex", alignItems: "center", gap: 4,
-                                padding: "3px 6px 3px 10px",
-                                background: "#eff6ff", borderRadius: 99,
-                                border: "1px solid #bfdbfe", fontSize: 12, color: "#1a73e8", fontWeight: 600,
-                              }}>
-                                {kbUnits.find(u => u.unit_name === topic)?.title ?? topic}
-                                <button
-                                  type="button"
-                                  onClick={() => setSelectedTopics(prev => prev.filter(t => t !== topic))}
-                                  style={{
-                                    background: "none", border: "none", cursor: "pointer",
-                                    padding: "0 3px", color: "#93c5fd", fontSize: 16, lineHeight: 1,
-                                    fontFamily: "inherit", display: "flex", alignItems: "center",
-                                  }}
-                                >×</button>
-                              </span>
-                            ))}
-                          </div>
-                        )}
+                            {kbUnits.find(u => u.unit_name === topic)?.title ?? topic}
+                            <button
+                              type="button"
+                              onClick={() => setSelectedTopics(prev => prev.filter(t => t !== topic))}
+                              style={{
+                                background: "none", border: "none", cursor: "pointer",
+                                padding: "0 3px", color: "#93c5fd", fontSize: 16, lineHeight: 1,
+                                fontFamily: "inherit", display: "flex", alignItems: "center",
+                              }}
+                            >×</button>
+                          </span>
+                        ))}
                       </div>
                     )}
                   </div>
-                )}
+                </div>
 
                 {/* Assignment recommended-by note */}
                 {assignment && (

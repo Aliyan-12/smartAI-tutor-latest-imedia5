@@ -23,7 +23,7 @@ const SESSION_TYPES = [
 const SESSION_GOAL_OPTIONS = [
   { id: "Learn from Scratch", emoji: "🧠", label: "Learn from Scratch", desc: "I'm new to this topic",              color: "#10b981", iconBg: "rgba(16,185,129,0.12)" },
   { id: "Homework Help",      emoji: "🎯", label: "Practice & Improve", desc: "Strengthen my skills",               color: "#6366f1", iconBg: "rgba(99,102,241,0.12)"  },
-  { id: "Catch Up",           emoji: "♻️", label: "Catch Up",           desc: "I missed a lesson or need to catch up", color: "#f59e0b", iconBg: "rgba(245,158,11,0.12)" },
+  { id: "Catch Up",           emoji: "↩️", label: "Catch Up",           desc: "I missed a lesson or need to catch up", color: "#f59e0b", iconBg: "rgba(245,158,11,0.12)" },
   { id: "Revision",           emoji: "🎓", label: "Exam Revision",      desc: "Prepare for a test or exam",         color: "#ef4444", iconBg: "rgba(239,68,68,0.12)"  },
 ];
 
@@ -627,8 +627,9 @@ export default function BookSessionPage() {
                   </div>
                 </div>
 
-                <div style={{ display: "flex", gap: 12, flexWrap: "wrap", marginBottom: 14 }}>
-                  <div style={{ flex: 1, minWidth: 140 }}>
+                {/* Subject · Key Stage · Topic — single row */}
+                <div style={{ display: "flex", gap: 12, marginBottom: 14, alignItems: "flex-start" }}>
+                  <div style={{ flex: 1, minWidth: 120 }}>
                     <label style={s.label}>Subject *</label>
                     <select
                       value={form.subject}
@@ -642,8 +643,8 @@ export default function BookSessionPage() {
                       ))}
                     </select>
                   </div>
-                  <div style={{ flex: 1, minWidth: 140 }}>
-                    <label style={s.label}>Key Stage / Year Group *</label>
+                  <div style={{ flex: 1, minWidth: 120 }}>
+                    <label style={s.label}>Key Stage *</label>
                     <select
                       value={form.key_stage}
                       onChange={(e) => setForm((f) => ({ ...f, key_stage: e.target.value }))}
@@ -655,6 +656,119 @@ export default function BookSessionPage() {
                         <option key={k} value={k}>{k}</option>
                       ))}
                     </select>
+                  </div>
+                  {/* Topic — always visible, disabled until subject + key stage chosen */}
+                  <div style={{ flex: 2, minWidth: 180 }} ref={topicDropdownRef}>
+                    <label style={s.label}>
+                      Topic
+                      {selectedUnits.length > 0 && (
+                        <span style={{ fontWeight: 400, color: "#1a73e8", marginLeft: 6 }}>{selectedUnits.length} selected</span>
+                      )}
+                    </label>
+                    <div style={{ position: "relative" }}>
+                      <button
+                        type="button"
+                        disabled={!form.subject || !form.key_stage}
+                        onClick={() => (form.subject && form.key_stage) && setTopicDropdownOpen(v => !v)}
+                        style={{
+                          width: "100%", padding: "10px 36px 10px 12px",
+                          border: `1.5px solid ${topicDropdownOpen ? "#1a73e8" : "#e2e8f0"}`,
+                          borderRadius: 8,
+                          background: (!form.subject || !form.key_stage) ? "#f8fafc" : "#fff",
+                          cursor: (!form.subject || !form.key_stage) ? "not-allowed" : "pointer",
+                          opacity: (!form.subject || !form.key_stage) ? 0.6 : 1,
+                          display: "flex", alignItems: "center",
+                          fontSize: 14, color: selectedUnits.length > 0 ? "#0f172a" : "#94a3b8",
+                          fontFamily: "inherit", textAlign: "left", transition: "border-color 0.15s",
+                          boxShadow: topicDropdownOpen ? "0 0 0 3px rgba(26,115,232,0.12)" : "none",
+                        }}
+                      >
+                        <span style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                          {!form.subject || !form.key_stage
+                            ? "Select subject & key stage first"
+                            : kbUnits.length === 0
+                              ? "No topics available"
+                              : selectedUnits.length === 0
+                                ? "Select topics..."
+                                : `${selectedUnits.length} topic${selectedUnits.length > 1 ? "s" : ""} selected`}
+                        </span>
+                        <ChevronDown
+                          size={15}
+                          style={{
+                            position: "absolute", right: 12, top: "50%",
+                            transform: `translateY(-50%) ${topicDropdownOpen ? "rotate(180deg)" : "rotate(0deg)"}`,
+                            transition: "transform 0.2s", color: "#64748b", pointerEvents: "none",
+                          }}
+                        />
+                      </button>
+                      {topicDropdownOpen && kbUnits.length > 0 && (
+                        <div style={{
+                          position: "absolute", top: "calc(100% + 4px)", left: 0, right: 0, zIndex: 50,
+                          background: "#fff", border: "1.5px solid #e2e8f0", borderRadius: 10,
+                          boxShadow: "0 8px 24px rgba(0,0,0,0.1)", maxHeight: 240, overflowY: "auto",
+                          padding: "4px 0",
+                        }}>
+                          {kbUnits.map((unit) => {
+                            const sel = selectedUnits.includes(unit.unit_name);
+                            return (
+                              <button
+                                key={unit.id}
+                                type="button"
+                                onClick={() => setSelectedUnits(prev =>
+                                  prev.includes(unit.unit_name)
+                                    ? prev.filter(u => u !== unit.unit_name)
+                                    : [...prev, unit.unit_name]
+                                )}
+                                style={{
+                                  display: "flex", alignItems: "center", gap: 10,
+                                  width: "100%", padding: "9px 14px",
+                                  background: sel ? "#eff6ff" : "transparent",
+                                  border: "none", cursor: "pointer", textAlign: "left",
+                                  fontFamily: "inherit", transition: "background 0.1s",
+                                }}
+                                onMouseEnter={e => { if (!sel) (e.currentTarget as HTMLButtonElement).style.background = "#f8fafc"; }}
+                                onMouseLeave={e => { if (!sel) (e.currentTarget as HTMLButtonElement).style.background = "transparent"; }}
+                              >
+                                <div style={{
+                                  width: 17, height: 17, borderRadius: 4, flexShrink: 0,
+                                  border: `2px solid ${sel ? "#1a73e8" : "#cbd5e1"}`,
+                                  background: sel ? "#1a73e8" : "transparent",
+                                  display: "flex", alignItems: "center", justifyContent: "center",
+                                }}>
+                                  {sel && <span style={{ color: "#fff", fontSize: 10, fontWeight: 900, lineHeight: 1 }}>✓</span>}
+                                </div>
+                                <span style={{ fontSize: 13, color: sel ? "#1a73e8" : "#0f172a", fontWeight: sel ? 600 : 400 }}>
+                                  {unit.title}
+                                </span>
+                              </button>
+                            );
+                          })}
+                        </div>
+                      )}
+                      {selectedUnits.length > 0 && (
+                        <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 8 }}>
+                          {selectedUnits.map(unitName => (
+                            <span key={unitName} style={{
+                              display: "inline-flex", alignItems: "center", gap: 4,
+                              padding: "3px 6px 3px 10px",
+                              background: "#eff6ff", borderRadius: 99,
+                              border: "1px solid #bfdbfe", fontSize: 12, color: "#1a73e8", fontWeight: 600,
+                            }}>
+                              {kbUnits.find(u => u.unit_name === unitName)?.title ?? unitName}
+                              <button
+                                type="button"
+                                onClick={() => setSelectedUnits(prev => prev.filter(u => u !== unitName))}
+                                style={{
+                                  background: "none", border: "none", cursor: "pointer",
+                                  padding: "0 3px", color: "#93c5fd", fontSize: 16, lineHeight: 1,
+                                  fontFamily: "inherit", display: "flex", alignItems: "center",
+                                }}
+                              >×</button>
+                            </span>
+                          ))}
+                        </div>
+                      )}
+                    </div>
                   </div>
                 </div>
 
@@ -765,7 +879,7 @@ export default function BookSessionPage() {
                 </div>
 
                 {/* Session title */}
-                <div style={{ marginBottom: kbUnits.length > 0 ? 14 : 0 }}>
+                <div style={{ marginBottom: 0 }}>
                   <label style={s.label}>Session Title *</label>
                   <input
                     type="text"
@@ -777,123 +891,12 @@ export default function BookSessionPage() {
                   />
                 </div>
 
-                {/* Topics from KB */}
-                {kbUnits.length > 0 && (
-                  <div style={{ marginTop: 14 }}>
-                    <label style={s.label}>
-                      Topics / Units to Cover
-                      {selectedUnits.length > 0 && (
-                        <span style={{ fontWeight: 400, color: "#1a73e8", marginLeft: 6 }}>
-                          {selectedUnits.length} selected
-                        </span>
-                      )}
-                    </label>
-                    <div style={{ position: "relative" }} ref={topicDropdownRef}>
-                      <button
-                        type="button"
-                        onClick={() => setTopicDropdownOpen(v => !v)}
-                        style={{
-                          width: "100%", padding: "10px 36px 10px 12px",
-                          border: `1.5px solid ${topicDropdownOpen ? "#1a73e8" : "#e2e8f0"}`,
-                          borderRadius: 8, background: "#fff", cursor: "pointer",
-                          display: "flex", alignItems: "center", justifyContent: "space-between",
-                          fontSize: 14, color: selectedUnits.length > 0 ? "#0f172a" : "#94a3b8",
-                          fontFamily: "inherit", textAlign: "left", transition: "border-color 0.15s",
-                          boxShadow: topicDropdownOpen ? "0 0 0 3px rgba(26,115,232,0.12)" : "none",
-                        }}
-                      >
-                        <span>
-                          {selectedUnits.length === 0
-                            ? "Select topics..."
-                            : `${selectedUnits.length} topic${selectedUnits.length > 1 ? "s" : ""} selected`}
-                        </span>
-                        <ChevronDown
-                          size={15}
-                          style={{
-                            position: "absolute", right: 12, top: "50%",
-                            transform: `translateY(-50%) ${topicDropdownOpen ? "rotate(180deg)" : "rotate(0deg)"}`,
-                            transition: "transform 0.2s", color: "#64748b", pointerEvents: "none",
-                          }}
-                        />
-                      </button>
-
-                      {topicDropdownOpen && (
-                        <div style={{
-                          position: "absolute", top: "calc(100% + 4px)", left: 0, right: 0, zIndex: 50,
-                          background: "#fff", border: "1.5px solid #e2e8f0", borderRadius: 10,
-                          boxShadow: "0 8px 24px rgba(0,0,0,0.1)", maxHeight: 240, overflowY: "auto",
-                          padding: "4px 0",
-                        }}>
-                          {kbUnits.map((unit) => {
-                            const sel = selectedUnits.includes(unit.unit_name);
-                            return (
-                              <button
-                                key={unit.id}
-                                type="button"
-                                onClick={() => setSelectedUnits(prev =>
-                                  prev.includes(unit.unit_name)
-                                    ? prev.filter(u => u !== unit.unit_name)
-                                    : [...prev, unit.unit_name]
-                                )}
-                                style={{
-                                  display: "flex", alignItems: "center", gap: 10,
-                                  width: "100%", padding: "9px 14px",
-                                  background: sel ? "#eff6ff" : "transparent",
-                                  border: "none", cursor: "pointer", textAlign: "left",
-                                  fontFamily: "inherit", transition: "background 0.1s",
-                                }}
-                                onMouseEnter={e => { if (!sel) (e.currentTarget as HTMLButtonElement).style.background = "#f8fafc"; }}
-                                onMouseLeave={e => { if (!sel) (e.currentTarget as HTMLButtonElement).style.background = "transparent"; }}
-                              >
-                                <div style={{
-                                  width: 17, height: 17, borderRadius: 4, flexShrink: 0,
-                                  border: `2px solid ${sel ? "#1a73e8" : "#cbd5e1"}`,
-                                  background: sel ? "#1a73e8" : "transparent",
-                                  display: "flex", alignItems: "center", justifyContent: "center",
-                                  transition: "all 0.15s",
-                                }}>
-                                  {sel && <span style={{ color: "#fff", fontSize: 10, fontWeight: 900, lineHeight: 1 }}>✓</span>}
-                                </div>
-                                <span style={{ fontSize: 13, color: sel ? "#1a73e8" : "#0f172a", fontWeight: sel ? 600 : 400 }}>
-                                  {unit.title}
-                                </span>
-                              </button>
-                            );
-                          })}
-                        </div>
-                      )}
-
-                      {selectedUnits.length > 0 && (
-                        <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 8 }}>
-                          {selectedUnits.map(unitName => (
-                            <span key={unitName} style={{
-                              display: "inline-flex", alignItems: "center", gap: 4,
-                              padding: "3px 6px 3px 10px",
-                              background: "#eff6ff", borderRadius: 99,
-                              border: "1px solid #bfdbfe", fontSize: 12, color: "#1a73e8", fontWeight: 600,
-                            }}>
-                              {kbUnits.find(u => u.unit_name === unitName)?.title ?? unitName}
-                              <button
-                                type="button"
-                                onClick={() => setSelectedUnits(prev => prev.filter(u => u !== unitName))}
-                                style={{
-                                  background: "none", border: "none", cursor: "pointer",
-                                  padding: "0 3px", color: "#93c5fd", fontSize: 16, lineHeight: 1,
-                                  fontFamily: "inherit", display: "flex", alignItems: "center",
-                                }}
-                              >×</button>
-                            </span>
-                          ))}
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                )}
                 {form.subject && form.key_stage && kbUnits.length === 0 && (
                   <p style={{ fontSize: 12, color: "var(--text-muted)", margin: "8px 0 0" }}>
                     No KB documents for {form.subject} {form.key_stage} — AI will use general knowledge.
                   </p>
                 )}
+
               </div>
 
               {/* STEP 3 — Schedule & Duration */}

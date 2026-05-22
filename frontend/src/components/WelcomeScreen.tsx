@@ -681,10 +681,10 @@ export default function WelcomeScreen({ onPromptClick, onStatsLoaded }: Props) {
           background: #fff;
           border: 1px solid #e2e8f0;
           border-radius: 16px;
-          padding: 16px 20px;
+          padding: 12px 20px 12px 14px;
           display: flex;
           align-items: center;
-          gap: 20px;
+          gap: 16px;
           margin-top: 8px;
         }
 
@@ -805,11 +805,23 @@ export default function WelcomeScreen({ onPromptClick, onStatsLoaded }: Props) {
               ? new Date(session.scheduled_at).toLocaleDateString("en-GB", { weekday: "short", day: "numeric", month: "short" })
               : null;
             return (
-              <div key={session.id} className="ws-cl-card" style={{ marginBottom: 16 }}>
-                <span className="ws-cl-badge" style={isPaused ? { background: "#fef3c7", color: "#b45309" } : undefined}>
+              <div key={session.id} className="ws-cl-card" style={{ marginBottom: 16, position: "relative", overflow: "hidden" }}>
+                {/* robot-resume decorative image — centered in the gap between content and action buttons */}
+                <img
+                  src="/images/robot-resume.png"
+                  alt=""
+                  draggable={false}
+                  aria-hidden="true"
+                  style={{
+                    position: "absolute", right: 175, top: "50%", transform: "translateY(-50%)",
+                    width: 200, height: "auto", objectFit: "contain",
+                    opacity: 0.55, pointerEvents: "none", zIndex: 0,
+                  }}
+                />
+                <span className="ws-cl-badge" style={{ position: "relative", zIndex: 1, ...(isPaused ? { background: "#fef3c7", color: "#b45309" } : {}) }}>
                   {isPaused ? "⏸ Paused" : "▶ Continue Learning"}
                 </span>
-                <div className="ws-cl-body">
+                <div className="ws-cl-body" style={{ position: "relative", zIndex: 1 }}>
                   <div className="ws-cl-info">
                     <h2 className="ws-cl-topic">{session.title}</h2>
                     <p className="ws-cl-subject">
@@ -872,12 +884,6 @@ export default function WelcomeScreen({ onPromptClick, onStatsLoaded }: Props) {
                       <div className="ws-cl-last-msg">💬 "{session.description}"</div>
                     ) : null}
                   </div>
-                  <img
-                    src="/images/robotAI.png"
-                    alt="AI tutor"
-                    draggable={false}
-                    className="ws-cl-robot"
-                  />
                   <div className="ws-cl-actions">
                     <button
                       className="ws-cl-btn-primary"
@@ -926,9 +932,20 @@ export default function WelcomeScreen({ onPromptClick, onStatsLoaded }: Props) {
           </button>
           </>
         ) : continue_learning ? (
-          <div className="ws-cl-card">
-            <span className="ws-cl-badge">Continue Learning</span>
-            <div className="ws-cl-body">
+          <div className="ws-cl-card" style={{ position: "relative", overflow: "hidden" }}>
+            <img
+              src="/images/robot-resume.png"
+              alt=""
+              draggable={false}
+              aria-hidden="true"
+              style={{
+                position: "absolute", right: 175, top: "50%", transform: "translateY(-50%)",
+                width: 200, height: "auto", objectFit: "contain",
+                opacity: 0.55, pointerEvents: "none", zIndex: 0,
+              }}
+            />
+            <span className="ws-cl-badge" style={{ position: "relative", zIndex: 1 }}>Continue Learning</span>
+            <div className="ws-cl-body" style={{ position: "relative", zIndex: 1 }}>
               <div className="ws-cl-info">
                 <h2 className="ws-cl-topic">{continue_learning.topic}</h2>
                 <p className="ws-cl-subject">
@@ -951,12 +968,6 @@ export default function WelcomeScreen({ onPromptClick, onStatsLoaded }: Props) {
                   </div>
                 )}
               </div>
-              <img
-                src="/images/robotAI.png"
-                alt="AI tutor"
-                draggable={false}
-                className="ws-cl-robot"
-              />
               <div className="ws-cl-actions">
                 <button
                   className="ws-cl-btn-primary"
@@ -1098,22 +1109,37 @@ export default function WelcomeScreen({ onPromptClick, onStatsLoaded }: Props) {
           </div>
 
           {/* Right column — promo card */}
-          <div className="ws-promo-card">
-            <div>
-              <p className="ws-promo-support">Need more support?</p>
-              <h3 className="ws-promo-heading">Book a 1:1 session with SmartTuition.org</h3>
-              <ul className="ws-promo-list">
-                <li>✓ Expert tutors</li>
-                <li>✓ Personalised support</li>
-                <li>✓ Achieve your goals</li>
-              </ul>
+          <div className="ws-promo-card" style={{ flexDirection: "row", alignItems: "center", padding: "24px 0 24px 24px", gap: 0, overflow: "hidden" }}>
+            {/* Text + button */}
+            <div style={{ flex: 1, display: "flex", flexDirection: "column", justifyContent: "space-between", minWidth: 0 }}>
+              <div>
+                <p className="ws-promo-support">Ready to level up?</p>
+                <h3 className="ws-promo-heading">Start a new lesson today</h3>
+                <ul className="ws-promo-list">
+                  <li>✓ AI-personalised sessions</li>
+                  <li>✓ Step-by-step explanations</li>
+                  <li>✓ Instant feedback</li>
+                </ul>
+              </div>
+              <button
+                className="ws-promo-btn"
+                onClick={() => navigate("/lesson/setup")}
+              >
+                Start Learning →
+              </button>
             </div>
-            <button
-              className="ws-promo-btn"
-              onClick={() => window.open("https://smarttuition.org", "_blank")}
-            >
-              Book Now →
-            </button>
+            {/* Robot image fills right side */}
+            <img
+              src="/images/robot-startlearning.png"
+              alt="Start Learning"
+              draggable={false}
+              style={{
+                width: 210, height: "auto", objectFit: "contain",
+                flexShrink: 0, alignSelf: "flex-end",
+                marginBottom: -24, marginRight: -4,
+                opacity: 0.92,
+              }}
+            />
           </div>
         </div>
 
@@ -1136,7 +1162,7 @@ export default function WelcomeScreen({ onPromptClick, onStatsLoaded }: Props) {
                 bg: "#f0fdf4",
                 border: "#bbf7d0",
                 btnBg: "#22c55e",
-                img: "/images/robotAI.png",
+                img: "/images/session-robot-green.png",
               },
               {
                 name: "Science",
@@ -1144,7 +1170,7 @@ export default function WelcomeScreen({ onPromptClick, onStatsLoaded }: Props) {
                 bg: "#eff6ff",
                 border: "#bfdbfe",
                 btnBg: "#1a73e8",
-                img: "/images/sci-robot.png",
+                img: "/images/session-robot-blue.png",
               },
               {
                 name: "English",
@@ -1152,7 +1178,7 @@ export default function WelcomeScreen({ onPromptClick, onStatsLoaded }: Props) {
                 bg: "#fff7ed",
                 border: "#fed7aa",
                 btnBg: "#f97316",
-                img: null,
+                img: "/images/session-robot-org.png",
               },
             ].map((s) => (
               <div
@@ -1167,16 +1193,13 @@ export default function WelcomeScreen({ onPromptClick, onStatsLoaded }: Props) {
                   (e.currentTarget as HTMLDivElement).style.boxShadow = "";
                 }}
               >
-                {s.img ? (
-                  <img
-                    src={s.img}
-                    alt={s.name}
-                    draggable={false}
-                    className="ws-subj-img"
-                  />
-                ) : (
-                  <span style={{ fontSize: 52, lineHeight: 1 }}>📚</span>
-                )}
+                <img
+                  src={s.img}
+                  alt={s.name}
+                  draggable={false}
+                  className="ws-subj-img"
+                  style={{ width: 200, height: 200 }}
+                />
                 <span className="ws-subj-name">{s.name}</span>
                 <span className="ws-subj-desc">{s.desc}</span>
                 <button
@@ -1198,12 +1221,10 @@ export default function WelcomeScreen({ onPromptClick, onStatsLoaded }: Props) {
         <div className="ws-help-bar">
           <div className="ws-help-left">
             <img
-              src="/images/robotAI.png"
-              width={40}
-              height={40}
+              src="/images/robot-help.png"
               draggable={false}
-              style={{ objectFit: "contain", borderRadius: 10, background: "#eff6ff", padding: 6 }}
-              alt="AI tutor"
+              style={{ width: 90, height: 90, objectFit: "contain", flexShrink: 0 }}
+              alt="Need help?"
             />
             <div>
               <p className="ws-help-text-heading">Need help with something?</p>
