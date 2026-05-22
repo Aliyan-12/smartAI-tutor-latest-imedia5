@@ -1,8 +1,16 @@
 import { useEffect, useState, useCallback, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
-import { gamificationApi, appointmentsApi, assignmentsApi } from "../services/api";
+import { gamificationApi, appointmentsApi, assignmentsApi, chatApi } from "../services/api";
 import type { DashboardData, Appointment, MyAssignment } from "../types";
+
+interface SessionSummary {
+  messageCount: number;
+  userTurns: number;
+  quizCount: number;
+  lastAiSnippet: string;
+  topicLine: string;
+}
 
 interface HeroStats {
   streak: number;
@@ -105,8 +113,49 @@ export default function WelcomeScreen({ onPromptClick, onStatsLoaded }: Props) {
     load();
   }, [load]);
 
+  useEffect(() => {
+    const active = appointments.filter((a) => ["started", "paused"].includes(a.status));
+    if (active.length === 0) return;
+    active.forEach(async (appt) => {
+      try {
+        const data = await chatApi.getOrCreateSessionChat(appt.id) as {
+          session_id: string;
+          messages: Array<{ id: number; role: string; content: string; timestamp: string }>;
+        };
+        const msgs = data.messages ?? [];
+        const aiMsgs = msgs.filter((m) => m.role === "assistant");
+        const userMsgs = msgs.filter((m) => m.role === "user");
+        const quizCount = aiMsgs.filter((m) =>
+          m.content.includes("[QUIZ_OFFER") || m.content.toLowerCase().includes("quiz")
+        ).length;
+        const lastAi = aiMsgs[aiMsgs.length - 1]?.content ?? "";
+        const snippet = lastAi.replace(/\[.*?\]/g, "").trim().slice(0, 120);
+        const topicLine = [
+          `${msgs.length} messages`,
+          userMsgs.length > 0 ? `${userMsgs.length} responses` : null,
+          quizCount > 0 ? `${quizCount} quiz attempt${quizCount > 1 ? "s" : ""}` : null,
+        ]
+          .filter(Boolean)
+          .join(" · ");
+        setSessionSummaries((prev) => ({
+          ...prev,
+          [appt.id]: {
+            messageCount: msgs.length,
+            userTurns: userMsgs.length,
+            quizCount,
+            lastAiSnippet: snippet,
+            topicLine,
+          },
+        }));
+      } catch {
+        // silently skip if chat not yet created
+      }
+    });
+  }, [appointments]);
+
   const [helpInput, setHelpInput] = useState("");
   const helpInputRef = useRef<HTMLInputElement>(null);
+  const [sessionSummaries, setSessionSummaries] = useState<Record<number, SessionSummary>>({});
 
   const firstName = user?.name?.split(" ")[0] ?? "there";
 
@@ -364,6 +413,21 @@ export default function WelcomeScreen({ onPromptClick, onStatsLoaded }: Props) {
         }
 
         .ws-cl-btn-secondary:hover { border-color: #94a3b8; background: #f8fafc; }
+
+        .ws-cl-btn-end {
+          background: #fff0f0;
+          color: #dc2626;
+          border: 1.5px solid #fecaca;
+          padding: 10px 20px;
+          border-radius: 8px;
+          font-weight: 700;
+          font-size: 13px;
+          cursor: pointer;
+          font-family: inherit;
+          transition: background 0.18s, border-color 0.18s;
+        }
+
+        .ws-cl-btn-end:hover { background: #fee2e2; border-color: #dc2626; }
 
         /* ── Section 2: Recommended for You ── */
         .ws-rec-row {
@@ -676,18 +740,20 @@ export default function WelcomeScreen({ onPromptClick, onStatsLoaded }: Props) {
         {/* ── Section 1: Active Sessions / Continue Learning / Start CTA ── */}
         {activeSessions.length > 0 ? (
           <>
-          {activeSessions.slice(0, 2).map((session) => {
+          {activeSessions.slice(0, 1).map((session) => {
             const startTime = session.session_started_at
               ? new Date(session.session_started_at).getTime()
               : null;
+            const pausedSecs = session.total_paused_seconds ?? 0;
             const elapsedMins = startTime
-              ? Math.max(0, Math.round((Date.now() - startTime) / 60000))
+              ? Math.max(0, Math.round((Date.now() - startTime) / 60000) - Math.round(pausedSecs / 60))
               : 0;
             const progressPct =
               session.duration_minutes > 0
                 ? Math.min(100, Math.round((elapsedMins / session.duration_minutes) * 100))
                 : 0;
             const isPaused = session.status === "paused";
+            const summary = sessionSummaries[session.id];
             return (
               <div key={session.id} className="ws-cl-card" style={{ marginBottom: 16 }}>
                 <span className="ws-cl-badge" style={isPaused ? { background: "#fef3c7", color: "#b45309" } : undefined}>
@@ -713,11 +779,19 @@ export default function WelcomeScreen({ onPromptClick, onStatsLoaded }: Props) {
                         <span className="ws-cl-prog-mins">{elapsedMins} mins completed</span>
                       )}
                     </div>
-                    {session.description && (
+                    {/* Session summary from chat messages */}
+                    {summary ? (
                       <div className="ws-cl-last-msg">
-                        💬 Last message: "{session.description}"
+                        <span style={{ fontSize: 11, color: "#94a3b8", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.4px", display: "block", marginBottom: 4 }}>
+                          {summary.topicLine}
+                        </span>
+                        {summary.lastAiSnippet && (
+                          <span>💬 "{summary.lastAiSnippet}{summary.lastAiSnippet.length >= 120 ? "…" : ""}"</span>
+                        )}
                       </div>
-                    )}
+                    ) : session.description ? (
+                      <div className="ws-cl-last-msg">💬 "{session.description}"</div>
+                    ) : null}
                   </div>
                   <img
                     src="/images/robotAI.png"
@@ -734,15 +808,23 @@ export default function WelcomeScreen({ onPromptClick, onStatsLoaded }: Props) {
                     </button>
                     <button
                       className="ws-cl-btn-secondary"
-                      onClick={() => navigate(`/session/${session.id}`)}
-                    >
-                      View Last Message
-                    </button>
-                    <button
-                      className="ws-cl-btn-secondary"
                       onClick={() => navigate("/lesson/setup")}
                     >
                       Start a Different Topic
+                    </button>
+                    <button
+                      className="ws-cl-btn-end"
+                      onClick={async () => {
+                        if (!window.confirm("End this lesson?")) return;
+                        try {
+                          await appointmentsApi.updateStatus(session.id, "completed");
+                          load();
+                        } catch {
+                          // ignore
+                        }
+                      }}
+                    >
+                      End Lesson
                     </button>
                   </div>
                 </div>
