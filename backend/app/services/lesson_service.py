@@ -480,43 +480,16 @@ async def generate_session_report(
     lesson_plan: Optional[Any],
     assessments: List[Any],
     student_name: Optional[str] = None,
+    messages: Optional[List[Any]] = None,
 ) -> Dict[str, Any]:
     """
-    Generate a structured AI session report from appointment + lesson plan + assessments.
-    Saves the report JSON string to lesson_plan.session_summary and returns the dict.
+    Generate a phase-wise AI session report from actual conversation content.
+    Quiz score is only set when a real quiz was taken in this session.
+    Weak/strong areas come from quiz results only — not the mastery database.
     """
     from app.services.gemini_service import _get_client
     from app.core.config import settings
     from google.genai import types as genai_types
-
-    # Calculate quiz stats across all assessments
-    total_questions = sum(getattr(a, "total_questions", 0) for a in assessments)
-    total_correct = sum(getattr(a, "correct_answers", 0) for a in assessments)
-    avg_score = (total_correct / total_questions * 100) if total_questions > 0 else 0.0
-
-    all_weak: List[str] = []
-    all_strong: List[str] = []
-    topics_covered: List[str] = []
-    for a in assessments:
-        if hasattr(a, "topic") and a.topic:
-            topics_covered.append(a.topic)
-        weak = a.weak_topics if hasattr(a, "weak_topics") and a.weak_topics else {}
-        strong = a.strong_topics if hasattr(a, "strong_topics") and a.strong_topics else {}
-        if isinstance(weak, dict):
-            all_weak.extend(weak.keys())
-        elif isinstance(weak, list):
-            all_weak.extend(weak)
-        if isinstance(strong, dict):
-            all_strong.extend(strong.keys())
-        elif isinstance(strong, list):
-            all_strong.extend(strong)
-
-    # De-duplicate
-    topics_covered = list(dict.fromkeys(topics_covered))
-    if not topics_covered and lesson_plan:
-        topics_covered = [lesson_plan.unit_name or lesson_plan.subtopic or appointment.subject]
-    all_weak = list(dict.fromkeys(all_weak))
-    all_strong = list(dict.fromkeys(all_strong))
 
     subject = appointment.subject
     key_stage = appointment.key_stage
@@ -524,46 +497,118 @@ async def generate_session_report(
     if student_name is None:
         student_name = "Student"
 
-    # Determine understanding level from score
-    if avg_score >= 80:
-        understanding = "Excellent"
-    elif avg_score >= 60:
-        understanding = "Good"
-    elif avg_score >= 40:
-        understanding = "Developing"
-    else:
-        understanding = "Needs Support"
-
-    # Build Gemini prompt for the report
-    topics_str = ", ".join(topics_covered) if topics_covered else subject
-    weak_str = ", ".join(all_weak) if all_weak else "None identified"
-    strong_str = ", ".join(all_strong) if all_strong else "None identified"
-
     goal = lesson_plan.goal if lesson_plan else "teach_from_scratch"
-    unit = lesson_plan.unit_name if lesson_plan else ""
+    unit = (lesson_plan.unit_name if lesson_plan else "") or appointment.subject
     subtopic = lesson_plan.subtopic if lesson_plan else ""
 
-    prompt = f"""A student just completed a {duration}-minute AI tutoring session.
+    # --- Quiz stats: only from assessments linked to THIS appointment ---
+    total_questions = sum(getattr(a, "total_questions", 0) for a in assessments)
+    total_correct = sum(getattr(a, "correct_answers", 0) for a in assessments)
+    quiz_taken = total_questions > 0
+    quiz_score: Optional[float] = (total_correct / total_questions * 100) if quiz_taken else None
 
+    quiz_weak: List[str] = []
+    quiz_strong: List[str] = []
+    if quiz_taken:
+        for a in assessments:
+            weak = a.weak_topics if hasattr(a, "weak_topics") and a.weak_topics else {}
+            strong = a.strong_topics if hasattr(a, "strong_topics") and a.strong_topics else {}
+            if isinstance(weak, dict):
+                quiz_weak.extend(weak.keys())
+            elif isinstance(weak, list):
+                quiz_weak.extend(weak)
+            if isinstance(strong, dict):
+                quiz_strong.extend(strong.keys())
+            elif isinstance(strong, list):
+                quiz_strong.extend(strong)
+        quiz_weak = list(dict.fromkeys(quiz_weak))
+        quiz_strong = list(dict.fromkeys(quiz_strong))
+
+    # --- Build conversation digest from actual messages ---
+    msg_lines: List[str] = []
+    if messages:
+        for m in messages[:80]:
+            if not m.content or m.content.strip() in ("__LESSON_START__", ""):
+                continue
+            role_label = "Student" if m.role == "user" else "AI Tutor"
+            content = m.content[:600] + "..." if len(m.content) > 600 else m.content
+            msg_lines.append(f"[{role_label}]: {content}")
+    conversation_text = "\n".join(msg_lines) if msg_lines else "(no messages recorded)"
+
+    student_msg_count = sum(1 for m in (messages or []) if m.role == "user" and m.content.strip() not in ("__LESSON_START__", ""))
+    ai_msg_count = sum(1 for m in (messages or []) if m.role == "assistant")
+
+    # --- Build planned phase structure from plan_blocks ---
+    phase_plan_text = ""
+    phases_schema: List[dict] = []
+    if lesson_plan and lesson_plan.plan_blocks:
+        steps = lesson_plan.plan_blocks.get("steps", [])
+        phase_lines = []
+        for step in steps:
+            phase_lines.append(
+                f"  Phase {step['order']}: \"{step['title']}\" "
+                f"({step.get('duration_minutes', '?')} min, type={step['type']})"
+            )
+            phases_schema.append({
+                "phase_title": step["title"],
+                "phase_type": step["type"],
+                "planned_minutes": step.get("duration_minutes"),
+                "what_was_covered": "",
+                "student_engagement": "",
+                "status": "completed",
+            })
+        phase_plan_text = "Planned lesson phases:\n" + "\n".join(phase_lines)
+    else:
+        phase_plan_text = "No structured lesson plan (open session)."
+
+    # --- Quiz section for prompt ---
+    if quiz_taken:
+        quiz_section = f"Quiz taken: YES — {total_correct}/{total_questions} correct ({quiz_score:.0f}%)\nWeak quiz topics: {', '.join(quiz_weak) or 'none'}\nStrong quiz topics: {', '.join(quiz_strong) or 'none'}"
+    else:
+        quiz_section = "Quiz taken: NO — do NOT invent a quiz score."
+
+    phases_json_template = json.dumps(phases_schema, indent=2) if phases_schema else '[{"phase_title": "Session", "phase_type": "teach", "planned_minutes": null, "what_was_covered": "...", "student_engagement": "...", "status": "completed"}]'
+
+    prompt = f"""You are writing a post-session report for a UK GCSE student. Analyse the actual conversation below and produce an accurate, honest report.
+
+SESSION CONTEXT
+Student: {student_name}
 Subject: {subject} ({key_stage})
-Unit/Topic covered: {unit or topics_str}
-Subtopic: {subtopic or 'N/A'}
-Session goal: {goal}
-Quiz score: {avg_score:.0f}% ({total_correct}/{total_questions} correct)
-Strong areas: {strong_str}
-Weak areas: {weak_str}
+Topic: {unit}{(' — ' + subtopic) if subtopic else ''}
+Goal: {goal}
+Planned duration: {duration} minutes
+Student messages: {student_msg_count}
+AI tutor messages: {ai_msg_count}
+{phase_plan_text}
+{quiz_section}
 
-Generate a structured session report as JSON (raw JSON only, no markdown):
+ACTUAL CONVERSATION
+{conversation_text}
+
+INSTRUCTIONS
+1. Analyse the conversation above to determine what was actually covered in each phase.
+2. summary: 2-3 sentences describing what happened — be specific to THIS session, no generic filler.
+3. phases: fill in each planned phase. "what_was_covered" = specific concepts discussed. "student_engagement" = how the student responded (e.g. "answered correctly", "asked clarifying questions", "gave no response"). "status" = "completed" | "partial" | "not_started".
+4. topics_covered: list only topics explicitly discussed in the conversation.
+5. quiz_score_percent: ONLY set this if a quiz was actually taken (see above). Otherwise use null.
+6. weak_areas / strong_areas: ONLY from quiz results above. If no quiz, use empty arrays.
+7. understanding_level: infer from how the student responded in conversation — "Excellent" | "Good" | "Developing" | "Needs Support".
+8. next_session_recommendation: based on what was NOT covered or where the student struggled.
+
+Output raw JSON only (no markdown fences):
 {{
-  "summary": "2-3 sentence warm summary of what was covered and overall performance",
-  "topics_covered": {json.dumps(topics_covered)},
-  "quiz_score_percent": {avg_score:.1f},
-  "weak_areas": {json.dumps(all_weak)},
-  "strong_areas": {json.dumps(all_strong)},
-  "understanding_level": "{understanding}",
-  "next_session_recommendation": "1-2 sentences on what to cover next",
+  "summary": "...",
+  "phases": {phases_json_template},
+  "topics_covered": [],
+  "student_messages_count": {student_msg_count},
+  "ai_messages_count": {ai_msg_count},
+  "quiz_score_percent": {json.dumps(quiz_score)},
+  "weak_areas": {json.dumps(quiz_weak)},
+  "strong_areas": {json.dumps(quiz_strong)},
+  "understanding_level": "...",
+  "next_session_recommendation": "...",
   "time_spent_minutes": {duration},
-  "encouragement": "A short motivational message for the student"
+  "encouragement": "A short warm motivational message for the student"
 }}"""
 
     try:
@@ -572,7 +617,7 @@ Generate a structured session report as JSON (raw JSON only, no markdown):
             model=settings.gemini_model,
             contents=prompt,
             config=genai_types.GenerateContentConfig(
-                system_instruction="You are a tutor writing a student session report. Output only valid JSON.",
+                system_instruction="You are a tutor writing a student session report. Output only valid JSON. Do not invent quiz scores.",
             ),
         )
         raw = response.text.strip()
@@ -583,15 +628,24 @@ Generate a structured session report as JSON (raw JSON only, no markdown):
                 raw = raw[4:]
             raw = raw.strip()
         report = json.loads(raw)
+        # Safety: ensure quiz_score_percent stays null if no quiz was taken
+        if not quiz_taken:
+            report["quiz_score_percent"] = None
+            report["weak_areas"] = []
+            report["strong_areas"] = []
     except Exception as exc:
         logger.error(f"Failed to generate session report via Gemini: {exc}")
+        topic_label = unit or subject
         report = {
-            "summary": f"Session completed: {subject} — {topics_str}.",
-            "topics_covered": topics_covered,
-            "quiz_score_percent": round(avg_score, 1),
-            "weak_areas": all_weak,
-            "strong_areas": all_strong,
-            "understanding_level": understanding,
+            "summary": f"{student_name} completed a {subject} session on {topic_label}. {student_msg_count} exchanges with the AI tutor.",
+            "phases": phases_schema,
+            "topics_covered": [topic_label] if topic_label else [subject],
+            "student_messages_count": student_msg_count,
+            "ai_messages_count": ai_msg_count,
+            "quiz_score_percent": round(quiz_score, 1) if quiz_taken else None,
+            "weak_areas": quiz_weak,
+            "strong_areas": quiz_strong,
+            "understanding_level": "Good",
             "next_session_recommendation": f"Continue practising {subject} in the next session.",
             "time_spent_minutes": duration,
             "encouragement": "Well done for completing your session!",

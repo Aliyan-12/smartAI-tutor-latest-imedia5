@@ -347,6 +347,7 @@ async def get_appointment_report(
     from app.services.lesson_service import get_appointment_report, generate_session_report
     from app.models.lesson_plan import LessonPlan
     from app.models.assessment import Assessment
+    from app.models.chat import Chat, Message
 
     report = await get_appointment_report(db, appointment_id)
 
@@ -355,30 +356,34 @@ async def get_appointment_report(
             lp_res = await db.execute(select(LessonPlan).where(LessonPlan.appointment_id == appointment_id))
             lesson_plan = lp_res.scalar_one_or_none()
 
-            # Prefer assessments linked to this appointment, fallback to subject-level
+            # Only use assessments actually linked to THIS appointment — no subject-level fallback
             asmt_res = await db.execute(
                 select(Assessment)
                 .where(Assessment.appointment_id == appointment_id)
-                .order_by(Assessment.created_at.desc())
+                .order_by(Assessment.created_at.asc())
                 .limit(20)
             )
             assessments = list(asmt_res.scalars().all())
-            if not assessments:
-                asmt_res = await db.execute(
-                    select(Assessment)
-                    .where(
-                        Assessment.student_id == appt.student_id,
-                        Assessment.subject == appt.subject,
-                    )
-                    .order_by(Assessment.created_at.desc())
-                    .limit(10)
+
+            # Load the session chat messages for conversation-based report generation
+            chat_res = await db.execute(
+                select(Chat).where(Chat.appointment_id == appointment_id)
+            )
+            chat = chat_res.scalar_one_or_none()
+            messages: list = []
+            if chat:
+                msg_res = await db.execute(
+                    select(Message)
+                    .where(Message.chat_id == chat.id)
+                    .order_by(Message.timestamp.asc())
                 )
-                assessments = list(asmt_res.scalars().all())
+                messages = list(msg_res.scalars().all())
 
             student = await get_user_by_id(db, appt.student_id)
             report = await generate_session_report(
                 db, appt, lesson_plan, assessments,
-                student_name=student.name if student else None
+                student_name=student.name if student else None,
+                messages=messages,
             )
             await db.commit()
         except Exception as exc:
@@ -391,10 +396,12 @@ async def get_appointment_report(
                 await db.rollback()
             except Exception:
                 pass
-            # Return a minimal fallback so the frontend doesn't show a hard error
             report = {
-                "summary": f"Session completed — report is being processed.",
+                "summary": "Session completed — report is being processed.",
+                "phases": [],
                 "topics_covered": [appt.subject],
+                "student_messages_count": 0,
+                "ai_messages_count": 0,
                 "quiz_score_percent": None,
                 "weak_areas": [],
                 "strong_areas": [],

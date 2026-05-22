@@ -2,7 +2,7 @@ import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
 import { appointmentsApi, gamificationApi } from "../services/api";
-import type { SessionReport } from "../types";
+import type { SessionReport, SessionPhase } from "../types";
 
 interface Props {
   appointmentId: number;
@@ -192,9 +192,79 @@ export default function PostSessionScreen({
                   )}
                 </div>
               )}
+              {typeof report.student_messages_count === "number" && (
+                <p style={{ fontSize: 12, color: "var(--text-muted)", marginTop: 8 }}>
+                  {report.student_messages_count} student messages · {report.ai_messages_count ?? 0} AI responses
+                </p>
+              )}
             </div>
           ) : null}
         </div>
+
+        {/* Phase Breakdown */}
+        {report?.phases && report.phases.length > 0 && (
+          <div style={{ ...styles.section, paddingBottom: 16 }}>
+            <p style={styles.sectionHeading}>📋 Lesson Breakdown</p>
+            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+              {report.phases.map((phase: SessionPhase, i: number) => {
+                const statusColor =
+                  phase.status === "completed" ? "#10b981" :
+                  phase.status === "partial" ? "#f59e0b" : "#94a3b8";
+                const statusDot = phase.status === "completed" ? "✓" : phase.status === "partial" ? "~" : "–";
+                return (
+                  <div key={i} style={{
+                    background: "var(--bg-primary)",
+                    border: "1px solid var(--border-color)",
+                    borderRadius: 8,
+                    padding: "10px 14px",
+                    display: "flex",
+                    gap: 12,
+                    alignItems: "flex-start",
+                  }}>
+                    <div style={{
+                      width: 22, height: 22, borderRadius: "50%",
+                      background: statusColor + "22",
+                      border: `1.5px solid ${statusColor}`,
+                      display: "flex", alignItems: "center", justifyContent: "center",
+                      fontSize: 11, fontWeight: 700, color: statusColor,
+                      flexShrink: 0, marginTop: 1,
+                    }}>
+                      {statusDot}
+                    </div>
+                    <div style={{ flex: 1 }}>
+                      <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                        <span style={{ fontSize: 13, fontWeight: 700, color: "var(--text-primary)" }}>
+                          {phase.phase_title}
+                        </span>
+                        {phase.planned_minutes && (
+                          <span style={{ fontSize: 11, color: "var(--text-muted)", fontWeight: 500 }}>
+                            {phase.planned_minutes} min
+                          </span>
+                        )}
+                        <span style={{
+                          fontSize: 10, fontWeight: 700, textTransform: "uppercase",
+                          color: statusColor, letterSpacing: "0.5px",
+                        }}>
+                          {phase.status}
+                        </span>
+                      </div>
+                      {phase.what_was_covered && (
+                        <p style={{ fontSize: 12, color: "var(--text-secondary)", margin: "4px 0 2px", lineHeight: 1.4 }}>
+                          {phase.what_was_covered}
+                        </p>
+                      )}
+                      {phase.student_engagement && (
+                        <p style={{ fontSize: 11, color: "var(--text-muted)", margin: 0, fontStyle: "italic" }}>
+                          {phase.student_engagement}
+                        </p>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
 
         <div style={{
           display: "flex", alignItems: "center", justifyContent: "center",
@@ -240,7 +310,7 @@ export default function PostSessionScreen({
         <div style={{ display: "flex", gap: 10, justifyContent: "center" }}>
           <button
             style={styles.backBtn}
-            onClick={() => navigate("/student/dashboard")}
+            onClick={() => navigate("/dashboard")}
           >
             ← Back to Dashboard
           </button>

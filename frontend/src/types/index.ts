@@ -246,10 +246,22 @@ export interface GeneratedLessonPlan {
   personalisation_notes: string;
 }
 
+export interface SessionPhase {
+  phase_title: string;
+  phase_type: string;
+  planned_minutes: number | null;
+  what_was_covered: string;
+  student_engagement: string;
+  status: "completed" | "partial" | "not_started";
+}
+
 export interface SessionReport {
   appointment_id: number;
   summary: string;
+  phases?: SessionPhase[];
   topics_covered: string[];
+  student_messages_count?: number;
+  ai_messages_count?: number;
   quiz_score_percent: number | null;
   weak_areas: string[];
   strong_areas: string[];
@@ -257,6 +269,7 @@ export interface SessionReport {
   next_session_recommendation: string;
   time_spent_minutes: number;
   xp_earned: number;
+  encouragement?: string;
 }
 
 export interface HomeworkItem {
