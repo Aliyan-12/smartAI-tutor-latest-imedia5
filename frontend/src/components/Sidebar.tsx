@@ -38,7 +38,7 @@ const SHARED_STYLES = `
   }
 
   .sb-header {
-    padding: 18px 16px 14px;
+    padding: 16px 16px 14px;
     border-bottom: 1px solid #e2e8f0;
   }
 
@@ -480,14 +480,39 @@ export default function Sidebar({
   const BrandHeader = () => (
     <div className="sb-header">
       <div className="sb-brand">
-        <div className="sb-brand-icon">🤖</div>
+        <img
+          src="/images/aitutor 4 schools.png"
+          alt="AI Tutor 4 Schools"
+          style={{ height: 46, width: "auto", objectFit: "contain", flexShrink: 0 }}
+        />
         <div className="sb-brand-text">
           <div className="sb-brand-name">AI Tutor 4 Schools</div>
-          <div className="sb-school-name">Greenfield Int. School</div>
         </div>
         <button className="sb-close-btn" onClick={close} aria-label="Close menu">
           <X size={18} />
         </button>
+      </div>
+
+      {/* School badge row */}
+      <div style={{
+        marginTop: 10,
+        display: "flex", alignItems: "center", gap: 9,
+        padding: "7px 10px",
+        background: "#f1f5f9",
+        borderRadius: 10,
+      }}>
+        <div style={{
+          width: 30, height: 30, borderRadius: "50%",
+          background: "#fff", border: "1.5px solid #e2e8f0",
+          display: "flex", alignItems: "center", justifyContent: "center",
+          flexShrink: 0,
+        }}>
+          <GraduationCap size={15} color="#1a73e8" />
+        </div>
+        <div style={{ minWidth: 0 }}>
+          <div style={{ fontSize: 12, fontWeight: 700, color: "#0f172a", lineHeight: 1.2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>Greenfield</div>
+          <div style={{ fontSize: 10.5, color: "#64748b", lineHeight: 1.3 }}>International School</div>
+        </div>
       </div>
     </div>
   );
