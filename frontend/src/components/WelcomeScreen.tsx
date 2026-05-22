@@ -640,9 +640,11 @@ export default function WelcomeScreen({ onPromptClick, onStatsLoaded }: Props) {
         .ws-subj-card:hover { transform: translateY(-3px); }
 
         .ws-subj-img {
-          width: 80px;
-          height: 80px;
+          width: 100%;
+          max-width: 210px;
+          height: auto;
           object-fit: contain;
+          display: block;
         }
 
         .ws-subj-name {
@@ -1198,7 +1200,7 @@ export default function WelcomeScreen({ onPromptClick, onStatsLoaded }: Props) {
                   alt={s.name}
                   draggable={false}
                   className="ws-subj-img"
-                  style={{ width: 200, height: 200 }}
+                  style={{}}
                 />
                 <span className="ws-subj-name">{s.name}</span>
                 <span className="ws-subj-desc">{s.desc}</span>
