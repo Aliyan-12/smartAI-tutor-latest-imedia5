@@ -429,6 +429,42 @@ export default function WelcomeScreen({ onPromptClick, onStatsLoaded }: Props) {
 
         .ws-cl-btn-end:hover { background: #fee2e2; border-color: #dc2626; }
 
+        .ws-cl-meta-row {
+          display: flex;
+          flex-wrap: wrap;
+          gap: 6px;
+          margin-bottom: 12px;
+        }
+
+        .ws-cl-meta-pill {
+          font-size: 11px;
+          font-weight: 600;
+          padding: 3px 10px;
+          border-radius: 999px;
+          background: #f8fafc;
+          border: 1px solid #e2e8f0;
+          color: #475569;
+          white-space: nowrap;
+        }
+
+        .ws-cl-stats-strip {
+          display: flex;
+          flex-wrap: wrap;
+          gap: 12px;
+          margin: 10px 0 8px;
+          padding: 8px 12px;
+          background: #f8fafc;
+          border-radius: 8px;
+          border: 1px solid #f1f5f9;
+        }
+
+        .ws-cl-stat {
+          font-size: 12px;
+          font-weight: 600;
+          color: #475569;
+          white-space: nowrap;
+        }
+
         /* ── Section 2: Recommended for You ── */
         .ws-rec-row {
           display: grid;
@@ -745,15 +781,29 @@ export default function WelcomeScreen({ onPromptClick, onStatsLoaded }: Props) {
               ? new Date(session.session_started_at).getTime()
               : null;
             const pausedSecs = session.total_paused_seconds ?? 0;
-            const elapsedMins = startTime
-              ? Math.max(0, Math.round((Date.now() - startTime) / 60000) - Math.round(pausedSecs / 60))
+            // When paused, active time stopped at paused_at — using Date.now() would
+            // count the current pause duration as elapsed active time.
+            const isPaused = session.status === "paused";
+            const referenceTime =
+              isPaused && session.paused_at
+                ? new Date(session.paused_at).getTime()
+                : Date.now();
+            const elapsedSecs = startTime
+              ? Math.max(0, (referenceTime - startTime) / 1000 - pausedSecs)
               : 0;
+            const elapsedMins = Math.round(elapsedSecs / 60);
             const progressPct =
               session.duration_minutes > 0
                 ? Math.min(100, Math.round((elapsedMins / session.duration_minutes) * 100))
                 : 0;
-            const isPaused = session.status === "paused";
             const summary = sessionSummaries[session.id];
+            const minsRemaining = session.duration_minutes > 0
+              ? Math.max(0, session.duration_minutes - elapsedMins)
+              : null;
+            const isOvertime = session.duration_minutes > 0 && elapsedMins > session.duration_minutes;
+            const scheduledDate = session.scheduled_at
+              ? new Date(session.scheduled_at).toLocaleDateString("en-GB", { weekday: "short", day: "numeric", month: "short" })
+              : null;
             return (
               <div key={session.id} className="ws-cl-card" style={{ marginBottom: 16 }}>
                 <span className="ws-cl-badge" style={isPaused ? { background: "#fef3c7", color: "#b45309" } : undefined}>
@@ -765,6 +815,26 @@ export default function WelcomeScreen({ onPromptClick, onStatsLoaded }: Props) {
                     <p className="ws-cl-subject">
                       {session.subject} · {session.key_stage}
                     </p>
+
+                    {/* Meta pill row */}
+                    <div className="ws-cl-meta-row">
+                      {session.duration_minutes > 0 && (
+                        <span className="ws-cl-meta-pill">⏱ {session.duration_minutes} min session</span>
+                      )}
+                      {minsRemaining !== null && (
+                        <span className="ws-cl-meta-pill" style={isOvertime ? { background: "#fee2e2", color: "#dc2626", borderColor: "#fecaca" } : { background: "#f0fdf4", color: "#16a34a", borderColor: "#bbf7d0" }}>
+                          {isOvertime ? "⚠ Overtime" : `⏳ ${minsRemaining} min${minsRemaining !== 1 ? "s" : ""} left`}
+                        </span>
+                      )}
+                      {session.teacher_name && (
+                        <span className="ws-cl-meta-pill">👤 {session.teacher_name}</span>
+                      )}
+                      {scheduledDate && (
+                        <span className="ws-cl-meta-pill">📅 {scheduledDate}</span>
+                      )}
+                    </div>
+
+                    {/* Progress bar */}
                     <div className="ws-cl-prog-row">
                       <span className="ws-cl-prog-label">
                         You're {progressPct > 0 ? `${progressPct}%` : "just starting"} through this lesson
@@ -779,15 +849,24 @@ export default function WelcomeScreen({ onPromptClick, onStatsLoaded }: Props) {
                         <span className="ws-cl-prog-mins">{elapsedMins} mins completed</span>
                       )}
                     </div>
-                    {/* Session summary from chat messages */}
-                    {summary ? (
-                      <div className="ws-cl-last-msg">
-                        <span style={{ fontSize: 11, color: "#94a3b8", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.4px", display: "block", marginBottom: 4 }}>
-                          {summary.topicLine}
-                        </span>
-                        {summary.lastAiSnippet && (
-                          <span>💬 "{summary.lastAiSnippet}{summary.lastAiSnippet.length >= 120 ? "…" : ""}"</span>
+
+                    {/* Engagement stats strip */}
+                    {summary && (summary.messageCount > 0) && (
+                      <div className="ws-cl-stats-strip">
+                        <span className="ws-cl-stat">💬 {summary.messageCount} messages</span>
+                        {summary.userTurns > 0 && (
+                          <span className="ws-cl-stat">✏️ {summary.userTurns} responses</span>
                         )}
+                        {summary.quizCount > 0 && (
+                          <span className="ws-cl-stat">🎯 {summary.quizCount} quiz attempt{summary.quizCount > 1 ? "s" : ""}</span>
+                        )}
+                      </div>
+                    )}
+
+                    {/* Last AI message snippet */}
+                    {summary?.lastAiSnippet ? (
+                      <div className="ws-cl-last-msg">
+                        💬 "{summary.lastAiSnippet}{summary.lastAiSnippet.length >= 120 ? "…" : ""}"
                       </div>
                     ) : session.description ? (
                       <div className="ws-cl-last-msg">💬 "{session.description}"</div>
