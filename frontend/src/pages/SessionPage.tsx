@@ -807,34 +807,34 @@ export default function SessionPage() {
           }
         `}</style>
 
-        {/* Top nav */}
-        <div style={{ background: "linear-gradient(90deg, #1a73e8, #6366f1)", padding: "12px 28px", display: "flex", alignItems: "center", gap: 14, flexShrink: 0, boxShadow: "0 2px 12px rgba(26,115,232,0.25)" }}>
+        {/* Top nav — matches app header style */}
+        <div style={{ background: "#fff", borderBottom: "1px solid #e2e8f0", padding: "12px 28px", display: "flex", alignItems: "center", gap: 14, flexShrink: 0 }}>
           <button
             onClick={() => navigate("/dashboard")}
-            style={{ background: "rgba(255,255,255,0.18)", border: "1px solid rgba(255,255,255,0.35)", borderRadius: 8, color: "white", padding: "5px 14px", fontSize: 12, fontWeight: 700, cursor: "pointer", display: "flex", alignItems: "center", gap: 6, fontFamily: "inherit" }}
+            style={{ background: "#f1f5f9", border: "1px solid #e2e8f0", borderRadius: 8, color: "#475569", padding: "5px 14px", fontSize: 12, fontWeight: 700, cursor: "pointer", display: "flex", alignItems: "center", gap: 6, fontFamily: "inherit" }}
           >
             ← Back
           </button>
           <div style={{ flex: 1, display: "flex", alignItems: "center", gap: 10 }}>
             <span style={{ fontSize: 18 }}>{subjEmoji}</span>
-            <span style={{ color: "white", fontSize: 15, fontWeight: 700 }}>{previewAppt?.subject || "Session"}</span>
-            {previewAppt?.key_stage && <span style={{ background: "rgba(255,255,255,0.22)", borderRadius: 99, padding: "2px 10px", fontSize: 11, fontWeight: 700, color: "white" }}>{previewAppt.key_stage}</span>}
+            <span style={{ color: "#0f172a", fontSize: 15, fontWeight: 700 }}>{previewAppt?.subject || "Session"}</span>
+            {previewAppt?.key_stage && <span style={{ background: "#e8f0fe", borderRadius: 99, padding: "2px 10px", fontSize: 11, fontWeight: 700, color: "#1a73e8" }}>{previewAppt.key_stage}</span>}
           </div>
-          <div style={{ display: "flex", alignItems: "center", gap: 6, background: "rgba(255,255,255,0.18)", borderRadius: 99, padding: "4px 12px" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 6, background: "#f1f5f9", border: "1px solid #e2e8f0", borderRadius: 99, padding: "4px 12px" }}>
             <span>{durCfg?.emoji ?? "⭐"}</span>
-            <span style={{ fontSize: 12, fontWeight: 700, color: "white" }}>{durCfg?.sublabel ?? `${dur} min`}</span>
+            <span style={{ fontSize: 12, fontWeight: 700, color: "#475569" }}>{durCfg?.sublabel ?? `${dur} min`}</span>
           </div>
         </div>
 
         {/* Main 2-column layout */}
-        <div style={{ flex: 1, overflowY: "auto", background: "linear-gradient(160deg, #f0f4ff 0%, #f8f9ff 50%, #fdf0ff 100%)" }}>
+        <div style={{ flex: 1, overflowY: "auto", background: "#f8fafc" }}>
           <div className="prelession-grid" style={{ display: "grid", gridTemplateColumns: "minmax(0,1fr) minmax(0,1fr)", gap: 24, padding: "28px 32px", maxWidth: 1200, margin: "0 auto", boxSizing: "border-box" }}>
 
             {/* ── LEFT COLUMN ── */}
             <div style={{ display: "flex", flexDirection: "column", gap: 16, minWidth: 0 }}>
 
               {/* Hero card */}
-              <div style={{ background: "linear-gradient(135deg, #1a73e8 0%, #6366f1 100%)", borderRadius: 20, padding: "26px 24px", color: "white", boxShadow: "0 8px 32px rgba(26,115,232,0.28)", position: "relative", overflow: "hidden" }}>
+              <div style={{ background: "linear-gradient(135deg, #1a73e8 0%, #1557b0 100%)", borderRadius: 20, padding: "26px 24px", color: "white", boxShadow: "0 4px 20px rgba(26,115,232,0.2)", position: "relative", overflow: "hidden" }}>
                 <div style={{ position: "absolute", top: -20, right: -20, width: 120, height: 120, borderRadius: "50%", background: "rgba(255,255,255,0.07)" }} />
                 <div style={{ position: "absolute", bottom: -30, left: -10, width: 90, height: 90, borderRadius: "50%", background: "rgba(255,255,255,0.05)" }} />
                 <div style={{ position: "relative" }}>
@@ -870,7 +870,7 @@ export default function SessionPage() {
                 <div style={{ fontSize: 11, fontWeight: 700, textTransform: "uppercase" as const, letterSpacing: "0.7px", color: "#94a3b8", marginBottom: 18 }}>Today's Lesson Plan</div>
                 <div className="prelession-phases" style={{ display: "flex", alignItems: "flex-start" }}>
                   {phases.map((phase, i) => {
-                    const phaseColors = ["#6366f1","#1a73e8","#10b981","#f59e0b","#ef4444","#8b5cf6"];
+                    const phaseColors = ["#1a73e8","#0ea5e9","#10b981","#f59e0b","#ef4444","#1557b0"];
                     const col = phaseColors[i % phaseColors.length];
                     return (
                       <div key={i} style={{ display: "flex", alignItems: "center", flex: i < phases.length - 1 ? 1 : "0 0 auto" }}>
@@ -964,12 +964,12 @@ export default function SessionPage() {
                         title={needsCode && !codeReady ? "Enter your 6-character lesson code above first" : undefined}
                         style={{
                           padding: "12px 22px",
-                          background: codeReady ? "linear-gradient(90deg,#1a73e8,#6366f1)" : "#e2e8f0",
+                          background: codeReady ? "#1a73e8" : "#e2e8f0",
                           color: codeReady ? "white" : "#94a3b8",
                           border: "none", borderRadius: 12, fontSize: 14, fontWeight: 800,
                           cursor: codeReady ? "pointer" : "not-allowed",
                           display: "flex", alignItems: "center", gap: 8, fontFamily: "inherit", whiteSpace: "nowrap" as const,
-                          boxShadow: codeReady ? "0 4px 16px rgba(26,115,232,0.38)" : "none", flexShrink: 0,
+                          boxShadow: codeReady ? "0 4px 16px rgba(26,115,232,0.2)" : "none", flexShrink: 0,
                         }}
                       >
                         🚀 Start My Lesson
@@ -996,8 +996,8 @@ export default function SessionPage() {
 
               {/* Header */}
               <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                <div style={{ width: 36, height: 36, borderRadius: "50%", background: "white", display: "flex", alignItems: "center", justifyContent: "center", boxShadow: "0 3px 10px rgba(99,102,241,0.3)", overflow: "hidden", flexShrink: 0 }}>
-                  <img src="/images/aitutor 4 schools-robo.png" style={{ width: 32, height: 32, objectFit: "contain" }} alt="AI Tutor" />
+                <div style={{ width: 36, height: 36, borderRadius: "50%", background: "#e8f0fe", border: "1.5px solid #c5d8fb", display: "flex", alignItems: "center", justifyContent: "center", overflow: "hidden", flexShrink: 0 }}>
+                  <img src="/images/aitutor 4 schools-robo.png" style={{ width: 30, height: 30, objectFit: "contain" }} alt="AI Tutor" />
                 </div>
                 <div>
                   <div style={{ fontSize: 14, fontWeight: 800, color: "#0f172a" }}>AI Session Briefing</div>
@@ -1065,11 +1065,11 @@ export default function SessionPage() {
 
                   {sessionBriefing.key_ideas && sessionBriefing.key_ideas.length > 0 && (
                     <div style={{ background: "white", borderRadius: 14, padding: "18px 20px", boxShadow: "0 2px 8px rgba(0,0,0,0.05)" }}>
-                      <div style={{ fontSize: 11, fontWeight: 800, textTransform: "uppercase" as const, letterSpacing: "0.6px", color: "#8b5cf6", marginBottom: 12 }}>💡 Key Ideas</div>
+                      <div style={{ fontSize: 11, fontWeight: 800, textTransform: "uppercase" as const, letterSpacing: "0.6px", color: "#1a73e8", marginBottom: 12 }}>💡 Key Ideas</div>
                       <div style={{ display: "flex", flexDirection: "column" as const, gap: 10 }}>
                         {sessionBriefing.key_ideas.map((idea, i) => (
                           <div key={i} style={{ display: "flex", gap: 12, alignItems: "flex-start" }}>
-                            <div style={{ width: 8, height: 8, borderRadius: "50%", background: "#8b5cf6", flexShrink: 0, marginTop: 5 }} />
+                            <div style={{ width: 8, height: 8, borderRadius: "50%", background: "#1a73e8", flexShrink: 0, marginTop: 5 }} />
                             <div>
                               <span style={{ fontSize: 13, fontWeight: 700, color: "#0f172a" }}>{idea.title}</span>
                               <span style={{ fontSize: 12, color: "#64748b", marginLeft: 6 }}>— {idea.summary}</span>
