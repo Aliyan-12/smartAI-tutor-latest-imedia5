@@ -483,10 +483,11 @@ export default function Sidebar({
         <img
           src="/images/aitutor 4 schools.png"
           alt="AI Tutor 4 Schools"
-          style={{ height: 46, width: "auto", objectFit: "contain", flexShrink: 0 }}
+          style={{ height: 56, width: "auto", objectFit: "contain", flexShrink: 0 }}
         />
         <div className="sb-brand-text">
-          <div className="sb-brand-name">AI Tutor 4 Schools</div>
+          <div className="sb-brand-name" style={{ fontSize: 15, fontWeight: 900 }}>AI Tutor 4 Schools</div>
+          <div style={{ fontSize: 10.5, color: "#94a3b8", marginTop: 1 }}>AI-Powered Education</div>
         </div>
         <button className="sb-close-btn" onClick={close} aria-label="Close menu">
           <X size={18} />
@@ -510,8 +511,8 @@ export default function Sidebar({
           <GraduationCap size={15} color="#1a73e8" />
         </div>
         <div style={{ minWidth: 0 }}>
-          <div style={{ fontSize: 12, fontWeight: 700, color: "#0f172a", lineHeight: 1.2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>Greenfield</div>
-          <div style={{ fontSize: 10.5, color: "#64748b", lineHeight: 1.3 }}>International School</div>
+          <div style={{ fontSize: 12, fontWeight: 700, color: "#0f172a", lineHeight: 1.2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>Smart Tuition</div>
+          <div style={{ fontSize: 10, color: "#64748b", lineHeight: 1.3, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>United Kingdom &amp; United Arab Emirates</div>
         </div>
       </div>
     </div>

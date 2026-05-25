@@ -541,9 +541,18 @@ export default function LessonSetupPage() {
       <main style={{ flex: 1, minWidth: 0, overflowY: "auto", height: "100%", display: "flex", flexDirection: "column" }}>
         <style>{`
           @media (max-width: 768px) {
-            .lsp-two-col { flex-direction: column !important; padding: 16px 16px 120px !important; gap: 16px !important; }
+            .lsp-two-col { flex-direction: column !important; padding: 12px 12px 100px !important; gap: 12px !important; }
             .lsp-right-col { display: none !important; }
             .lsp-step1-row { flex-direction: column !important; }
+            .lsp-header { padding: 12px 16px 10px !important; gap: 10px !important; }
+            .lsp-header-title { font-size: 17px !important; }
+            .lsp-header-sub { font-size: 12px !important; }
+            .lsp-header-stats { gap: 12px !important; }
+            .lsp-stat-divider { display: none !important; }
+          }
+          @media (max-width: 480px) {
+            .lsp-header-stats { display: none !important; }
+            .lsp-header { padding: 10px 14px 8px !important; }
           }
           .lsp-mode-card {
             flex: 1; position: relative; display: flex; flex-direction: column; gap: 6px;
@@ -592,7 +601,7 @@ export default function LessonSetupPage() {
         `}</style>
 
         {/* ── Page header ─────────────────────────────────────────── */}
-        <div style={{
+        <div className="lsp-header" style={{
           background: "#fff",
           borderBottom: "1px solid #e2e8f0",
           padding: "20px 32px 18px",
@@ -605,16 +614,16 @@ export default function LessonSetupPage() {
         }}>
           {/* Left: title */}
           <div>
-            <h1 style={{ fontSize: 22, fontWeight: 800, color: "#0f172a", margin: "0 0 4px", lineHeight: 1.2 }}>
+            <h1 className="lsp-header-title" style={{ fontSize: 22, fontWeight: 800, color: "#0f172a", margin: "0 0 4px", lineHeight: 1.2 }}>
               Let's set up your lesson 👋
             </h1>
-            <p style={{ fontSize: 13, color: "#64748b", margin: 0 }}>
+            <p className="lsp-header-sub" style={{ fontSize: 13, color: "#64748b", margin: 0 }}>
               Your AI Tutor will personalise the lesson just for you.
             </p>
           </div>
 
           {/* Right: stat items */}
-          <div style={{ display: "flex", alignItems: "center", gap: 20, flexWrap: "wrap" }}>
+          <div className="lsp-header-stats" style={{ display: "flex", alignItems: "center", gap: 20, flexWrap: "wrap" }}>
             {/* Session length */}
             <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
               <div style={{
@@ -630,7 +639,7 @@ export default function LessonSetupPage() {
               </div>
             </div>
 
-            <div style={{ width: 1, height: 36, background: "#e2e8f0" }} />
+            <div className="lsp-stat-divider" style={{ width: 1, height: 36, background: "#e2e8f0" }} />
 
             {/* Streak */}
             <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
@@ -646,7 +655,7 @@ export default function LessonSetupPage() {
               </div>
             </div>
 
-            <div style={{ width: 1, height: 36, background: "#e2e8f0" }} />
+            <div className="lsp-stat-divider" style={{ width: 1, height: 36, background: "#e2e8f0" }} />
 
             {/* XP */}
             <div style={{ display: "flex", alignItems: "center", gap: 8 }}>

@@ -300,9 +300,10 @@ export default function WelcomeScreen({ onPromptClick, onStatsLoaded }: Props) {
         }
 
         .ws-cl-body {
-          display: flex;
-          align-items: flex-start;
-          gap: 20px;
+          display: grid;
+          grid-template-columns: 1fr 210px 130px 160px;
+          gap: 14px;
+          align-items: center;
         }
 
         .ws-cl-info {
@@ -355,6 +356,36 @@ export default function WelcomeScreen({ onPromptClick, onStatsLoaded }: Props) {
           font-size: 12px;
           color: #64748b;
           white-space: nowrap;
+        }
+
+        .ws-cl-lp-box {
+          background: #f0f6ff;
+          border: 1.5px solid #bfdbfe;
+          border-radius: 12px;
+          padding: 12px 14px;
+          align-self: stretch;
+          display: flex;
+          flex-direction: column;
+          gap: 8px;
+        }
+
+        .ws-cl-lp-label {
+          font-size: 11px;
+          font-weight: 700;
+          color: #1a73e8;
+          display: flex;
+          align-items: center;
+          gap: 5px;
+        }
+
+        .ws-cl-lp-msg {
+          font-size: 12px;
+          color: #475569;
+          line-height: 1.55;
+          display: -webkit-box;
+          -webkit-line-clamp: 4;
+          -webkit-box-orient: vertical;
+          overflow: hidden;
         }
 
         .ws-cl-last-msg {
@@ -759,17 +790,60 @@ export default function WelcomeScreen({ onPromptClick, onStatsLoaded }: Props) {
           margin-bottom: 20px;
         }
 
-        @media (max-width: 900px) {
-          .ws-rec-row { grid-template-columns: 1fr; }
-          .ws-subj-grid { grid-template-columns: 1fr 1fr; }
+        /* ── Tablet: hide robot column, shrink LP ── */
+        @media (max-width: 1100px) {
+          .ws-cl-body { grid-template-columns: 1fr 180px 150px; }
+          .ws-cl-robot-col { display: none; }
+          .ws-help-input { width: 220px; }
         }
 
+        /* ── Tablet narrow / large mobile ── */
+        @media (max-width: 900px) {
+          .ws-cl-body { grid-template-columns: 1fr 150px; }
+          .ws-cl-robot-col { display: none; }
+          .ws-cl-lp-box { display: none; }
+          .ws-cl-actions { min-width: unset; }
+
+          .ws-rec-row { grid-template-columns: 1fr; }
+          .ws-subj-grid { grid-template-columns: 1fr 1fr; }
+
+          /* rec card: button drops below */
+          .ws-rec-card { flex-wrap: wrap; }
+          .ws-rec-right { width: 100%; flex-direction: row; align-items: center; justify-content: flex-start; margin-top: 4px; }
+
+          /* banner: contain height */
+          .ws-promo-banner { max-height: 200px; object-fit: cover; width: 100%; border-radius: 16px; }
+        }
+
+        /* ── Tablet: truncate title ── */
+        @media (max-width: 900px) {
+          .ws-cl-topic {
+            font-size: 16px;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+          }
+        }
+
+        /* ── Mobile ── */
         @media (max-width: 640px) {
-          .ws-subj-grid { grid-template-columns: 1fr; }
-          .ws-help-bar { flex-direction: column; align-items: flex-start; }
-          .ws-help-input { width: 100%; }
-          .ws-cl-robot { display: none; }
+          .ws-cl-body { grid-template-columns: 1fr; }
+          .ws-cl-robot-col { display: none; }
+          .ws-cl-lp-box { display: none; }
           .ws-cl-actions { min-width: unset; width: 100%; }
+          .ws-cl-topic { font-size: 16px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+          .ws-cl-prog-mins { display: none; }
+
+          .ws-subj-grid { grid-template-columns: 1fr; }
+
+          /* help bar: robot + content side-by-side, input below */
+          .ws-help-inner { flex-wrap: wrap; gap: 10px; }
+          .ws-help-inner > img { width: 72px !important; height: 72px !important; align-self: flex-start; }
+          .ws-help-inner > div:nth-child(2) { flex: 1 1 120px; min-width: 120px; }
+          .ws-help-right-row { width: 100%; flex-shrink: unset; }
+          .ws-help-input { width: calc(100% - 56px); }
+          .ws-help-bar { padding: 14px 14px 10px !important; }
+          .ws-help-strip { padding-left: 0 !important; gap: 12px !important; }
         }
       `}</style>
 
@@ -807,30 +881,17 @@ export default function WelcomeScreen({ onPromptClick, onStatsLoaded }: Props) {
               ? new Date(session.scheduled_at).toLocaleDateString("en-GB", { weekday: "short", day: "numeric", month: "short" })
               : null;
             return (
-              <div key={session.id} className="ws-cl-card" style={{ marginBottom: 16, position: "relative", overflow: "hidden" }}>
-                {/* robot-resume decorative image — centered in the gap between content and action buttons */}
-                <img
-                  src="/images/robot-resume.png"
-                  alt=""
-                  draggable={false}
-                  aria-hidden="true"
-                  style={{
-                    position: "absolute", right: 175, top: "50%", transform: "translateY(-50%)",
-                    width: 200, height: "auto", objectFit: "contain",
-                    opacity: 0.55, pointerEvents: "none", zIndex: 0,
-                  }}
-                />
-                <span className="ws-cl-badge" style={{ position: "relative", zIndex: 1, ...(isPaused ? { background: "#fef3c7", color: "#b45309" } : {}) }}>
+              <div key={session.id} className="ws-cl-card" style={{ marginBottom: 16 }}>
+                <span className="ws-cl-badge" style={{ ...(isPaused ? { background: "#fef3c7", color: "#b45309" } : {}) }}>
                   {isPaused ? "⏸ Paused" : "▶ Continue Learning"}
                 </span>
-                <div className="ws-cl-body" style={{ position: "relative", zIndex: 1 }}>
+                <div className="ws-cl-body">
+                  {/* Col 1 — Session info */}
                   <div className="ws-cl-info">
                     <h2 className="ws-cl-topic">{session.title}</h2>
                     <p className="ws-cl-subject">
                       {session.subject} · {session.key_stage}
                     </p>
-
-                    {/* Meta pill row */}
                     <div className="ws-cl-meta-row">
                       {session.duration_minutes > 0 && (
                         <span className="ws-cl-meta-pill">⏱ {session.duration_minutes} min session</span>
@@ -847,56 +908,55 @@ export default function WelcomeScreen({ onPromptClick, onStatsLoaded }: Props) {
                         <span className="ws-cl-meta-pill">📅 {scheduledDate}</span>
                       )}
                     </div>
-
-                    {/* Progress bar */}
                     <div className="ws-cl-prog-row">
                       <span className="ws-cl-prog-label">
                         You're {progressPct > 0 ? `${progressPct}%` : "just starting"} through this lesson
                       </span>
                       <div className="ws-cl-prog-track">
-                        <div
-                          className="ws-cl-prog-fill"
-                          style={{ width: `${Math.max(progressPct, 2)}%` }}
-                        />
+                        <div className="ws-cl-prog-fill" style={{ width: `${Math.max(progressPct, 2)}%` }} />
                       </div>
                       {elapsedMins > 0 && (
                         <span className="ws-cl-prog-mins">{elapsedMins} mins completed</span>
                       )}
                     </div>
-
-                    {/* Engagement stats strip */}
-                    {summary && (summary.messageCount > 0) && (
+                    {summary && summary.messageCount > 0 && (
                       <div className="ws-cl-stats-strip">
                         <span className="ws-cl-stat">💬 {summary.messageCount} messages</span>
-                        {summary.userTurns > 0 && (
-                          <span className="ws-cl-stat">✏️ {summary.userTurns} responses</span>
-                        )}
-                        {summary.quizCount > 0 && (
-                          <span className="ws-cl-stat">🎯 {summary.quizCount} quiz attempt{summary.quizCount > 1 ? "s" : ""}</span>
-                        )}
+                        {summary.userTurns > 0 && <span className="ws-cl-stat">✏️ {summary.userTurns} responses</span>}
+                        {summary.quizCount > 0 && <span className="ws-cl-stat">🎯 {summary.quizCount} quiz attempt{summary.quizCount > 1 ? "s" : ""}</span>}
                       </div>
                     )}
-
-                    {/* Last AI message snippet */}
-                    {summary?.lastAiSnippet ? (
-                      <div className="ws-cl-last-msg">
-                        💬 "{summary.lastAiSnippet}{summary.lastAiSnippet.length >= 120 ? "…" : ""}"
-                      </div>
-                    ) : session.description ? (
-                      <div className="ws-cl-last-msg">💬 "{session.description}"</div>
-                    ) : null}
                   </div>
+
+                  {/* Col 2 — Last Learning Point */}
+                  <div className="ws-cl-lp-box">
+                    <div className="ws-cl-lp-label">💬 Last Learning Point</div>
+                    <div className="ws-cl-lp-msg">
+                      {summary?.lastAiSnippet
+                        ? `"${summary.lastAiSnippet}${summary.lastAiSnippet.length >= 120 ? "…" : ""}"`
+                        : session.description
+                          ? `"${session.description}"`
+                          : "No messages yet — resume to continue your lesson."}
+                    </div>
+                  </div>
+
+                  {/* Col 3 — Robot image */}
+                  <div className="ws-cl-robot-col" style={{ display: "flex", alignItems: "center", justifyContent: "center", overflow: "hidden" }}>
+                    <img
+                      src="/images/robot-resume.png"
+                      alt=""
+                      draggable={false}
+                      aria-hidden="true"
+                      style={{ width: "100%", maxWidth: 140, height: "auto", objectFit: "contain", opacity: 1 }}
+                    />
+                  </div>
+
+                  {/* Col 4 — Action buttons */}
                   <div className="ws-cl-actions">
-                    <button
-                      className="ws-cl-btn-primary"
-                      onClick={() => navigate(`/session/${session.id}`)}
-                    >
+                    <button className="ws-cl-btn-primary" onClick={() => navigate(`/session/${session.id}`)}>
                       ▶ Resume Lesson
                     </button>
-                    <button
-                      className="ws-cl-btn-secondary"
-                      onClick={() => navigate("/lesson/setup")}
-                    >
+                    <button className="ws-cl-btn-secondary" onClick={() => navigate("/lesson/setup")}>
                       Start a Different Topic
                     </button>
                     <button
@@ -906,9 +966,7 @@ export default function WelcomeScreen({ onPromptClick, onStatsLoaded }: Props) {
                         try {
                           await appointmentsApi.updateStatus(session.id, "completed");
                           load();
-                        } catch {
-                          // ignore
-                        }
+                        } catch { /* ignore */ }
                       }}
                     >
                       End Lesson
@@ -1021,7 +1079,9 @@ export default function WelcomeScreen({ onPromptClick, onStatsLoaded }: Props) {
         <div className="ws-rec-row">
           {/* Left column */}
           <div>
-            <h3 className="ws-rec-left-header">← Recommended for You</h3>
+            <h3 className="ws-rec-left-header" style={{ display: "flex", alignItems: "center", gap: 6 }}>
+              <span style={{ color: "#1a73e8" }}>✦</span> Recommended for You
+            </h3>
 
             {pendingAssignments.length > 0 && (
               <div className="ws-rec-card">
@@ -1088,14 +1148,19 @@ export default function WelcomeScreen({ onPromptClick, onStatsLoaded }: Props) {
             )}
 
             {pendingAssignments.length === 0 && daily_plan.weak_spots.length === 0 && (
-              <div className="ws-rec-card">
-                <div className="ws-rec-icon-bubble">✨</div>
+              <div className="ws-rec-card" style={{ borderLeft: "3px solid #1a73e8", paddingLeft: 14 }}>
+                <div style={{
+                  width: 48, height: 48, borderRadius: 12,
+                  background: "#eff6ff", border: "1px solid #bfdbfe",
+                  display: "flex", alignItems: "center", justifyContent: "center",
+                  fontSize: 22, flexShrink: 0,
+                }}>🤖</div>
                 <div className="ws-rec-body">
-                  <span className="ws-rec-label" style={{ color: "#1a73e8", background: "#eff6ff" }}>
-                    Keep Going
+                  <span className="ws-rec-label" style={{ color: "#1a73e8", background: "#eff6ff", display: "flex", alignItems: "center", gap: 4 }}>
+                    <span style={{ color: "#1a73e8" }}>✦</span> Keep Learning
                   </span>
                   <p className="ws-rec-title">Explore a new topic today</p>
-                  <p className="ws-rec-desc">No specific recommendations right now — pick any subject to continue learning.</p>
+                  <p className="ws-rec-desc">Pick any subject and continue learning at your own pace.</p>
                 </div>
                 <div className="ws-rec-right">
                   <button
@@ -1110,37 +1175,14 @@ export default function WelcomeScreen({ onPromptClick, onStatsLoaded }: Props) {
             )}
           </div>
 
-          {/* Right column — promo card */}
-          <div className="ws-promo-card" style={{ flexDirection: "row", alignItems: "center", padding: "24px 0 24px 24px", gap: 0, overflow: "hidden" }}>
-            {/* Text + button */}
-            <div style={{ flex: 1, display: "flex", flexDirection: "column", justifyContent: "space-between", minWidth: 0 }}>
-              <div>
-                <p className="ws-promo-support">Ready to level up?</p>
-                <h3 className="ws-promo-heading">Start a new lesson today</h3>
-                <ul className="ws-promo-list">
-                  <li>✓ AI-personalised sessions</li>
-                  <li>✓ Step-by-step explanations</li>
-                  <li>✓ Instant feedback</li>
-                </ul>
-              </div>
-              <button
-                className="ws-promo-btn"
-                onClick={() => navigate("/lesson/setup")}
-              >
-                Start Learning →
-              </button>
-            </div>
-            {/* Robot image fills right side */}
+          {/* Right column — promo banner image */}
+          <div style={{ borderRadius: 16, overflow: "hidden", height: "100%", minHeight: 180 }}>
             <img
-              src="/images/robot-startlearning.png"
-              alt="Start Learning"
+              src="/images/banner.jpeg"
+              alt="Smart Tuition"
               draggable={false}
-              style={{
-                width: 210, height: "auto", objectFit: "contain",
-                flexShrink: 0, alignSelf: "flex-end",
-                marginBottom: -24, marginRight: -4,
-                opacity: 0.92,
-              }}
+              className="ws-promo-banner"
+              style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }}
             />
           </div>
         </div>
@@ -1220,44 +1262,88 @@ export default function WelcomeScreen({ onPromptClick, onStatsLoaded }: Props) {
         </div>
 
         {/* ── Section 4: Need Help Bar ── */}
-        <div className="ws-help-bar">
-          <div className="ws-help-left">
+        <div className="ws-help-bar" style={{ flexDirection: "column", gap: 0, padding: "16px 20px 12px" }}>
+          <div className="ws-help-inner" style={{ display: "flex", alignItems: "center", gap: 16, width: "100%" }}>
+            {/* Robot image — larger */}
             <img
               src="/images/robot-help.png"
               draggable={false}
-              style={{ width: 90, height: 90, objectFit: "contain", flexShrink: 0 }}
+              style={{ width: 110, height: 110, objectFit: "contain", flexShrink: 0 }}
               alt="Need help?"
             />
-            <div>
-              <p className="ws-help-text-heading">Need help with something?</p>
-              <p className="ws-help-text-sub">Ask me anything about your studies...</p>
+            {/* Text + chips */}
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 2 }}>
+                <p className="ws-help-text-heading" style={{ margin: 0 }}>Need help with something?</p>
+                <span style={{
+                  fontSize: 10, fontWeight: 700, color: "#16a34a",
+                  background: "#f0fdf4", border: "1px solid #bbf7d0",
+                  padding: "2px 8px", borderRadius: 99,
+                  display: "flex", alignItems: "center", gap: 4, flexShrink: 0,
+                }}>
+                  <span style={{ width: 6, height: 6, borderRadius: "50%", background: "#16a34a", display: "inline-block", flexShrink: 0 }} />
+                  24/7 AI Support
+                </span>
+              </div>
+              <p className="ws-help-text-sub" style={{ marginBottom: 8 }}>Ask me anything about your studies</p>
+              <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                {["GCSE Maths", "Homework Help", "Science Revision", "Ask AI Tutor"].map((chip) => (
+                  <button
+                    key={chip}
+                    type="button"
+                    onClick={() => onPromptClick(chip)}
+                    style={{
+                      padding: "3px 10px", fontSize: 11, fontWeight: 600,
+                      background: "#f8fafc", border: "1px solid #e2e8f0",
+                      borderRadius: 99, cursor: "pointer", color: "#475569",
+                      fontFamily: "inherit", transition: "background 0.15s",
+                    }}
+                    onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.background = "#eff6ff"; (e.currentTarget as HTMLButtonElement).style.borderColor = "#bfdbfe"; }}
+                    onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.background = "#f8fafc"; (e.currentTarget as HTMLButtonElement).style.borderColor = "#e2e8f0"; }}
+                  >
+                    {chip}
+                  </button>
+                ))}
+              </div>
+            </div>
+            {/* Input + send */}
+            <div className="ws-help-right-row" style={{ display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }}>
+              <input
+                ref={helpInputRef}
+                className="ws-help-input"
+                placeholder="Type your question..."
+                value={helpInput}
+                onChange={(e) => setHelpInput(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" && helpInput.trim()) {
+                    onPromptClick(helpInput.trim());
+                    setHelpInput("");
+                  }
+                }}
+              />
+              <button
+                className="ws-help-send"
+                onClick={() => {
+                  if (helpInput.trim()) {
+                    onPromptClick(helpInput.trim());
+                    setHelpInput("");
+                  }
+                }}
+              >
+                ➤
+              </button>
             </div>
           </div>
-          <div className="ws-help-right">
-            <input
-              ref={helpInputRef}
-              className="ws-help-input"
-              placeholder="Type your question..."
-              value={helpInput}
-              onChange={(e) => setHelpInput(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter" && helpInput.trim()) {
-                  onPromptClick(helpInput.trim());
-                  setHelpInput("");
-                }
-              }}
-            />
-            <button
-              className="ws-help-send"
-              onClick={() => {
-                if (helpInput.trim()) {
-                  onPromptClick(helpInput.trim());
-                  setHelpInput("");
-                }
-              }}
-            >
-              ➤
-            </button>
+          {/* Bottom info strip */}
+          <div className="ws-help-strip" style={{
+            borderTop: "1px solid #f1f5f9",
+            marginTop: 12, paddingTop: 8, paddingLeft: 126,
+            display: "flex", alignItems: "center", gap: 20,
+            fontSize: 11, color: "#94a3b8", flexWrap: "wrap",
+          }}>
+            <span style={{ whiteSpace: "nowrap" }}>📍 Instant Answers</span>
+            <span style={{ whiteSpace: "nowrap" }}>📚 Curriculum Aligned</span>
+            <span style={{ whiteSpace: "nowrap" }}>⚡ Powered by Smart AI</span>
           </div>
         </div>
 
