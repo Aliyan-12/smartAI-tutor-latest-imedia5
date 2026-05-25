@@ -424,7 +424,7 @@ export default function LoginPage() {
           {/* Brand header — z-index 10 */}
           <div className="lp-brand-hdr">
             <div className="lp-brand-badge">
-              <img src="/images/aitutor 4 schools.png" alt="AI Tutor 4 Schools" />
+              <img src="/images/aitutor 4 schools-robo.png" alt="AI Tutor 4 Schools" />
             </div>
             <div>
               <h1>AI Tutor <span style={{color:"#f97316"}}>4</span> Schools</h1>
@@ -501,7 +501,7 @@ export default function LoginPage() {
 
               <div className="lp-m-banner-hdr">
                 <div className="lp-m-banner-icon">
-                  <img src="/images/aitutor 4 schools.png" alt="AI Tutor 4 Schools" style={{ width: 38, height: 38, objectFit: "contain", borderRadius: 8 }} />
+                  <img src="/images/aitutor 4 schools-robo.png" alt="AI Tutor 4 Schools" style={{ width: 38, height: 38, objectFit: "contain", borderRadius: 8 }} />
                 </div>
                 <div>
                   <h3>AI Tutor <span style={{color:"#f97316"}}>4</span> Schools</h3>

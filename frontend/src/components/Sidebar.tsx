@@ -481,12 +481,12 @@ export default function Sidebar({
     <div className="sb-header">
       <div className="sb-brand">
         <img
-          src="/images/aitutor 4 schools.png"
+          src="/images/aitutor 4 schools-robo.png"
           alt="AI Tutor 4 Schools"
-          style={{ height: 70, width: "auto", objectFit: "contain", flexShrink: 0 }}
+          style={{ height: 52, width: "auto", objectFit: "contain", flexShrink: 0 }}
         />
         <div className="sb-brand-text">
-          <div className="sb-brand-name" style={{ fontSize: 17, fontWeight: 900 }}>AI Tutor 4 Schools</div>
+          <div className="sb-brand-name" style={{ fontSize: 17, fontWeight: 900 }}>AI Tutor <span style={{ color: "#f97316" }}>4</span> Schools</div>
           <div style={{ fontSize: 11.5, color: "#94a3b8", marginTop: 2 }}>AI-Powered Education</div>
         </div>
         <button className="sb-close-btn" onClick={close} aria-label="Close menu">
@@ -503,12 +503,13 @@ export default function Sidebar({
         borderRadius: 10,
       }}>
         <div style={{
-          width: 30, height: 30, borderRadius: "50%",
+          width: 38, height: 38, borderRadius: "50%",
           background: "#fff", border: "1.5px solid #e2e8f0",
           display: "flex", alignItems: "center", justifyContent: "center",
-          flexShrink: 0,
+          flexShrink: 0, overflow: "hidden",
+          boxShadow: "0 1px 4px rgba(0,0,0,0.08)",
         }}>
-          <GraduationCap size={15} color="#1a73e8" />
+          <img src="/images/smarttuition-logo.png" style={{ width: 32, height: 32, objectFit: "contain" }} alt="Smart Tuition" />
         </div>
         <div style={{ minWidth: 0 }}>
           <div style={{ fontSize: 12, fontWeight: 700, color: "#0f172a", lineHeight: 1.2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>Smart Tuition</div>

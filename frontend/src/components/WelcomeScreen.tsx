@@ -1144,7 +1144,7 @@ export default function WelcomeScreen({ onPromptClick, onStatsLoaded }: Props) {
             {daily_plan.weak_spots.length > 0 && (
               <div className="ws-rec-card">
                 <div className="ws-rec-icon-bubble">
-                  <img src="/images/robot-startlearning.png" style={{ width: 40, height: 40, objectFit: "contain" }} alt="Start Learning" />
+                  <img src="/images/robot-happy.png" style={{ width: 40, height: 40, objectFit: "contain" }} alt="Start Learning" />
                 </div>
                 <div className="ws-rec-body">
                   <span className="ws-rec-label" style={{ color: "#7c3aed", background: "#f5f3ff" }}>
@@ -1182,7 +1182,7 @@ export default function WelcomeScreen({ onPromptClick, onStatsLoaded }: Props) {
                   display: "flex", alignItems: "center", justifyContent: "center",
                   flexShrink: 0, overflow: "hidden",
                 }}>
-                  <img src="/images/robot-startlearning.png" alt="AI Tutor" draggable={false}
+                  <img src="/images/robot-happy.png" alt="AI Tutor" draggable={false}
                     style={{ width: 40, height: 40, objectFit: "contain" }} />
                 </div>
                 <div className="ws-rec-body">
