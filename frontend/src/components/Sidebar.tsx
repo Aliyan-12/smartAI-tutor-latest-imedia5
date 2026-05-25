@@ -38,7 +38,7 @@ const SHARED_STYLES = `
   }
 
   .sb-header {
-    padding: 16px 16px 14px;
+    padding: 10px 12px 12px;
     border-bottom: 1px solid #e2e8f0;
   }
 
@@ -483,11 +483,11 @@ export default function Sidebar({
         <img
           src="/images/aitutor 4 schools.png"
           alt="AI Tutor 4 Schools"
-          style={{ height: 56, width: "auto", objectFit: "contain", flexShrink: 0 }}
+          style={{ height: 70, width: "auto", objectFit: "contain", flexShrink: 0 }}
         />
         <div className="sb-brand-text">
-          <div className="sb-brand-name" style={{ fontSize: 15, fontWeight: 900 }}>AI Tutor 4 Schools</div>
-          <div style={{ fontSize: 10.5, color: "#94a3b8", marginTop: 1 }}>AI-Powered Education</div>
+          <div className="sb-brand-name" style={{ fontSize: 17, fontWeight: 900 }}>AI Tutor 4 Schools</div>
+          <div style={{ fontSize: 11.5, color: "#94a3b8", marginTop: 2 }}>AI-Powered Education</div>
         </div>
         <button className="sb-close-btn" onClick={close} aria-label="Close menu">
           <X size={18} />

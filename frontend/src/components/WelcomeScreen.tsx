@@ -238,6 +238,19 @@ export default function WelcomeScreen({ onPromptClick, onStatsLoaded }: Props) {
           from { transform: rotate(0deg); }
           to { transform: rotate(360deg); }
         }
+        @keyframes ws-chips-scroll {
+          0%   { transform: translateX(0); }
+          100% { transform: translateX(-50%); }
+        }
+        .ws-chips-track {
+          display: flex;
+          gap: 6px;
+          animation: ws-chips-scroll 14s linear infinite;
+          width: max-content;
+        }
+        .ws-chips-track:hover {
+          animation-play-state: paused;
+        }
 
         /* ── Buttons ── */
         .ws-btn {
@@ -301,7 +314,7 @@ export default function WelcomeScreen({ onPromptClick, onStatsLoaded }: Props) {
 
         .ws-cl-body {
           display: grid;
-          grid-template-columns: 1fr 210px 130px 160px;
+          grid-template-columns: 30% 25% 20% 20%;
           gap: 14px;
           align-items: center;
         }
@@ -326,23 +339,28 @@ export default function WelcomeScreen({ onPromptClick, onStatsLoaded }: Props) {
 
         .ws-cl-prog-row {
           display: flex;
-          align-items: center;
-          gap: 10px;
+          flex-direction: column;
+          gap: 5px;
           margin-bottom: 10px;
+        }
+
+        .ws-cl-prog-top {
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          gap: 8px;
         }
 
         .ws-cl-prog-label {
           font-size: 12px;
           color: #64748b;
-          white-space: nowrap;
         }
 
         .ws-cl-prog-track {
           height: 8px;
           background: #e2e8f0;
           border-radius: 999px;
-          flex: 1;
-          max-width: 180px;
+          width: 100%;
           overflow: hidden;
         }
 
@@ -350,12 +368,14 @@ export default function WelcomeScreen({ onPromptClick, onStatsLoaded }: Props) {
           height: 100%;
           border-radius: 999px;
           background: linear-gradient(90deg, #1a73e8, #60a5fa);
+          transition: width 0.4s ease;
         }
 
         .ws-cl-prog-mins {
-          font-size: 12px;
-          color: #64748b;
+          font-size: 11px;
+          color: #94a3b8;
           white-space: nowrap;
+          flex-shrink: 0;
         }
 
         .ws-cl-lp-box {
@@ -789,16 +809,24 @@ export default function WelcomeScreen({ onPromptClick, onStatsLoaded }: Props) {
           margin-bottom: 20px;
         }
 
+        /* ── Desktop help bar: 30% | 30% | 40% ── */
+        @media (min-width: 641px) {
+          .ws-help-inner > img    { flex: 3 0 auto !important; }
+          .ws-help-inner > div:nth-child(2) { flex: 3 1 0 !important; min-width: 0; }
+          .ws-help-right-row      { flex: 4 1 0 !important; }
+          .ws-help-input          { flex: 1 !important; width: auto !important; min-width: 0; }
+        }
+
         /* ── Tablet: hide robot column, shrink LP ── */
         @media (max-width: 1100px) {
-          .ws-cl-body { grid-template-columns: 1fr 180px 150px; }
+          .ws-cl-body { grid-template-columns: 40% 35% 25%; }
           .ws-cl-robot-col { display: none; }
           .ws-help-input { width: 220px; }
         }
 
         /* ── Tablet narrow / large mobile ── */
         @media (max-width: 900px) {
-          .ws-cl-body { grid-template-columns: 1fr 150px; }
+          .ws-cl-body { grid-template-columns: 1fr 180px; }
           .ws-cl-robot-col { display: none; }
           .ws-cl-lp-box { display: none; }
           .ws-cl-actions { min-width: unset; }
@@ -908,15 +936,17 @@ export default function WelcomeScreen({ onPromptClick, onStatsLoaded }: Props) {
                       )}
                     </div>
                     <div className="ws-cl-prog-row">
-                      <span className="ws-cl-prog-label">
-                        You're {progressPct > 0 ? `${progressPct}%` : "just starting"} through this lesson
-                      </span>
+                      <div className="ws-cl-prog-top">
+                        <span className="ws-cl-prog-label">
+                          You're <strong style={{ color: "#1a73e8" }}>{progressPct > 0 ? `${progressPct}%` : "0%"}</strong> through this lesson
+                        </span>
+                        {elapsedMins > 0 && (
+                          <span className="ws-cl-prog-mins">{elapsedMins} mins completed</span>
+                        )}
+                      </div>
                       <div className="ws-cl-prog-track">
                         <div className="ws-cl-prog-fill" style={{ width: `${Math.max(progressPct, 2)}%` }} />
                       </div>
-                      {elapsedMins > 0 && (
-                        <span className="ws-cl-prog-mins">{elapsedMins} mins completed</span>
-                      )}
                     </div>
                     {summary && summary.messageCount > 0 && (
                       <div className="ws-cl-stats-strip">
@@ -940,13 +970,13 @@ export default function WelcomeScreen({ onPromptClick, onStatsLoaded }: Props) {
                   </div>
 
                   {/* Col 3 — Robot image */}
-                  <div className="ws-cl-robot-col" style={{ display: "flex", alignItems: "center", justifyContent: "center", overflow: "hidden" }}>
+                  <div className="ws-cl-robot-col" style={{ overflow: "hidden" }}>
                     <img
                       src="/images/robot-resume.png"
                       alt=""
                       draggable={false}
                       aria-hidden="true"
-                      style={{ width: "100%", maxWidth: 140, height: "auto", objectFit: "contain", opacity: 1 }}
+                      style={{ width: "100%", height: "auto", objectFit: "contain", opacity: 1 }}
                     />
                   </div>
 
@@ -1011,14 +1041,13 @@ export default function WelcomeScreen({ onPromptClick, onStatsLoaded }: Props) {
                   {continue_learning.subject} · {continue_learning.key_stage}
                 </p>
                 <div className="ws-cl-prog-row">
-                  <span className="ws-cl-prog-label">
-                    You're {continue_learning.mastery > 0 ? `${continue_learning.mastery}%` : "just starting"} through this lesson
-                  </span>
+                  <div className="ws-cl-prog-top">
+                    <span className="ws-cl-prog-label">
+                      You're <strong style={{ color: "#1a73e8" }}>{continue_learning.mastery > 0 ? `${continue_learning.mastery}%` : "0%"}</strong> through this lesson
+                    </span>
+                  </div>
                   <div className="ws-cl-prog-track">
-                    <div
-                      className="ws-cl-prog-fill"
-                      style={{ width: `${Math.max(continue_learning.mastery, 2)}%` }}
-                    />
+                    <div className="ws-cl-prog-fill" style={{ width: `${Math.max(continue_learning.mastery, 2)}%` }} />
                   </div>
                 </div>
                 {continue_learning.last_mistake && (
@@ -1117,7 +1146,9 @@ export default function WelcomeScreen({ onPromptClick, onStatsLoaded }: Props) {
 
             {daily_plan.weak_spots.length > 0 && (
               <div className="ws-rec-card">
-                <div className="ws-rec-icon-bubble">🎯</div>
+                <div className="ws-rec-icon-bubble">
+                  <img src="/images/robot-startlearning.png" style={{ width: 40, height: 40, objectFit: "contain" }} alt="Start Learning" />
+                </div>
                 <div className="ws-rec-body">
                   <span className="ws-rec-label" style={{ color: "#7c3aed", background: "#f5f3ff" }}>
                     Recommended Learning
@@ -1149,11 +1180,14 @@ export default function WelcomeScreen({ onPromptClick, onStatsLoaded }: Props) {
             {pendingAssignments.length === 0 && daily_plan.weak_spots.length === 0 && (
               <div className="ws-rec-card" style={{ borderLeft: "3px solid #1a73e8", paddingLeft: 14 }}>
                 <div style={{
-                  width: 48, height: 48, borderRadius: 12,
+                  width: 52, height: 52, borderRadius: 12,
                   background: "#eff6ff", border: "1px solid #bfdbfe",
                   display: "flex", alignItems: "center", justifyContent: "center",
-                  fontSize: 22, flexShrink: 0,
-                }}>🤖</div>
+                  flexShrink: 0, overflow: "hidden",
+                }}>
+                  <img src="/images/aitutor 4 schools-robo.png" alt="AI Tutor" draggable={false}
+                    style={{ width: 40, height: 40, objectFit: "contain" }} />
+                </div>
                 <div className="ws-rec-body">
                   <span className="ws-rec-label" style={{ color: "#1a73e8", background: "#eff6ff", display: "flex", alignItems: "center", gap: 4 }}>
                     <span style={{ color: "#1a73e8" }}>✦</span> Keep Learning
@@ -1260,42 +1294,49 @@ export default function WelcomeScreen({ onPromptClick, onStatsLoaded }: Props) {
           </div>
         </div>
 
-        {/* ── Section 4: Need Help Bar ── */}
-        <div className="ws-help-bar" style={{ flexDirection: "column", gap: 0, padding: "16px 20px 12px" }}>
-          <div className="ws-help-inner" style={{ display: "flex", alignItems: "center", gap: 16, width: "100%" }}>
-            {/* Robot image — larger */}
-            <img
-              src="/images/robot-help.png"
-              draggable={false}
-              style={{ width: 110, height: 110, objectFit: "contain", flexShrink: 0 }}
-              alt="Need help?"
-            />
-            {/* Text + chips */}
-            <div style={{ flex: 1, minWidth: 0 }}>
-              <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 2 }}>
-                <p className="ws-help-text-heading" style={{ margin: 0 }}>Need help with something?</p>
-                <span style={{
-                  fontSize: 10, fontWeight: 700, color: "#16a34a",
-                  background: "#f0fdf4", border: "1px solid #bbf7d0",
-                  padding: "2px 8px", borderRadius: 99,
-                  display: "flex", alignItems: "center", gap: 4, flexShrink: 0,
-                }}>
-                  <span style={{ width: 6, height: 6, borderRadius: "50%", background: "#16a34a", display: "inline-block", flexShrink: 0 }} />
-                  24/7 AI Support
-                </span>
-              </div>
-              <p className="ws-help-text-sub" style={{ marginBottom: 8 }}>Ask me anything about your studies</p>
-              <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-                {["GCSE Maths", "Homework Help", "Science Revision", "Ask AI Tutor"].map((chip) => (
+        {/* ── Section 4: Need Help Bar — 30% | 30% | 40% ── */}
+        <div className="ws-help-bar" style={{ padding: 0, gap: 0, overflow: "hidden", position: "relative", alignItems: "stretch" }}>
+
+          {/* 24/7 AI Support badge — absolute top-right */}
+          <span style={{
+            position: "absolute", top: 12, right: 16, zIndex: 2,
+            fontSize: 10, fontWeight: 700, color: "#16a34a",
+            background: "#f0fdf4", border: "1px solid #bbf7d0",
+            padding: "2px 8px", borderRadius: 99,
+            display: "flex", alignItems: "center", gap: 4,
+          }}>
+            <span style={{ width: 6, height: 6, borderRadius: "50%", background: "#16a34a", display: "inline-block", flexShrink: 0 }} />
+            24/7 AI Support
+          </span>
+
+          {/* Col 1 — 30% — robot background */}
+          <div style={{
+            flex: 3,
+            backgroundImage: "url('/images/robot-help.png')",
+            backgroundSize: "cover",
+            backgroundPosition: "center",
+            backgroundRepeat: "no-repeat",
+            minHeight: 130,
+          }} />
+
+          {/* Col 2 — 30% — heading + subtitle + scrolling chips */}
+          <div style={{ flex: 3, padding: "16px 16px 14px", display: "flex", flexDirection: "column", justifyContent: "center", minWidth: 0 }}>
+            <p className="ws-help-text-heading" style={{ margin: "0 0 2px" }}>Need help with something?</p>
+            <p className="ws-help-text-sub" style={{ marginBottom: 10 }}>Ask me anything about your studies</p>
+            {/* Scrolling chips ticker */}
+            <div style={{ overflow: "hidden", width: "100%" }}>
+              <div className="ws-chips-track">
+                {[...["GCSE Maths", "Homework Help", "Science Revision", "Ask AI Tutor"],
+                  ...["GCSE Maths", "Homework Help", "Science Revision", "Ask AI Tutor"]].map((chip, i) => (
                   <button
-                    key={chip}
+                    key={`${chip}-${i}`}
                     type="button"
                     onClick={() => onPromptClick(chip)}
                     style={{
                       padding: "3px 10px", fontSize: 11, fontWeight: 600,
                       background: "#f8fafc", border: "1px solid #e2e8f0",
                       borderRadius: 99, cursor: "pointer", color: "#475569",
-                      fontFamily: "inherit", transition: "background 0.15s",
+                      fontFamily: "inherit", transition: "background 0.15s", whiteSpace: "nowrap", flexShrink: 0,
                     }}
                     onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.background = "#eff6ff"; (e.currentTarget as HTMLButtonElement).style.borderColor = "#bfdbfe"; }}
                     onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.background = "#f8fafc"; (e.currentTarget as HTMLButtonElement).style.borderColor = "#e2e8f0"; }}
@@ -1305,8 +1346,11 @@ export default function WelcomeScreen({ onPromptClick, onStatsLoaded }: Props) {
                 ))}
               </div>
             </div>
-            {/* Input + send */}
-            <div className="ws-help-right-row" style={{ display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }}>
+          </div>
+
+          {/* Col 3 — 40% — input + send + strip */}
+          <div className="ws-help-right-col" style={{ flex: 4, padding: "16px 16px 14px", display: "flex", flexDirection: "column", justifyContent: "center", gap: 8 }}>
+            <div className="ws-help-right-row" style={{ display: "flex", alignItems: "center", gap: 8 }}>
               <input
                 ref={helpInputRef}
                 className="ws-help-input"
@@ -1332,18 +1376,16 @@ export default function WelcomeScreen({ onPromptClick, onStatsLoaded }: Props) {
                 ➤
               </button>
             </div>
+            <div className="ws-help-strip" style={{
+              display: "flex", alignItems: "center", gap: 12,
+              fontSize: 10.5, color: "#94a3b8", flexWrap: "wrap",
+            }}>
+              <span style={{ whiteSpace: "nowrap" }}>📍 Instant Answers</span>
+              <span style={{ whiteSpace: "nowrap" }}>📚 Curriculum Aligned</span>
+              <span style={{ whiteSpace: "nowrap" }}>⚡ Powered by Smart AI</span>
+            </div>
           </div>
-          {/* Bottom info strip */}
-          <div className="ws-help-strip" style={{
-            borderTop: "1px solid #f1f5f9",
-            marginTop: 12, paddingTop: 8, paddingLeft: 126,
-            display: "flex", alignItems: "center", gap: 20,
-            fontSize: 11, color: "#94a3b8", flexWrap: "wrap",
-          }}>
-            <span style={{ whiteSpace: "nowrap" }}>📍 Instant Answers</span>
-            <span style={{ whiteSpace: "nowrap" }}>📚 Curriculum Aligned</span>
-            <span style={{ whiteSpace: "nowrap" }}>⚡ Powered by Smart AI</span>
-          </div>
+
         </div>
 
       </div>
