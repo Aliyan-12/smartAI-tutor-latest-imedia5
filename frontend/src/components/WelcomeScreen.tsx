@@ -1158,7 +1158,7 @@ export default function WelcomeScreen({ onPromptClick, onStatsLoaded }: Props) {
                   </p>
                 </div>
                 <div className="ws-rec-right">
-                  <span className="ws-rec-mins">30 Minutes</span>
+                  <span className="ws-rec-mins">40 Minutes</span>
                   <button
                     className="ws-rec-start-btn"
                     style={{ background: "#7c3aed" }}
