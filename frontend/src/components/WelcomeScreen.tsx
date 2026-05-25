@@ -672,8 +672,7 @@ export default function WelcomeScreen({ onPromptClick, onStatsLoaded }: Props) {
 
         .ws-subj-img {
           width: 100%;
-          max-width: 210px;
-          height: auto;
+          height: 190px;
           object-fit: contain;
           display: block;
         }
@@ -836,10 +835,10 @@ export default function WelcomeScreen({ onPromptClick, onStatsLoaded }: Props) {
 
           .ws-subj-grid { grid-template-columns: 1fr; }
 
-          /* help bar: robot + content side-by-side, input below */
-          .ws-help-inner { flex-wrap: wrap; gap: 10px; }
-          .ws-help-inner > img { width: 72px !important; height: 72px !important; align-self: flex-start; }
-          .ws-help-inner > div:nth-child(2) { flex: 1 1 120px; min-width: 120px; }
+          /* help bar: robot + content always in a row, input below */
+          .ws-help-inner { flex-wrap: nowrap; align-items: flex-start; gap: 10px; }
+          .ws-help-inner > img { width: 68px !important; height: 68px !important; flex-shrink: 0; }
+          .ws-help-inner > div:nth-child(2) { flex: 1; min-width: 0; }
           .ws-help-right-row { width: 100%; flex-shrink: unset; }
           .ws-help-input { width: calc(100% - 56px); }
           .ws-help-bar { padding: 14px 14px 10px !important; }
