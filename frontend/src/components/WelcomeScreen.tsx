@@ -1182,7 +1182,7 @@ export default function WelcomeScreen({ onPromptClick, onStatsLoaded }: Props) {
                   display: "flex", alignItems: "center", justifyContent: "center",
                   flexShrink: 0, overflow: "hidden",
                 }}>
-                  <img src="/images/aitutor 4 schools-robo.png" alt="AI Tutor" draggable={false}
+                  <img src="/images/robot-startlearning.png" alt="AI Tutor" draggable={false}
                     style={{ width: 40, height: 40, objectFit: "contain" }} />
                 </div>
                 <div className="ws-rec-body">
