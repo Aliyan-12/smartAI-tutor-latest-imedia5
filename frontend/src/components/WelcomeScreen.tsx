@@ -940,9 +940,6 @@ export default function WelcomeScreen({ onPromptClick, onStatsLoaded }: Props) {
                         <span className="ws-cl-prog-label">
                           You're <strong style={{ color: "#1a73e8" }}>{progressPct > 0 ? `${progressPct}%` : "0%"}</strong> through this lesson
                         </span>
-                        {elapsedMins > 0 && (
-                          <span className="ws-cl-prog-mins">{elapsedMins} mins completed</span>
-                        )}
                       </div>
                       <div className="ws-cl-prog-track">
                         <div className="ws-cl-prog-fill" style={{ width: `${Math.max(progressPct, 2)}%` }} />
@@ -1313,8 +1310,8 @@ export default function WelcomeScreen({ onPromptClick, onStatsLoaded }: Props) {
           <div style={{
             flex: 3,
             backgroundImage: "url('/images/robot-help.png')",
-            backgroundSize: "cover",
-            backgroundPosition: "center",
+            backgroundSize: "contain",
+            backgroundPosition: "center bottom",
             backgroundRepeat: "no-repeat",
             minHeight: 130,
           }} />
