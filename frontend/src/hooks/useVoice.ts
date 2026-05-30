@@ -47,6 +47,11 @@ export function useVoice() {
   const ttsActiveRef = useRef(false);
   const ttsProcessingRef = useRef(false);
   const ttsDelayTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Paragraph-buffering: max 4 TTS requests per message (3 during stream + 1 flush at end)
+  const ttsChunkCountRef = useRef(0);
+  const MAX_TTS_CHUNKS = 4;
+  // Flush after this many chars if no paragraph break arrives first (~40-60 words)
+  const TTS_PARA_THRESHOLD = 280;
 
   // Connection lifecycle guards
   const intentionalCloseRef = useRef(false);
@@ -406,40 +411,66 @@ export function useVoice() {
     if (!ttsActiveRef.current || ttsQueueRef.current.length === 0) setPlaying(false);
   }, []);
 
-  // As each token arrives, scan for sentence-boundary punctuation.
-  // Every complete phrase is dispatched to TTS immediately so audio
-  // starts playing within ~500ms of the first sentence completing.
+  // ── Paragraph-buffered streaming TTS ─────────────────────────────────────
+  //
+  // Design goals:
+  //   • Max MAX_TTS_CHUNKS (4) Kokoro requests per AI message
+  //   • 3 slots consumed during streaming (on paragraph breaks or threshold)
+  //   • 1 slot reserved for endStreamTTS final flush
+  //   • Reduces concurrent CPU pressure vs per-sentence firing
+  //
+  // Flush conditions (in priority order):
+  //   1. Double-newline paragraph break in the buffer
+  //   2. Buffer reaches TTS_PARA_THRESHOLD chars — cut at nearest sentence end
+  //   3. endStreamTTS — flush everything remaining as one final chunk
+
+  const _dispatchTTSChunk = useCallback((text: string) => {
+    const clean = _stripMarkersForTTS(text);
+    if (clean.length < 8) return;
+    ttsChunkCountRef.current += 1;
+    ttsQueueRef.current.push(voiceApi.speak(clean));
+    _processTTSQueue();
+  }, [_processTTSQueue]);
+
   const feedStreamTTS = useCallback((chunk: string) => {
     if (!ttsActiveRef.current) return;
     sentenceBufRef.current += chunk;
 
-    let buf = sentenceBufRef.current;
-    let dispatched = false;
+    // Reserve the last slot for endStreamTTS flush
+    if (ttsChunkCountRef.current >= MAX_TTS_CHUNKS - 1) return;
 
-    while (true) {
-      const idx = buf.search(/[!?.,:\n]/);
-      if (idx === -1) break;
-      const phrase = _stripMarkersForTTS(buf.slice(0, idx + 1));
-      buf = buf.slice(idx + 1).trimStart();
-      if (phrase.length >= 3) {
-        ttsQueueRef.current.push(voiceApi.speak(phrase));
-        dispatched = true;
-      }
+    const buf = sentenceBufRef.current;
+
+    // Priority 1: paragraph break — natural content boundary
+    const paraIdx = buf.indexOf("\n\n");
+    if (paraIdx !== -1 && paraIdx > 0) {
+      const phrase = buf.slice(0, paraIdx);
+      sentenceBufRef.current = buf.slice(paraIdx + 2).trimStart();
+      _dispatchTTSChunk(phrase);
+      return;
     }
 
-    // Safety valve: flush if no punctuation arrives for a long stretch
-    if (buf.length >= 150) {
-      const safe = _stripMarkersForTTS(buf);
-      buf = "";
-      if (safe.length >= 3) {
-        ttsQueueRef.current.push(voiceApi.speak(safe));
-        dispatched = true;
+    // Priority 2: buffer has grown large enough — find nearest sentence end
+    if (buf.length >= TTS_PARA_THRESHOLD) {
+      // Search for last sentence-ending punctuation followed by space
+      // within the first (THRESHOLD + 80) chars to avoid cutting mid-word
+      const searchZone = buf.slice(0, TTS_PARA_THRESHOLD + 80);
+      let cutAt = -1;
+      for (let i = searchZone.length - 1; i >= TTS_PARA_THRESHOLD / 2; i--) {
+        const ch = searchZone[i];
+        if ((ch === "." || ch === "!" || ch === "?") &&
+            (i + 1 >= searchZone.length || searchZone[i + 1] === " " || searchZone[i + 1] === "\n")) {
+          cutAt = i + 1;
+          break;
+        }
       }
+      // Fall back to threshold position if no sentence end found
+      if (cutAt === -1) cutAt = TTS_PARA_THRESHOLD;
+      const phrase = buf.slice(0, cutAt);
+      sentenceBufRef.current = buf.slice(cutAt).trimStart();
+      _dispatchTTSChunk(phrase);
     }
-
-    sentenceBufRef.current = buf;
-    if (dispatched) _processTTSQueue();
-  }, [_processTTSQueue]);
+  }, [_dispatchTTSChunk]);
 
   const startStreamTTS = useCallback(() => {
     if (ttsDelayTimerRef.current) {
@@ -450,23 +481,24 @@ export function useVoice() {
     ttsActiveRef.current = true;
     ttsQueueRef.current = [];
     sentenceBufRef.current = "";
+    ttsChunkCountRef.current = 0;
     ttsProcessingRef.current = false;
     setPlaying(false);
   }, []);
 
-  // Flush any trailing text that didn't end with punctuation
+  // Final flush — sends whatever is left in the buffer as the last TTS chunk
   const endStreamTTS = useCallback(() => {
     if (ttsDelayTimerRef.current) {
       clearTimeout(ttsDelayTimerRef.current);
       ttsDelayTimerRef.current = null;
     }
-    const remaining = _stripMarkersForTTS(sentenceBufRef.current);
+    const remaining = sentenceBufRef.current;
     sentenceBufRef.current = "";
-    if (remaining.length >= 3) {
-      ttsQueueRef.current.push(voiceApi.speak(remaining));
-      _processTTSQueue();
+    ttsChunkCountRef.current = 0;
+    if (remaining.trim().length >= 5) {
+      _dispatchTTSChunk(remaining);
     }
-  }, [_processTTSQueue]);
+  }, [_dispatchTTSChunk]);
 
   const cancelStreamTTS = useCallback(() => {
     if (ttsDelayTimerRef.current) {
@@ -476,6 +508,7 @@ export function useVoice() {
     ttsActiveRef.current = false;
     ttsQueueRef.current = [];
     sentenceBufRef.current = "";
+    ttsChunkCountRef.current = 0;
     if (audioRef.current) { audioRef.current.pause(); audioRef.current = null; }
     setPlaying(false);
   }, []);
