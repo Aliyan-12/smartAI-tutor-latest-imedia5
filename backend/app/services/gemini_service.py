@@ -130,6 +130,28 @@ def build_personalised_system_prompt(student_preferences: dict, base_prompt: str
 # Internal helpers
 # ---------------------------------------------------------------------------
 
+def _is_thinking_token(text: str) -> bool:
+    """
+    Detect Gemini 2.5 Flash internal reasoning tokens that must never reach the frontend.
+    These are 'thinking' outputs: tool_code blocks, thought traces, and print(default_api...)
+    calls that Gemini emits when extended thinking leaks into the content stream.
+    """
+    s = text.strip()
+    return (
+        s.startswith("tool_code") or
+        s.startswith("```tool_code") or
+        s.startswith("thought ") or
+        s.startswith(" thought ") or
+        "print(default_api." in s or
+        "default_api.advance_lesson_phase" in s or
+        "default_api.generate_quiz" in s or
+        "default_api.set_homework" in s or
+        "default_api.evaluate_answer" in s or
+        "default_api.get_student_mastery" in s or
+        "default_api.update_topic_mastery" in s
+    )
+
+
 def _friendly_error(exc: Exception) -> str:
     msg = str(exc).lower()
     if "quota" in msg or "resource_exhausted" in msg or "429" in msg:
@@ -330,7 +352,14 @@ async def stream_response_async(
                         for part in content
                     )
                 if content:
-                    yield content
+                    # Hard filter: drop any Gemini thinking/tool_code tokens before
+                    # they reach the frontend. Should not fire once thinking_budget=0
+                    # is active, but kept as a safety net.
+                    if _is_thinking_token(content):
+                        logger.debug(f"Suppressed thinking token: {content[:60]!r}")
+                        # Still accumulate for full_response so tool calls parse correctly
+                    else:
+                        yield content
                 full_response = (full_response + chunk) if full_response is not None else chunk
         except Exception as e:
             logger.error(f"LangChain astream error (round {_round}): {e}")
