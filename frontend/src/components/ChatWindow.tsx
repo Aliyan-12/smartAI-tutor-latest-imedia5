@@ -49,16 +49,69 @@ export default function ChatWindow({
   return (
     <div ref={containerRef} style={{ display: "contents" }}>
       <style>{`
-        @keyframes typingDot {
-          0%, 60%, 100% { transform: translateY(0); opacity: 0.4; }
-          30% { transform: translateY(-6px); opacity: 1; }
-        }
+        /* ── Message slide-in ── */
         @keyframes msgSlideIn {
-          from { opacity: 0; transform: translateY(8px); }
-          to { opacity: 1; transform: translateY(0); }
+          from { opacity: 0; transform: translateY(10px); }
+          to   { opacity: 1; transform: translateY(0); }
         }
-        .chat-msg-animate {
-          animation: msgSlideIn 0.25s ease;
+        .chat-msg-animate { animation: msgSlideIn 0.22s ease; }
+
+        /* ── Streaming cursor: blinking block at end of text ── */
+        @keyframes streamCursor {
+          0%, 100% { opacity: 1; }
+          50%       { opacity: 0; }
+        }
+        .stream-cursor::after {
+          content: "▋";
+          display: inline-block;
+          margin-left: 2px;
+          font-size: 0.85em;
+          color: #1a73e8;
+          animation: streamCursor 0.9s ease-in-out infinite;
+          vertical-align: middle;
+        }
+
+        /* ── Pulsing blob: waiting for first token ── */
+        @keyframes blobScale {
+          0%, 100% { transform: scale(1);    opacity: 0.55; }
+          50%       { transform: scale(1.22); opacity: 1;    }
+        }
+        @keyframes blobOrbit {
+          0%   { transform: translate(0, 0) scale(0.7); opacity: 0.4; }
+          25%  { transform: translate(5px, -5px) scale(1); opacity: 0.9; }
+          50%  { transform: translate(10px, 0) scale(0.7); opacity: 0.4; }
+          75%  { transform: translate(5px, 5px) scale(1); opacity: 0.9; }
+          100% { transform: translate(0, 0) scale(0.7); opacity: 0.4; }
+        }
+        .ai-blob-wrap {
+          display: flex;
+          align-items: center;
+          gap: 5px;
+          padding: 4px 2px;
+        }
+        .ai-blob-core {
+          width: 10px; height: 10px;
+          border-radius: 50%;
+          background: #1a73e8;
+          animation: blobScale 1.2s ease-in-out infinite;
+        }
+        .ai-blob-dot {
+          width: 6px; height: 6px;
+          border-radius: 50%;
+          background: #1a73e8;
+        }
+        .ai-blob-dot:nth-child(2) { animation: blobScale 1.2s ease-in-out infinite 0.15s; opacity: 0.7; }
+        .ai-blob-dot:nth-child(3) { animation: blobScale 1.2s ease-in-out infinite 0.30s; opacity: 0.5; }
+
+        /* ── Streaming bubble: subtle left-border glow ── */
+        @keyframes streamGlow {
+          0%, 100% { border-left-color: #c5d8fb; }
+          50%       { border-left-color: #1a73e8; }
+        }
+        .streaming-bubble {
+          border-left: 3px solid #c5d8fb;
+          animation: streamGlow 1.8s ease-in-out infinite;
+          padding-left: 10px !important;
         }
       `}</style>
 
@@ -125,60 +178,44 @@ export default function ChatWindow({
         );
       })}
 
+      {/* Streaming: has content — show with blinking cursor + left-glow border */}
       {streaming && streamContent && (
         <div className="message assistant chat-msg-animate">
           <div className="message-avatar">AI</div>
           <div className="message-content">
-            <div className="message-bubble">
-              <ReactMarkdown>{streamContent}</ReactMarkdown>
+            <div className="message-bubble streaming-bubble">
+              <span className="stream-cursor">
+                <ReactMarkdown>{streamContent}</ReactMarkdown>
+              </span>
             </div>
           </div>
         </div>
       )}
 
-      {streaming && !streamContent && (
-        <div className="message assistant">
-          <div className="message-avatar">AI</div>
+      {/* Streaming: waiting for first token — pulsing blob indicator */}
+      {(streaming && !streamContent) || (isAiTyping && !streaming) ? (
+        <div className="message assistant" style={{ animation: "msgSlideIn 0.22s ease" }}>
+          <div className="message-avatar" style={{
+            background: "linear-gradient(135deg, #1a73e8, #1557b0)",
+            color: "#fff",
+            fontSize: 11,
+            fontWeight: 700,
+          }}>AI</div>
           <div className="message-content">
-            <div className="message-bubble">
-              <div className="typing-indicator">
-                <span></span>
-                <span></span>
-                <span></span>
+            <div className="message-bubble" style={{
+              background: "#f0f7ff",
+              border: "1px solid #c5d8fb",
+              minWidth: 64,
+            }}>
+              <div className="ai-blob-wrap">
+                <div className="ai-blob-core" />
+                <div className="ai-blob-dot" />
+                <div className="ai-blob-dot" />
               </div>
             </div>
           </div>
         </div>
-      )}
-
-      {isAiTyping && !streaming && (
-        <div style={{ display: "flex", alignItems: "flex-start", gap: 10, padding: "4px 0" }}>
-          <div style={{
-            width: 32,
-            height: 32,
-            borderRadius: "50%",
-            background: "var(--accent-blue, #6366f1)",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            fontSize: 16,
-            flexShrink: 0,
-          }}>AI</div>
-          <div style={{
-            background: "var(--bg-secondary, #f8fafc)",
-            border: "1px solid var(--border-color, #e2e8f0)",
-            borderRadius: 12,
-            padding: "10px 14px",
-            display: "flex",
-            gap: 4,
-            alignItems: "center",
-          }}>
-            <span style={{ width: 7, height: 7, borderRadius: "50%", background: "#94a3b8", display: "inline-block", animation: "typingDot 1.4s ease-in-out infinite" }} />
-            <span style={{ width: 7, height: 7, borderRadius: "50%", background: "#94a3b8", display: "inline-block", animation: "typingDot 1.4s ease-in-out infinite 0.2s" }} />
-            <span style={{ width: 7, height: 7, borderRadius: "50%", background: "#94a3b8", display: "inline-block", animation: "typingDot 1.4s ease-in-out infinite 0.4s" }} />
-          </div>
-        </div>
-      )}
+      ) : null}
 
       <div ref={bottomRef} />
     </div>
