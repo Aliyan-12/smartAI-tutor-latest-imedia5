@@ -25,9 +25,19 @@ logger = logging.getLogger(__name__)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    import asyncio
     logger.info("=== SmartAI Tutor starting up — running DB init ===")
     from app.db.init_db import init_database
     await init_database()
+
+    # Pre-warm Kokoro TTS pipeline so the first voice request is not slow
+    try:
+        from app.services.voice_service import _get_kokoro
+        await asyncio.to_thread(_get_kokoro)
+        logger.info("Kokoro TTS pipeline pre-warmed successfully.")
+    except Exception as _kokoro_err:
+        logger.warning(f"Kokoro TTS pre-warm failed (non-fatal): {_kokoro_err}")
+
     logger.info("=== SmartAI Tutor ready ===")
     yield
     logger.info("=== SmartAI Tutor shutting down ===")

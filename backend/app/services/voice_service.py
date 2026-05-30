@@ -1,8 +1,13 @@
+import io as _io
 import logging
 import struct
 import tempfile
 import os
 from typing import Optional
+
+import numpy as np
+import soundfile as sf
+from kokoro import KPipeline
 
 from google import genai
 from google.genai import types
@@ -11,9 +16,11 @@ from app.core.config import settings
 
 logger = logging.getLogger(__name__)
 
-_client = None
+# ---------------------------------------------------------------------------
+# Gemini client — still used by speech_to_text() and voice_converse()
+# ---------------------------------------------------------------------------
 
-TTS_MODEL = "gemini-2.5-flash-preview-tts"
+_client = None
 
 
 def _get_client() -> genai.Client:
@@ -23,7 +30,25 @@ def _get_client() -> genai.Client:
     return _client
 
 
+# ---------------------------------------------------------------------------
+# Kokoro TTS — replaces Gemini TTS
+# ---------------------------------------------------------------------------
+
+_kokoro: Optional[KPipeline] = None
+
+
+def _get_kokoro() -> KPipeline:
+    """Lazy-init the Kokoro pipeline (British English, ~300 MB model)."""
+    global _kokoro
+    if _kokoro is None:
+        logger.info("Initialising Kokoro TTS pipeline (lang_code='b')...")
+        _kokoro = KPipeline(lang_code="b")   # "b" = British English
+        logger.info("Kokoro TTS pipeline ready.")
+    return _kokoro
+
+
 def _pcm_to_wav(pcm_data: bytes, sample_rate: int = 24000, num_channels: int = 1, bits_per_sample: int = 16) -> bytes:
+    """Convert raw PCM bytes to a WAV file (kept for speech_to_text / voice_converse callers)."""
     data_size = len(pcm_data)
     header = struct.pack(
         '<4sI4s4sIHHIIHH4sI',
@@ -37,29 +62,23 @@ def _pcm_to_wav(pcm_data: bytes, sample_rate: int = 24000, num_channels: int = 1
 
 
 def text_to_speech(text: str, lang: str = "en") -> tuple[bytes, str]:
-    clean_text = text.strip()
-    if not clean_text or clean_text.startswith("[Error"):
+    """
+    Convert text to speech using Kokoro (British English, bf_emma voice).
+    Returns (wav_bytes, "audio/wav") — identical return type to the previous implementation.
+    """
+    clean = text.strip()
+    if not clean or clean.startswith("[Error"):
         raise ValueError("Cannot generate speech for empty or error text")
-    client = _get_client()
-    response = client.models.generate_content(
-        model=TTS_MODEL,
-        contents=[
-            types.Content(
-                role="user",
-                parts=[types.Part(text=clean_text)],
-            )
-        ],
-        config=types.GenerateContentConfig(
-            response_modalities=["AUDIO"],
-            speech_config=types.SpeechConfig(
-                voice_config=types.VoiceConfig(
-                    prebuilt_voice_config=types.PrebuiltVoiceConfig(voice_name="Puck")
-                )
-            ),
-        ),
-    )
-    pcm = response.candidates[0].content.parts[0].inline_data.data
-    return _pcm_to_wav(pcm), "audio/wav"
+
+    pipeline = _get_kokoro()
+    # Each iteration yields (graphemes, phonemes, audio_array)
+    chunks = [audio for _, _, audio in pipeline(clean, voice="bf_emma")]
+    if not chunks:
+        raise ValueError("Kokoro returned no audio for the provided text")
+
+    buf = _io.BytesIO()
+    sf.write(buf, np.concatenate(chunks).astype(np.float32), samplerate=24000, format="WAV")
+    return buf.getvalue(), "audio/wav"
 
 
 def speech_to_text(audio_bytes: bytes, filename: str = "audio.webm") -> Optional[str]:

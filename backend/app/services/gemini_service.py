@@ -1,17 +1,36 @@
-import time
-import re as _re_json
-from typing import AsyncGenerator, List, Optional, TYPE_CHECKING
-import logging
+"""
+Gemini service — LangChain-backed text generation for SmartAI Tutor.
 
-from google import genai
-from google.genai import types
+Public API (unchanged):
+  generate_response(history, user_message, rag_chunks=None, student_preferences=None)
+  stream_response(history, user_message, rag_chunks=None, student_preferences=None, system_prompt_override=None)
+  stream_response_async(history, user_message, rag_chunks=None, student_preferences=None, system_prompt_override=None, tool_context=None)
+  generate_mcq_questions(topic, subject, key_stage, ...)
+  generate_assessment_report(topic, subject, score_percent, weak_topics, strong_topics)
+  generate_chat_title(user_message)
+  build_personalised_system_prompt(student_preferences, base_prompt=None)
+  SYSTEM_PROMPT  (constant)
+  SIMPLE_CHAT_SYSTEM_PROMPT  (constant)
+"""
+
+import json as _json
+import logging
+from typing import AsyncGenerator, List, Optional, TYPE_CHECKING
+
+from langchain_core.messages import SystemMessage, HumanMessage, AIMessage, ToolMessage
+from pydantic import BaseModel
 
 from app.core.config import settings
+from app.services.llm_service import get_llm
 
 if TYPE_CHECKING:
     from app.schemas.documents import RetrievedChunk
 
 logger = logging.getLogger(__name__)
+
+# ---------------------------------------------------------------------------
+# System prompts (unchanged constants)
+# ---------------------------------------------------------------------------
 
 SYSTEM_PROMPT = (
     "You are SmartAI Tutor, a friendly and knowledgeable AI tutor designed for K-12 students. "
@@ -23,12 +42,7 @@ SYSTEM_PROMPT = (
     "When KNOWLEDGE BASE CONTEXT is provided in a message, use it as your primary reference material "
     "to answer the student's question. Synthesise the information naturally and accurately. "
     "Do not mention chunk boundaries or source labels. If the context does not fully answer the "
-    "question, supplement with your general knowledge and say so.\n\n"
-    "After you have finished explaining a concept clearly and the student seems to understand, "
-    "offer a short quiz by including this exact marker on its own line at the END of your response:\n"
-    '[QUIZ_OFFER: topic="<specific topic name>"]\n'
-    "Only include this marker once per explanation. The topic should be specific. "
-    "Do not include the marker if you have already offered a quiz recently in this conversation."
+    "question, supplement with your general knowledge and say so."
 )
 
 SIMPLE_CHAT_SYSTEM_PROMPT = (
@@ -45,6 +59,10 @@ SIMPLE_CHAT_SYSTEM_PROMPT = (
     "Focus purely on explaining topics clearly using the knowledge base provided. Do not include any special markers or control sequences in your responses."
 )
 
+
+# ---------------------------------------------------------------------------
+# Personalised prompt builder (unchanged)
+# ---------------------------------------------------------------------------
 
 def build_personalised_system_prompt(student_preferences: dict, base_prompt: str = None) -> str:
     """
@@ -107,17 +125,20 @@ def build_personalised_system_prompt(student_preferences: dict, base_prompt: str
     )
     return _base + preference_block
 
-MAX_RETRIES = 5
-RETRY_DELAY = 1.0  # base delay; doubles each attempt (1s, 2s, 4s, 8s, 16s)
 
-_client = None
+# ---------------------------------------------------------------------------
+# Internal helpers
+# ---------------------------------------------------------------------------
 
-
-def _get_client() -> genai.Client:
-    global _client
-    if _client is None:
-        _client = genai.Client(api_key=settings.gemini_api_key)
-    return _client
+def _friendly_error(exc: Exception) -> str:
+    msg = str(exc).lower()
+    if "quota" in msg or "resource_exhausted" in msg or "429" in msg:
+        return "The AI service is temporarily at capacity. Please wait a minute and try again."
+    if "invalid" in msg and "key" in msg:
+        return "AI service configuration error. Please contact support."
+    if "timeout" in msg or "deadline" in msg:
+        return "The AI took too long to respond. Please try a shorter question."
+    return "Something went wrong while generating a response. Please try again."
 
 
 def _format_rag_context(rag_chunks: List["RetrievedChunk"]) -> str:
@@ -132,91 +153,95 @@ def _format_rag_context(rag_chunks: List["RetrievedChunk"]) -> str:
     return "\n".join(lines)
 
 
-def _build_contents(
+def _build_lc_messages(
     history: List[dict],
     user_message: str,
     rag_chunks: Optional[List["RetrievedChunk"]] = None,
+    system_prompt: Optional[str] = None,
 ) -> list:
-    contents = []
+    """Build a LangChain message list from chat history, RAG context, and the user message."""
+    messages = []
+    if system_prompt:
+        messages.append(SystemMessage(content=system_prompt))
     for msg in history:
-        role = "user" if msg["role"] == "user" else "model"
-        contents.append(types.Content(role=role, parts=[types.Part(text=msg["content"])]))
-
-    context_block = _format_rag_context(rag_chunks) if rag_chunks else ""
-    if context_block:
-        full_message = f"{context_block}\n\n{user_message}"
-    else:
-        full_message = user_message
-
-    contents.append(types.Content(role="user", parts=[types.Part(text=full_message)]))
-    return contents
+        cls = HumanMessage if msg["role"] == "user" else AIMessage
+        messages.append(cls(content=msg["content"]))
+    rag_prefix = (_format_rag_context(rag_chunks) + "\n\n") if rag_chunks else ""
+    messages.append(HumanMessage(content=rag_prefix + user_message))
+    return messages
 
 
-def _friendly_error(exc: Exception) -> str:
-    msg = str(exc).lower()
-    if "quota" in msg or "resource_exhausted" in msg or "429" in msg:
-        return "The AI service is temporarily at capacity. Please wait a minute and try again."
-    if "invalid" in msg and "key" in msg:
-        return "AI service configuration error. Please contact support."
-    if "timeout" in msg or "deadline" in msg:
-        return "The AI took too long to respond. Please try a shorter question."
-    return "Something went wrong while generating a response. Please try again."
+# ---------------------------------------------------------------------------
+# MCQ structured output schema
+# ---------------------------------------------------------------------------
+
+class MCQQuestion(BaseModel):
+    question_index: int
+    question_text: str
+    options: List[str]       # ["A) ...", "B) ...", "C) ...", "D) ..."]
+    correct_answer: int      # 0-based index
+    explanation: str
+    topic_tag: str
 
 
-def _is_retryable(exc: Exception) -> bool:
-    msg = str(exc).lower()
-    return any(kw in msg for kw in (
-        "429", "503", "500",
-        "resource_exhausted", "unavailable", "service unavailable",
-        "overloaded", "quota", "rate limit", "too many requests",
-        "internal", "deadline", "timeout",
-    ))
-
-
-def _call_with_retry(fn, *args, **kwargs):
-    """Call a synchronous Gemini SDK function with exponential-backoff retry on transient errors."""
-    last_error = None
-    for attempt in range(MAX_RETRIES + 1):
-        try:
-            return fn(*args, **kwargs)
-        except Exception as e:
-            last_error = e
-            if _is_retryable(e) and attempt < MAX_RETRIES:
-                delay = RETRY_DELAY * (2 ** attempt)
-                logger.warning(
-                    f"Gemini transient error (attempt {attempt + 1}/{MAX_RETRIES + 1}), "
-                    f"retrying in {delay:.1f}s: {type(e).__name__}: {e}"
-                )
-                time.sleep(delay)
-                continue
-            break
-    raise last_error
-
+# ---------------------------------------------------------------------------
+# Public: generate_response
+# Supports both the legacy positional signature AND the keyword-argument variant
+# used by session_agent_service (system_prompt=, messages=, model=, stream=).
+# ---------------------------------------------------------------------------
 
 def generate_response(
-    history: List[dict],
-    user_message: str,
+    history: List[dict] = None,
+    user_message: str = "",
     rag_chunks: Optional[List["RetrievedChunk"]] = None,
     student_preferences: Optional[dict] = None,
+    # --- keyword-only args used by session_agent_service ---
+    system_prompt: Optional[str] = None,
+    messages: Optional[List[dict]] = None,
+    model: Optional[str] = None,   # accepted but ignored — LangChain singleton handles model
+    stream: bool = False,           # accepted but ignored — this function always returns str
 ) -> str:
-    system_prompt = (
-        build_personalised_system_prompt(student_preferences)
-        if student_preferences
-        else SYSTEM_PROMPT
-    )
+    """
+    Non-streaming single-turn generation.
+
+    Two calling conventions are supported:
+      1. Original: generate_response(history, user_message, rag_chunks, student_preferences)
+      2. session_agent_service style: generate_response(system_prompt=..., messages=[...], model=None, stream=False)
+    """
+    # Normalise calling convention (2) into (1)
+    if messages is not None and not history:
+        history = messages
+    if history is None:
+        history = []
+
+    # When messages=[{"role":"user","content":"..."}] is passed without a separate
+    # user_message (as session_agent_service does), extract the last message's content
+    # so we don't append a redundant empty HumanMessage.
+    if not user_message and history:
+        last = history[-1]
+        if isinstance(last, dict) and last.get("role") == "user":
+            user_message = last["content"]
+            history = history[:-1]
+
+    if system_prompt:
+        _system = system_prompt
+    elif student_preferences:
+        _system = build_personalised_system_prompt(student_preferences)
+    else:
+        _system = SYSTEM_PROMPT
+
+    lc_messages = _build_lc_messages(history, user_message, rag_chunks, _system)
     try:
-        client = _get_client()
-        response = _call_with_retry(
-            client.models.generate_content,
-            model=settings.gemini_model,
-            contents=_build_contents(history, user_message, rag_chunks),
-            config=types.GenerateContentConfig(system_instruction=system_prompt),
-        )
-        return response.text
+        response = get_llm().invoke(lc_messages)
+        return response.content if hasattr(response, "content") else str(response)
     except Exception as e:
-        logger.error(f"Gemini generate_response failed: {e}")
+        logger.error(f"generate_response failed: {e}")
         return f"[Error: {_friendly_error(e)}]"
 
+
+# ---------------------------------------------------------------------------
+# Public: stream_response (sync generator — kept for WebSocket handler)
+# ---------------------------------------------------------------------------
 
 def stream_response(
     history: List[dict],
@@ -225,28 +250,31 @@ def stream_response(
     student_preferences: Optional[dict] = None,
     system_prompt_override: Optional[str] = None,
 ):
+    """
+    Synchronous streaming generator.
+    NOTE: This is a blocking generator. Prefer stream_response_async in async contexts.
+    Used only by the WebSocket handler in chat.py.
+    """
     if system_prompt_override:
-        system_prompt = system_prompt_override
+        _system = system_prompt_override
     elif student_preferences:
-        system_prompt = build_personalised_system_prompt(student_preferences)
+        _system = build_personalised_system_prompt(student_preferences)
     else:
-        system_prompt = SYSTEM_PROMPT
+        _system = SYSTEM_PROMPT
 
+    lc_messages = _build_lc_messages(history, user_message, rag_chunks, _system)
     try:
-        client = _get_client()
-        response = _call_with_retry(
-            client.models.generate_content_stream,
-            model=settings.gemini_model,
-            contents=_build_contents(history, user_message, rag_chunks),
-            config=types.GenerateContentConfig(system_instruction=system_prompt),
-        )
-        for chunk in response:
-            if chunk.text:
-                yield chunk.text
+        for chunk in get_llm().stream(lc_messages):
+            if chunk.content:
+                yield chunk.content
     except Exception as e:
-        logger.error(f"Gemini stream_response failed: {e}")
+        logger.error(f"stream_response failed: {e}")
         yield f"[Error: {_friendly_error(e)}]"
 
+
+# ---------------------------------------------------------------------------
+# Public: stream_response_async (true async generator with tool executor loop)
+# ---------------------------------------------------------------------------
 
 async def stream_response_async(
     history: List[dict],
@@ -254,65 +282,81 @@ async def stream_response_async(
     rag_chunks: Optional[List["RetrievedChunk"]] = None,
     student_preferences: Optional[dict] = None,
     system_prompt_override: Optional[str] = None,
+    tool_context=None,  # ToolContext | None  — avoids circular import at module level
 ) -> AsyncGenerator[str, None]:
-    for token in stream_response(
-        history, user_message, rag_chunks, student_preferences, system_prompt_override
-    ):
-        yield token
+    """
+    True async streaming generator backed by LangChain astream().
+    Includes a tool executor loop: up to 3 rounds of tool calling before final answer.
+    tool_context is a ToolContext dataclass from app.tools.session_tools.
+    """
+    if system_prompt_override:
+        _system = system_prompt_override
+    elif student_preferences:
+        _system = build_personalised_system_prompt(student_preferences)
+    else:
+        _system = SYSTEM_PROMPT
+
+    messages = _build_lc_messages(history, user_message, rag_chunks, _system)
+
+    if tool_context is not None:
+        from app.tools.session_tools import make_session_tools
+        tools = make_session_tools(tool_context)
+    else:
+        tools = []
+
+    llm = get_llm(tools=tools if tools else None)
+
+    for _round in range(3):   # max 3 tool-call rounds
+        full_response = None
+
+        try:
+            async for chunk in llm.astream(messages):
+                if chunk.content:
+                    yield chunk.content
+                full_response = (full_response + chunk) if full_response is not None else chunk
+        except Exception as e:
+            logger.error(f"LangChain astream error (round {_round}): {e}")
+            yield f"[Error: {_friendly_error(e)}]"
+            return
+
+        # If no tool calls in the response, we are done
+        tool_calls = getattr(full_response, "tool_calls", None) if full_response is not None else None
+        if not tool_calls:
+            break
+
+        tool_map = {t.name: t for t in tools}
+        tool_messages = []
+
+        for tc in tool_calls:
+            tool_name = tc["name"]
+            tool_fn = tool_map.get(tool_name)
+            if tool_fn is None:
+                logger.warning(f"Tool '{tool_name}' not found in tool_map")
+                continue
+            try:
+                result = await tool_fn.ainvoke(tc["args"])
+                tool_messages.append(
+                    ToolMessage(
+                        content=_json.dumps(result),
+                        tool_call_id=tc["id"],
+                        name=tool_name,
+                    )
+                )
+                # Emit a structured tool-result token for the router to intercept
+                yield f"\n[TOOL_RESULT:{_json.dumps({'tool': tool_name, 'data': result})}]\n"
+            except Exception as e:
+                logger.error(f"Tool '{tool_name}' execution failed: {e}")
+
+        if not tool_messages:
+            break
+
+        # Append assistant message + tool results, then loop for the next LLM turn
+        messages = messages + [full_response] + tool_messages
 
 
-import re
-import json as json_module
-
-QUIZ_OFFER_RE = re.compile(r'\[QUIZ_OFFER:\s*topic="([^"]+)"\]')
-
-
-def extract_quiz_offer(text: str) -> Optional[str]:
-    match = QUIZ_OFFER_RE.search(text)
-    return match.group(1) if match else None
-
-
-def strip_quiz_offer(text: str) -> str:
-    return QUIZ_OFFER_RE.sub("", text).rstrip()
-
-
-def _repair_json(raw: str) -> str:
-    """Fix common Gemini JSON output issues: trailing commas, unescaped control chars."""
-    # Remove trailing commas before } or ]
-    raw = _re_json.sub(r",\s*([}\]])", r"\1", raw)
-    # Remove literal tab/newline/CR inside JSON strings (replace with space)
-    raw = _re_json.sub(r'(?<!\\)([\t\r\n])', " ", raw)
-    return raw
-
-
-def _extract_json_array(raw: str) -> str:
-    """Extract the first complete JSON array from raw text, ignoring trailing content."""
-    start = raw.find("[")
-    if start == -1:
-        return raw
-    depth = 0
-    in_string = False
-    escape_next = False
-    for i, ch in enumerate(raw[start:], start):
-        if escape_next:
-            escape_next = False
-            continue
-        if ch == "\\" and in_string:
-            escape_next = True
-            continue
-        if ch == '"':
-            in_string = not in_string
-            continue
-        if in_string:
-            continue
-        if ch == "[":
-            depth += 1
-        elif ch == "]":
-            depth -= 1
-            if depth == 0:
-                return raw[start : i + 1]
-    return raw[start:]
-
+# ---------------------------------------------------------------------------
+# Public: generate_mcq_questions — structured output (no JSON repair needed)
+# ---------------------------------------------------------------------------
 
 def generate_mcq_questions(
     topic: str,
@@ -323,12 +367,10 @@ def generate_mcq_questions(
     kb_content: str = "",
     unit_names: Optional[List[str]] = None,
 ) -> List[dict]:
-    item_schema = (
-        '{"question_index": 0, "question_text": "...", '
-        '"options": ["A) ...", "B) ...", "C) ...", "D) ..."], '
-        '"correct_answer": 0, "explanation": "...", "topic_tag": "..."}'
-    )
-
+    """
+    Generate multiple-choice questions using LangChain structured output.
+    Always returns List[dict] (compatible with assessment_service.create_assessment).
+    """
     units_line = ""
     if unit_names:
         quoted = ", ".join(f'"{u}"' for u in unit_names)
@@ -350,18 +392,14 @@ def generate_mcq_questions(
             f"chloroplasts, tissues, specialised cells, or any other topic not in the scope.\n"
             f"{units_line}"
             f"Every question must test ONLY the concepts within \"{topic}\".\n\n"
-            f"Return ONLY a valid JSON array — no markdown, no explanation, no text after the closing ].\n"
-            f"Each item: {item_schema}\n"
-            f"Rules: correct_answer is 0-based index; topic_tag must be a sub-topic of \"{topic}\"; "
-            f"explanation cites the material; all 4 options plausible."
+            f"Generate exactly {num_questions} questions as a structured list."
         )
         system_instruction = (
             f"You generate quiz questions STRICTLY about '{topic}'. "
             "Never write questions about topics outside the specified scope, even if curriculum material mentions them. "
-            "Output only a valid JSON array. No text before or after the array."
+            "Return exactly the number of questions requested."
         )
     elif unit_names:
-        # No KB text available but we know exactly which topics to test
         units_str = ", ".join(unit_names)
         prompt = (
             f"Generate exactly {num_questions} multiple-choice questions for a "
@@ -370,56 +408,40 @@ def generate_mcq_questions(
             f"Do NOT write questions about AI, technology, advanced research, or any topic "
             f"not explicitly listed above. Every question must be clearly about one of the "
             f"listed topics.\n\n"
-            f"Return ONLY a valid JSON array — no markdown, no explanation, no text after ].\n"
-            f"Each item: {item_schema}\n"
-            f"Rules: correct_answer is 0-based index; topic_tag must be one of the listed "
-            f"topics; explanation is 1-2 sentences; all 4 options plausible."
+            f"Generate exactly {num_questions} questions as a structured list."
         )
         system_instruction = (
             f"You are a quiz generator for {key_stage} {subject}. "
-            f"Output only a valid JSON array. "
-            f"Every question MUST be about the explicitly listed topics only. "
-            f"No text before or after the array."
+            f"Every question MUST be about the explicitly listed topics only."
         )
     else:
         prompt = (
             f'Generate exactly {num_questions} multiple-choice questions for a '
             f'{key_stage} {subject} student on the topic: "{topic}".\n'
             + (f"Recent context: {chat_history_summary}\n\n" if chat_history_summary else "\n")
-            + f"Return ONLY a valid JSON array. No markdown fences, no explanation, no text after ].\n"
-            f"Each item: {item_schema}\n"
-            f"Rules: correct_answer is 0-based index; topic_tag is a short sub-topic label; "
-            f"explanation is 1-2 sentences; all 4 options plausible."
+            + f"Generate exactly {num_questions} questions as a structured list."
         )
         system_instruction = (
-            "You are a quiz generator. Output only a valid JSON array. "
-            "No text before or after the array."
+            "You are a quiz generator. Generate exactly the number of questions requested."
         )
 
-    client = _get_client()
-    response = _call_with_retry(
-        client.models.generate_content,
-        model=settings.gemini_model,
-        contents=prompt,
-        config=types.GenerateContentConfig(system_instruction=system_instruction),
-    )
-
-    raw = response.text.strip()
-    if raw.startswith("```"):
-        parts = raw.split("```")
-        raw = parts[1] if len(parts) > 1 else raw
-        if raw.startswith("json"):
-            raw = raw[4:]
-        raw = raw.strip()
-
-    raw = _extract_json_array(raw)
-    raw = _repair_json(raw)
+    structured_llm = get_llm().with_structured_output(List[MCQQuestion])
+    lc_messages = [
+        SystemMessage(content=system_instruction),
+        HumanMessage(content=prompt),
+    ]
     try:
-        return json_module.loads(raw)
-    except json_module.JSONDecodeError as exc:
-        logger.error(f"MCQ JSON parse failed even after repair — raw snippet: {raw[:300]!r}")
-        raise exc
+        questions: List[MCQQuestion] = structured_llm.invoke(lc_messages)
+        # Convert Pydantic models to plain dicts for downstream callers
+        return [q.model_dump() for q in questions]
+    except Exception as e:
+        logger.error(f"generate_mcq_questions structured output failed: {e}")
+        raise RuntimeError(f"MCQ generation error: {e}") from e
 
+
+# ---------------------------------------------------------------------------
+# Public: generate_assessment_report
+# ---------------------------------------------------------------------------
 
 def generate_assessment_report(
     topic: str,
@@ -436,32 +458,34 @@ Weak areas: {', '.join(weak_topics) if weak_topics else 'None'}
 Write a brief, encouraging report (3-4 sentences) summarizing their performance.
 Mention specific strong and weak areas. Suggest what to review next. Keep it warm and motivating."""
 
-    client = _get_client()
-    response = _call_with_retry(
-        client.models.generate_content,
-        model=settings.gemini_model,
-        contents=prompt,
-        config=types.GenerateContentConfig(
-            system_instruction="You are a supportive tutor writing a student progress report.",
-        ),
-    )
-    return response.text.strip()
+    lc_messages = [
+        SystemMessage(content="You are a supportive tutor writing a student progress report."),
+        HumanMessage(content=prompt),
+    ]
+    try:
+        response = get_llm().invoke(lc_messages)
+        return (response.content if hasattr(response, "content") else str(response)).strip()
+    except Exception as e:
+        logger.error(f"generate_assessment_report failed: {e}")
+        return f"Quiz completed with a score of {score_percent:.0f}%."
 
+
+# ---------------------------------------------------------------------------
+# Public: generate_chat_title
+# ---------------------------------------------------------------------------
 
 def generate_chat_title(user_message: str) -> str:
+    lc_messages = [
+        SystemMessage(content="Generate a short title (max 6 words) for a chat. Return only the title, no quotes or formatting."),
+        HumanMessage(content=user_message),
+    ]
     try:
-        client = _get_client()
-        response = _call_with_retry(
-            client.models.generate_content,
-            model=settings.gemini_model,
-            contents=user_message,
-            config=types.GenerateContentConfig(
-                system_instruction="Generate a short title (max 6 words) for a chat. Return only the title, no quotes or formatting.",
-            ),
-        )
-        title = response.text.strip()
+        response = get_llm().invoke(lc_messages)
+        title = (response.content if hasattr(response, "content") else str(response)).strip()
         return title[:60] if len(title) > 60 else title
     except Exception as e:
         logger.warning(f"Title generation failed: {e}")
         words = user_message.split()[:5]
         return " ".join(words) + ("..." if len(user_message.split()) > 5 else "")
+
+

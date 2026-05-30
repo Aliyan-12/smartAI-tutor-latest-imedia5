@@ -157,6 +157,8 @@ export interface Appointment {
 export interface QuizOffer {
   topic: string;
   chat_session_id: string;
+  assessment_id?: number;
+  questions?: AssessmentQuestion[];
 }
 
 export interface StudentProgress {

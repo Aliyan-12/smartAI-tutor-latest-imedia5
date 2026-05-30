@@ -61,8 +61,8 @@ _STEP_META: dict[str, tuple[str, str]] = {
     "Exam-Style Questions":      ("practice", "Give ONE exam-style question. Ask the student to attempt it fully before any help. Give specific exam-focused feedback on their answer, then move on."),
     "Mark Scheme Discussion":    ("practice", "Walk through the mark scheme for the attempted question. Highlight where marks are awarded and 1-2 common errors to avoid. Move on once discussed."),
     # quiz
-    "Quiz Round 1":              ("quiz",     "Offer an interactive quiz on this topic using the [QUIZ_OFFER] marker."),
-    "Quiz Round 2":              ("quiz",     "Offer a second interactive quiz focusing on any gaps identified in Round 1 using the [QUIZ_OFFER] marker."),
+    "Quiz Round 1":              ("quiz",     "Call the generate_quiz tool to offer an interactive quiz on the specific concepts taught this session. Before calling, say: 'We have covered a lot -- let me set you a quick test!'"),
+    "Quiz Round 2":              ("quiz",     "Call the generate_quiz tool to offer a second interactive quiz focusing on any gaps identified in Round 1. Before calling, say: 'Let us go again -- this time focusing on what we need to sharpen up!'"),
     "Review Mistakes":           ("review",   "Go through any incorrect answers from the previous quiz. Clarify each misconception in 1-2 sentences. Move on once all reviewed."),
     "Final Score & Next Steps":  ("review",   "Summarise the 3 most important things learned. Give personalised encouragement. Suggest one thing to review independently. Then continue — offer harder practice or move to a new topic. Do NOT say goodbye or imply the session is ending."),
     # review / summary

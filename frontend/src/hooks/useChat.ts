@@ -85,7 +85,7 @@ export function useChat() {
       suppressNavigation?: boolean;
       onStreamStart?: () => void;
       onToken?: (chunk: string) => void;
-      onStreamComplete?: (text: string, hasSlideTrigger?: boolean) => void;
+      onStreamComplete?: (text: string) => void;
     }) => {
       const userMsg: ChatMessage = {
         id: Date.now(),
@@ -131,12 +131,7 @@ export function useChat() {
               return;
             }
             accumulated += event.content;
-            // Strip markers from visible stream — backend saves the clean version
-            const displayContent = accumulated
-              .replace(/\[QUIZ_OFFER:[^\]]*\]/gi, "")
-              .replace(/\[SLIDE_TRIGGER\]/gi, "")
-              .trimEnd();
-            setStreamContent(displayContent);
+            setStreamContent(accumulated.trimEnd());
             opts?.onToken?.(event.content);
           } else if (event.type === "title") {
             loadChats();
@@ -146,7 +141,13 @@ export function useChat() {
             setQuizOffer({
               topic: event.content,
               chat_session_id: activeSessionId || "",
+              assessment_id: (event as any).assessment_id ?? undefined,
+              questions: (event as any).questions ?? undefined,
             });
+          } else if (event.type === "tool_result") {
+            const tool = (event as any).tool as string;
+            const data = (event as any).data as Record<string, unknown>;
+            window.dispatchEvent(new CustomEvent("tool_result", { detail: { tool, data } }));
           }
         },
         () => {
@@ -155,8 +156,7 @@ export function useChat() {
             setStreaming(false);
             return;
           }
-          const hasSlideTrigger = /\[SLIDE_TRIGGER\]/i.test(accumulated);
-          const cleanText = accumulated.replace(/\[SLIDE_TRIGGER\]/gi, "").trimEnd();
+          const cleanText = accumulated.trimEnd();
           setMessages((prev) => [
             ...prev,
             {
@@ -170,7 +170,7 @@ export function useChat() {
           setStreamContent("");
           setStreaming(false);
           loadChats();
-          opts?.onStreamComplete?.(cleanText, hasSlideTrigger);
+          opts?.onStreamComplete?.(cleanText);
         },
         (err) => {
           console.error("Stream error:", err);

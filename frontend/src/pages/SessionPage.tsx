@@ -159,6 +159,8 @@ export default function SessionPage() {
   const [testAnswering, setTestAnswering] = useState(false);
 
   const [isAiTyping, setIsAiTyping] = useState(false);
+  const [toolResults, setToolResults] = useState<Array<{ tool: string; data: Record<string, unknown>; id: string }>>([]);
+
   const [sessionBriefing, setSessionBriefing] = useState<{
     hook?: string;
     what_you_will_learn?: string[];
@@ -179,7 +181,6 @@ export default function SessionPage() {
   const [voiceMessages, setVoiceMessages] = useState<{ role: string; content: string }[]>([]);
   const voiceMessagesRef = useRef<{ role: string; content: string }[]>([]);
   const voiceAiTurnRef = useRef("");
-  const voiceAiTextForSlideRef = useRef("");
   const [voiceQuizTopic, setVoiceQuizTopic] = useState<string | null>(null);
 
   const [sessionKeyStage, setSessionKeyStage] = useState("");
@@ -392,6 +393,16 @@ export default function SessionPage() {
   useEffect(() => {
     if (!streaming) setIsAiTyping(false);
   }, [streaming]);
+
+  // Listen for tool_result events dispatched by useChat
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const { tool, data } = (e as CustomEvent).detail;
+      setToolResults((prev) => [...prev, { tool, data, id: Date.now().toString() }]);
+    };
+    window.addEventListener("tool_result", handler);
+    return () => window.removeEventListener("tool_result", handler);
+  }, []);
 
   useEffect(() => {
     const check = () => {
@@ -694,10 +705,10 @@ export default function SessionPage() {
         suppressNavigation: true,
         onStreamStart: () => { setIsAiTyping(false); if (ttsEnabledRef.current) startStreamTTS(); },
         onToken: (t: string) => { if (ttsEnabledRef.current) feedStreamTTS(t); },
-        onStreamComplete: (aiText: string, hasSlideTrigger?: boolean) => { setIsAiTyping(false); if (ttsEnabledRef.current) endStreamTTS(); if (hasSlideTrigger) generateSlide(aiText); },
+        onStreamComplete: () => { setIsAiTyping(false); if (ttsEnabledRef.current) endStreamTTS(); },
       });
     },
-    [sendMessage, startStreamTTS, feedStreamTTS, endStreamTTS, generateSlide]
+    [sendMessage, startStreamTTS, feedStreamTTS, endStreamTTS]
   );
 
   const handleVoiceToggle = useCallback(() => {
@@ -719,12 +730,9 @@ export default function SessionPage() {
         },
         onAiTranscriptChunk: (chunk) => {
           voiceAiTurnRef.current += chunk;
-          voiceAiTextForSlideRef.current += chunk;
-          // Recompute full clean text from accumulated buffer so markers that
-          // arrive split across multiple chunks are still reliably stripped.
+          // Recompute full clean text from accumulated buffer so any partial
+          // bracket sequences still arriving are stripped from display.
           const displayText = voiceAiTurnRef.current
-            .replace(/\[SLIDE_TRIGGER\]/gi, "")
-            .replace(/\[QUIZ_OFFER[^\]]*\]/gi, "")
             .replace(/\[[A-Z_:][^\]]*$/, "") // strip partial [...] still arriving
             .trimEnd();
           setVoiceMessages((prev) => {
@@ -736,16 +744,9 @@ export default function SessionPage() {
           });
         },
         onTurnComplete: () => {
-          const fullAi = voiceAiTurnRef.current;
           voiceAiTurnRef.current = "";
-          const match = fullAi.match(/\[QUIZ_OFFER:\s*topic="([^"]+)"\]/i);
-          if (match) {
-            setVoiceQuizTopic(match[1]);
-          }
         },
         onTurnSaved: () => {
-          const aiText = voiceAiTextForSlideRef.current;
-          voiceAiTextForSlideRef.current = "";
           // Capture count before async DB reload to avoid stale closure
           const savedCount = voiceMessagesRef.current.length;
           if (apptId) {
@@ -757,7 +758,6 @@ export default function SessionPage() {
           } else {
             setVoiceMessages([]);
           }
-          if (aiText.includes("[SLIDE_TRIGGER]")) generateSlide(aiText);
         },
         onCreditsUpdate: () => {},
         onSessionCreated: () => {},
@@ -765,7 +765,7 @@ export default function SessionPage() {
         onQuizOffer: (topic) => { setVoiceQuizTopic(topic); },
       }, apptId);
     }
-  }, [isVoiceActive, connectVoice, disconnectVoice, activeSessionId, apptId, initSessionChat, generateSlide]);
+  }, [isVoiceActive, connectVoice, disconnectVoice, activeSessionId, apptId, initSessionChat]);
 
   if (sessionState === "loading") {
     return (
@@ -1422,13 +1422,86 @@ export default function SessionPage() {
             </div>
           </div>
         ) : !isPaused ? (
-          <ChatWindow
-            messages={displayMessages}
-            streaming={streaming}
-            streamContent={streamContent}
-            onSpeak={speakText}
-            isAiTyping={isAiTyping}
-          />
+          <>
+            <ChatWindow
+              messages={displayMessages}
+              streaming={streaming}
+              streamContent={streamContent}
+              onSpeak={speakText}
+              isAiTyping={isAiTyping}
+            />
+            {toolResults.map((tr) => {
+              if (tr.tool === "set_homework") {
+                return (
+                  <div key={tr.id} style={{
+                    background: "#e8f0fe",
+                    border: "1.5px solid #c5d8fb",
+                    borderRadius: 12,
+                    padding: "12px 16px",
+                    marginTop: 8,
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 10,
+                    maxWidth: 420,
+                  }}>
+                    <span style={{ fontSize: 22 }}>📚</span>
+                    <div>
+                      <div style={{ fontWeight: 600, color: "#1557b0", fontSize: 13 }}>
+                        Homework Set
+                      </div>
+                      <div style={{ color: "#0f172a", fontSize: 13 }}>
+                        {tr.data.title as string}
+                      </div>
+                      <div style={{ color: "#475569", fontSize: 11, marginTop: 2 }}>
+                        Due: {tr.data.due_date ? new Date(tr.data.due_date as string).toLocaleDateString("en-GB", { weekday: "short", day: "numeric", month: "short" }) : "—"}
+                      </div>
+                    </div>
+                  </div>
+                );
+              }
+              if (tr.tool === "evaluate_answer") {
+                const score = tr.data.score as number;
+                const maxScore = tr.data.max_score as number;
+                const correct = tr.data.correct as boolean;
+                const borderColor = score >= 2 ? "#10b981" : score === 1 ? "#f59e0b" : "#ef4444";
+                const bgColor = score >= 2 ? "#d1fae5" : score === 1 ? "#fef3c7" : "#fee2e2";
+                const badgeBg = borderColor;
+                const misconceptions = (tr.data.misconceptions as string[]) ?? [];
+                return (
+                  <div key={tr.id} style={{
+                    background: bgColor,
+                    border: `1.5px solid ${borderColor}`,
+                    borderRadius: 12,
+                    padding: "12px 16px",
+                    marginTop: 8,
+                    maxWidth: 480,
+                  }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
+                      <span style={{ fontWeight: 700, fontSize: 14, color: "#0f172a" }}>
+                        {score}/{maxScore} marks
+                      </span>
+                      <span style={{
+                        background: badgeBg,
+                        color: "#fff", borderRadius: 6, padding: "1px 8px", fontSize: 11, fontWeight: 600,
+                      }}>
+                        {correct ? "Correct" : "Needs work"}
+                      </span>
+                    </div>
+                    <div style={{ fontSize: 13, color: "#0f172a", marginBottom: 4 }}>
+                      {tr.data.feedback as string}
+                    </div>
+                    {misconceptions.length > 0 && (
+                      <div style={{ fontSize: 12, color: "#475569", marginTop: 4 }}>
+                        <span style={{ fontWeight: 600 }}>Watch out for: </span>
+                        {misconceptions.join(", ")}
+                      </div>
+                    )}
+                  </div>
+                );
+              }
+              return null;
+            })}
+          </>
         ) : null}
       </div>
 

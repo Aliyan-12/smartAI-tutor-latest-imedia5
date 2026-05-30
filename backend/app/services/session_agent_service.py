@@ -586,25 +586,26 @@ async def build_session_system_prompt(
 
     if quiz_count >= MAX_QUIZZES:
         quiz_timing_note = (
-            f"⚠️ QUIZ LIMIT REACHED: {quiz_count} quiz(zes) offered this session "
-            f"(maximum {MAX_QUIZZES}). Do NOT offer any more quizzes or include any "
-            "[QUIZ_OFFER] marker for the rest of this session. Continue teaching normally."
+            f"QUIZ LIMIT REACHED: {quiz_count} quiz(zes) completed this session "
+            f"(maximum {MAX_QUIZZES}). Do NOT call generate_quiz again. Continue teaching."
         )
     elif not quiz_phase:
         quiz_timing_note = (
-            f"⏳ QUIZ LOCKED — Session has been running for ~{elapsed_minutes} minute(s) "
-            f"(~{remaining_minutes} minute(s) remaining). Do NOT offer a quiz yet. "
+            f"QUIZ LOCKED -- Session has been running for ~{elapsed_minutes} minute(s) "
+            f"(~{remaining_minutes} minute(s) remaining). Do NOT call generate_quiz yet. "
             f"Quizzes are only allowed after {QUIZ_UNLOCK_AFTER_MINUTES} minutes of teaching "
             f"OR when less than {QUIZ_UNLOCK_REMAINING_MINUTES} minutes remain. "
-            "NEVER include a [QUIZ_OFFER] marker at this stage. Focus entirely on teaching."
+            "Focus entirely on teaching and practice right now."
         )
     else:
         remaining_quizzes = MAX_QUIZZES - quiz_count
         quiz_timing_note = (
-            f"✅ QUIZ PHASE — {elapsed_minutes} minute(s) into the session "
-            f"(~{remaining_minutes} minute(s) remaining). You may now offer up to "
-            f"{remaining_quizzes} more quiz(zes). Frame it as a final test: "
-            "'We've covered a lot today — let me set you a quick test to check what you've learned!'"
+            f"QUIZ PHASE ACTIVE -- {elapsed_minutes} minute(s) into the session "
+            f"(~{remaining_minutes} minute(s) remaining). You may now call generate_quiz up to "
+            f"{remaining_quizzes} more time(s). "
+            "Call generate_quiz(topic='<the exact concepts you taught this session>', difficulty='medium', num_questions=5). "
+            "Before calling the tool, say something like: "
+            "'We have covered a lot today -- let me set you a quick test!'"
         )
 
     # Lesson phase + full plan
@@ -921,7 +922,7 @@ RULE 2 — STEP TYPE:
    - During RECAP or TEACH steps: PURE TEACHING only. Do NOT ask check questions. Teach clearly, then move on.
    - During PRACTICE steps: Ask ONE focused question per response, wait for their answer before continuing.
 
-   ── WHEN QUIZ STATUS = ⏳ QUIZ LOCKED and you are in a PRACTICE step ──
+   ── WHEN QUIZ STATUS = QUIZ LOCKED and you are in a PRACTICE step ──
    - End each practice response with ONE short, direct question.
    - STRICTLY ROTATE through all of these types — do NOT default to True/False repeatedly:
      • Sentence recall:  "In one sentence, what is [concept]?"
@@ -932,8 +933,8 @@ RULE 2 — STEP TYPE:
    - The question must be answerable in a few words or one sentence.
    - After the student answers: ONE sentence affirming or correcting, then continue. No lengthy praise.
 
-   ── WHEN QUIZ STATUS = ✅ QUIZ PHASE ──
-   - STOP asking inline questions. Offer a formal quiz using [QUIZ_OFFER] after 1–2 more concepts.
+   ── WHEN QUIZ STATUS = QUIZ PHASE ACTIVE ──
+   - STOP asking inline questions. Call the generate_quiz tool after 1–2 more teaching turns.
 
    ── ALWAYS ──
    - NEVER say "Does that make sense?", "Any questions?", "Are you following?"
@@ -958,30 +959,14 @@ If the student sends a message that's clearly not about the lesson (e.g. "test t
 
 QUIZ RULES — FOLLOW EXACTLY:
 - {quiz_timing_note}
-- When offering a quiz (only if QUIZ PHASE above), include this marker ONLY at the very END of your response (never in the middle):
-  [QUIZ_OFFER: topic="<specific topic name>"]
-- The topic in QUIZ_OFFER MUST be the specific concepts YOU ACTUALLY TAUGHT in this session — not the generic unit names from the booking.
-  ✅ CORRECT: [QUIZ_OFFER: topic="eukaryotic vs prokaryotic cells, light microscope magnification"]
-  ❌ WRONG:   [QUIZ_OFFER: topic="Cell-structure-1, Cell-structure-and-using-a-light-microscope-"]
-  Only list concepts that were explicitly explained and practised in this chat. Do NOT include organelles, specialised cells, tissues, or anything not covered in this session.
-- When including [QUIZ_OFFER], say ONLY something brief like: "Let me set you a quick test on what we've covered — check the Test tab when you're ready." Do NOT write any questions or answer options.
-- NEVER apologise. If you realise you made an error earlier in the session, simply correct course and continue without mentioning it.
-
-SLIDE TRIGGER RULE — FOLLOW EXACTLY:
-- Append [SLIDE_TRIGGER] at the absolute END of your response ONLY when ALL of the following are true:
-  1. The student's message was about the {subject} subject matter (a genuine study question or topic exploration)
-  2. Your response teaches a NEW {subject} concept not already covered earlier in this conversation
-  3. Your response contains factual, educational content directly about {subject}
-- ABSOLUTELY NEVER include [SLIDE_TRIGGER] when ANY of the following apply:
-  - Student asked about technical issues ("I can't see the test", "nothing is loading", "it's not showing")
-  - Student asked about yourself, other users, the platform, or anything not {subject}-related
-  - You are redirecting the student back to the topic
-  - You are responding to social chit-chat ("ok", "I see", "that makes sense", "thanks")
-  - You are offering a quiz, acknowledging quiz results, or praising performance
-  - You are repeating or re-summarising a concept already taught this session
-  - Your response is only a check-in question with no new teaching content
-  - You are troubleshooting a platform problem or giving UI navigation advice
-- One [SLIDE_TRIGGER] per response maximum, at the absolute end, never in the middle.
+- When QUIZ PHASE is ACTIVE and you want to test the student: call the generate_quiz tool.
+  generate_quiz(topic="<specific concepts YOU taught this session>", difficulty="medium", num_questions=5)
+  The topic MUST be the specific concepts you taught -- NOT the generic unit names from the booking.
+  CORRECT: topic="eukaryotic vs prokaryotic cells, light microscope magnification"
+  WRONG:   topic="Cell-structure-1, Cell-structure-and-using-a-light-microscope-"
+  Before calling the tool, say: "We have covered a lot -- let me set you a quick test!"
+- After the quiz tool is called, the student will see the quiz in their interface. Continue naturally.
+- NEVER apologise. If you made an error earlier, just correct course and continue.
 
 SESSION-TYPE BEHAVIOUR:
 {session_type_instruction}

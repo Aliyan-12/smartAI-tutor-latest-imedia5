@@ -318,6 +318,25 @@ async def stream_message(
         else:
             session_system_prompt = SIMPLE_CHAT_SYSTEM_PROMPT
 
+    # Build ToolContext for session chats so Gemini can call session tools
+    tool_context = None
+    if is_session and _appt_id:
+        try:
+            from app.services.appointment_service import get_appointment
+            from app.tools.session_tools import ToolContext
+            appt = await get_appointment(db, _appt_id)
+            if appt:
+                tool_context = ToolContext(
+                    db=db,
+                    student_id=current_user.id,
+                    appointment_id=_appt_id,
+                    subject=appt.subject,
+                    key_stage=appt.key_stage,
+                    chat_session_id=chat.session_id,
+                )
+        except Exception:
+            logger.warning(f"Could not build ToolContext for appointment {_appt_id}")
+
     async def event_stream():
         full_response = []
         yield f"data: {json.dumps({'type': 'start', 'session_id': chat.session_id})}\n\n"
@@ -333,22 +352,28 @@ async def stream_message(
             rag_chunks=rag_chunks,
             student_preferences=student_prefs,
             system_prompt_override=session_system_prompt,
+            tool_context=tool_context,
         ):
+            # Intercept tool-result tokens — emit as special SSE events, skip DB storage
+            stripped = token.strip()
+            if stripped.startswith("[TOOL_RESULT:") and stripped.endswith("]"):
+                try:
+                    inner = stripped[len("[TOOL_RESULT:"):-1]
+                    tr = json.loads(inner)
+                    if tr.get("tool") == "generate_quiz":
+                        data = tr.get("data", {})
+                        yield f"data: {json.dumps({'type': 'quiz_offer', 'content': data.get('topic', ''), 'assessment_id': data.get('assessment_id'), 'questions': data.get('questions', [])})}\n\n"
+                    yield f"data: {json.dumps({'type': 'tool_result', 'tool': tr.get('tool', ''), 'data': tr.get('data', {})})}\n\n"
+                except Exception:
+                    pass
+                continue  # Do NOT add tool-result tokens to full_response
             full_response.append(token)
             yield f"data: {json.dumps({'type': 'token', 'content': token})}\n\n"
 
         complete_text = "".join(full_response)
 
-        # Only process quiz/slide markers for session chats
-        if is_session:
-            quiz_topic = gemini_service.extract_quiz_offer(complete_text)
-            clean_text = gemini_service.strip_quiz_offer(complete_text)
-        else:
-            quiz_topic = None
-            clean_text = complete_text
-
-        if not is_session:
-            clean_text = clean_text.replace("[SLIDE_TRIGGER]", "").replace("[QUIZ_OFFER:", "").strip()
+        # Strip any stray text markers from saved text (tools now handle quiz/slides)
+        clean_text = complete_text.replace("[SLIDE_TRIGGER]", "").strip()
 
         if "[Error:" in clean_text:
             yield f"data: {json.dumps({'type': 'end'})}\n\n"
@@ -380,9 +405,6 @@ async def stream_message(
 
             if title_to_yield:
                 yield f"data: {json.dumps({'type': 'title', 'content': title_to_yield})}\n\n"
-
-        if quiz_topic:
-            yield f"data: {json.dumps({'type': 'quiz_offer', 'content': quiz_topic})}\n\n"
 
         yield f"data: {json.dumps({'type': 'end'})}\n\n"
 
