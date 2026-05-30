@@ -184,6 +184,11 @@ class MCQQuestion(BaseModel):
     topic_tag: str
 
 
+class MCQQuestionList(BaseModel):
+    # Wrapper required: langchain-google-genai>=4.0.0 rejects List[Model] directly
+    questions: List[MCQQuestion]
+
+
 # ---------------------------------------------------------------------------
 # Public: generate_response
 # Supports both the legacy positional signature AND the keyword-argument variant
@@ -441,15 +446,16 @@ def generate_mcq_questions(
             "You are a quiz generator. Generate exactly the number of questions requested."
         )
 
-    structured_llm = get_llm().with_structured_output(List[MCQQuestion])
+    # Use MCQQuestionList wrapper — langchain-google-genai>=4.0.0 rejects List[Model] directly
+    structured_llm = get_llm().with_structured_output(MCQQuestionList)
     lc_messages = [
         SystemMessage(content=system_instruction),
         HumanMessage(content=prompt),
     ]
     try:
-        questions: List[MCQQuestion] = structured_llm.invoke(lc_messages)
+        result: MCQQuestionList = structured_llm.invoke(lc_messages)
         # Convert Pydantic models to plain dicts for downstream callers
-        return [q.model_dump() for q in questions]
+        return [q.model_dump() for q in result.questions]
     except Exception as e:
         logger.error(f"generate_mcq_questions structured output failed: {e}")
         raise RuntimeError(f"MCQ generation error: {e}") from e
