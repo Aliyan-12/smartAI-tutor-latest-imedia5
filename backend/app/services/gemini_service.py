@@ -311,8 +311,15 @@ async def stream_response_async(
 
         try:
             async for chunk in llm.astream(messages):
-                if chunk.content:
-                    yield chunk.content
+                # chunk.content can be a list of parts (Gemini multi-part) or a plain string
+                content = chunk.content
+                if isinstance(content, list):
+                    content = "".join(
+                        part.get("text", "") if isinstance(part, dict) else str(part)
+                        for part in content
+                    )
+                if content:
+                    yield content
                 full_response = (full_response + chunk) if full_response is not None else chunk
         except Exception as e:
             logger.error(f"LangChain astream error (round {_round}): {e}")

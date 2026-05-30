@@ -354,6 +354,12 @@ async def stream_message(
             system_prompt_override=session_system_prompt,
             tool_context=tool_context,
         ):
+            # Ensure token is always a string (LangChain can yield lists on multi-part content)
+            if not isinstance(token, str):
+                token = "".join(
+                    p.get("text", "") if isinstance(p, dict) else str(p)
+                    for p in token
+                ) if isinstance(token, list) else str(token)
             # Intercept tool-result tokens — emit as special SSE events, skip DB storage
             stripped = token.strip()
             if stripped.startswith("[TOOL_RESULT:") and stripped.endswith("]"):
