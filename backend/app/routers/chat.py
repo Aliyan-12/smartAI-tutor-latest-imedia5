@@ -278,6 +278,12 @@ async def stream_message(
         if _m:
             _appt_id = int(_m.group(1))
 
+    logger.info(
+        f"Context built: history_msgs={len(history)}, "
+        f"rag_chunks={len(rag_chunks) if rag_chunks else 0}, "
+        f"is_session={_appt_id is not None}, appt_id={_appt_id}"
+    )
+
     # Build a session-specific system prompt when this chat belongs to an appointment
     # history already includes the new user message so subtract 1 for the history_len
     session_system_prompt: str | None = None
@@ -334,6 +340,10 @@ async def stream_message(
                     key_stage=appt.key_stage,
                     chat_session_id=chat.session_id,
                 )
+                logger.info(
+                    f"ToolContext built: appt_id={_appt_id}, student_id={current_user.id}, "
+                    f"subject={appt.subject}, key_stage={appt.key_stage}"
+                )
         except Exception:
             logger.warning(f"Could not build ToolContext for appointment {_appt_id}")
 
@@ -366,6 +376,7 @@ async def stream_message(
                 try:
                     inner = stripped[len("[TOOL_RESULT:"):-1]
                     tr = json.loads(inner)
+                    logger.info(f"Tool result intercepted: tool={tr.get('tool')}, action={tr.get('data', {}).get('action')}")
                     if tr.get("tool") == "generate_quiz":
                         data = tr.get("data", {})
                         yield f"data: {json.dumps({'type': 'quiz_offer', 'content': data.get('topic', ''), 'assessment_id': data.get('assessment_id'), 'questions': data.get('questions', [])})}\n\n"

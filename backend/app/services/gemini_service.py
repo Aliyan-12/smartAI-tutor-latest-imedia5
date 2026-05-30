@@ -56,7 +56,7 @@ SIMPLE_CHAT_SYSTEM_PROMPT = (
     "to answer the student's question. Synthesise the information naturally and accurately. "
     "Do not mention chunk boundaries or source labels. If the context does not fully answer the "
     "question, supplement with your general knowledge and say so.\n\n"
-    "Focus purely on explaining topics clearly using the knowledge base provided. Do not include any special markers or control sequences in your responses."
+    "Focus purely on explaining topics clearly. When [KNOWLEDGE BASE CONTEXT] is provided, use it as your primary reference and cite specific facts from it. Do not include any special markers or control sequences in your responses. Keep responses concise — maximum 4 sentences for a direct question, maximum 6 sentences for a concept explanation."
 )
 
 
@@ -305,6 +305,12 @@ async def stream_response_async(
         tools = []
 
     llm = get_llm(tools=tools if tools else None)
+    logger.info(
+        f"stream_response_async: history={len(history)} msgs, "
+        f"rag_chunks={len(rag_chunks) if rag_chunks else 0}, "
+        f"tools_bound={[t.name for t in tools]}, "
+        f"has_system_prompt={bool(system_prompt_override or student_preferences)}"
+    )
 
     for _round in range(3):   # max 3 tool-call rounds
         full_response = None
@@ -329,6 +335,8 @@ async def stream_response_async(
         # If no tool calls in the response, we are done
         tool_calls = getattr(full_response, "tool_calls", None) if full_response is not None else None
         if not tool_calls:
+            if _round > 0:
+                logger.info(f"Tool loop completed after {_round + 1} round(s)")
             break
 
         tool_map = {t.name: t for t in tools}
@@ -351,8 +359,9 @@ async def stream_response_async(
                 )
                 # Emit a structured tool-result token for the router to intercept
                 yield f"\n[TOOL_RESULT:{_json.dumps({'tool': tool_name, 'data': result})}]\n"
+                logger.info(f"Tool executed: {tool_name} → action={result.get('action', 'n/a')}")
             except Exception as e:
-                logger.error(f"Tool '{tool_name}' execution failed: {e}")
+                logger.error(f"Tool '{tool_name}' execution failed: {type(e).__name__}: {e}", exc_info=True)
 
         if not tool_messages:
             break

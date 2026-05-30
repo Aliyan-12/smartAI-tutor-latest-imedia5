@@ -36,15 +36,47 @@ def _get_client() -> genai.Client:
 
 _kokoro: Optional[KPipeline] = None
 
+# Voice: af_sky — energetic, bright, expressive American English
+# lang_code MUST match voice prefix: "a" for af_*/am_*, "b" for bf_*/bm_*
+TTS_VOICE = "af_sky"
+TTS_SPEED = 1.05
+
 
 def _get_kokoro() -> KPipeline:
-    """Lazy-init the Kokoro pipeline (British English, ~300 MB model)."""
+    """Lazy-init the Kokoro pipeline (American English, af_sky voice — energetic and natural)."""
     global _kokoro
     if _kokoro is None:
-        logger.info("Initialising Kokoro TTS pipeline (lang_code='b')...")
-        _kokoro = KPipeline(lang_code="b")   # "b" = British English
+        logger.info("Initialising Kokoro TTS pipeline (lang_code='a', voice=af_sky)...")
+        _kokoro = KPipeline(lang_code="a")   # "a" = American English (af_sky is the most expressive)
         logger.info("Kokoro TTS pipeline ready.")
     return _kokoro
+
+
+import re as _re
+
+def _prep_tts_text(text: str) -> str:
+    """
+    Clean and prepare text for natural, energetic TTS delivery.
+    - Strip markdown symbols Kokoro would pronounce literally
+    - Normalise whitespace
+    - Keep punctuation that drives prosody (! ? , .)
+    """
+    # Strip bold/italic markers
+    text = _re.sub(r'\*{1,3}([^*]+)\*{1,3}', r'\1', text)
+    # Strip headers
+    text = _re.sub(r'^#{1,6}\s+', '', text, flags=_re.MULTILINE)
+    # Strip inline code ticks
+    text = _re.sub(r'`+([^`]+)`+', r'\1', text)
+    # Strip bullet dashes/asterisks at line start
+    text = _re.sub(r'^\s*[-*•]\s+', '', text, flags=_re.MULTILINE)
+    # Collapse multiple newlines to a single pause (period)
+    text = _re.sub(r'\n{2,}', '. ', text)
+    text = _re.sub(r'\n', ' ', text)
+    # Remove leftover bracket markers
+    text = _re.sub(r'\[[A-Z_:][^\]]*\]', '', text)
+    # Collapse multiple spaces
+    text = _re.sub(r' {2,}', ' ', text)
+    return text.strip()
 
 
 def _pcm_to_wav(pcm_data: bytes, sample_rate: int = 24000, num_channels: int = 1, bits_per_sample: int = 16) -> bytes:
@@ -63,16 +95,17 @@ def _pcm_to_wav(pcm_data: bytes, sample_rate: int = 24000, num_channels: int = 1
 
 def text_to_speech(text: str, lang: str = "en") -> tuple[bytes, str]:
     """
-    Convert text to speech using Kokoro (British English, bf_emma voice).
+    Convert text to speech using Kokoro (af_sky — energetic, expressive, natural).
     Returns (wav_bytes, "audio/wav") — identical return type to the previous implementation.
     """
-    clean = text.strip()
+    clean = _prep_tts_text(text)
     if not clean or clean.startswith("[Error"):
         raise ValueError("Cannot generate speech for empty or error text")
 
     pipeline = _get_kokoro()
-    # Each iteration yields (graphemes, phonemes, audio_array)
-    chunks = [audio for _, _, audio in pipeline(clean, voice="bf_emma")]
+    # af_sky: young, bright, expressive — most energetic Kokoro voice
+    # speed=1.05 adds natural energy without sounding rushed
+    chunks = [audio for _, _, audio in pipeline(clean, voice=TTS_VOICE, speed=TTS_SPEED)]
     if not chunks:
         raise ValueError("Kokoro returned no audio for the provided text")
 
