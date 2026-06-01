@@ -340,10 +340,13 @@ async def get_appointment_report(
             raise HTTPException(status_code=403, detail="Not your child's appointment")
 
     if appt.status not in ("completed", "terminated"):
-        raise HTTPException(
-            status_code=400,
-            detail="Session report is only available for completed or terminated sessions."
-        )
+        # Session not yet ended — return pending so the frontend retries gracefully (no 400 spam)
+        return {
+            "appointment_id": appointment_id,
+            "status": appt.status,
+            "pending": True,
+            "report": None,
+        }
 
     from app.services.lesson_service import get_appointment_report, generate_session_report
     from app.models.lesson_plan import LessonPlan

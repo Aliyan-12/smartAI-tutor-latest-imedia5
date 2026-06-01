@@ -29,17 +29,24 @@ export default function PostSessionScreen({
   useEffect(() => {
     let cancelled = false;
     const fetchWithRetry = async () => {
-      for (let attempt = 0; attempt < 8; attempt++) {
+      // Give the backend pipeline a moment to start before the first poll
+      await new Promise((r) => setTimeout(r, 1500));
+      for (let attempt = 0; attempt < 20; attempt++) {
         if (cancelled) return;
         try {
           const data: any = await appointmentsApi.getReport(appointmentId);
+          // Backend returns {pending: true} while session hasn't ended yet — retry
+          if (data?.pending) {
+            await new Promise((r) => setTimeout(r, 2500));
+            continue;
+          }
           if (!cancelled) {
             setReport((data?.report ?? data) as SessionReport);
             setLoading(false);
           }
           return;
         } catch {
-          if (attempt < 7) {
+          if (attempt < 19) {
             await new Promise((r) => setTimeout(r, 2500));
           } else if (!cancelled) {
             setError("Could not load session report. Your progress has still been saved.");

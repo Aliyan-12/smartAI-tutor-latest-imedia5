@@ -158,19 +158,19 @@ export default function SessionPage() {
   const [practiceAnswering, setPracticeAnswering] = useState(false);
   const [testAnswering, setTestAnswering] = useState(false);
 
-  const [isAiTyping, setIsAiTyping] = useState(false);
+  // Single flag: blob shows while true; cleared when TTS fires (or stream ends if TTS off)
+  const [aiWaiting, setAiWaiting] = useState(false);
+  const aiWaitingRef = useRef(false);
   const [toolResults, setToolResults] = useState<Array<{ tool: string; data: Record<string, unknown>; id: string }>>([]);
 
   // Attachment / web-search opts for ChatInput
   const [webSearchEnabled, setWebSearchEnabled] = useState(false);
   const [researchEnabled, setResearchEnabled] = useState(false);
 
-  // TTS-synchronized word-by-word reveal
+  // Word-by-word reveal while TTS plays
   const [ttsRevealedText, setTtsRevealedText] = useState<string>("");
   const [ttsRevealingMsgId, setTtsRevealingMsgId] = useState<number | null>(null);
   const revealIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  // Set in onStreamComplete so the new AI message is hidden the instant it arrives, before TTS fires
-  const ttsExpectedRef = useRef(false);
 
   const [sessionBriefing, setSessionBriefing] = useState<{
     hook?: string;
@@ -223,25 +223,21 @@ export default function SessionPage() {
     if (!ttsEnabled) cancelStreamTTS();
   }, [ttsEnabled]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Pre-hide the new AI message the instant it lands in messages (before playing fires)
-  useEffect(() => {
-    if (!ttsExpectedRef.current) return;
-    const lastAi = [...messages].reverse().find((m) => m.role === "assistant");
-    if (!lastAi) return;
-    setTtsRevealingMsgId(lastAi.id);
-    setTtsRevealedText("");
-  }, [messages.length]); // eslint-disable-line react-hooks/exhaustive-deps
+  // Keep aiWaitingRef in sync for use in setTimeout callbacks
+  useEffect(() => { aiWaitingRef.current = aiWaiting; }, [aiWaiting]);
 
   // TTS word-by-word reveal: start when TTS begins playing
   useEffect(() => {
     if (playing) {
-      ttsExpectedRef.current = false;
+      // Blob off → text starts streaming word by word
+      setAiWaiting(false);
+      aiWaitingRef.current = false;
       const lastAi = [...messages].reverse().find((m) => m.role === "assistant");
       if (!lastAi) return;
       const words = lastAi.content.split(" ");
-      let i = 0;
       setTtsRevealingMsgId(lastAi.id);
-      setTtsRevealedText("");
+      setTtsRevealedText(words[0] || "");  // first word immediately — no empty flash
+      let i = 1;
       if (revealIntervalRef.current) clearInterval(revealIntervalRef.current);
       revealIntervalRef.current = setInterval(() => {
         i++;
@@ -256,11 +252,8 @@ export default function SessionPage() {
         clearInterval(revealIntervalRef.current);
         revealIntervalRef.current = null;
       }
-      // Don't clear if we're still waiting for TTS to start (pre-hide active)
-      if (!ttsExpectedRef.current) {
-        setTtsRevealingMsgId(null);
-        setTtsRevealedText("");
-      }
+      setTtsRevealingMsgId(null);
+      setTtsRevealedText("");
     }
   }, [playing]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -402,9 +395,11 @@ export default function SessionPage() {
       const remaining = Math.max(0, Math.floor((end - now) / 1000));
       setTimeRemaining(remaining);
       if (remaining <= 0) {
-        appointmentsApi.updateStatus(apptId, "terminated").catch(() => {});
-        setSessionState("ended");
         if (timerRef.current) clearInterval(timerRef.current);
+        // Await status update before showing PostSessionScreen — avoids report 400s
+        appointmentsApi.updateStatus(apptId, "terminated")
+          .catch(() => {})
+          .finally(() => setSessionState("ended"));
       }
     };
 
@@ -445,11 +440,6 @@ export default function SessionPage() {
     feedStreamTTS(`Quiz complete! You scored ${Math.round(testResult.score)} percent. ${weakMsg}`);
     endStreamTTS();
   }, [testResult]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  // Clear typing indicator as a safety net if streaming ends without firing onStreamStart
-  useEffect(() => {
-    if (!streaming) setIsAiTyping(false);
-  }, [streaming]);
 
   // Listen for tool_result events dispatched by useChat
   useEffect(() => {
@@ -651,13 +641,21 @@ export default function SessionPage() {
         if (isVoiceActive) {
           sendQuizResult(quizTopic, quizScore, quizStrong, quizWeak);
         } else if (activeSessionId) {
-          setIsAiTyping(true);
+          setAiWaiting(true);
+          aiWaitingRef.current = true;
           sendQuizFeedback(activeSessionId, quizTopic, quizScore, quizStrong, quizWeak, {
-            onStreamStart: () => { setIsAiTyping(false); if (ttsEnabledRef.current) startStreamTTS(); },
+            onStreamStart: () => { if (ttsEnabledRef.current) startStreamTTS(); },
             onToken: (t: string) => { if (ttsEnabledRef.current) feedStreamTTS(t); },
             onStreamComplete: () => {
-              setIsAiTyping(false);
-              if (ttsEnabledRef.current) { ttsExpectedRef.current = true; endStreamTTS(); }
+              if (ttsEnabledRef.current) {
+                endStreamTTS();
+                setTimeout(() => {
+                  if (aiWaitingRef.current) { setAiWaiting(false); aiWaitingRef.current = false; }
+                }, 8000);
+              } else {
+                setAiWaiting(false);
+                aiWaitingRef.current = false;
+              }
             },
           }, questionDetails);
         }
@@ -760,14 +758,26 @@ export default function SessionPage() {
 
   const sessionSend = useCallback(
     (text: string, sendOpts?: { imageData?: string; imageMime?: string; webSearch?: boolean; research?: boolean }) => {
-      setIsAiTyping(true);
+      setAiWaiting(true);
+      aiWaitingRef.current = true;
       sendMessage(text, {
         suppressNavigation: true,
-        onStreamStart: () => { setIsAiTyping(false); if (ttsEnabledRef.current) startStreamTTS(); },
+        onStreamStart: () => { if (ttsEnabledRef.current) startStreamTTS(); },
         onToken: (t: string) => { if (ttsEnabledRef.current) feedStreamTTS(t); },
         onStreamComplete: () => {
-          setIsAiTyping(false);
-          if (ttsEnabledRef.current) { ttsExpectedRef.current = true; endStreamTTS(); }
+          if (ttsEnabledRef.current) {
+            endStreamTTS();
+            // Safety: if TTS never fires within 8s, clear the blob
+            setTimeout(() => {
+              if (aiWaitingRef.current) {
+                setAiWaiting(false);
+                aiWaitingRef.current = false;
+              }
+            }, 8000);
+          } else {
+            setAiWaiting(false);
+            aiWaitingRef.current = false;
+          }
         },
         imageData: sendOpts?.imageData,
         imageMime: sendOpts?.imageMime,
@@ -1495,10 +1505,9 @@ export default function SessionPage() {
               streaming={streaming}
               streamContent={streamContent}
               onSpeak={speakText}
-              isAiTyping={isAiTyping}
+              isWaiting={aiWaiting}
               revealingMsgId={ttsRevealingMsgId}
               revealedText={ttsRevealedText}
-              suppressStreamText={ttsEnabled}
             />
             {toolResults.map((tr) => {
               if (tr.tool === "set_homework") {
