@@ -12,6 +12,8 @@ interface Props {
   // TTS-synchronized word reveal
   revealingMsgId?: number | null;
   revealedText?: string;
+  // When true, suppress streaming text and show only the blob (used with TTS)
+  suppressStreamText?: boolean;
 }
 
 export default function ChatWindow({
@@ -22,6 +24,7 @@ export default function ChatWindow({
   isAiTyping = false,
   revealingMsgId,
   revealedText,
+  suppressStreamText = false,
 }: Props) {
   const bottomRef = useRef<HTMLDivElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -78,37 +81,41 @@ export default function ChatWindow({
           vertical-align: middle;
         }
 
-        /* ── Pulsing blob: waiting for first token ── */
-        @keyframes blobScale {
-          0%, 100% { transform: scale(1);    opacity: 0.55; }
-          50%       { transform: scale(1.22); opacity: 1;    }
+        /* ── Claude-style thinking: pulsing star + skeleton lines ── */
+        @keyframes starPulse {
+          0%   { transform: rotate(0deg) scale(0.92); opacity: 0.7; }
+          25%  { transform: rotate(90deg) scale(1.08); opacity: 1; }
+          50%  { transform: rotate(180deg) scale(0.92); opacity: 0.7; }
+          75%  { transform: rotate(270deg) scale(1.08); opacity: 1; }
+          100% { transform: rotate(360deg) scale(0.92); opacity: 0.7; }
         }
-        @keyframes blobOrbit {
-          0%   { transform: translate(0, 0) scale(0.7); opacity: 0.4; }
-          25%  { transform: translate(5px, -5px) scale(1); opacity: 0.9; }
-          50%  { transform: translate(10px, 0) scale(0.7); opacity: 0.4; }
-          75%  { transform: translate(5px, 5px) scale(1); opacity: 0.9; }
-          100% { transform: translate(0, 0) scale(0.7); opacity: 0.4; }
+        @keyframes skeletonShimmer {
+          0%   { background-position: -200% center; }
+          100% { background-position: 200% center; }
         }
-        .ai-blob-wrap {
+        .ai-thinking-wrap {
           display: flex;
-          align-items: center;
-          gap: 5px;
-          padding: 4px 2px;
+          flex-direction: column;
+          gap: 9px;
+          padding: 4px 0;
         }
-        .ai-blob-core {
-          width: 10px; height: 10px;
-          border-radius: 50%;
-          background: #1a73e8;
-          animation: blobScale 1.2s ease-in-out infinite;
+        .ai-thinking-star {
+          animation: starPulse 1.8s ease-in-out infinite;
+          color: #1a73e8;
+          display: block;
         }
-        .ai-blob-dot {
-          width: 6px; height: 6px;
-          border-radius: 50%;
-          background: #1a73e8;
+        .ai-skeleton-line {
+          height: 9px;
+          border-radius: 99px;
+          background: linear-gradient(
+            90deg,
+            var(--border-color, #e2e8f0) 25%,
+            #c5d8fb 50%,
+            var(--border-color, #e2e8f0) 75%
+          );
+          background-size: 200% 100%;
+          animation: skeletonShimmer 1.6s ease-in-out infinite;
         }
-        .ai-blob-dot:nth-child(2) { animation: blobScale 1.2s ease-in-out infinite 0.15s; opacity: 0.7; }
-        .ai-blob-dot:nth-child(3) { animation: blobScale 1.2s ease-in-out infinite 0.30s; opacity: 0.5; }
 
         /* ── Streaming bubble: subtle left-border glow ── */
         @keyframes streamGlow {
@@ -179,7 +186,9 @@ export default function ChatWindow({
 
           return (
             <div key={msg.id} className="message assistant chat-msg-animate">
-              <div className="message-avatar">AI</div>
+              <div className="message-avatar" style={{ background: "transparent", overflow: "hidden", padding: 1, flexShrink: 0 }}>
+                <img src="/images/aitutor 4 schools-robo.png" style={{ width: "100%", height: "100%", objectFit: "contain" }} alt="AI" />
+              </div>
               <div className="message-content ai-free-text">
                 <ReactMarkdown>{displayContent}</ReactMarkdown>
                 <div className="message-actions">
@@ -206,10 +215,12 @@ export default function ChatWindow({
         );
       })}
 
-      {/* Streaming: has content — borderless free text with left glow */}
-      {streaming && streamContent && (
+      {/* Streaming: has content — borderless free text with left glow (hidden when suppressStreamText) */}
+      {streaming && streamContent && !suppressStreamText && (
         <div className="message assistant chat-msg-animate">
-          <div className="message-avatar">AI</div>
+          <div className="message-avatar" style={{ background: "transparent", overflow: "hidden", padding: 1, flexShrink: 0 }}>
+            <img src="/images/aitutor 4 schools-robo.png" style={{ width: "100%", height: "100%", objectFit: "contain" }} alt="AI" />
+          </div>
           <div className="message-content ai-free-text streaming-bubble">
             <span className="stream-cursor">
               <ReactMarkdown>{revealingMsgId != null && revealedText != null ? revealedText : streamContent}</ReactMarkdown>
@@ -218,26 +229,22 @@ export default function ChatWindow({
         </div>
       )}
 
-      {/* Streaming: waiting for first token — pulsing blob indicator */}
-      {(streaming && !streamContent) || (isAiTyping && !streaming) ? (
-        <div className="message assistant" style={{ animation: "msgSlideIn 0.22s ease" }}>
-          <div className="message-avatar" style={{
-            background: "linear-gradient(135deg, #1a73e8, #1557b0)",
-            color: "#fff",
-            fontSize: 11,
-            fontWeight: 700,
-          }}>AI</div>
-          <div className="message-content">
-            <div className="message-bubble" style={{
-              background: "#f0f7ff",
-              border: "1px solid #c5d8fb",
-              minWidth: 64,
-            }}>
-              <div className="ai-blob-wrap">
-                <div className="ai-blob-core" />
-                <div className="ai-blob-dot" />
-                <div className="ai-blob-dot" />
-              </div>
+      {/* Thinking / stream-suppressed: Claude-style pulsing star + skeleton lines */}
+      {(streaming && (!streamContent || suppressStreamText)) || (isAiTyping && !streaming) ? (
+        <div className="message assistant" style={{ animation: "msgSlideIn 0.22s ease", alignItems: "flex-start" }}>
+          <div className="message-avatar" style={{ background: "transparent", overflow: "hidden", padding: 1, flexShrink: 0 }}>
+            <img src="/images/aitutor 4 schools-robo.png" style={{ width: "100%", height: "100%", objectFit: "contain" }} alt="AI" />
+          </div>
+          <div className="message-content" style={{ paddingTop: 2 }}>
+            <div className="ai-thinking-wrap">
+              {/* 4-pointed star SVG — rotates and pulses */}
+              <svg className="ai-thinking-star" width="22" height="22" viewBox="0 0 24 24" fill="#1a73e8" xmlns="http://www.w3.org/2000/svg">
+                <path d="M12 0 C12.5 5.5 13.5 9.5 14.5 11.5 C16.5 12.5 20.5 12 24 12 C20.5 12 16.5 11.5 14.5 12.5 C13.5 14.5 12.5 18.5 12 24 C11.5 18.5 10.5 14.5 9.5 12.5 C7.5 11.5 3.5 12 0 12 C3.5 12 7.5 12.5 9.5 11.5 C10.5 9.5 11.5 5.5 12 0 Z" />
+              </svg>
+              {/* Skeleton shimmer lines */}
+              <div className="ai-skeleton-line" style={{ width: "72%" }} />
+              <div className="ai-skeleton-line" style={{ width: "52%", animationDelay: "0.2s" }} />
+              <div className="ai-skeleton-line" style={{ width: "36%", animationDelay: "0.4s" }} />
             </div>
           </div>
         </div>

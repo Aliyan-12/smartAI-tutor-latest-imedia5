@@ -5,7 +5,6 @@ import ResizablePanels from "../components/ResizablePanels";
 import { appointmentsApi, assessmentsApi, sessionsApi, gamificationApi, slidesApi } from "../services/api";
 import ChatWindow from "../components/ChatWindow";
 import ChatInput from "../components/ChatInput";
-import LottiePlayer, { LOTTIE_URLS } from "../components/LottiePlayer";
 import AssessmentMode from "../components/AssessmentMode";
 import PostSessionScreen from "../components/PostSessionScreen";
 import LessonSlide from "../components/LessonSlide";
@@ -170,6 +169,8 @@ export default function SessionPage() {
   const [ttsRevealedText, setTtsRevealedText] = useState<string>("");
   const [ttsRevealingMsgId, setTtsRevealingMsgId] = useState<number | null>(null);
   const revealIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  // Set in onStreamComplete so the new AI message is hidden the instant it arrives, before TTS fires
+  const ttsExpectedRef = useRef(false);
 
   const [sessionBriefing, setSessionBriefing] = useState<{
     hook?: string;
@@ -222,9 +223,19 @@ export default function SessionPage() {
     if (!ttsEnabled) cancelStreamTTS();
   }, [ttsEnabled]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Pre-hide the new AI message the instant it lands in messages (before playing fires)
+  useEffect(() => {
+    if (!ttsExpectedRef.current) return;
+    const lastAi = [...messages].reverse().find((m) => m.role === "assistant");
+    if (!lastAi) return;
+    setTtsRevealingMsgId(lastAi.id);
+    setTtsRevealedText("");
+  }, [messages.length]); // eslint-disable-line react-hooks/exhaustive-deps
+
   // TTS word-by-word reveal: start when TTS begins playing
   useEffect(() => {
     if (playing) {
+      ttsExpectedRef.current = false;
       const lastAi = [...messages].reverse().find((m) => m.role === "assistant");
       if (!lastAi) return;
       const words = lastAi.content.split(" ");
@@ -245,8 +256,11 @@ export default function SessionPage() {
         clearInterval(revealIntervalRef.current);
         revealIntervalRef.current = null;
       }
-      setTtsRevealingMsgId(null);
-      setTtsRevealedText("");
+      // Don't clear if we're still waiting for TTS to start (pre-hide active)
+      if (!ttsExpectedRef.current) {
+        setTtsRevealingMsgId(null);
+        setTtsRevealedText("");
+      }
     }
   }, [playing]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -641,7 +655,10 @@ export default function SessionPage() {
           sendQuizFeedback(activeSessionId, quizTopic, quizScore, quizStrong, quizWeak, {
             onStreamStart: () => { setIsAiTyping(false); if (ttsEnabledRef.current) startStreamTTS(); },
             onToken: (t: string) => { if (ttsEnabledRef.current) feedStreamTTS(t); },
-            onStreamComplete: () => { setIsAiTyping(false); if (ttsEnabledRef.current) endStreamTTS(); },
+            onStreamComplete: () => {
+              setIsAiTyping(false);
+              if (ttsEnabledRef.current) { ttsExpectedRef.current = true; endStreamTTS(); }
+            },
           }, questionDetails);
         }
       } catch (err: any) {
@@ -748,7 +765,10 @@ export default function SessionPage() {
         suppressNavigation: true,
         onStreamStart: () => { setIsAiTyping(false); if (ttsEnabledRef.current) startStreamTTS(); },
         onToken: (t: string) => { if (ttsEnabledRef.current) feedStreamTTS(t); },
-        onStreamComplete: () => { setIsAiTyping(false); if (ttsEnabledRef.current) endStreamTTS(); },
+        onStreamComplete: () => {
+          setIsAiTyping(false);
+          if (ttsEnabledRef.current) { ttsExpectedRef.current = true; endStreamTTS(); }
+        },
         imageData: sendOpts?.imageData,
         imageMime: sendOpts?.imageMime,
         webSearch: sendOpts?.webSearch,
@@ -1478,6 +1498,7 @@ export default function SessionPage() {
               isAiTyping={isAiTyping}
               revealingMsgId={ttsRevealingMsgId}
               revealedText={ttsRevealedText}
+              suppressStreamText={ttsEnabled}
             />
             {toolResults.map((tr) => {
               if (tr.tool === "set_homework") {
@@ -1553,24 +1574,6 @@ export default function SessionPage() {
           </>
         ) : null}
       </div>
-
-      {isAiTyping && (
-        <div style={{
-          display: "flex", alignItems: "center", gap: 8,
-          padding: "4px 12px",
-          borderTop: "1px solid var(--border-color)",
-          background: "var(--bg-secondary)",
-        }}>
-          <LottiePlayer
-            src={LOTTIE_URLS.thinking}
-            fallback="🤔"
-            style={{ width: 32, height: 32 }}
-          />
-          <span style={{ fontSize: 12, color: "var(--text-muted)", fontStyle: "italic" }}>
-            AI Tutor is thinking...
-          </span>
-        </div>
-      )}
 
       <div style={styles.chatInputWrap}>
         <ChatInput
