@@ -415,7 +415,7 @@ def make_session_tools(ctx: ToolContext) -> list:
     @tool
     async def deep_research(
         topic: str,
-        research_questions: list = None,
+        research_questions: Optional[List[str]] = None,
     ) -> dict:
         """
         Conduct thorough research on a topic using multiple search queries and synthesize findings.
