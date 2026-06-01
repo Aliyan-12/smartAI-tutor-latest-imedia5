@@ -86,6 +86,10 @@ export function useChat() {
       onStreamStart?: () => void;
       onToken?: (chunk: string) => void;
       onStreamComplete?: (text: string) => void;
+      imageData?: string;
+      imageMime?: string;
+      webSearch?: boolean;
+      research?: boolean;
     }) => {
       const userMsg: ChatMessage = {
         id: Date.now(),
@@ -186,6 +190,12 @@ export function useChat() {
           ]);
           setStreaming(false);
           setStreamContent("");
+        },
+        {
+          imageData: opts?.imageData,
+          imageMime: opts?.imageMime,
+          webSearch: opts?.webSearch,
+          research: opts?.research,
         }
       );
 

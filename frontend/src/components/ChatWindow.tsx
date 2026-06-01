@@ -1,6 +1,6 @@
-import { useEffect, useRef, useCallback } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import ReactMarkdown from "react-markdown";
-import { Volume2 } from "lucide-react";
+import { Volume2, ChevronDown } from "lucide-react";
 import type { ChatMessage } from "../types";
 
 interface Props {
@@ -9,6 +9,9 @@ interface Props {
   streamContent: string;
   onSpeak: (text: string) => void;
   isAiTyping?: boolean;
+  // TTS-synchronized word reveal
+  revealingMsgId?: number | null;
+  revealedText?: string;
 }
 
 export default function ChatWindow({
@@ -17,16 +20,20 @@ export default function ChatWindow({
   streamContent,
   onSpeak,
   isAiTyping = false,
+  revealingMsgId,
+  revealedText,
 }: Props) {
   const bottomRef = useRef<HTMLDivElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const userScrolledUpRef = useRef(false);
+  const [showScrollBtn, setShowScrollBtn] = useState(false);
 
   const handleScroll = useCallback(() => {
     const el = containerRef.current?.parentElement;
     if (!el) return;
     const distanceFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
     userScrolledUpRef.current = distanceFromBottom > 80;
+    setShowScrollBtn(distanceFromBottom > 80);
   }, []);
 
   useEffect(() => {
@@ -113,6 +120,18 @@ export default function ChatWindow({
           animation: streamGlow 1.8s ease-in-out infinite;
           padding-left: 10px !important;
         }
+
+        /* ── AI free-text: no bubble, clean prose ── */
+        .ai-free-text {
+          background: transparent !important;
+          border: none !important;
+          padding: 0 !important;
+          font-size: 0.97rem;
+          line-height: 1.7;
+          color: var(--text-primary, #1a1a1a);
+        }
+        .ai-free-text p { margin: 0 0 0.6em 0; }
+        .ai-free-text p:last-child { margin-bottom: 0; }
       `}</style>
 
       {messages.map((msg) => {
@@ -152,42 +171,49 @@ export default function ChatWindow({
           );
         }
 
-        return (
-          <div key={msg.id} className={`message ${msg.role} chat-msg-animate`}>
-            <div className="message-avatar">
-              {msg.role === "user" ? "U" : "AI"}
-            </div>
-            <div className="message-content">
-              <div className="message-bubble">
-                {msg.role === "assistant" ? (
-                  <ReactMarkdown>{msg.content}</ReactMarkdown>
-                ) : (
-                  msg.content
-                )}
-              </div>
-              {msg.role === "assistant" && (
+        if (msg.role === "assistant") {
+          const displayContent =
+            revealingMsgId != null && msg.id === revealingMsgId && revealedText != null
+              ? revealedText
+              : msg.content;
+
+          return (
+            <div key={msg.id} className="message assistant chat-msg-animate">
+              <div className="message-avatar">AI</div>
+              <div className="message-content ai-free-text">
+                <ReactMarkdown>{displayContent}</ReactMarkdown>
                 <div className="message-actions">
                   <button onClick={() => onSpeak(msg.content)} title="Read aloud">
                     <Volume2 size={14} />
                     <span>Listen</span>
                   </button>
                 </div>
-              )}
+              </div>
+            </div>
+          );
+        }
+
+        // user message
+        return (
+          <div key={msg.id} className={`message ${msg.role} chat-msg-animate`}>
+            <div className="message-avatar">U</div>
+            <div className="message-content">
+              <div className="message-bubble">
+                {msg.content}
+              </div>
             </div>
           </div>
         );
       })}
 
-      {/* Streaming: has content — show with blinking cursor + left-glow border */}
+      {/* Streaming: has content — borderless free text with left glow */}
       {streaming && streamContent && (
         <div className="message assistant chat-msg-animate">
           <div className="message-avatar">AI</div>
-          <div className="message-content">
-            <div className="message-bubble streaming-bubble">
-              <span className="stream-cursor">
-                <ReactMarkdown>{streamContent}</ReactMarkdown>
-              </span>
-            </div>
+          <div className="message-content ai-free-text streaming-bubble">
+            <span className="stream-cursor">
+              <ReactMarkdown>{revealingMsgId != null && revealedText != null ? revealedText : streamContent}</ReactMarkdown>
+            </span>
           </div>
         </div>
       )}
@@ -218,6 +244,33 @@ export default function ChatWindow({
       ) : null}
 
       <div ref={bottomRef} />
+
+      {/* Scroll-to-bottom button */}
+      {showScrollBtn && (
+        <button
+          onClick={() => bottomRef.current?.scrollIntoView({ behavior: "smooth" })}
+          style={{
+            position: "fixed",
+            bottom: 90,
+            left: "50%",
+            transform: "translateX(-50%)",
+            zIndex: 50,
+            background: "rgba(30,30,30,0.85)",
+            border: "1px solid rgba(255,255,255,0.15)",
+            borderRadius: "50%",
+            width: 36,
+            height: 36,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            cursor: "pointer",
+            backdropFilter: "blur(8px)",
+            boxShadow: "0 2px 12px rgba(0,0,0,0.35)",
+          }}
+        >
+          <ChevronDown size={18} color="#fff" />
+        </button>
+      )}
     </div>
   );
 }

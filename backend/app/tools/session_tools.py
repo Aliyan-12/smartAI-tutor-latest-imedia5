@@ -367,6 +367,117 @@ def make_session_tools(ctx: ToolContext) -> list:
             "action": "show_report",
         }
 
+    @tool
+    async def web_search(query: str, num_results: int = 5) -> dict:
+        """
+        Search the web for current information relevant to the student's question.
+        Use when the student asks about recent events, news, or topics that benefit from
+        up-to-date web information beyond the lesson knowledge base.
+        query: specific search query related to the lesson topic
+        num_results: how many results to fetch (default 5)
+        """
+        import asyncio
+        from app.services.llm_service import get_llm
+        from langchain_core.messages import HumanMessage
+
+        search_prompt = (
+            f"Subject: {ctx.subject} {ctx.key_stage}\n\n"
+            f"Search the web and find current, accurate information to answer this query: {query}\n\n"
+            f"Provide a concise, factual summary of what you find. Include any relevant dates, "
+            f"statistics, or key facts. Focus on information relevant to GCSE {ctx.subject} students."
+        )
+
+        try:
+            from langchain_google_genai import GoogleSearchRetrieval
+            search_llm = get_llm(tools=[GoogleSearchRetrieval()])
+            response = await asyncio.to_thread(
+                search_llm.invoke,
+                [HumanMessage(content=search_prompt)]
+            )
+            content = response.content if hasattr(response, "content") else str(response)
+            if isinstance(content, list):
+                content = " ".join(
+                    p.get("text", "") if isinstance(p, dict) else str(p) for p in content
+                )
+            return {
+                "query": query,
+                "results": content,
+                "action": "show_search_results",
+            }
+        except Exception as e:
+            logger.warning(f"web_search tool failed: {e}")
+            return {
+                "query": query,
+                "results": "Web search unavailable at this time. Using knowledge base only.",
+                "action": "show_search_results",
+            }
+
+    @tool
+    async def deep_research(
+        topic: str,
+        research_questions: list = None,
+    ) -> dict:
+        """
+        Conduct thorough research on a topic using multiple search queries and synthesize findings.
+        Use when the student asks for in-depth understanding of a complex topic, wants to explore
+        multiple perspectives, or needs comprehensive background knowledge beyond the lesson.
+        topic: the main research topic
+        research_questions: optional list of specific questions to investigate
+        """
+        import asyncio
+        from app.services.llm_service import get_llm
+        from langchain_core.messages import HumanMessage, SystemMessage
+
+        questions = research_questions or [
+            f"What are the key concepts of {topic} in {ctx.subject}?",
+            f"What are common misconceptions about {topic}?",
+            f"How does {topic} relate to {ctx.key_stage} GCSE exam requirements?",
+        ]
+
+        try:
+            from langchain_google_genai import GoogleSearchRetrieval
+            research_llm = get_llm(tools=[GoogleSearchRetrieval()])
+
+            research_prompt = (
+                f"You are a research assistant helping a GCSE {ctx.subject} {ctx.key_stage} student "
+                f"understand '{topic}' in depth.\n\n"
+                f"Research the following questions thoroughly:\n"
+                + "\n".join(f"- {q}" for q in questions)
+                + f"\n\nSynthesize your findings into a comprehensive, student-friendly explanation. "
+                f"Include: key facts, real-world examples, exam-relevant points, and any recent developments. "
+                f"Format with clear sections."
+            )
+
+            response = await asyncio.to_thread(
+                research_llm.invoke,
+                [
+                    SystemMessage(
+                        content=f"You are a thorough research assistant for GCSE {ctx.subject} students."
+                    ),
+                    HumanMessage(content=research_prompt),
+                ],
+            )
+            content = response.content if hasattr(response, "content") else str(response)
+            if isinstance(content, list):
+                content = " ".join(
+                    p.get("text", "") if isinstance(p, dict) else str(p) for p in content
+                )
+
+            return {
+                "topic": topic,
+                "research": content,
+                "questions_investigated": questions,
+                "action": "show_research",
+            }
+        except Exception as e:
+            logger.warning(f"deep_research tool failed: {e}")
+            return {
+                "topic": topic,
+                "research": f"Research synthesis unavailable. Please ask your teacher for more resources on {topic}.",
+                "questions_investigated": questions,
+                "action": "show_research",
+            }
+
     return [
         generate_quiz,
         set_homework,
@@ -375,4 +486,6 @@ def make_session_tools(ctx: ToolContext) -> list:
         advance_lesson_phase,
         evaluate_answer,
         generate_session_report,
+        web_search,
+        deep_research,
     ]

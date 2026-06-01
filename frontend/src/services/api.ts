@@ -103,10 +103,22 @@ export const chatApi = {
     sessionId: string | null,
     onEvent: (event: { type: string; content?: string; session_id?: string }) => void,
     onDone: () => void,
-    onError: (err: Error) => void
+    onError: (err: Error) => void,
+    extras?: {
+      imageData?: string;
+      imageMime?: string;
+      webSearch?: boolean;
+      research?: boolean;
+    }
   ) {
     const token = getToken();
     const controller = new AbortController();
+
+    const body: Record<string, unknown> = { message, session_id: sessionId };
+    if (extras?.imageData) body.image_data = extras.imageData;
+    if (extras?.imageMime) body.image_mime = extras.imageMime;
+    if (extras?.webSearch) body.web_search = extras.webSearch;
+    if (extras?.research) body.research = extras.research;
 
     fetch(`${API_BASE}/chat/stream`, {
       method: "POST",
@@ -114,7 +126,7 @@ export const chatApi = {
         "Content-Type": "application/json",
         Authorization: `Bearer ${token}`,
       },
-      body: JSON.stringify({ message, session_id: sessionId }),
+      body: JSON.stringify(body),
       signal: controller.signal,
     })
       .then(async (res) => {

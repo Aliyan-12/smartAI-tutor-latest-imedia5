@@ -180,8 +180,14 @@ def _build_lc_messages(
     user_message: str,
     rag_chunks: Optional[List["RetrievedChunk"]] = None,
     system_prompt: Optional[str] = None,
+    image_data: Optional[str] = None,
+    image_mime: str = "image/jpeg",
 ) -> list:
-    """Build a LangChain message list from chat history, RAG context, and the user message."""
+    """Build a LangChain message list from chat history, RAG context, and the user message.
+
+    When image_data is supplied (raw base64, no data URI prefix) the final HumanMessage
+    is built as a multimodal content list so Gemini receives both the text and the image.
+    """
     messages = []
     if system_prompt:
         messages.append(SystemMessage(content=system_prompt))
@@ -189,7 +195,20 @@ def _build_lc_messages(
         cls = HumanMessage if msg["role"] == "user" else AIMessage
         messages.append(cls(content=msg["content"]))
     rag_prefix = (_format_rag_context(rag_chunks) + "\n\n") if rag_chunks else ""
-    messages.append(HumanMessage(content=rag_prefix + user_message))
+    text_content = rag_prefix + user_message
+
+    if image_data:
+        # LangChain multimodal format understood by ChatGoogleGenerativeAI
+        human_content = [
+            {"type": "text", "text": text_content},
+            {
+                "type": "image_url",
+                "image_url": {"url": f"data:{image_mime};base64,{image_data}"},
+            },
+        ]
+        messages.append(HumanMessage(content=human_content))
+    else:
+        messages.append(HumanMessage(content=text_content))
     return messages
 
 
@@ -310,11 +329,15 @@ async def stream_response_async(
     student_preferences: Optional[dict] = None,
     system_prompt_override: Optional[str] = None,
     tool_context=None,  # ToolContext | None  — avoids circular import at module level
+    image_data: Optional[str] = None,
+    image_mime: str = "image/jpeg",
 ) -> AsyncGenerator[str, None]:
     """
     True async streaming generator backed by LangChain astream().
     Includes a tool executor loop: up to 3 rounds of tool calling before final answer.
     tool_context is a ToolContext dataclass from app.tools.session_tools.
+    image_data: raw base64-encoded image (no data URI prefix).
+    image_mime: MIME type such as "image/jpeg" or "image/png".
     """
     if system_prompt_override:
         _system = system_prompt_override
@@ -323,7 +346,7 @@ async def stream_response_async(
     else:
         _system = SYSTEM_PROMPT
 
-    messages = _build_lc_messages(history, user_message, rag_chunks, _system)
+    messages = _build_lc_messages(history, user_message, rag_chunks, _system, image_data, image_mime)
 
     if tool_context is not None:
         from app.tools.session_tools import make_session_tools

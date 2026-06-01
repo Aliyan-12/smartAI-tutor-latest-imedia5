@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { Lock, X, Pause, Play, Volume2, VolumeX } from "lucide-react";
+import ResizablePanels from "../components/ResizablePanels";
 import { appointmentsApi, assessmentsApi, sessionsApi, gamificationApi, slidesApi } from "../services/api";
 import ChatWindow from "../components/ChatWindow";
 import ChatInput from "../components/ChatInput";
@@ -161,6 +162,15 @@ export default function SessionPage() {
   const [isAiTyping, setIsAiTyping] = useState(false);
   const [toolResults, setToolResults] = useState<Array<{ tool: string; data: Record<string, unknown>; id: string }>>([]);
 
+  // Attachment / web-search opts for ChatInput
+  const [webSearchEnabled, setWebSearchEnabled] = useState(false);
+  const [researchEnabled, setResearchEnabled] = useState(false);
+
+  // TTS-synchronized word-by-word reveal
+  const [ttsRevealedText, setTtsRevealedText] = useState<string>("");
+  const [ttsRevealingMsgId, setTtsRevealingMsgId] = useState<number | null>(null);
+  const revealIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
   const [sessionBriefing, setSessionBriefing] = useState<{
     hook?: string;
     what_you_will_learn?: string[];
@@ -211,6 +221,39 @@ export default function SessionPage() {
     ttsEnabledRef.current = ttsEnabled;
     if (!ttsEnabled) cancelStreamTTS();
   }, [ttsEnabled]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // TTS word-by-word reveal: start when TTS begins playing
+  useEffect(() => {
+    if (playing) {
+      const lastAi = [...messages].reverse().find((m) => m.role === "assistant");
+      if (!lastAi) return;
+      const words = lastAi.content.split(" ");
+      let i = 0;
+      setTtsRevealingMsgId(lastAi.id);
+      setTtsRevealedText("");
+      if (revealIntervalRef.current) clearInterval(revealIntervalRef.current);
+      revealIntervalRef.current = setInterval(() => {
+        i++;
+        setTtsRevealedText(words.slice(0, i).join(" "));
+        if (i >= words.length) {
+          clearInterval(revealIntervalRef.current!);
+          revealIntervalRef.current = null;
+        }
+      }, 60);
+    } else {
+      if (revealIntervalRef.current) {
+        clearInterval(revealIntervalRef.current);
+        revealIntervalRef.current = null;
+      }
+      setTtsRevealingMsgId(null);
+      setTtsRevealedText("");
+    }
+  }, [playing]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Cleanup reveal interval on unmount
+  useEffect(() => () => {
+    if (revealIntervalRef.current) clearInterval(revealIntervalRef.current);
+  }, []);
 
   const handleJoin = async (overrideCode?: string) => {
     if (!appointmentId) return;
@@ -699,13 +742,17 @@ export default function SessionPage() {
   }, [sessionSubject, sessionKeyStage, apptId, slideHistory]);
 
   const sessionSend = useCallback(
-    (text: string) => {
+    (text: string, sendOpts?: { imageData?: string; imageMime?: string; webSearch?: boolean; research?: boolean }) => {
       setIsAiTyping(true);
       sendMessage(text, {
         suppressNavigation: true,
         onStreamStart: () => { setIsAiTyping(false); if (ttsEnabledRef.current) startStreamTTS(); },
         onToken: (t: string) => { if (ttsEnabledRef.current) feedStreamTTS(t); },
         onStreamComplete: () => { setIsAiTyping(false); if (ttsEnabledRef.current) endStreamTTS(); },
+        imageData: sendOpts?.imageData,
+        imageMime: sendOpts?.imageMime,
+        webSearch: sendOpts?.webSearch,
+        research: sendOpts?.research,
       });
     },
     [sendMessage, startStreamTTS, feedStreamTTS, endStreamTTS]
@@ -1429,6 +1476,8 @@ export default function SessionPage() {
               streamContent={streamContent}
               onSpeak={speakText}
               isAiTyping={isAiTyping}
+              revealingMsgId={ttsRevealingMsgId}
+              revealedText={ttsRevealedText}
             />
             {toolResults.map((tr) => {
               if (tr.tool === "set_homework") {
@@ -1525,13 +1574,17 @@ export default function SessionPage() {
 
       <div style={styles.chatInputWrap}>
         <ChatInput
-          onSend={sessionSend}
+          onSend={(text, opts) => sessionSend(text, opts)}
           streaming={streaming}
           onStop={stopStreaming}
           voiceStatus={voiceStatus}
           onVoiceStart={handleVoiceToggle}
           onVoiceEnd={disconnectVoice}
           disabled={isPaused}
+          webSearchEnabled={webSearchEnabled}
+          onWebSearchToggle={() => setWebSearchEnabled((v) => !v)}
+          researchEnabled={researchEnabled}
+          onResearchToggle={() => setResearchEnabled((v) => !v)}
         />
       </div>
     </>
@@ -1747,17 +1800,14 @@ export default function SessionPage() {
             </div>
           </>
         ) : (
-          <>
-            <div style={styles.learnPanel}>
-              {learnPanelInner}
-            </div>
-            <div style={styles.avatarPanel}>
-              {avatarInner}
-            </div>
-            <div style={styles.chatPanel}>
-              {chatPanelInner}
-            </div>
-          </>
+          <ResizablePanels
+            panels={[
+              { id: "learn",  label: "Learn",  content: <div style={{ ...styles.learnPanel,  width: "100%", borderRight: "none" }}>{learnPanelInner}</div> },
+              { id: "avatar", label: "Avatar", content: <div style={{ ...styles.avatarPanel, width: "100%", borderRight: "none" }}>{avatarInner}</div> },
+              { id: "chat",   label: "Chat",   content: <div style={{ ...styles.chatPanel,   flex: 1 }}>{chatPanelInner}</div> },
+            ]}
+            initialWidths={[35, 30, 35]}
+          />
         )}
       </div>
 
@@ -1888,7 +1938,6 @@ const styles: Record<string, React.CSSProperties> = {
     width: "35%",
     display: "flex",
     flexDirection: "column",
-    borderRight: "1px solid var(--border-color)",
     background: "var(--bg-secondary)",
     overflow: "hidden",
   },
@@ -1964,7 +2013,6 @@ const styles: Record<string, React.CSSProperties> = {
     flexDirection: "column",
     alignItems: "center",
     justifyContent: "center",
-    borderRight: "1px solid var(--border-color)",
     background: "var(--bg-primary)",
     gap: 16,
     padding: 20,

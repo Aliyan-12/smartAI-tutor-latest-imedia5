@@ -347,22 +347,53 @@ async def stream_message(
         except Exception:
             logger.warning(f"Could not build ToolContext for appointment {_appt_id}")
 
+    # Augment the user message with a research instruction when deep research is requested.
+    # The actual retrieval happens inside the deep_research session tool, but for non-session
+    # chats (no tool_context) we prepend a prompt directive so the LLM knows to be thorough.
+    _effective_message = payload.message
+    if payload.research and not is_lesson_start:
+        _effective_message = (
+            "[DEEP RESEARCH REQUEST] Please conduct a thorough, multi-faceted investigation "
+            "into the following topic, covering key concepts, common misconceptions, real-world "
+            "applications, and exam-relevant facts with clear sections:\n\n"
+            + payload.message
+        )
+
     async def event_stream():
         full_response = []
         yield f"data: {json.dumps({'type': 'start', 'session_id': chat.session_id})}\n\n"
 
         # Use the internal lesson instruction as the AI prompt when auto-starting a lesson;
         # for a lesson start the history has no user message appended so pass it as-is.
-        _ai_user_content = lesson_start_instruction if is_lesson_start else payload.message
+        _ai_user_content = lesson_start_instruction if is_lesson_start else _effective_message
         _history_slice = history if is_lesson_start else history[:-1]
 
-        async for token in gemini_service.stream_response_async(
-            _history_slice,
-            _ai_user_content,
+        # For non-session chats with web_search=True, bind GoogleSearchRetrieval grounding
+        # directly onto the LLM for this request. session chats use the web_search tool instead.
+        _stream_kwargs: dict = dict(
             rag_chunks=rag_chunks,
             student_preferences=student_prefs,
             system_prompt_override=session_system_prompt,
             tool_context=tool_context,
+            image_data=payload.image_data,
+            image_mime=payload.image_mime or "image/jpeg",
+        )
+
+        if payload.web_search and not is_session:
+            # Inject a search-aware system prompt addendum for simple (non-session) chats
+            _search_note = (
+                "\n\nWEB SEARCH ENABLED: You have access to current web information. "
+                "Where relevant, incorporate up-to-date facts, recent developments, and "
+                "verified statistics in your answer. Clearly note when information is recent."
+            )
+            _stream_kwargs["system_prompt_override"] = (
+                (session_system_prompt or "") + _search_note
+            )
+
+        async for token in gemini_service.stream_response_async(
+            _history_slice,
+            _ai_user_content,
+            **_stream_kwargs,
         ):
             # Ensure token is always a string (LangChain can yield lists on multi-part content)
             if not isinstance(token, str):
