@@ -245,31 +245,36 @@ export default function ChatWindow({
 
       <div ref={bottomRef} />
 
-      {/* Scroll-to-bottom button */}
+      {/* Scroll-to-bottom button — sticky inside the chat scroll container */}
       {showScrollBtn && (
-        <button
-          onClick={() => bottomRef.current?.scrollIntoView({ behavior: "smooth" })}
-          style={{
-            position: "fixed",
-            bottom: 90,
-            left: "50%",
-            transform: "translateX(-50%)",
-            zIndex: 50,
-            background: "rgba(30,30,30,0.85)",
-            border: "1px solid rgba(255,255,255,0.15)",
-            borderRadius: "50%",
-            width: 36,
-            height: 36,
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            cursor: "pointer",
-            backdropFilter: "blur(8px)",
-            boxShadow: "0 2px 12px rgba(0,0,0,0.35)",
-          }}
-        >
-          <ChevronDown size={18} color="#fff" />
-        </button>
+        <div style={{
+          position: "sticky",
+          bottom: 16,
+          display: "flex",
+          justifyContent: "center",
+          pointerEvents: "none",
+          zIndex: 20,
+        }}>
+          <button
+            onClick={() => bottomRef.current?.scrollIntoView({ behavior: "smooth" })}
+            style={{
+              pointerEvents: "all",
+              background: "rgba(30,30,30,0.85)",
+              border: "1px solid rgba(255,255,255,0.15)",
+              borderRadius: "50%",
+              width: 36,
+              height: 36,
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              cursor: "pointer",
+              backdropFilter: "blur(8px)",
+              boxShadow: "0 2px 12px rgba(0,0,0,0.35)",
+            }}
+          >
+            <ChevronDown size={18} color="#fff" />
+          </button>
+        </div>
       )}
     </div>
   );
