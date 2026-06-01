@@ -11,7 +11,7 @@ class AssessmentStart(BaseModel):
 
 
 class AnswerSubmit(BaseModel):
-    question_index: int = Field(..., ge=0, le=9)
+    question_index: int = Field(..., ge=0)
     student_answer: int = Field(..., ge=0, le=3)
 
 
