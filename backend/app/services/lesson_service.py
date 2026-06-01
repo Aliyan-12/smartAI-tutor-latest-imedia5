@@ -215,9 +215,8 @@ async def generate_lesson_plan(
     Returns the generated plan as a dict (also suitable for storing in plan_blocks).
     """
     from app.models.student_profile import StudentProfile, TopicMastery
-    from app.services.gemini_service import _get_client
-    from app.core.config import settings
-    from google.genai import types as genai_types
+    from app.services.llm_service import get_llm
+    from langchain_core.messages import SystemMessage, HumanMessage
 
     # 1. Fetch student's topic mastery for personalisation
     mastery_result = await db.execute(
@@ -364,15 +363,13 @@ Rules:
 - Return ONLY valid JSON, no markdown fences"""
 
     try:
-        client = _get_client()
-        response = client.models.generate_content(
-            model=settings.gemini_model,
-            contents=prompt,
-            config=genai_types.GenerateContentConfig(
-                system_instruction="You are a lesson plan generator. Output only valid JSON.",
-            ),
-        )
-        raw = response.text.strip()
+        import asyncio
+        lc_messages = [
+            SystemMessage(content="You are a lesson plan generator. Output only valid JSON."),
+            HumanMessage(content=prompt),
+        ]
+        response = await asyncio.to_thread(get_llm().invoke, lc_messages)
+        raw = response.content.strip()
         # Strip markdown fences if present
         if raw.startswith("```"):
             parts = raw.split("```")
@@ -487,9 +484,8 @@ async def generate_session_report(
     Quiz score is only set when a real quiz was taken in this session.
     Weak/strong areas come from quiz results only — not the mastery database.
     """
-    from app.services.gemini_service import _get_client
-    from app.core.config import settings
-    from google.genai import types as genai_types
+    from app.services.llm_service import get_llm
+    from langchain_core.messages import SystemMessage, HumanMessage
 
     subject = appointment.subject
     key_stage = appointment.key_stage
@@ -612,15 +608,13 @@ Output raw JSON only (no markdown fences):
 }}"""
 
     try:
-        client = _get_client()
-        response = client.models.generate_content(
-            model=settings.gemini_model,
-            contents=prompt,
-            config=genai_types.GenerateContentConfig(
-                system_instruction="You are a tutor writing a student session report. Output only valid JSON. Do not invent quiz scores.",
-            ),
-        )
-        raw = response.text.strip()
+        import asyncio
+        lc_messages = [
+            SystemMessage(content="You are a tutor writing a student session report. Output only valid JSON. Do not invent quiz scores."),
+            HumanMessage(content=prompt),
+        ]
+        response = await asyncio.to_thread(get_llm().invoke, lc_messages)
+        raw = response.content.strip()
         if raw.startswith("```"):
             parts = raw.split("```")
             raw = parts[1] if len(parts) > 1 else raw

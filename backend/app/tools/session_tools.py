@@ -264,6 +264,109 @@ def make_session_tools(ctx: ToolContext) -> list:
             "action": "show_answer_feedback",
         }
 
+    @tool
+    async def generate_session_report(
+        topics_covered: List[str],
+        student_performance: str = "good",
+        session_notes: str = "",
+    ) -> dict:
+        """
+        Generate and save the session report at the end of the lesson.
+        Call after delivering the final summary/review — summarise what was taught,
+        how the student performed, and recommend next steps.
+        topics_covered: specific concepts actually taught this session (e.g. ["mitosis", "cell division"])
+        student_performance: struggling | developing | good | excellent
+        session_notes: any notable observations (optional)
+        """
+        from sqlalchemy import select
+        from app.models.chat import Chat, Message
+        from app.models.assessment import Assessment
+        from app.models.lesson_plan import LessonPlan
+        from app.models.user import User
+        from app.models.appointment import Appointment
+        from app.services import lesson_service
+
+        # Load appointment
+        appt_result = await ctx.db.execute(
+            select(Appointment).where(Appointment.id == ctx.appointment_id)
+        )
+        appointment = appt_result.scalar_one_or_none()
+        if not appointment:
+            return {"error": "appointment_not_found", "action": "show_report"}
+
+        # Skip if report already saved (idempotent)
+        lp_result = await ctx.db.execute(
+            select(LessonPlan).where(LessonPlan.appointment_id == ctx.appointment_id)
+        )
+        lesson_plan = lp_result.scalar_one_or_none()
+        if lesson_plan and lesson_plan.session_summary:
+            try:
+                import json as _json
+                existing = _json.loads(lesson_plan.session_summary)
+                return {
+                    "report_saved": True,
+                    "already_existed": True,
+                    "summary": existing.get("summary", ""),
+                    "understanding_level": existing.get("understanding_level", "Good"),
+                    "encouragement": existing.get("encouragement", ""),
+                    "action": "show_report",
+                }
+            except Exception:
+                pass  # malformed JSON — regenerate
+
+        # Load chat messages
+        chat_result = await ctx.db.execute(
+            select(Chat).where(Chat.appointment_id == ctx.appointment_id)
+        )
+        chat = chat_result.scalar_one_or_none()
+        messages = []
+        if chat:
+            msg_result = await ctx.db.execute(
+                select(Message)
+                .where(Message.chat_id == chat.id)
+                .order_by(Message.timestamp)
+                .limit(100)
+            )
+            messages = list(msg_result.scalars().all())
+
+        # Load assessments
+        asmt_result = await ctx.db.execute(
+            select(Assessment)
+            .where(Assessment.appointment_id == ctx.appointment_id)
+            .order_by(Assessment.created_at.desc())
+            .limit(20)
+        )
+        assessments = list(asmt_result.scalars().all())
+
+        # Load student name
+        student_result = await ctx.db.execute(
+            select(User).where(User.id == ctx.student_id)
+        )
+        student = student_result.scalar_one_or_none()
+
+        report = await lesson_service.generate_session_report(
+            db=ctx.db,
+            appointment=appointment,
+            lesson_plan=lesson_plan,
+            assessments=assessments,
+            student_name=student.name if student else "Student",
+            messages=messages,
+        )
+
+        logger.info(
+            f"[generate_session_report tool] Report generated for appointment_id={ctx.appointment_id}"
+        )
+        return {
+            "report_saved": True,
+            "summary": report.get("summary", ""),
+            "topics_covered": report.get("topics_covered", topics_covered),
+            "quiz_score_percent": report.get("quiz_score_percent"),
+            "understanding_level": report.get("understanding_level", "Good"),
+            "next_session_recommendation": report.get("next_session_recommendation", ""),
+            "encouragement": report.get("encouragement", ""),
+            "action": "show_report",
+        }
+
     return [
         generate_quiz,
         set_homework,
@@ -271,4 +374,5 @@ def make_session_tools(ctx: ToolContext) -> list:
         update_topic_mastery,
         advance_lesson_phase,
         evaluate_answer,
+        generate_session_report,
     ]

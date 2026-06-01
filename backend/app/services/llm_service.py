@@ -29,13 +29,8 @@ def get_llm(tools: list = None) -> BaseChatModel:
         _llm = ChatGoogleGenerativeAI(
             model=settings.gemini_model_fast,
             google_api_key=settings.gemini_api_key,
-            temperature=1.0,        # must be 1.0 when thinking is disabled
+            temperature=1.0,
             max_retries=5,
-            # Disable Gemini 2.5 Flash extended thinking — prevents internal
-            # reasoning tokens (tool_code / thought) from leaking into the stream
-            thinking={"thinking_budget": 0},
         )
-        logger.info(
-            f"LLM singleton created: model={settings.gemini_model_fast} (thinking=disabled)"
-        )
+        logger.info(f"LLM singleton created: model={settings.gemini_model_fast}")
     return _llm.bind_tools(tools) if tools else _llm

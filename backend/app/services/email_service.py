@@ -132,7 +132,7 @@ def send_session_report(
     Send a formatted HTML session report email to a parent (and optionally the student).
     Handles None email gracefully — logs a warning instead of crashing.
     """
-    score = report_dict.get("quiz_score_percent", 0)
+    score = report_dict.get("quiz_score_percent")
     understanding = report_dict.get("understanding_level", "N/A")
     summary = report_dict.get("summary", "Session completed.")
     next_rec = report_dict.get("next_session_recommendation", "")
@@ -210,7 +210,11 @@ def send_session_report(
     </div>
     """
 
-    email_subject = f"Session Report: {subject} — {student_name} scored {score:.0f}%"
+    email_subject = (
+        f"Session Report: {subject} — {student_name} scored {score:.0f}%"
+        if score is not None
+        else f"Session Report: {subject} — {student_name} completed their session"
+    )
 
     if to_email:
         send_email(to_email, email_subject, body)

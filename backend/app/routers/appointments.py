@@ -312,6 +312,7 @@ async def update_appointment_status(
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
+    await db.refresh(updated)
     resp = AppointmentResponse.model_validate(updated)
     return resp
 

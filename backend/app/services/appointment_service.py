@@ -128,6 +128,7 @@ async def _run_post_session_pipeline(db: AsyncSession, appointment: Appointment)
     """
     from app.models.lesson_plan import LessonPlan
     from app.models.assessment import Assessment
+    from app.models.chat import Chat, Message
     from app.services import lesson_service, gamification_service, email_service
 
     key_stage = appointment.key_stage or "KS4"
@@ -142,39 +143,66 @@ async def _run_post_session_pipeline(db: AsyncSession, appointment: Appointment)
         )
         lesson_plan = lp_result.scalar_one_or_none()
 
+        # If the AI already generated a report via the generate_session_report tool, skip regeneration
+        if lesson_plan and lesson_plan.session_summary:
+            import json as _json
+            try:
+                report = _json.loads(lesson_plan.session_summary)
+                logger.info(f"Using AI-generated report for appointment_id={appointment.id}")
+            except Exception:
+                report = None  # malformed JSON — will regenerate below
+
         student_result = await db.execute(
             select(User).where(User.id == appointment.student_id)
         )
         student = student_result.scalar_one_or_none()
 
-        # Load assessments linked to this appointment (by appointment_id first, fallback by subject)
-        asmt_result = await db.execute(
-            select(Assessment)
-            .where(Assessment.appointment_id == appointment.id)
-            .order_by(Assessment.created_at.desc())
-            .limit(20)
-        )
-        assessments = list(asmt_result.scalars().all())
-        if not assessments:
-            # Fallback: recent assessments for this student+subject
+        if report is None:
+            # Load assessments linked to this appointment (by appointment_id first, fallback by subject)
             asmt_result = await db.execute(
                 select(Assessment)
-                .where(
-                    Assessment.student_id == appointment.student_id,
-                    Assessment.subject == appointment.subject,
-                )
+                .where(Assessment.appointment_id == appointment.id)
                 .order_by(Assessment.created_at.desc())
-                .limit(10)
+                .limit(20)
             )
             assessments = list(asmt_result.scalars().all())
+            if not assessments:
+                # Fallback: recent assessments for this student+subject
+                asmt_result = await db.execute(
+                    select(Assessment)
+                    .where(
+                        Assessment.student_id == appointment.student_id,
+                        Assessment.subject == appointment.subject,
+                    )
+                    .order_by(Assessment.created_at.desc())
+                    .limit(10)
+                )
+                assessments = list(asmt_result.scalars().all())
 
-        report = await lesson_service.generate_session_report(
-            db=db,
-            appointment=appointment,
-            lesson_plan=lesson_plan,
-            assessments=assessments,
-            student_name=student.name if student else "Student",
-        )
+            # Load session messages for the report
+            chat_result = await db.execute(
+                select(Chat).where(Chat.appointment_id == appointment.id)
+            )
+            chat = chat_result.scalar_one_or_none()
+            session_messages = []
+            if chat:
+                msg_result = await db.execute(
+                    select(Message)
+                    .where(Message.chat_id == chat.id)
+                    .order_by(Message.timestamp)
+                    .limit(100)
+                )
+                session_messages = list(msg_result.scalars().all())
+            logger.info(f"Loaded {len(session_messages)} messages for report (appointment_id={appointment.id})")
+
+            report = await lesson_service.generate_session_report(
+                db=db,
+                appointment=appointment,
+                lesson_plan=lesson_plan,
+                assessments=assessments,
+                student_name=student.name if student else "Student",
+                messages=session_messages,
+            )
 
         if lesson_plan and lesson_plan.status != "completed":
             lesson_plan.status = "completed"
