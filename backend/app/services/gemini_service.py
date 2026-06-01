@@ -132,24 +132,69 @@ def build_personalised_system_prompt(student_preferences: dict, base_prompt: str
 
 def _is_thinking_token(text: str) -> bool:
     """
-    Detect Gemini 2.5 Flash internal reasoning tokens that must never reach the frontend.
-    These are 'thinking' outputs: tool_code blocks, thought traces, and print(default_api...)
-    calls that Gemini emits when extended thinking leaks into the content stream.
+    Detect internal tokens that must never reach the frontend:
+    - Gemini 2.5 Flash reasoning/thinking traces
+    - Tool call text: Gemini sometimes echoes function call signatures as plain text
+      alongside the actual structured tool call. Both forms must be suppressed.
     """
     s = text.strip()
-    return (
+    # Thinking / reasoning traces
+    if (
         s.startswith("tool_code") or
         s.startswith("```tool_code") or
         s.startswith("thought ") or
         s.startswith(" thought ") or
         "print(default_api." in s or
-        "default_api.advance_lesson_phase" in s or
-        "default_api.generate_quiz" in s or
-        "default_api.set_homework" in s or
-        "default_api.evaluate_answer" in s or
-        "default_api.get_student_mastery" in s or
-        "default_api.update_topic_mastery" in s
+        "default_api." in s
+    ):
+        return True
+    # Tool call text signatures — Gemini writes these as plain text in addition to
+    # (or instead of) emitting a structured tool_call. Suppress all of them.
+    _TOOL_NAMES = (
+        "generate_quiz",
+        "set_homework",
+        "get_student_mastery",
+        "update_topic_mastery",
+        "advance_lesson_phase",
+        "evaluate_answer",
+        "generate_session_report",
+        "web_search",
+        "deep_research",
     )
+    for name in _TOOL_NAMES:
+        if f"{name}(" in s:
+            return True
+    return False
+
+
+# Track whether we are currently inside a multi-chunk tool call text block.
+# This is module-level so it persists across generator yields within one stream.
+# Using a simple threading.local() is safe because each SSE request is a separate
+# async task; we reset it at the start of each stream_response_async call.
+import threading as _threading
+_tl = _threading.local()
+
+
+def _reset_tool_call_state():
+    _tl.in_tool_call_text = False
+    _tl.paren_depth = 0
+
+
+def _should_suppress(content: str) -> bool:
+    """
+    Returns True if this content chunk should be suppressed (not sent to frontend).
+    Handles multi-chunk tool call text blocks by tracking open/close parentheses.
+    """
+    if _is_thinking_token(content):
+        return True
+    # Already inside a tool call text block — keep suppressing until parens close
+    if getattr(_tl, "in_tool_call_text", False):
+        _tl.paren_depth += content.count("(") - content.count(")")
+        if _tl.paren_depth <= 0:
+            _tl.in_tool_call_text = False
+            _tl.paren_depth = 0
+        return True
+    return False
 
 
 def _friendly_error(exc: Exception) -> str:
@@ -362,6 +407,8 @@ async def stream_response_async(
         f"has_system_prompt={bool(system_prompt_override or student_preferences)}"
     )
 
+    _reset_tool_call_state()   # clear paren-tracking state for this stream
+
     for _round in range(3):   # max 3 tool-call rounds
         full_response = None
 
@@ -375,11 +422,8 @@ async def stream_response_async(
                         for part in content
                     )
                 if content:
-                    # Hard filter: drop any Gemini thinking/tool_code tokens before
-                    # they reach the frontend. Should not fire once thinking_budget=0
-                    # is active, but kept as a safety net.
-                    if _is_thinking_token(content):
-                        logger.debug(f"Suppressed thinking token: {content[:60]!r}")
+                    if _should_suppress(content):
+                        logger.debug(f"Suppressed internal token: {content[:80]!r}")
                         # Still accumulate for full_response so tool calls parse correctly
                     else:
                         yield content
