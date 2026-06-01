@@ -169,8 +169,10 @@ export default function SessionPage() {
 
   // Word-by-word reveal while TTS plays
   const [ttsRevealedText, setTtsRevealedText] = useState<string>("");
-  const [ttsRevealingMsgId, setTtsRevealingMsgId] = useState<number | null>(null);
+  const [revealContent, setRevealContent] = useState<string | null>(null);
   const revealIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const localStreamRef = useRef<string>("");
+  const lastAiIdBeforeSendRef = useRef<number | null>(null);
 
   const [sessionBriefing, setSessionBriefing] = useState<{
     hook?: string;
@@ -229,14 +231,13 @@ export default function SessionPage() {
   // TTS word-by-word reveal: start when TTS begins playing
   useEffect(() => {
     if (playing) {
-      // Blob off → text starts streaming word by word
       setAiWaiting(false);
       aiWaitingRef.current = false;
-      const lastAi = [...messages].reverse().find((m) => m.role === "assistant");
-      if (!lastAi) return;
-      const words = lastAi.content.split(" ");
-      setTtsRevealingMsgId(lastAi.id);
-      setTtsRevealedText(words[0] || "");  // first word immediately — no empty flash
+      const content = localStreamRef.current.trim();
+      if (!content) return;
+      const words = content.split(" ");
+      setRevealContent(content);
+      setTtsRevealedText(words[0] || "");
       let i = 1;
       if (revealIntervalRef.current) clearInterval(revealIntervalRef.current);
       revealIntervalRef.current = setInterval(() => {
@@ -252,7 +253,7 @@ export default function SessionPage() {
         clearInterval(revealIntervalRef.current);
         revealIntervalRef.current = null;
       }
-      setTtsRevealingMsgId(null);
+      setRevealContent(null);
       setTtsRevealedText("");
     }
   }, [playing]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -641,11 +642,13 @@ export default function SessionPage() {
         if (isVoiceActive) {
           sendQuizResult(quizTopic, quizScore, quizStrong, quizWeak);
         } else if (activeSessionId) {
+          lastAiIdBeforeSendRef.current = [...messages].reverse().find((m) => m.role === "assistant")?.id ?? null;
+          localStreamRef.current = "";
           setAiWaiting(true);
           aiWaitingRef.current = true;
           sendQuizFeedback(activeSessionId, quizTopic, quizScore, quizStrong, quizWeak, {
-            onStreamStart: () => { if (ttsEnabledRef.current) startStreamTTS(); },
-            onToken: (t: string) => { if (ttsEnabledRef.current) feedStreamTTS(t); },
+            onStreamStart: () => { localStreamRef.current = ""; if (ttsEnabledRef.current) startStreamTTS(); },
+            onToken: (t: string) => { localStreamRef.current += t; if (ttsEnabledRef.current) feedStreamTTS(t); },
             onStreamComplete: () => {
               if (ttsEnabledRef.current) {
                 endStreamTTS();
@@ -758,12 +761,14 @@ export default function SessionPage() {
 
   const sessionSend = useCallback(
     (text: string, sendOpts?: { imageData?: string; imageMime?: string; webSearch?: boolean; research?: boolean }) => {
+      lastAiIdBeforeSendRef.current = [...messages].reverse().find((m) => m.role === "assistant")?.id ?? null;
+      localStreamRef.current = "";
       setAiWaiting(true);
       aiWaitingRef.current = true;
       sendMessage(text, {
         suppressNavigation: true,
-        onStreamStart: () => { if (ttsEnabledRef.current) startStreamTTS(); },
-        onToken: (t: string) => { if (ttsEnabledRef.current) feedStreamTTS(t); },
+        onStreamStart: () => { localStreamRef.current = ""; if (ttsEnabledRef.current) startStreamTTS(); },
+        onToken: (t: string) => { localStreamRef.current += t; if (ttsEnabledRef.current) feedStreamTTS(t); },
         onStreamComplete: () => {
           if (ttsEnabledRef.current) {
             endStreamTTS();
@@ -785,7 +790,7 @@ export default function SessionPage() {
         research: sendOpts?.research,
       });
     },
-    [sendMessage, startStreamTTS, feedStreamTTS, endStreamTTS]
+    [messages, sendMessage, startStreamTTS, feedStreamTTS, endStreamTTS]
   );
 
   const handleVoiceToggle = useCallback(() => {
@@ -1506,8 +1511,9 @@ export default function SessionPage() {
               streamContent={streamContent}
               onSpeak={speakText}
               isWaiting={aiWaiting}
-              revealingMsgId={ttsRevealingMsgId}
+              revealContent={revealContent}
               revealedText={ttsRevealedText}
+              lastKnownAiId={lastAiIdBeforeSendRef.current}
             />
             {toolResults.map((tr) => {
               if (tr.tool === "set_homework") {

@@ -10,11 +10,10 @@ interface Props {
   streaming: boolean;
   streamContent: string;
   onSpeak: (text: string) => void;
-  // Single flag: true = show blob (waiting for AI response / TTS not started yet)
   isWaiting?: boolean;
-  // Word-by-word reveal while TTS is playing
-  revealingMsgId?: number | null;
+  revealContent?: string | null;
   revealedText?: string;
+  lastKnownAiId?: number | null;
 }
 
 export default function ChatWindow({
@@ -23,8 +22,9 @@ export default function ChatWindow({
   streamContent,
   onSpeak,
   isWaiting = false,
-  revealingMsgId,
+  revealContent,
   revealedText,
+  lastKnownAiId,
 }: Props) {
   const bottomRef = useRef<HTMLDivElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -50,7 +50,7 @@ export default function ChatWindow({
     if (!userScrolledUpRef.current) {
       bottomRef.current?.scrollIntoView({ behavior: "smooth" });
     }
-  }, [messages, streamContent, isWaiting, revealedText]);
+  }, [messages, streamContent, isWaiting, revealedText, revealContent]);
 
   if (messages.length === 0 && !streaming && !isWaiting) {
     return null;
@@ -132,9 +132,8 @@ export default function ChatWindow({
 
       {/* ── All past messages ── */}
       {(() => {
-        // While waiting, find the last AI message ID so we can hide it (blob covers it until TTS fires)
-        const hiddenAiId = isWaiting
-          ? [...messages].reverse().find((m) => m.role === "assistant")?.id ?? null
+        const hiddenAiId = (isWaiting || revealContent != null)
+          ? [...messages].reverse().find((m) => m.role === "assistant" && (lastKnownAiId == null || m.id > lastKnownAiId))?.id ?? null
           : null;
 
         return messages.map((msg) => {
@@ -167,29 +166,19 @@ export default function ChatWindow({
         }
 
         if (msg.role === "assistant") {
-          // Hide latest AI message while blob is active — prevents full-text flash before TTS
           if (hiddenAiId !== null && msg.id === hiddenAiId) return null;
-
-          const isRevealing = revealingMsgId != null && msg.id === revealingMsgId;
-          const displayContent = isRevealing && revealedText ? revealedText : msg.content;
-          const isPartial = isRevealing && revealedText != null && revealedText.length < msg.content.length;
 
           return (
             <div key={msg.id} className="message assistant chat-msg-animate">
               <AiAvatar />
               <div className="message-content ai-free-text">
-                <ReactMarkdown>{displayContent}</ReactMarkdown>
-                {isPartial
-                  ? <span className="tts-reveal-ball" />
-                  : (
-                    <div className="message-actions">
-                      <button onClick={() => onSpeak(msg.content)} title="Read aloud">
-                        <Volume2 size={14} />
-                        <span>Listen</span>
-                      </button>
-                    </div>
-                  )
-                }
+                <ReactMarkdown>{msg.content}</ReactMarkdown>
+                <div className="message-actions">
+                  <button onClick={() => onSpeak(msg.content)} title="Read aloud">
+                    <Volume2 size={14} />
+                    <span>Listen</span>
+                  </button>
+                </div>
               </div>
             </div>
           );
@@ -205,6 +194,27 @@ export default function ChatWindow({
         );
       });
       })()}
+
+      {/* ── Live TTS reveal row ── */}
+      {revealContent != null && (
+        <div className="message assistant chat-msg-animate">
+          <AiAvatar />
+          <div className="message-content ai-free-text">
+            <ReactMarkdown>{revealedText || revealContent[0] || ""}</ReactMarkdown>
+            {(revealedText?.length ?? 0) < revealContent.length
+              ? <span className="tts-reveal-ball" />
+              : (
+                <div className="message-actions">
+                  <button onClick={() => onSpeak(revealContent)} title="Read aloud">
+                    <Volume2 size={14} />
+                    <span>Listen</span>
+                  </button>
+                </div>
+              )
+            }
+          </div>
+        </div>
+      )}
 
       {/* ── Streaming text (TTS-off mode: show text as it arrives) ── */}
       {!isWaiting && streaming && streamContent && (
