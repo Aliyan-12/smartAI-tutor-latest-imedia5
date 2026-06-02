@@ -14,6 +14,7 @@ interface Props {
   revealContent?: string | null;
   revealedText?: string;
   lastKnownAiId?: number | null;
+  fillerText?: string | null;
 }
 
 export default function ChatWindow({
@@ -25,6 +26,7 @@ export default function ChatWindow({
   revealContent,
   revealedText,
   lastKnownAiId,
+  fillerText,
 }: Props) {
   const bottomRef = useRef<HTMLDivElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -67,6 +69,20 @@ export default function ChatWindow({
       <AiAvatar />
       <div className="message-content" style={{ paddingTop: 0 }}>
         <span className="tts-reveal-ball" style={{ width: 11, height: 11 }} />
+      </div>
+    </div>
+  );
+
+  // Distinctive "spoken aside" bubble shown while a pre-recorded filler phrase
+  // plays — visually nothing like the AI's real answer (gradient pill + equaliser).
+  const FillerBubble = ({ text }: { text: string }) => (
+    <div className="message assistant" style={{ animation: "msgSlideIn 0.22s ease", alignItems: "center" }}>
+      <AiAvatar />
+      <div className="message-content" style={{ paddingTop: 0 }}>
+        <div className="filler-bubble">
+          <span className="filler-eq"><i /><i /><i /></span>
+          <span className="filler-text">{text}</span>
+        </div>
       </div>
     </div>
   );
@@ -128,6 +144,49 @@ export default function ChatWindow({
         }
         .ai-free-text p { margin: 0 0 0.6em 0; }
         .ai-free-text p:last-child { margin-bottom: 0; }
+
+        @keyframes fillerEq {
+          0%, 100% { transform: scaleY(0.35); }
+          50%       { transform: scaleY(1); }
+        }
+        @keyframes fillerGlow {
+          0%, 100% { box-shadow: 0 0 0 0 rgba(99,102,241,0); }
+          50%       { box-shadow: 0 0 0 4px rgba(99,102,241,0.10); }
+        }
+        .filler-bubble {
+          display: inline-flex;
+          align-items: center;
+          gap: 9px;
+          padding: 8px 14px;
+          border-radius: 16px;
+          background: linear-gradient(135deg, rgba(99,102,241,0.13), rgba(26,115,232,0.13));
+          border: 1px solid rgba(99,102,241,0.28);
+          animation: fillerGlow 1.8s ease-in-out infinite;
+        }
+        .filler-eq {
+          display: inline-flex;
+          align-items: flex-end;
+          gap: 2px;
+          height: 14px;
+        }
+        .filler-eq i {
+          display: block;
+          width: 3px;
+          height: 100%;
+          border-radius: 2px;
+          background: linear-gradient(#6366f1, #1a73e8);
+          transform-origin: bottom;
+          animation: fillerEq 0.85s ease-in-out infinite;
+        }
+        .filler-eq i:nth-child(2) { animation-delay: 0.16s; }
+        .filler-eq i:nth-child(3) { animation-delay: 0.32s; }
+        .filler-text {
+          font-size: 0.9rem;
+          font-style: italic;
+          font-weight: 500;
+          color: #4338ca;
+          letter-spacing: 0.01em;
+        }
       `}</style>
 
       {/* ── All past messages ── */}
@@ -228,8 +287,10 @@ export default function ChatWindow({
         </div>
       )}
 
-      {/* ── Blob: waiting for response OR TTS-off waiting for first token ── */}
-      {(isWaiting || (!isWaiting && streaming && !streamContent)) && <ThinkingBlob />}
+      {/* ── Blob / filler: waiting for response OR TTS-off waiting for first token ── */}
+      {(isWaiting || (!isWaiting && streaming && !streamContent)) && (
+        fillerText && isWaiting ? <FillerBubble text={fillerText} /> : <ThinkingBlob />
+      )}
 
       <div ref={bottomRef} />
 

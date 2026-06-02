@@ -220,6 +220,34 @@ export const chatApi = {
   },
 };
 
+export interface FillerPhrase {
+  text: string;
+  slug: string;
+  file: string;
+  duration_ms: number;
+}
+
+export interface FillerCategory {
+  when: string;
+  phrases: FillerPhrase[];
+}
+
+export interface FillerManifest {
+  voice?: string;
+  speed?: number;
+  count?: number;
+  categories: Record<string, FillerCategory>;
+}
+
+export interface FillerPick {
+  category: string;
+  slug: string;
+  text: string;
+  file: string;
+  duration_ms: number | null;
+  audio_url: string;
+}
+
 export const voiceApi = {
   async speak(text: string): Promise<Blob> {
     const res = await fetch(`${API_BASE}/voice/speak`, {
@@ -229,6 +257,31 @@ export const voiceApi = {
     });
     if (!res.ok) throw new Error("TTS request failed");
     return res.blob();
+  },
+
+  // ── Thinking-filler player ────────────────────────────────────────────────
+  async fillersManifest(): Promise<FillerManifest> {
+    const res = await fetch(`${API_BASE}/voice/fillers/manifest`, { headers: authHeaders() });
+    if (!res.ok) throw new Error("Failed to load filler manifest");
+    return res.json();
+  },
+
+  async fillerAudioBlob(slug: string): Promise<Blob> {
+    const res = await fetch(`${API_BASE}/voice/fillers/audio/${encodeURIComponent(slug)}`, {
+      headers: authHeaders(),
+    });
+    if (!res.ok) throw new Error("Failed to load filler clip");
+    return res.blob();
+  },
+
+  async pickFiller(message: string): Promise<FillerPick> {
+    const res = await fetch(`${API_BASE}/voice/fillers/pick`, {
+      method: "POST",
+      headers: authHeaders(),
+      body: JSON.stringify({ message }),
+    });
+    if (!res.ok) throw new Error("Filler pick failed");
+    return res.json();
   },
 };
 

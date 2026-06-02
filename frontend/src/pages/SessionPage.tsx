@@ -2,7 +2,8 @@ import { useState, useEffect, useRef, useCallback } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { Lock, X, Pause, Play, Volume2, VolumeX, AlertTriangle } from "lucide-react";
 import ResizablePanels from "../components/ResizablePanels";
-import { appointmentsApi, assessmentsApi, sessionsApi, gamificationApi, slidesApi } from "../services/api";
+import { appointmentsApi, assessmentsApi, sessionsApi, gamificationApi, slidesApi, voiceApi } from "../services/api";
+import type { FillerManifest, FillerPhrase, FillerPick } from "../services/api";
 import ChatWindow from "../components/ChatWindow";
 import ChatInput from "../components/ChatInput";
 import AssessmentMode from "../components/AssessmentMode";
@@ -176,6 +177,15 @@ export default function SessionPage() {
   const localStreamRef = useRef<string>("");
   const lastAiIdBeforeSendRef = useRef<number | null>(null);
 
+  // Thinking-filler player: short pre-recorded phrase shown + played during the
+  // wait between "send" and the real response's TTS starting.
+  const [fillerText, setFillerText] = useState<string | null>(null);
+  const fillerActiveRef = useRef(false);
+  const fillerGenRef = useRef(0); // invalidates stale sequences on rapid re-send
+  const fillerAudioRef = useRef<HTMLAudioElement | null>(null);
+  const fillerCacheRef = useRef<Map<string, string>>(new Map()); // slug -> objectURL
+  const fillerManifestRef = useRef<FillerManifest | null>(null);
+
   const [sessionBriefing, setSessionBriefing] = useState<{
     hook?: string;
     what_you_will_learn?: string[];
@@ -230,9 +240,69 @@ export default function SessionPage() {
   // Keep aiWaitingRef in sync for use in setTimeout callbacks
   useEffect(() => { aiWaitingRef.current = aiWaiting; }, [aiWaiting]);
 
+  // ── Thinking-filler player helpers ──────────────────────────────────────
+  const stopFiller = useCallback(() => {
+    fillerActiveRef.current = false;
+    fillerGenRef.current++;           // invalidate any in-flight sequence
+    if (fillerAudioRef.current) {
+      try { fillerAudioRef.current.pause(); } catch { /* ignore */ }
+      fillerAudioRef.current = null;
+    }
+    setFillerText(null);
+  }, []);
+
+  const playFillerClip = useCallback((slug: string, text: string): Promise<void> => {
+    return new Promise((resolve) => {
+      setFillerText(text);
+      const url = fillerCacheRef.current.get(slug);
+      if (!url) { resolve(); return; }
+      const audio = new Audio(url);
+      fillerAudioRef.current = audio;
+      const done = () => resolve();
+      audio.onended = done;
+      audio.onerror = done;
+      audio.onpause = done;           // resolves at once if stopFiller() pauses it
+      audio.play().catch(done);
+    });
+  }, []);
+
+  // Pick + play one or two fillers while we wait for the real response's TTS.
+  const startFillerSequence = useCallback(async (message: string) => {
+    if (!ttsEnabledRef.current) return;       // muted -> plain blob, no filler
+    if (!fillerManifestRef.current) return;    // manifest not loaded yet
+    fillerActiveRef.current = true;
+    const myGen = ++fillerGenRef.current;
+    // Still the active sequence AND the student is still waiting?
+    const alive = () => fillerGenRef.current === myGen && aiWaitingRef.current;
+
+    let pick: FillerPick;
+    try {
+      pick = await voiceApi.pickFiller(message);
+    } catch {
+      if (fillerGenRef.current === myGen) fillerActiveRef.current = false;
+      return;
+    }
+    if (!alive()) return;             // real TTS started / superseded while classifying
+
+    await playFillerClip(pick.slug, pick.text);
+
+    // Loop a 2nd filler if the student is still waiting (real TTS not yet started).
+    if (alive()) {
+      const m = fillerManifestRef.current;
+      const bucket = m?.categories[pick.category] || m?.categories["thinking"];
+      const phrases: FillerPhrase[] = bucket?.phrases ?? [];
+      const second = phrases.length ? phrases[Math.floor(Math.random() * phrases.length)] : null;
+      if (second) await playFillerClip(second.slug, second.text);
+    }
+
+    // Fillers exhausted but still waiting -> fall back to the plain pulsing blob.
+    if (alive()) setFillerText(null);
+  }, [playFillerClip]);
+
   // TTS word-by-word reveal: start when TTS begins playing
   useEffect(() => {
     if (playing) {
+      stopFiller();              // real answer's TTS started -> kill any filler
       setAiWaiting(false);
       aiWaitingRef.current = false;
       const content = localStreamRef.current.trim();
@@ -263,6 +333,43 @@ export default function SessionPage() {
   // Cleanup reveal interval on unmount
   useEffect(() => () => {
     if (revealIntervalRef.current) clearInterval(revealIntervalRef.current);
+  }, []);
+
+  // Pre-load the filler manifest + cache every clip as an object URL so playback
+  // is instant later. Fillers are optional — any failure degrades to the blob.
+  useEffect(() => {
+    let cancelled = false;
+    const cache = fillerCacheRef.current;
+    (async () => {
+      try {
+        const manifest = await voiceApi.fillersManifest();
+        if (cancelled) return;
+        fillerManifestRef.current = manifest;
+        const slugs: string[] = [];
+        Object.values(manifest.categories || {}).forEach((c) =>
+          (c.phrases || []).forEach((p) => slugs.push(p.slug))
+        );
+        await Promise.all(
+          slugs.map(async (slug) => {
+            if (cancelled || cache.has(slug)) return;
+            try {
+              const blob = await voiceApi.fillerAudioBlob(slug);
+              if (cancelled) return;
+              cache.set(slug, URL.createObjectURL(blob));
+            } catch { /* skip individual clip */ }
+          })
+        );
+      } catch { /* fillers unavailable — silent, blob fallback */ }
+    })();
+    return () => {
+      cancelled = true;
+      cache.forEach((url) => URL.revokeObjectURL(url));
+      cache.clear();
+      if (fillerAudioRef.current) {
+        try { fillerAudioRef.current.pause(); } catch { /* ignore */ }
+        fillerAudioRef.current = null;
+      }
+    };
   }, []);
 
   const handleJoin = async (overrideCode?: string) => {
@@ -651,6 +758,8 @@ export default function SessionPage() {
           localStreamRef.current = "";
           setAiWaiting(true);
           aiWaitingRef.current = true;
+          stopFiller();
+          void startFillerSequence("I just finished the quiz, how did I do?");
           sendQuizFeedback(activeSessionId, quizTopic, quizScore, quizStrong, quizWeak, {
             onStreamStart: () => { localStreamRef.current = ""; if (ttsEnabledRef.current) startStreamTTS(); },
             onToken: (t: string) => { localStreamRef.current += t; if (ttsEnabledRef.current) feedStreamTTS(t); },
@@ -770,6 +879,8 @@ export default function SessionPage() {
       localStreamRef.current = "";
       setAiWaiting(true);
       aiWaitingRef.current = true;
+      stopFiller();
+      void startFillerSequence(text);
       sendMessage(text, {
         suppressNavigation: true,
         onStreamStart: () => { localStreamRef.current = ""; if (ttsEnabledRef.current) startStreamTTS(); },
@@ -795,7 +906,7 @@ export default function SessionPage() {
         research: sendOpts?.research,
       });
     },
-    [messages, sendMessage, startStreamTTS, feedStreamTTS, endStreamTTS]
+    [messages, sendMessage, startStreamTTS, feedStreamTTS, endStreamTTS, stopFiller, startFillerSequence]
   );
 
   const handleVoiceToggle = useCallback(() => {
@@ -1519,6 +1630,7 @@ export default function SessionPage() {
               revealContent={revealContent}
               revealedText={ttsRevealedText}
               lastKnownAiId={lastAiIdBeforeSendRef.current}
+              fillerText={fillerText}
             />
             {toolResults.map((tr) => {
               if (tr.tool === "set_homework") {
