@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { useParams, useNavigate } from "react-router-dom";
-import { Lock, X, Pause, Play, Volume2, VolumeX } from "lucide-react";
+import { Lock, X, Pause, Play, Volume2, VolumeX, AlertTriangle } from "lucide-react";
 import ResizablePanels from "../components/ResizablePanels";
 import { appointmentsApi, assessmentsApi, sessionsApi, gamificationApi, slidesApi } from "../services/api";
 import ChatWindow from "../components/ChatWindow";
@@ -117,6 +117,8 @@ export default function SessionPage() {
   const { user } = useAuth();
 
   const [sessionState, setSessionState] = useState<SessionState>("loading");
+  const [showEndConfirm, setShowEndConfirm] = useState(false);
+  const [ending, setEnding] = useState(false);
   const [passcode, setPasscode] = useState("");
   const [codeDigits, setCodeDigits] = useState<string[]>(Array(6).fill(""));
   const [joinError, setJoinError] = useState("");
@@ -482,8 +484,11 @@ export default function SessionPage() {
   };
 
   const handleEndSession = async () => {
+    setEnding(true);
     if (timerRef.current) clearInterval(timerRef.current);
     await appointmentsApi.updateStatus(apptId, "terminated").catch(() => {});
+    setShowEndConfirm(false);
+    setEnding(false);
     setSessionState("ended");
   };
 
@@ -1675,7 +1680,7 @@ export default function SessionPage() {
           </button>
           <button
             style={{ ...styles.endBtn, padding: isSmall ? "5px 8px" : "5px 12px" }}
-            onClick={handleEndSession}
+            onClick={() => setShowEndConfirm(true)}
             title="End session"
           >
             <X size={14} style={isSmall ? {} : { marginRight: 4 }} />
@@ -1829,6 +1834,47 @@ export default function SessionPage() {
         )}
       </div>
 
+      {showEndConfirm && (
+        <div
+          style={styles.endModalOverlay}
+          onClick={() => { if (!ending) setShowEndConfirm(false); }}
+        >
+          <div
+            style={styles.endModalCard}
+            onClick={(e) => e.stopPropagation()}
+            role="alertdialog"
+            aria-modal="true"
+            aria-labelledby="end-modal-title"
+          >
+            <div style={styles.endModalIconWrap}>
+              <AlertTriangle size={28} color="#dc2626" strokeWidth={2.4} />
+            </div>
+            <h2 id="end-modal-title" style={styles.endModalTitle}>End this lesson?</h2>
+            <p style={styles.endModalText}>
+              Your lesson is still in progress. If you end now, the AI tutor will stop
+              and a session summary will be generated. You can’t resume this session
+              afterwards.
+            </p>
+            <div style={styles.endModalActions}>
+              <button
+                style={styles.endModalCancelBtn}
+                onClick={() => setShowEndConfirm(false)}
+                disabled={ending}
+              >
+                Keep Learning
+              </button>
+              <button
+                style={{ ...styles.endModalConfirmBtn, opacity: ending ? 0.7 : 1, cursor: ending ? "wait" : "pointer" }}
+                onClick={handleEndSession}
+                disabled={ending}
+              >
+                {ending ? "Ending…" : "End Lesson"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       <style>{`
         @keyframes avatarPulse {
           0%, 100% { box-shadow: 0 0 0 0 rgba(99,102,241,0.3); }
@@ -1836,6 +1882,14 @@ export default function SessionPage() {
         }
         .avatar-pulse-anim {
           animation: avatarPulse 2.4s ease-in-out infinite;
+        }
+        @keyframes endModalFade {
+          from { opacity: 0; }
+          to { opacity: 1; }
+        }
+        @keyframes endModalPop {
+          from { opacity: 0; transform: translateY(12px) scale(0.96); }
+          to { opacity: 1; transform: translateY(0) scale(1); }
         }
       `}</style>
     </div>
@@ -1849,6 +1903,80 @@ const styles: Record<string, React.CSSProperties> = {
     height: "100vh",
     overflow: "hidden",
     background: "var(--bg-primary)",
+  },
+  endModalOverlay: {
+    position: "fixed",
+    inset: 0,
+    zIndex: 9999,
+    background: "rgba(15, 23, 42, 0.55)",
+    backdropFilter: "blur(4px)",
+    WebkitBackdropFilter: "blur(4px)",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    padding: 20,
+    animation: "endModalFade 0.18s ease",
+  },
+  endModalCard: {
+    width: "100%",
+    maxWidth: 420,
+    background: "#ffffff",
+    borderRadius: 20,
+    padding: "30px 28px 24px",
+    boxShadow: "0 24px 60px rgba(0,0,0,0.35)",
+    textAlign: "center",
+    animation: "endModalPop 0.22s cubic-bezier(0.16, 1, 0.3, 1)",
+  },
+  endModalIconWrap: {
+    width: 64,
+    height: 64,
+    borderRadius: "50%",
+    background: "#fee2e2",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    margin: "0 auto 16px",
+  },
+  endModalTitle: {
+    fontSize: 21,
+    fontWeight: 800,
+    color: "#0f172a",
+    margin: "0 0 10px",
+  },
+  endModalText: {
+    fontSize: 14,
+    lineHeight: 1.55,
+    color: "#475569",
+    margin: "0 0 24px",
+  },
+  endModalActions: {
+    display: "flex",
+    gap: 12,
+  },
+  endModalCancelBtn: {
+    flex: 1,
+    padding: "12px 16px",
+    borderRadius: 12,
+    border: "1.5px solid #e2e8f0",
+    background: "#ffffff",
+    color: "#334155",
+    fontSize: 14,
+    fontWeight: 700,
+    cursor: "pointer",
+    fontFamily: "inherit",
+  },
+  endModalConfirmBtn: {
+    flex: 1,
+    padding: "12px 16px",
+    borderRadius: 12,
+    border: "none",
+    background: "linear-gradient(135deg, #ef4444 0%, #dc2626 100%)",
+    color: "#ffffff",
+    fontSize: 14,
+    fontWeight: 700,
+    cursor: "pointer",
+    fontFamily: "inherit",
+    boxShadow: "0 6px 16px rgba(220,38,38,0.35)",
   },
   topBar: {
     display: "flex",
