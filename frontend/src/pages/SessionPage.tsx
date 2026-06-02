@@ -112,6 +112,10 @@ function getCurrentPhaseIndex(elapsedMin: number, phases: typeof PHASES_30) {
   return phases.length - 1;
 }
 
+// Filler manifest cached at module scope so it's fetched ONCE per browser session
+// (not on every SessionPage visit). Clips themselves are fetched on demand.
+let _cachedFillerManifest: FillerManifest | null = null;
+
 export default function SessionPage() {
   const { appointmentId } = useParams<{ appointmentId: string }>();
   const navigate = useNavigate();
@@ -183,8 +187,6 @@ export default function SessionPage() {
   const fillerActiveRef = useRef(false);
   const fillerGenRef = useRef(0); // invalidates stale sequences on rapid re-send
   const fillerAudioRef = useRef<HTMLAudioElement | null>(null);
-  const fillerCacheRef = useRef<Map<string, string>>(new Map()); // slug -> objectURL
-  const fillerManifestRef = useRef<FillerManifest | null>(null);
 
   const [sessionBriefing, setSessionBriefing] = useState<{
     hook?: string;
@@ -251,29 +253,51 @@ export default function SessionPage() {
     setFillerText(null);
   }, []);
 
-  const playFillerClip = useCallback((slug: string, text: string): Promise<void> => {
-    return new Promise((resolve) => {
+  // Fetch the clip on demand (no bulk pre-caching) and play it. `stillWanted`
+  // lets the caller skip playback if the sequence was superseded mid-fetch.
+  const playFillerClip = useCallback(
+    async (slug: string, text: string, stillWanted?: () => boolean): Promise<void> => {
       setFillerText(text);
-      const url = fillerCacheRef.current.get(slug);
-      if (!url) { resolve(); return; }
-      const audio = new Audio(url);
-      fillerAudioRef.current = audio;
-      const done = () => resolve();
-      audio.onended = done;
-      audio.onerror = done;
-      audio.onpause = done;           // resolves at once if stopFiller() pauses it
-      audio.play().catch(done);
-    });
-  }, []);
+      let url: string;
+      try {
+        const blob = await voiceApi.fillerAudioBlob(slug);
+        url = URL.createObjectURL(blob);
+      } catch {
+        return;
+      }
+      if (stillWanted && !stillWanted()) { URL.revokeObjectURL(url); return; }
+      await new Promise<void>((resolve) => {
+        const audio = new Audio(url);
+        fillerAudioRef.current = audio;
+        const done = () => { URL.revokeObjectURL(url); resolve(); };
+        audio.onended = done;
+        audio.onerror = done;
+        audio.onpause = done;           // resolves at once if stopFiller() pauses it
+        audio.play().catch(done);
+      });
+    },
+    []
+  );
 
   // Pick + play one or two fillers while we wait for the real response's TTS.
   const startFillerSequence = useCallback(async (message: string) => {
     if (!ttsEnabledRef.current) return;       // muted -> plain blob, no filler
-    if (!fillerManifestRef.current) return;    // manifest not loaded yet
     fillerActiveRef.current = true;
     const myGen = ++fillerGenRef.current;
     // Still the active sequence AND the student is still waiting?
     const alive = () => fillerGenRef.current === myGen && aiWaitingRef.current;
+
+    // Lazily load the manifest once per browser session (module-level cache).
+    if (!_cachedFillerManifest) {
+      try {
+        _cachedFillerManifest = await voiceApi.fillersManifest();
+      } catch {
+        if (fillerGenRef.current === myGen) fillerActiveRef.current = false;
+        return;
+      }
+    }
+    if (!alive()) return;
+    const manifest = _cachedFillerManifest;
 
     let pick: FillerPick;
     try {
@@ -284,15 +308,14 @@ export default function SessionPage() {
     }
     if (!alive()) return;             // real TTS started / superseded while classifying
 
-    await playFillerClip(pick.slug, pick.text);
+    await playFillerClip(pick.slug, pick.text, alive);
 
     // Loop a 2nd filler if the student is still waiting (real TTS not yet started).
     if (alive()) {
-      const m = fillerManifestRef.current;
-      const bucket = m?.categories[pick.category] || m?.categories["thinking"];
+      const bucket = manifest.categories[pick.category] || manifest.categories["thinking"];
       const phrases: FillerPhrase[] = bucket?.phrases ?? [];
       const second = phrases.length ? phrases[Math.floor(Math.random() * phrases.length)] : null;
-      if (second) await playFillerClip(second.slug, second.text);
+      if (second) await playFillerClip(second.slug, second.text, alive);
     }
 
     // Fillers exhausted but still waiting -> fall back to the plain pulsing blob.
@@ -335,41 +358,13 @@ export default function SessionPage() {
     if (revealIntervalRef.current) clearInterval(revealIntervalRef.current);
   }, []);
 
-  // Pre-load the filler manifest + cache every clip as an object URL so playback
-  // is instant later. Fillers are optional — any failure degrades to the blob.
-  useEffect(() => {
-    let cancelled = false;
-    const cache = fillerCacheRef.current;
-    (async () => {
-      try {
-        const manifest = await voiceApi.fillersManifest();
-        if (cancelled) return;
-        fillerManifestRef.current = manifest;
-        const slugs: string[] = [];
-        Object.values(manifest.categories || {}).forEach((c) =>
-          (c.phrases || []).forEach((p) => slugs.push(p.slug))
-        );
-        await Promise.all(
-          slugs.map(async (slug) => {
-            if (cancelled || cache.has(slug)) return;
-            try {
-              const blob = await voiceApi.fillerAudioBlob(slug);
-              if (cancelled) return;
-              cache.set(slug, URL.createObjectURL(blob));
-            } catch { /* skip individual clip */ }
-          })
-        );
-      } catch { /* fillers unavailable — silent, blob fallback */ }
-    })();
-    return () => {
-      cancelled = true;
-      cache.forEach((url) => URL.revokeObjectURL(url));
-      cache.clear();
-      if (fillerAudioRef.current) {
-        try { fillerAudioRef.current.pause(); } catch { /* ignore */ }
-        fillerAudioRef.current = null;
-      }
-    };
+  // Stop any playing filler clip on unmount. The manifest + clips are loaded
+  // lazily on first send (no pre-caching) — see startFillerSequence.
+  useEffect(() => () => {
+    if (fillerAudioRef.current) {
+      try { fillerAudioRef.current.pause(); } catch { /* ignore */ }
+      fillerAudioRef.current = null;
+    }
   }, []);
 
   const handleJoin = async (overrideCode?: string) => {
