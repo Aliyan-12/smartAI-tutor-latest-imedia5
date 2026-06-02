@@ -51,6 +51,10 @@ services:
       POSTGRES_HOST: db
       PRESENTON_URL: http://presenton
       PRESENTON_PUBLIC_URL: http://localhost:5000
+      OMP_NUM_THREADS: "8"
+      TORCH_NUM_THREADS: "8"
+      MKL_NUM_THREADS: "8"
+      OPENBLAS_NUM_THREADS: "8"
     volumes:
       - ./backend:/app
       - backend_uploads:/app/uploads
