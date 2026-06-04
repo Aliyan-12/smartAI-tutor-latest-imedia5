@@ -11,7 +11,7 @@ from app.middleware.rate_limit import RateLimitMiddleware
 from app.routers import auth, chat, voice, health, admin, teacher, subscription, documents
 from app.routers import parent, appointments, assessments, gamification, lessons, assignments
 from app.routers import settings as settings_router
-from app.routers import sessions, slides, session_ws
+from app.routers import sessions, slides
 
 logging.basicConfig(
     level=logging.INFO,
@@ -32,7 +32,7 @@ async def lifespan(app: FastAPI):
 
     # Pre-warm Kokoro TTS pipeline so the first voice request is not slow
     try:
-        from app.services.voice_service import _get_kokoro
+        from app.services.voice_agent_service import _get_kokoro
         await asyncio.to_thread(_get_kokoro)
         logger.info("Kokoro TTS pipeline pre-warmed successfully.")
     except Exception as _kokoro_err:
@@ -88,4 +88,3 @@ app.include_router(assignments.router)
 app.include_router(settings_router.router)
 app.include_router(sessions.router)
 app.include_router(slides.router)
-app.include_router(session_ws.router)

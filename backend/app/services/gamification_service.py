@@ -359,7 +359,7 @@ async def get_next_topic_recommendations(
 
     query = "Next topics to learn after mastering: " + ", ".join(m.topic for m in mastered[:6])
 
-    from app.services.retrieval_service import retrieve_relevant_chunks
+    from app.services.rag_service import retrieve_relevant_chunks
     chunks = await retrieve_relevant_chunks(
         db, query, subject=subject, key_stage=key_stage, top_k=15
     )

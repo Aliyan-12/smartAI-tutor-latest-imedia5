@@ -2,16 +2,35 @@
 Session Agent Service — builds personalised AI tutor prompts for booked AI sessions
 and generates practice/test assessments scoped to a specific appointment.
 """
+import asyncio
+import base64
+import io
+import json
 import logging
+import os
+import random
 import re as _re
+from pathlib import Path
 from typing import Optional
+from uuid import uuid4
+
+import soundfile as sf
+from pydantic import BaseModel
+
+from fastapi import WebSocket, WebSocketDisconnect
+from starlette.websockets import WebSocketState
 
 from sqlalchemy import select, desc
 from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.core.config import settings
+from app.core.security import decode_access_token
+from app.db.session import async_session_factory
 from app.models.appointment import Appointment
 from app.models.assessment import Assessment
 from app.models.student_profile import StudentProfile, TopicMastery
-from app.services import gemini_service, assessment_service, retrieval_service
+from app.models.user import ROLE_STUDENT
+from app.services import gemini_service, assessment_service, rag_service, chat_service, credit_service
 
 logger = logging.getLogger(__name__)
 
@@ -213,7 +232,7 @@ async def _fetch_unit_kb_content_rag(
 
     for unit_name in unit_names:
         query = unit_name.replace("-", " ").strip()
-        chunks = await retrieval_service.retrieve_relevant_chunks(
+        chunks = await rag_service.retrieve_relevant_chunks(
             db=db,
             query=query,
             subject=subject,
@@ -705,7 +724,7 @@ The student has uploaded the following material for this session. Reference it w
     training_style_section = ""
     try:
         style_query = f"{subject} {title} teaching explanation"
-        style_examples = await retrieval_service.retrieve_training_style_examples(
+        style_examples = await rag_service.retrieve_training_style_examples(
             db=db,
             query=style_query,
             subject=subject,
@@ -1204,3 +1223,552 @@ Be age-appropriate for {key_stage}. Return ONLY valid JSON, no markdown."""
         await db.rollback()
 
     return briefing
+
+
+# ===========================================================================
+# Segment streaming + TTS bundling  (merged from segment_service)
+# ===========================================================================
+
+# Bound concurrent Kokoro inferences across all sessions (avoid CPU oversubscription).
+_TTS_MAX_CONCURRENCY = int(os.getenv("TTS_MAX_CONCURRENCY", "4"))
+_tts_semaphore = asyncio.Semaphore(_TTS_MAX_CONCURRENCY)
+
+_MAX_SEGMENT_CHARS = 240
+_MIN_TTS_CHARS = 3
+
+_SENT_END = _re.compile(r"[.!?]")
+_DISPLAY_MARKER = _re.compile(r"\[(QUIZ_OFFER|SLIDE_TRIGGER|TOOL_RESULT)[^\]]*\]")
+
+
+def strip_display_markers(text: str) -> str:
+    """Remove internal bracket markers so they never appear in the chat bubble."""
+    return _DISPLAY_MARKER.sub("", text)
+
+
+class SentenceSegmenter:
+    """Accumulates streamed text and emits complete segments (~sentences)."""
+
+    def __init__(self, max_chars: int = _MAX_SEGMENT_CHARS):
+        self._buf = ""
+        self._max = max_chars
+
+    def feed(self, text: str) -> list:
+        self._buf += text
+        out: list = []
+        while True:
+            seg = self._take()
+            if seg is None:
+                break
+            if seg:
+                out.append(seg)
+        return out
+
+    def flush(self) -> Optional[str]:
+        seg = self._buf.strip()
+        self._buf = ""
+        return seg or None
+
+    def _take(self) -> Optional[str]:
+        buf = self._buf
+        para = buf.find("\n\n")
+        if para != -1:
+            seg = buf[:para].strip()
+            self._buf = buf[para + 2:].lstrip()
+            return seg
+        for m in _SENT_END.finditer(buf):
+            i = m.end()
+            if i >= len(buf):
+                break
+            if buf[i] in " \n\t":
+                seg = buf[:i].strip()
+                self._buf = buf[i:].lstrip()
+                return seg
+        if len(buf) >= self._max:
+            cut = buf.rfind(" ", 0, self._max)
+            if cut <= 0:
+                cut = self._max
+            seg = buf[:cut].strip()
+            self._buf = buf[cut:].lstrip()
+            return seg
+        return None
+
+
+def _wav_duration_ms(wav: bytes) -> int:
+    try:
+        with sf.SoundFile(io.BytesIO(wav)) as f:
+            return int(round(len(f) / float(f.samplerate) * 1000))
+    except Exception:
+        return 0
+
+
+async def build_segment(text: str, seq: int, tts: bool) -> dict:
+    """{type:"segment"} payload: cleaned display text + optional bundled audio."""
+    display = strip_display_markers(text).strip()
+    audio_b64 = None
+    duration_ms = None
+    if tts and len(display) >= _MIN_TTS_CHARS:
+        try:
+            from app.services.voice_agent_service import text_to_speech
+            async with _tts_semaphore:
+                wav, _mime = await asyncio.to_thread(text_to_speech, display)
+            audio_b64 = base64.b64encode(wav).decode("ascii")
+            duration_ms = _wav_duration_ms(wav)
+        except Exception as e:  # noqa: BLE001 - a failed clip must not break the turn
+            logger.warning("Segment TTS failed (seq=%s): %s", seq, e)
+    return {"type": "segment", "seq": seq, "text": display, "audio_b64": audio_b64, "duration_ms": duration_ms}
+
+
+# ===========================================================================
+# Filler phrases  (merged from filler_service)
+# ===========================================================================
+
+WAITING_CATEGORIES = ["acknowledge", "thinking", "checking", "encourage"]
+_DEFAULT_CATEGORY = "thinking"
+_manifest_cache: Optional[dict] = None
+
+
+def voices_dir() -> Path:
+    """uploads/voices/ — sibling of settings.upload_dir, matches the seeder."""
+    return Path(settings.upload_dir).resolve().parent / "voices"
+
+
+def get_manifest(force_reload: bool = False) -> dict:
+    """Load (and cache) uploads/voices/manifest.json produced by the seeder."""
+    global _manifest_cache
+    if _manifest_cache is not None and not force_reload:
+        return _manifest_cache
+    path = voices_dir() / "manifest.json"
+    if not path.exists():
+        logger.warning("Filler manifest not found at %s — run: python -m app.seed_voice_fillers", path)
+        _manifest_cache = {"categories": {}, "count": 0}
+    else:
+        try:
+            _manifest_cache = json.loads(path.read_text(encoding="utf-8"))
+        except Exception as e:  # noqa: BLE001
+            logger.error("Failed to read filler manifest: %s", e)
+            _manifest_cache = {"categories": {}, "count": 0}
+    return _manifest_cache
+
+
+def _random_phrase(category: str) -> Optional[dict]:
+    bucket = get_manifest().get("categories", {}).get(category)
+    if not bucket or not bucket.get("phrases"):
+        return None
+    return random.choice(bucket["phrases"])
+
+
+def _any_phrase() -> Optional[dict]:
+    for bucket in get_manifest().get("categories", {}).values():
+        if bucket.get("phrases"):
+            return random.choice(bucket["phrases"])
+    return None
+
+
+def get_neutral_filler() -> Optional[dict]:
+    """A short NEUTRAL bridge ("Okay.", "Right.") + its audio, played the instant the
+    student sends — covers the <1s before the model's first sentence (the real reaction)."""
+    phrase = _random_phrase("neutral")
+    if not phrase:
+        return None
+    audio_b64 = None
+    try:
+        wav = (voices_dir() / phrase["file"]).read_bytes()
+        audio_b64 = base64.b64encode(wav).decode("ascii")
+    except Exception as e:  # noqa: BLE001
+        logger.warning("Neutral filler clip read failed (%s): %s", phrase.get("file"), e)
+    return {"text": phrase["text"], "audio_b64": audio_b64}
+
+
+class FillerPick(BaseModel):
+    category: str
+
+
+def _classify_filler(message: str, available: list) -> str:
+    from langchain_core.messages import SystemMessage, HumanMessage
+    from app.services.llm_service import get_llm
+
+    cat_lines = "\n".join(f"- {c}: {get_manifest()['categories'][c]['when']}" for c in available)
+    system = (
+        "You pick a short 'filler' phrase a tutor says the instant a student sends a "
+        "message, to fill the brief moment before the full answer is ready. "
+        "Choose the ONE category that best fits the student's message.\n\n"
+        f"Categories:\n{cat_lines}\n\n"
+        f"Respond with category set to exactly one of: {', '.join(available)}."
+    )
+    result: FillerPick = get_llm().with_structured_output(FillerPick).invoke([
+        SystemMessage(content=system),
+        HumanMessage(content=f'Student just said: "{message[:500]}". Pick the best category.'),
+    ])
+    return result.category
+
+
+def pick_filler(message: str) -> Optional[dict]:
+    """Classify the just-sent message and return which situational filler to play."""
+    manifest = get_manifest()
+    if not manifest.get("categories"):
+        return None
+    available = [c for c in WAITING_CATEGORIES if c in manifest["categories"]]
+    category = _DEFAULT_CATEGORY
+    if available:
+        try:
+            chosen = _classify_filler(message, available)
+            if chosen in available:
+                category = chosen
+        except Exception as e:  # noqa: BLE001
+            logger.warning("filler-pick classification failed, using default: %s", e)
+    phrase = _random_phrase(category) or _random_phrase(_DEFAULT_CATEGORY) or _any_phrase()
+    if not phrase:
+        return None
+    return {
+        "category": category, "slug": phrase["slug"], "text": phrase["text"],
+        "file": phrase["file"], "duration_ms": phrase.get("duration_ms"),
+        "audio_url": f"/api/voice/fillers/audio/{phrase['slug']}",
+    }
+
+
+# ===========================================================================
+# Session chat WebSocket turn orchestration  (merged from the session_ws router)
+# ===========================================================================
+
+_TURN_TIMEOUT_S = 150
+_active_ws: dict = {}
+
+_RESEARCH_PREFIX = (
+    "[DEEP RESEARCH REQUEST] Please conduct a thorough, multi-faceted investigation "
+    "into the following, covering key concepts, common misconceptions, real-world "
+    "applications, and exam-relevant facts with clear sections:\n\n"
+)
+
+_DOC_TYPES = {
+    "application/pdf": ("pdf", ".pdf"),
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document": ("docx", ".docx"),
+    "application/vnd.openxmlformats-officedocument.presentationml.presentation": ("pptx", ".pptx"),
+}
+
+
+def _extract_doc_text(b64: str, mime: str) -> Optional[str]:
+    """Extract text from an attached PDF/DOCX/PPTX (reuses document_service)."""
+    entry = _DOC_TYPES.get(mime)
+    if not entry:
+        return None
+    file_type, suffix = entry
+    import tempfile
+    path = None
+    try:
+        from app.services.document_service import extract_text
+        with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tmp:
+            tmp.write(base64.b64decode(b64))
+            path = tmp.name
+        text = extract_text(path, file_type)
+        return text.strip() or None
+    except Exception as e:  # noqa: BLE001
+        logger.warning("Attached-file text extraction failed: %s", e)
+        return None
+    finally:
+        if path:
+            try:
+                os.unlink(path)
+            except Exception:
+                pass
+
+
+def _coerce_str(token) -> str:
+    if isinstance(token, str):
+        return token
+    if isinstance(token, list):
+        return "".join(p.get("text", "") if isinstance(p, dict) else str(p) for p in token)
+    return str(token)
+
+
+def _build_quiz_ctx(topic: str, score: float, strong: list, weak: list) -> str:
+    score_pct = round(score, 1)
+    strong_str = ", ".join(strong) if strong else "none"
+    weak_str = ", ".join(weak) if weak else "none"
+    if score_pct >= 80:
+        tone = "Praise them enthusiastically — this is a great score!"
+    elif score_pct >= 60:
+        tone = "Acknowledge the effort, highlight strengths, gently note the areas to review."
+    else:
+        tone = ("Be warm and encouraging — do not make them feel bad. Focus first on what they "
+                "got right, then guide them through the weak areas clearly.")
+    return (
+        f"[QUIZ COMPLETED]\nTopic: {topic} | Score: {score_pct}%\n"
+        f"Strong areas: {strong_str}\nWeak areas: {weak_str}\n"
+        f"Tone guidance: {tone}\n"
+        "Respond naturally — give brief, warm feedback on the quiz result, then continue teaching."
+    )
+
+
+async def _run_turn(send, chat_id, user_id, *, saved_user_text, ai_content,
+                    image_b64=None, image_mime="image/jpeg", tts=True):
+    """Run one assistant turn: save-once, stream + segment, emit turn_end with the DB id."""
+    await send({"type": "turn_start", "turn_id": uuid4().hex})
+
+    if tts:
+        nf = await asyncio.to_thread(get_neutral_filler)
+        if nf and nf.get("audio_b64"):
+            await send({"type": "filler", "text": nf["text"], "audio_b64": nf["audio_b64"]})
+
+    if image_b64 and image_mime and not image_mime.startswith("image/"):
+        doc_text = await asyncio.to_thread(_extract_doc_text, image_b64, image_mime)
+        image_b64 = None
+        if doc_text:
+            ai_content = f"[ATTACHED FILE CONTENT]\n{doc_text[:8000]}\n\n{ai_content}"
+
+    message_id = None
+    clean = ""
+    async with async_session_factory() as db:
+        chat = await chat_service.get_chat_by_id(db, chat_id)
+        if not chat:
+            await send({"type": "error", "message": "Session not found.", "recoverable": False})
+            await send({"type": "turn_end", "message_id": None, "full_text": ""})
+            return
+
+        if saved_user_text is not None:
+            await chat_service.add_message(db, chat_id, "user", saved_user_text)
+        history, rag_chunks = await chat_service.build_context(db, chat_id, user_query=saved_user_text or ai_content)
+        await db.commit()
+
+        appt_id = getattr(chat, "appointment_id", None)
+        if not appt_id and chat.title:
+            m = _re.match(r"\[session:(\d+)\]", chat.title)
+            if m:
+                appt_id = int(m.group(1))
+
+        session_system_prompt = None
+        tool_context = None
+        if appt_id:
+            try:
+                session_system_prompt = await build_session_system_prompt(
+                    db, appt_id, user_id, history_len=max(0, len(history) - 1)
+                )
+            except Exception:
+                logger.warning("Session prompt build failed for appt %s", appt_id)
+            try:
+                from app.services.appointment_service import get_appointment
+                from app.tools.session_tools import ToolContext
+                appt = await get_appointment(db, appt_id)
+                if appt:
+                    tool_context = ToolContext(
+                        db=db, student_id=user_id, appointment_id=appt_id,
+                        subject=appt.subject, key_stage=appt.key_stage,
+                        chat_session_id=chat.session_id,
+                    )
+            except Exception:
+                logger.warning("ToolContext build failed for appt %s", appt_id)
+
+        hist_slice = history[:-1] if saved_user_text is not None else history
+
+        segmenter = SentenceSegmenter()
+        seq = 0
+        full: list = []
+        async for raw in gemini_service.stream_response_async(
+            hist_slice, ai_content, rag_chunks=rag_chunks,
+            system_prompt_override=session_system_prompt, tool_context=tool_context,
+            image_data=image_b64, image_mime=image_mime,
+        ):
+            token = _coerce_str(raw)
+            stripped = token.strip()
+            if stripped.startswith("[TOOL_RESULT:") and stripped.endswith("]"):
+                try:
+                    tr = json.loads(stripped[len("[TOOL_RESULT:"):-1])
+                    await send({"type": "tool", "tool": tr.get("tool", ""), "data": tr.get("data", {})})
+                except Exception:
+                    pass
+                continue
+            full.append(token)
+            for sentence in segmenter.feed(token):
+                await send(await build_segment(sentence, seq, tts))
+                seq += 1
+
+        remainder = segmenter.flush()
+        if remainder:
+            await send(await build_segment(remainder, seq, tts))
+            seq += 1
+
+        complete = "".join(full)
+        clean = strip_display_markers(complete).replace("[SLIDE_TRIGGER]", "").strip()
+        if not clean or "[Error:" in complete:
+            await send({"type": "error", "message": "The tutor couldn't generate a reply — please try again.", "recoverable": True})
+            await send({"type": "turn_end", "message_id": None, "full_text": ""})
+            return
+
+        msg = await chat_service.add_message(db, chat_id, "assistant", clean)
+        message_id = msg.id
+        try:
+            from app.services.user_service import get_user_by_id
+            from app.services import gamification_service
+            fresh_user = await get_user_by_id(db, user_id)
+            if fresh_user:
+                await credit_service.check_and_deduct_credit(db, fresh_user)
+                await send({"type": "credits", "value": float(fresh_user.credits)})
+                try:
+                    await gamification_service.award_xp(db, user_id, 5, "chat_message")
+                    await gamification_service.check_and_update_streak(db, user_id)
+                except Exception:
+                    pass
+        except Exception:
+            logger.warning("Credit/XP update failed for user %s", user_id)
+        await db.commit()
+
+    await send({"type": "turn_end", "message_id": message_id, "full_text": clean})
+
+
+async def _handle_user_message(send, chat_id, user_id, data):
+    text = (data.get("text") or "").strip()
+    image_b64 = data.get("image_b64")
+    if not text and not image_b64:
+        return
+    research = bool(data.get("research"))
+    saved = text if text else "(shared an image)"
+    if research and text:
+        ai = _RESEARCH_PREFIX + text
+    else:
+        ai = text or "Please look at the attached image and help me understand it."
+    await _run_turn(send, chat_id, user_id, saved_user_text=saved, ai_content=ai,
+                    image_b64=image_b64, image_mime=data.get("image_mime") or "image/jpeg",
+                    tts=bool(data.get("tts", True)))
+
+
+async def _handle_quiz_result(send, chat_id, user_id, data):
+    quiz_ctx = _build_quiz_ctx(
+        data.get("topic", "the quiz"), float(data.get("score", 0) or 0),
+        data.get("strong", []) or [], data.get("weak", []) or [],
+    )
+    await _run_turn(send, chat_id, user_id, saved_user_text=None, ai_content=quiz_ctx,
+                    tts=bool(data.get("tts", True)))
+
+
+async def _handle_user_audio(send, chat_id, user_id, data):
+    """Custom voice loop: transcribe the recorded utterance, then run a normal turn."""
+    audio_b64 = data.get("audio_b64")
+    if not audio_b64:
+        return
+    mime = data.get("mime") or "audio/webm"
+    try:
+        audio_bytes = base64.b64decode(audio_b64)
+    except Exception:
+        await send({"type": "error", "message": "Bad audio data.", "recoverable": True})
+        await send({"type": "turn_end", "message_id": None, "full_text": ""})
+        return
+    from app.services.voice_agent_service import speech_to_text
+    ext = (mime.split("/")[-1] or "webm").split(";")[0]
+    transcript = await asyncio.to_thread(speech_to_text, audio_bytes, f"audio.{ext}")
+    if not transcript:
+        await send({"type": "error", "message": "Sorry, I couldn't hear that — please try again.", "recoverable": True})
+        await send({"type": "turn_end", "message_id": None, "full_text": ""})
+        return
+    await send({"type": "user_transcript", "text": transcript})
+    await _run_turn(send, chat_id, user_id, saved_user_text=transcript, ai_content=transcript,
+                    tts=bool(data.get("tts", True)))
+
+
+async def _guard_turn(send, coro):
+    try:
+        await asyncio.wait_for(coro, timeout=_TURN_TIMEOUT_S)
+    except asyncio.TimeoutError:
+        await send({"type": "error", "message": "The tutor took too long — please try again.", "recoverable": True})
+        await send({"type": "turn_end", "message_id": None, "full_text": ""})
+    except asyncio.CancelledError:
+        await send({"type": "turn_end", "message_id": None, "full_text": ""})
+    except Exception as e:  # noqa: BLE001
+        logger.error("Session turn failed: %s", e, exc_info=True)
+        await send({"type": "error", "message": "Something went wrong — please try again.", "recoverable": True})
+        await send({"type": "turn_end", "message_id": None, "full_text": ""})
+
+
+async def run_session_ws(websocket: WebSocket) -> None:
+    """Full session-chat WebSocket handler (auth + turn loop). The router delegates here."""
+    await websocket.accept()
+
+    token = websocket.query_params.get("token")
+    appt_str = websocket.query_params.get("appointment_id")
+    session_id_q = websocket.query_params.get("session_id")
+    appt_id = int(appt_str) if appt_str and appt_str.isdigit() else None
+
+    if not token:
+        await websocket.close(code=4001, reason="Missing auth token")
+        return
+    payload = decode_access_token(token)
+    if not payload:
+        await websocket.close(code=4001, reason="Invalid token")
+        return
+    user_id = int(payload.get("sub", 0))
+    role = payload.get("role", "")
+    if not user_id or role != ROLE_STUDENT:
+        await websocket.close(code=4003, reason="Only students can use the session")
+        return
+
+    existing = _active_ws.get(user_id)
+    if existing is not None and existing is not websocket:
+        try:
+            await existing.close(code=4000, reason="Replaced by new session")
+        except Exception:
+            pass
+    _active_ws[user_id] = websocket
+    current_turn: Optional[asyncio.Task] = None
+
+    async def send(d: dict) -> None:
+        try:
+            if websocket.client_state == WebSocketState.CONNECTED:
+                await websocket.send_json(d)
+        except Exception:
+            pass
+
+    try:
+        async with async_session_factory() as db:
+            chat = None
+            if session_id_q:
+                chat = await chat_service.get_chat_by_session(db, session_id_q, user_id)
+            if not chat and appt_id:
+                chat = await chat_service.get_or_create_session_chat(db, user_id, appt_id)
+                await db.commit()
+            if not chat:
+                await send({"type": "error", "message": "Session not found.", "recoverable": False})
+                await websocket.close(code=4004)
+                return
+            chat_id = chat.id
+            chat_session_id = chat.session_id
+
+        await send({"type": "ready", "session_id": chat_session_id})
+        logger.info("Session WS ready: user=%s chat=%s appt=%s", user_id, chat_id, appt_id)
+
+        _handlers = {
+            "user_message": _handle_user_message,
+            "quiz_result": _handle_quiz_result,
+            "user_audio": _handle_user_audio,
+        }
+        while True:
+            try:
+                data = await websocket.receive_json()
+            except (WebSocketDisconnect, RuntimeError):
+                break
+            except Exception:
+                break
+            mtype = data.get("type")
+            if mtype == "ping":
+                await send({"type": "pong"})
+            elif mtype == "stop":
+                if current_turn and not current_turn.done():
+                    current_turn.cancel()
+            elif mtype in _handlers:
+                if current_turn and not current_turn.done():
+                    continue
+                current_turn = asyncio.create_task(
+                    _guard_turn(send, _handlers[mtype](send, chat_id, user_id, data))
+                )
+    except WebSocketDisconnect:
+        pass
+    except Exception as e:  # noqa: BLE001
+        logger.error("Session WS error: %s", e, exc_info=True)
+    finally:
+        if current_turn and not current_turn.done():
+            current_turn.cancel()
+        if _active_ws.get(user_id) is websocket:
+            del _active_ws[user_id]
+        try:
+            if websocket.client_state == WebSocketState.CONNECTED:
+                await websocket.close()
+        except Exception:
+            pass
+        logger.info("Session WS closed: user=%s", user_id)

@@ -25,8 +25,8 @@ from app.core.security import decode_access_token
 from app.db.session import async_session_factory
 from app.middleware.auth import get_current_user
 from app.models.user import User, ROLE_STUDENT
-from app.services import chat_service, filler_service, voice_agent_service
-from app.services.voice_service import text_to_speech
+from app.services import chat_service, session_agent_service, voice_agent_service
+from app.services.voice_agent_service import text_to_speech
 
 logger = logging.getLogger(__name__)
 
@@ -69,14 +69,14 @@ class FillerPickRequest(BaseModel):
 @router.get("/fillers/manifest")
 async def fillers_manifest(current_user: User = Depends(get_current_user)):
     """Full catalog of filler phrases (categories + text + slugs) for pre-caching."""
-    return filler_service.get_manifest()
+    return session_agent_service.get_manifest()
 
 
 @router.get("/fillers/audio/{slug}")
 async def fillers_audio(slug: str, current_user: User = Depends(get_current_user)):
     """Serve one filler WAV clip by slug (e.g. 'thats-a-great-question')."""
     safe = re.sub(r"[^a-z0-9-]", "", slug.lower())
-    path = filler_service.voices_dir() / f"{safe}.wav"
+    path = session_agent_service.voices_dir() / f"{safe}.wav"
     if not safe or not path.exists():
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Filler clip not found")
     return FileResponse(str(path), media_type="audio/wav")
@@ -89,7 +89,7 @@ async def fillers_pick(
 ):
     """Classify the student's message and return which filler to play + show."""
     # pick_filler runs a blocking LLM .invoke() — offload so the event loop stays free.
-    pick = await asyncio.to_thread(filler_service.pick_filler, payload.message)
+    pick = await asyncio.to_thread(session_agent_service.pick_filler, payload.message)
     if not pick:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,

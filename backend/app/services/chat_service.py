@@ -118,7 +118,7 @@ async def build_context(
         try:
             from app.core.config import settings
             if settings.rag_enabled:
-                from app.services.retrieval_service import retrieve_relevant_chunks
+                from app.services.rag_service import retrieve_relevant_chunks
                 rag_chunks = await retrieve_relevant_chunks(db=db, query=user_query)
         except Exception as e:
             logger.warning(f"RAG retrieval skipped: {e}")

@@ -6,7 +6,7 @@ retrieve the most recent attempt.
 import logging
 from typing import Optional
 
-from fastapi import APIRouter, Body, Depends, HTTPException, status
+from fastapi import APIRouter, Body, Depends, HTTPException, WebSocket, status
 from pydantic import BaseModel
 from sqlalchemy import select, desc
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -23,6 +23,12 @@ from app.services import session_agent_service
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/sessions", tags=["sessions"])
+
+
+@router.websocket("/ws")
+async def session_ws(websocket: WebSocket):
+    """Unified session chat WebSocket — thin transport; all logic in session_agent_service."""
+    await session_agent_service.run_session_ws(websocket)
 
 
 class StartQuizBody(BaseModel):

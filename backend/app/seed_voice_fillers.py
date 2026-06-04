@@ -178,7 +178,7 @@ def _wav_duration_ms(wav_bytes: bytes) -> int:
 
 def generate_clip(text: str, out_path: Path) -> int:
     """Render one phrase to a WAV file. Returns its duration in milliseconds."""
-    from app.services.voice_service import text_to_speech  # lazy: pulls in Kokoro/torch
+    from app.services.voice_agent_service import text_to_speech  # lazy: pulls in Kokoro/torch
     wav_bytes, _mime = text_to_speech(text)  # same af_sky voice as the live tutor
     out_path.write_bytes(wav_bytes)
     return _wav_duration_ms(wav_bytes)
@@ -211,7 +211,7 @@ def main() -> int:
         return 0
 
     # Heavy imports happen here (not at module top) so --list works without Kokoro.
-    from app.services.voice_service import TTS_VOICE, TTS_SPEED, _get_kokoro
+    from app.services.voice_agent_service import TTS_VOICE, TTS_SPEED, _get_kokoro
 
     out_dir = voices_dir()
     print(f"Output folder: {out_dir}")

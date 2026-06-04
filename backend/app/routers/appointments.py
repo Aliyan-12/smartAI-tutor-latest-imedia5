@@ -85,8 +85,8 @@ async def book_appointment(
         await db.flush()
         await db.refresh(appointment)
         try:
-            from app.services import lesson_structure_service
-            await lesson_structure_service.auto_create_lesson_plan(
+            from app.services import lesson_service
+            await lesson_service.auto_create_lesson_plan(
                 db=db,
                 appointment=appointment,
                 student_id=current_user.id,

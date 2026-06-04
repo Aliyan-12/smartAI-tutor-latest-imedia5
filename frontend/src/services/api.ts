@@ -252,7 +252,7 @@ export interface FillerPick {
 export function sessionWsUrl(appointmentId: number | null, sessionId: string | null): string {
   const token = getToken() ?? "";
   const proto = window.location.protocol === "https:" ? "wss:" : "ws:";
-  let url = `${proto}//${window.location.host}/api/session/ws?token=${encodeURIComponent(token)}`;
+  let url = `${proto}//${window.location.host}/api/sessions/ws?token=${encodeURIComponent(token)}`;
   if (appointmentId) url += `&appointment_id=${appointmentId}`;
   if (sessionId) url += `&session_id=${encodeURIComponent(sessionId)}`;
   return url;
