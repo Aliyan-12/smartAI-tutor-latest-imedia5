@@ -248,6 +248,16 @@ export interface FillerPick {
   audio_url: string;
 }
 
+// Build the unified session WebSocket URL (auth via query token, like the voice WS).
+export function sessionWsUrl(appointmentId: number | null, sessionId: string | null): string {
+  const token = getToken() ?? "";
+  const proto = window.location.protocol === "https:" ? "wss:" : "ws:";
+  let url = `${proto}//${window.location.host}/api/session/ws?token=${encodeURIComponent(token)}`;
+  if (appointmentId) url += `&appointment_id=${appointmentId}`;
+  if (sessionId) url += `&session_id=${encodeURIComponent(sessionId)}`;
+  return url;
+}
+
 export const voiceApi = {
   async speak(text: string): Promise<Blob> {
     const res = await fetch(`${API_BASE}/voice/speak`, {

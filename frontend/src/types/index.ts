@@ -23,6 +23,8 @@ export interface ChatMessage {
   role: "user" | "assistant" | "system" | "quiz_result";
   content: string;
   timestamp: string;
+  imageUrl?: string;   // attached image preview (data URL) for the live session
+  fileName?: string;   // attached non-image file (PDF/DOC) name
 }
 
 export interface Chat {

@@ -14,6 +14,7 @@ The model only ever sees the SITUATION categories + their "when" hints and picks
 one — it never decides student IDs or anything sensitive. We then pick a random
 phrase from that bucket (for variety) and return its text + audio URL.
 """
+import base64
 import json
 import logging
 import random
@@ -76,6 +77,25 @@ def _any_phrase() -> Optional[dict]:
         if bucket.get("phrases"):
             return random.choice(bucket["phrases"])
     return None
+
+
+def get_neutral_filler() -> Optional[dict]:
+    """
+    A short NEUTRAL bridge ("Okay.", "Right.", "Let me see.") + its audio, played
+    the instant the student sends — covers the <1s before the model's first
+    sentence (which carries the real contextual reaction). Returns
+    {text, audio_b64} or None if no neutral clips have been seeded.
+    """
+    phrase = _random_phrase("neutral")
+    if not phrase:
+        return None
+    audio_b64 = None
+    try:
+        wav = (voices_dir() / phrase["file"]).read_bytes()
+        audio_b64 = base64.b64encode(wav).decode("ascii")
+    except Exception as e:  # noqa: BLE001
+        logger.warning("Neutral filler clip read failed (%s): %s", phrase.get("file"), e)
+    return {"text": phrase["text"], "audio_b64": audio_b64}
 
 
 class FillerPick(BaseModel):

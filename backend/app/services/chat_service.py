@@ -36,6 +36,46 @@ async def get_chat_by_id(db: AsyncSession, chat_id: int) -> Optional[Chat]:
     return result.scalar_one_or_none()
 
 
+async def get_or_create_session_chat(
+    db: AsyncSession, user_id: int, appointment_id: int
+) -> Optional[Chat]:
+    """
+    Resolve (or create) the single chat tied to an appointment session.
+
+    Mirrors the lookup in routers/chat.py:get_or_create_session_chat so the
+    session WebSocket can reuse it. Returns None if the appointment does not
+    belong to the user. Caller is responsible for committing.
+    """
+    session_title_key = f"[session:{appointment_id}]"
+    result = await db.execute(
+        select(Chat)
+        .options(selectinload(Chat.messages))
+        .where(Chat.user_id == user_id, Chat.title.like(f"{session_title_key}%"))
+        .order_by(desc(Chat.id))
+        .limit(1)
+    )
+    chat = result.scalar_one_or_none()
+    if chat:
+        return chat
+
+    from app.services import appointment_service
+
+    appt = await appointment_service.get_appointment(db, appointment_id)
+    if not appt or appt.student_id != user_id:
+        return None
+
+    display_title = appt.title or f"{appt.subject} Session"
+    full_title = f"{session_title_key} {display_title}"
+    chat = await create_chat(db, user_id, title=full_title)
+    try:
+        chat.appointment_id = appointment_id
+    except Exception:
+        pass
+    await db.flush()
+    await db.refresh(chat)
+    return chat
+
+
 async def get_user_chats(db: AsyncSession, user_id: int, limit: int = 50) -> List[Chat]:
     result = await db.execute(
         select(Chat)

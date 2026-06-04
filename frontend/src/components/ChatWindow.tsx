@@ -15,6 +15,10 @@ interface Props {
   revealedText?: string;
   lastKnownAiId?: number | null;
   fillerText?: string | null;
+  // Unified session pipeline (useSessionChannel): the single in-flight assistant
+  // turn revealing in lockstep with its audio, plus its status.
+  liveText?: string | null;
+  liveStatus?: "idle" | "connecting" | "waiting" | "speaking";
 }
 
 export default function ChatWindow({
@@ -27,6 +31,8 @@ export default function ChatWindow({
   revealedText,
   lastKnownAiId,
   fillerText,
+  liveText,
+  liveStatus,
 }: Props) {
   const bottomRef = useRef<HTMLDivElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -52,9 +58,10 @@ export default function ChatWindow({
     if (!userScrolledUpRef.current) {
       bottomRef.current?.scrollIntoView({ behavior: "smooth" });
     }
-  }, [messages, streamContent, isWaiting, revealedText, revealContent]);
+  }, [messages, streamContent, isWaiting, revealedText, revealContent, liveText, liveStatus]);
 
-  if (messages.length === 0 && !streaming && !isWaiting) {
+  const liveActive = !!liveText || (liveStatus != null && liveStatus !== "idle");
+  if (messages.length === 0 && !streaming && !isWaiting && !liveActive) {
     return null;
   }
 
@@ -247,7 +254,25 @@ export default function ChatWindow({
           <div key={msg.id} className={`message ${msg.role} chat-msg-animate`}>
             <div className="message-avatar">U</div>
             <div className="message-content">
-              <div className="message-bubble">{msg.content}</div>
+              <div className="message-bubble">
+                {msg.imageUrl && (
+                  <img
+                    src={msg.imageUrl}
+                    alt="attachment"
+                    style={{ display: "block", maxWidth: 220, maxHeight: 220, borderRadius: 10, marginBottom: msg.content ? 8 : 0 }}
+                  />
+                )}
+                {msg.fileName && (
+                  <div style={{
+                    display: "inline-flex", alignItems: "center", gap: 6, padding: "6px 10px",
+                    background: "rgba(255,255,255,0.18)", borderRadius: 8, fontSize: 12,
+                    marginBottom: msg.content ? 8 : 0,
+                  }}>
+                    📎 {msg.fileName}
+                  </div>
+                )}
+                {msg.content}
+              </div>
             </div>
           </div>
         );
@@ -291,6 +316,28 @@ export default function ChatWindow({
       {(isWaiting || (!isWaiting && streaming && !streamContent)) && (
         fillerText && isWaiting ? <FillerBubble text={fillerText} /> : <ThinkingBlob />
       )}
+
+      {/* ── Unified session live turn (useSessionChannel): one in-flight reply ── */}
+      {liveText ? (
+        <div className="message assistant chat-msg-animate">
+          <AiAvatar />
+          <div className="message-content ai-free-text">
+            <ReactMarkdown>{liveText}</ReactMarkdown>
+            {liveStatus === "speaking" ? (
+              <span className="tts-reveal-ball" />
+            ) : (
+              <div className="message-actions">
+                <button onClick={() => onSpeak(liveText)} title="Read aloud">
+                  <Volume2 size={14} />
+                  <span>Listen</span>
+                </button>
+              </div>
+            )}
+          </div>
+        </div>
+      ) : liveStatus === "waiting" ? (
+        fillerText ? <FillerBubble text={fillerText} /> : <ThinkingBlob />
+      ) : null}
 
       <div ref={bottomRef} />
 

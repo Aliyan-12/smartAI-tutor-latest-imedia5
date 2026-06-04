@@ -66,6 +66,19 @@ SAMPLE_RATE = 24000
 # selector, the situation in which that bucket of fillers is appropriate.
 # ---------------------------------------------------------------------------
 FILLER_CATALOG: dict[str, dict] = {
+    "neutral": {
+        "when": "A tiny neutral bridge played the instant the student sends, covering only the <1s before the real reply begins. Never presumes praise or correctness.",
+        "phrases": [
+            "Okay.",
+            "Right.",
+            "Mm-hmm.",
+            "Let me see.",
+            "One sec.",
+            "Alright.",
+            "Got it.",
+            "Sure.",
+        ],
+    },
     "acknowledge": {
         "when": "Immediately after the student asks a question, before you begin answering.",
         "phrases": [

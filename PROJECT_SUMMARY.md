@@ -1,7 +1,7 @@
 # SmartAI Tutor — Project Summary
 
-> **Last updated:** 2026-06-02
-> **Recent changes:** Thinking-filler player (engaging waits) · Kokoro TTS (af_sky) replaces gTTS · LangChain migration (gemini_service + llm_service) · TTS-synced word-by-word streaming · End-lesson confirmation modal · Session report 400 fix · Production deploy (dev.smartaitutor.online)
+> **Last updated:** 2026-06-03
+> **Recent changes:** Solid session pipeline rewrite — unified `/api/session/ws` WebSocket (segment-bundled TTS for true sync, leak-free messages, freeze-proof) · Thinking-filler player · Kokoro TTS (af_sky) · LangChain migration · End-lesson confirmation modal · Production deploy (dev.smartaitutor.online)
 
 SmartAI Tutor is an AI-powered tutoring platform built for UK GCSE curriculum (Key Stages 1-5). It provides personalized learning through text chat and real-time voice conversation, grounded in actual course materials via a Retrieval-Augmented Generation (RAG) system. Teachers and admins upload curriculum content (PDF, DOCX, PPTX) organized by Key Stage, subject, exam board, and tier. When students ask questions, the system automatically retrieves relevant document chunks using pgvector similarity search and injects them into the Gemini AI prompt, producing accurate, curriculum-aligned answers.
 
@@ -472,6 +472,29 @@ Simple chat uses `SIMPLE_CHAT_SYSTEM_PROMPT` (no `[QUIZ_OFFER]` / `[SLIDE_TRIGGE
 | PostgreSQL | 5432 | localhost:5432 |
 | Presenton | 5000 | http://localhost:5000 |
 | API Docs (Swagger) | 8001 | http://localhost:8001/docs |
+
+---
+
+## Recent Changes (2026-06-03)
+
+### Solid session chat + TTS pipeline — unified WebSocket (Phase 1)
+The old session chat raced three uncoordinated channels (SSE text + N `/voice/speak` HTTP calls + filler audio) with a fixed-60 ms reveal and optimistic message ids; it drifted, duplicated openings, and **froze after ~8–9 messages** (stuck ■ STOP, re-send pileup). Rebuilt as one backend-orchestrated WebSocket.
+
+- **`backend/app/routers/session_ws.py`** (new) — `/api/session/ws`. Per turn: saves the user message once, streams the reply, and emits ordered `segment` events (one sentence + its bundled Kokoro audio + duration). Tool calls → structured `tool` events; finishes with `turn_end {message_id, full_text}` (authoritative DB id). A per-turn `asyncio.wait_for` timeout guarantees the socket can never hang. Also accepts `quiz_result` (quiz feedback rides the same pipeline) and `user_audio` (scaffolding for the future custom voice loop — **not wired up yet**).
+- **`backend/app/services/segment_service.py`** (new) — streaming `SentenceSegmenter` + `build_segment()` (Kokoro TTS per sentence, bounded by a semaphore, duration measured via soundfile).
+- **`backend/app/services/chat_service.py`** — added reusable `get_or_create_session_chat()`.
+- **`frontend/src/hooks/useSessionChannel.ts`** (new) — WS client + ordered segment player that reveals each sentence's words over its audio's exact duration (true lockstep; WPM fallback when muted). Commits messages only on `turn_end` via server id → no duplicates/leaks. Lifecycle: open on active, close on pause, reopen on resume, close on end; heartbeat + reconnect-with-backoff + client watchdog (freeze recovery). One in-flight turn (input disabled) kills the re-send pileup.
+- **`SessionPage.tsx` / `ChatWindow.tsx`** — swapped the `useChat` SSE + `useVoice` stream-TTS + filler tangle for `useSessionChannel`; ChatWindow renders committed messages + one live turn (`liveText`/`liveStatus`). Quiz question/score read-aloud now uses single-shot `speakText`.
+- **`frontend/nginx.conf`** — added a `/api/session/ws` WS-upgrade block. **Production host Nginx needs the same block added manually.**
+- Gemini Live **voice mode is untouched** (separate; rebuild onto this pipeline is Phase 4, planned not built).
+
+### Phase 2 — smart fillers
+The pre-recorded clips are now a **neutral bridge** (new `neutral` bucket in `seed_voice_fillers.py`: "Okay.", "Right.", "Let me see."). The backend sends one neutral `filler` (text + audio) at turn start; the **model's own first sentence** carries the real contextual reaction (praise/correction/"let's dive in"). No more "Good question" misfires. `filler_service.get_neutral_filler()` + the hook's `playFiller` (clears the instant the first real segment plays). **Re-run the seeder** to generate the neutral clips: `docker compose exec backend python -m app.seed_voice_fillers --force` (degrades to no filler until then).
+
+### Phase 3 — images & files
+- **Input box:** 100×100 image thumbnail preview before send (chip for non-image files) — `ChatInput.tsx`.
+- **Chat bubble:** the image/file renders above the message text — `ChatWindow.tsx` (`ChatMessage` gained optional `imageUrl`/`fileName`).
+- **Backend:** images → Gemini vision (already); attached **PDF/DOCX/PPTX → text extracted** (`document_service.extract_text` via a temp file) and injected into the prompt so the AI can answer about the file — `session_ws.py:_extract_doc_text`.
 
 ---
 
