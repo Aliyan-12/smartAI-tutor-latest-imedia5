@@ -378,10 +378,13 @@ export function useSessionChannel(opts: SessionChannelOpts) {
     armWatchdog();
   }, []);
 
-  /** Phase 4 — send a recorded utterance for the custom voice loop. */
+  /**
+   * Send a recorded utterance for the custom voice loop.
+   * `stt: true` — transcribe this audio to text first; `tts` — speak the reply.
+   */
   const sendAudio = useCallback((audioB64: string, mime: string) => {
     if (busyAt.current) return;
-    const ok = _send({ type: "user_audio", audio_b64: audioB64, mime, tts: ttsEnabledRef.current });
+    const ok = _send({ type: "user_audio", audio_b64: audioB64, mime, stt: true, tts: ttsEnabledRef.current });
     if (!ok) return;
     busyAt.current = true;
     setBusy(true);

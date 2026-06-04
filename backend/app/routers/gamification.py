@@ -14,7 +14,7 @@ from app.schemas.gamification import (
     DashboardResponse,
     DailyPlanResponse,
 )
-from app.services import gamification_service
+from app.services import platform_service
 
 logger = logging.getLogger(__name__)
 
@@ -27,7 +27,7 @@ async def get_dashboard(
     db: AsyncSession = Depends(get_db),
 ):
     """Return the full gamified dashboard for the authenticated student."""
-    data = await gamification_service.get_dashboard_data(db, current_user.id)
+    data = await platform_service.get_dashboard_data(db, current_user.id)
 
     mastery_list = [
         TopicMasteryResponse.model_validate(m) for m in data["mastery_overview"]
@@ -56,7 +56,7 @@ async def get_profile(
     db: AsyncSession = Depends(get_db),
 ):
     """Return the gamification profile for the authenticated student."""
-    profile = await gamification_service.get_or_create_profile(db, current_user.id)
+    profile = await platform_service.get_or_create_profile(db, current_user.id)
     return StudentProfileResponse.model_validate(profile)
 
 
@@ -66,7 +66,7 @@ async def get_mastery(
     db: AsyncSession = Depends(get_db),
 ):
     """Return all topic mastery records for the authenticated student."""
-    mastery_list = await gamification_service.get_mastery_overview(db, current_user.id)
+    mastery_list = await platform_service.get_mastery_overview(db, current_user.id)
     return [TopicMasteryResponse.model_validate(m) for m in mastery_list]
 
 
@@ -80,7 +80,7 @@ async def get_mastery_for_student(
     Return all topic mastery records for a specific student.
     Accessible to teachers, parents, and admins for monitoring purposes.
     """
-    mastery_list = await gamification_service.get_mastery_overview(db, student_id)
+    mastery_list = await platform_service.get_mastery_overview(db, student_id)
     return [TopicMasteryResponse.model_validate(m) for m in mastery_list]
 
 
@@ -90,7 +90,7 @@ async def streak_check(
     db: AsyncSession = Depends(get_db),
 ):
     """Check and update the daily login streak for the authenticated student."""
-    profile = await gamification_service.check_and_update_streak(db, current_user.id)
+    profile = await platform_service.check_and_update_streak(db, current_user.id)
     return StudentProfileResponse.model_validate(profile)
 
 
@@ -102,6 +102,6 @@ async def get_next_topics(
     db: AsyncSession = Depends(get_db),
 ):
     """Return RAG-based topic recommendations for what to study next."""
-    return await gamification_service.get_next_topic_recommendations(
+    return await platform_service.get_next_topic_recommendations(
         db, current_user.id, subject=subject, key_stage=key_stage
     )

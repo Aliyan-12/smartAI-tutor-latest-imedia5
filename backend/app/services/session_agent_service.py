@@ -30,7 +30,7 @@ from app.models.appointment import Appointment
 from app.models.assessment import Assessment
 from app.models.student_profile import StudentProfile, TopicMastery
 from app.models.user import ROLE_STUDENT
-from app.services import gemini_service, assessment_service, rag_service, chat_service, credit_service
+from app.services import gemini_service, assessment_service, rag_service, chat_service, platform_service
 
 logger = logging.getLogger(__name__)
 
@@ -1597,14 +1597,13 @@ async def _run_turn(send, chat_id, user_id, *, saved_user_text, ai_content,
         message_id = msg.id
         try:
             from app.services.user_service import get_user_by_id
-            from app.services import gamification_service
             fresh_user = await get_user_by_id(db, user_id)
             if fresh_user:
-                await credit_service.check_and_deduct_credit(db, fresh_user)
+                await platform_service.check_and_deduct_credit(db, fresh_user)
                 await send({"type": "credits", "value": float(fresh_user.credits)})
                 try:
-                    await gamification_service.award_xp(db, user_id, 5, "chat_message")
-                    await gamification_service.check_and_update_streak(db, user_id)
+                    await platform_service.award_xp(db, user_id, 5, "chat_message")
+                    await platform_service.check_and_update_streak(db, user_id)
                 except Exception:
                     pass
         except Exception:
@@ -1640,9 +1639,19 @@ async def _handle_quiz_result(send, chat_id, user_id, data):
 
 
 async def _handle_user_audio(send, chat_id, user_id, data):
-    """Custom voice loop: transcribe the recorded utterance, then run a normal turn."""
+    """
+    Custom voice loop. The client sends {stt: true, tts: ...} with the audio:
+    `stt` → transcribe the utterance to text first, then run the SAME turn
+    pipeline as a typed message; `tts` → speak the reply back. Audio is text-only
+    to the model, so stt is effectively always required for a `user_audio` turn.
+    """
     audio_b64 = data.get("audio_b64")
     if not audio_b64:
+        return
+    if not bool(data.get("stt", True)):
+        # No transcription requested → no usable text for the text model.
+        await send({"type": "error", "message": "Voice needs speech-to-text enabled.", "recoverable": True})
+        await send({"type": "turn_end", "message_id": None, "full_text": ""})
         return
     mime = data.get("mime") or "audio/webm"
     try:

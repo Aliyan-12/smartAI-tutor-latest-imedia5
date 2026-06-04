@@ -2,16 +2,16 @@ import { useState, useEffect, useRef, useCallback } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { Lock, X, Pause, Play, Volume2, VolumeX, AlertTriangle } from "lucide-react";
 import ResizablePanels from "../components/ResizablePanels";
-import { appointmentsApi, assessmentsApi, sessionsApi, gamificationApi, slidesApi, chatApi } from "../services/api";
+import { appointmentsApi, assessmentsApi, sessionsApi, gamificationApi, chatApi } from "../services/api";
 import ChatWindow from "../components/ChatWindow";
 import ChatInput from "../components/ChatInput";
 import AssessmentMode from "../components/AssessmentMode";
 import PostSessionScreen from "../components/PostSessionScreen";
-import LessonSlide from "../components/LessonSlide";
 import { useVoice } from "../hooks/useVoice";
 import { useSessionChannel } from "../hooks/useSessionChannel";
+import { useVoiceCapture } from "../hooks/useVoiceCapture";
 import { useAuth } from "../context/AuthContext";
-import type { Assessment, ChatMessage, SlideData, QuizOffer } from "../types";
+import type { Assessment, ChatMessage, QuizOffer } from "../types";
 
 type SessionState = "loading" | "passcode" | "active" | "ended";
 type LearnTab = "learn" | "test";
@@ -183,11 +183,9 @@ export default function SessionPage() {
 
   const hasAutoStartedRef = useRef(false);
 
-  const { voiceStatus, speakText, connectVoice, disconnectVoice, isVoiceActive, sendQuizResult } = useVoice();
-  const [voiceMessages, setVoiceMessages] = useState<{ role: string; content: string }[]>([]);
-  const voiceMessagesRef = useRef<{ role: string; content: string }[]>([]);
-  const voiceAiTurnRef = useRef("");
-  const [voiceQuizTopic, setVoiceQuizTopic] = useState<string | null>(null);
+  const { speakText } = useVoice();
+  // Custom voice-to-voice loop (mic → STT → same turn pipeline → Kokoro TTS).
+  const [voiceActive, setVoiceActive] = useState(false);
 
   const [sessionKeyStage, setSessionKeyStage] = useState("");
   const [previewAppt, setPreviewAppt] = useState<{
@@ -198,10 +196,6 @@ export default function SessionPage() {
     description: string;
     passcode: string | null;
   } | null>(null);
-  const [currentSlide, setCurrentSlide] = useState<SlideData | null>(null);
-  const [slideHistory, setSlideHistory] = useState<SlideData[]>([]);
-  const [slideIndex, setSlideIndex] = useState(0);
-  const slidePollingRefs = useRef<Map<number, number>>(new Map());
 
   const apptId = appointmentId ? parseInt(appointmentId) : 0;
 
@@ -251,6 +245,25 @@ export default function SessionPage() {
   messagesLenRef.current = messages.length;
   const clearQuizOffer = useCallback(() => setQuizOffer(null), []);
 
+  // Hands-free voice loop: capture the student's utterance and send it over the
+  // SAME session WebSocket as `user_audio`. The mic is paused while a turn runs
+  // (AI thinking/speaking) so the tutor's own TTS is never recorded.
+  useVoiceCapture({
+    active: voiceActive && !isPaused,
+    paused: busy,
+    onUtterance: (b64, mime) => channel.sendAudio(b64, mime),
+    onError: (msg) => { console.warn(msg); setVoiceActive(false); },
+  });
+
+  // Voice-bar status for ChatInput (maps the loop's state to the UI labels).
+  const voiceUiStatus: "idle" | "connecting" | "listening" | "processing" | "speaking" = !voiceActive
+    ? "idle"
+    : liveStatus === "speaking"
+    ? "speaking"
+    : busy
+    ? "processing"
+    : "listening";
+
   // Open the session WebSocket while active; close it on pause; reopen on resume;
   // close permanently when the lesson ends. Chat is independent of the timer.
   useEffect(() => {
@@ -295,16 +308,6 @@ export default function SessionPage() {
       setSessionState("active");
       // The session WebSocket is opened/closed by the lifecycle effect below,
       // driven by sessionState + isPaused.
-
-      // Load persisted slides for this session
-      try {
-        const persistedSlides = await slidesApi.getSessionSlides(parseInt(appointmentId));
-        if (persistedSlides.length > 0) {
-          setSlideHistory(persistedSlides);
-          setCurrentSlide(persistedSlides[persistedSlides.length - 1]);
-          setSlideIndex(persistedSlides.length - 1);
-        }
-      } catch {}
 
       // Restore any in-progress test so a page refresh doesn't lose quiz state
       try {
@@ -362,15 +365,6 @@ export default function SessionPage() {
     setLearnTab("test");
     handleStartTest();
   }, [quizOffer]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  // Voice quiz trigger: when AI voice response contains a quiz offer
-  useEffect(() => {
-    if (!voiceQuizTopic) return;
-    if (testAssessment || testLoading || testResult) { setVoiceQuizTopic(null); return; }
-    setLearnTab("test");
-    handleStartTest(voiceQuizTopic);
-    setVoiceQuizTopic(null);
-  }, [voiceQuizTopic]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Auto-start the lesson when the session becomes active and chat is empty
   useEffect(() => {
@@ -469,8 +463,8 @@ export default function SessionPage() {
       setIsPaused(false);
       await appointmentsApi.updateStatus(apptId, "started").catch(() => {});
     } else {
-      // Pause — disconnect voice if active
-      if (isVoiceActive) disconnectVoice();
+      // Pause — stop the voice loop if active
+      if (voiceActive) setVoiceActive(false);
       if (timerRef.current) clearInterval(timerRef.current);
       setPausedAt(Date.now());
       setIsPaused(true);
@@ -627,12 +621,8 @@ export default function SessionPage() {
         clearQuizOffer();
 
         // Notify the AI of the quiz result — adds a visible quiz_result bubble,
-        // then the AI responds via the unified pipeline (or voice mode).
-        if (isVoiceActive) {
-          sendQuizResult(quizTopic, quizScore, quizStrong, quizWeak);
-        } else {
-          channel.sendQuizResult(quizTopic, quizScore, quizStrong, quizWeak);
-        }
+        // then the AI responds via the unified pipeline (text or voice).
+        channel.sendQuizResult(quizTopic, quizScore, quizStrong, quizWeak);
       } catch (err: any) {
         setTestError(err.message || "Failed to complete test");
       }
@@ -645,18 +635,8 @@ export default function SessionPage() {
     return `${m.toString().padStart(2, "0")}:${s.toString().padStart(2, "0")}`;
   };
 
-  // Merge DB messages with live voice transcripts so they stream in real-time
-  const voiceChatMessages: ChatMessage[] = voiceMessages.map((m, i) => ({
-    id: -(i + 1),
-    chat_id: 0,
-    role: m.role as "user" | "assistant",
-    content: m.content,
-    timestamp: new Date().toISOString(),
-  }));
-  const displayMessages = voiceChatMessages.length > 0
-    ? [...messages, ...voiceChatMessages]
-    : messages;
-  voiceMessagesRef.current = voiceMessages; // keep ref in sync for stale-closure-free access
+  // Text and voice turns both flow through the session channel's message list.
+  const displayMessages = messages;
 
   const totalSeconds = durationMinutes * 60;
   const elapsedSeconds = totalSeconds - timeRemaining;
@@ -672,63 +652,6 @@ export default function SessionPage() {
     ? "#d97706"
     : "var(--accent-blue, var(--accent))";
 
-  const MAX_SLIDES = 15;
-
-  // Clean up any active slide polling intervals on unmount
-  useEffect(() => {
-    const refs = slidePollingRefs.current;
-    return () => { refs.forEach((id) => clearInterval(id)); };
-  }, []);
-
-  const generateSlide = useCallback(async (text: string) => {
-    if (!text || !text.trim()) return;
-    if (slideHistory.length >= MAX_SLIDES) return;
-
-    const result = await slidesApi.generate(
-      text,
-      sessionSubject,
-      sessionKeyStage,
-      apptId || undefined,
-      slideHistory.map((s) => s.topic),
-    );
-    if (!result) return; // skipped by backend (not slide-worthy)
-
-    const placeholder: SlideData = {
-      slide_id: result.slide_id,
-      status: "generating",
-      topic: result.topic,
-      presentation_id: null,
-      viewer_url: null,
-      pptx_url: null,
-    };
-    const newIndex = slideHistory.length;
-    setSlideHistory((prev) => [...prev, placeholder]);
-    setCurrentSlide(placeholder);
-    setSlideIndex(newIndex);
-
-    // Poll until ready or failed (max 3 min)
-    const intervalId = window.setInterval(async () => {
-      const updated = await slidesApi.getSlide(result.slide_id);
-      if (!updated) return;
-      if (updated.status === "ready" || updated.status === "failed") {
-        clearInterval(intervalId);
-        slidePollingRefs.current.delete(result.slide_id);
-        setSlideHistory((prev) =>
-          prev.map((s) => (s.slide_id === result.slide_id ? updated : s))
-        );
-        setCurrentSlide((prev) =>
-          prev?.slide_id === result.slide_id ? updated : prev
-        );
-      }
-    }, 3000);
-    slidePollingRefs.current.set(result.slide_id, intervalId);
-    setTimeout(() => {
-      if (slidePollingRefs.current.has(result.slide_id)) {
-        clearInterval(intervalId);
-        slidePollingRefs.current.delete(result.slide_id);
-      }
-    }, 180_000);
-  }, [sessionSubject, sessionKeyStage, apptId, slideHistory]);
 
   const sessionSend = useCallback(
     (text: string, sendOpts?: { imageData?: string; imageMime?: string; fileName?: string; webSearch?: boolean; research?: boolean }) => {
@@ -743,61 +666,11 @@ export default function SessionPage() {
     [channel.sendMessage] // eslint-disable-line react-hooks/exhaustive-deps
   );
 
+  // Toggle the hands-free voice loop. No new socket — mic audio rides the same
+  // session WebSocket (useVoiceCapture above sends it as `user_audio`).
   const handleVoiceToggle = useCallback(() => {
-    if (isVoiceActive) {
-      disconnectVoice();
-      // Clear live voice transcripts and reload DB-saved messages after a short delay
-      setVoiceMessages([]);
-      setTimeout(() => { void reloadHistory(); }, 1200);
-    } else {
-      connectVoice(sessionId, {
-        onUserTranscript: (chunk) => {
-          setVoiceMessages((prev) => {
-            const last = prev[prev.length - 1];
-            if (last && last.role === "user") {
-              return [...prev.slice(0, -1), { role: "user", content: last.content + chunk }];
-            }
-            return [...prev, { role: "user", content: chunk }];
-          });
-        },
-        onAiTranscriptChunk: (chunk) => {
-          voiceAiTurnRef.current += chunk;
-          // Recompute full clean text from accumulated buffer so any partial
-          // bracket sequences still arriving are stripped from display.
-          const displayText = voiceAiTurnRef.current
-            .replace(/\[[A-Z_:][^\]]*$/, "") // strip partial [...] still arriving
-            .trimEnd();
-          setVoiceMessages((prev) => {
-            const last = prev[prev.length - 1];
-            if (last && last.role === "assistant") {
-              return [...prev.slice(0, -1), { role: "assistant", content: displayText }];
-            }
-            return displayText ? [...prev, { role: "assistant", content: displayText }] : prev;
-          });
-        },
-        onTurnComplete: () => {
-          voiceAiTurnRef.current = "";
-        },
-        onTurnSaved: () => {
-          // Capture count before async DB reload to avoid stale closure
-          const savedCount = voiceMessagesRef.current.length;
-          if (apptId) {
-            reloadHistory().then(() => {
-              // Remove only the completed-turn messages; any new messages the user
-              // started during the DB load are preserved (slice keeps them).
-              setVoiceMessages((prev) => prev.slice(savedCount));
-            });
-          } else {
-            setVoiceMessages([]);
-          }
-        },
-        onCreditsUpdate: () => {},
-        onSessionCreated: () => {},
-        onError: (msg) => console.error("Voice error:", msg),
-        onQuizOffer: (topic) => { setVoiceQuizTopic(topic); },
-      }, apptId);
-    }
-  }, [isVoiceActive, connectVoice, disconnectVoice, sessionId, apptId, reloadHistory]);
+    setVoiceActive((v) => !v);
+  }, []);
 
   if (sessionState === "loading") {
     return (
@@ -1188,22 +1061,17 @@ export default function SessionPage() {
           </div>
         ) : null}
         {!isPaused && learnTab === "learn" && (
-          <div style={styles.learnMessagesWrap}>
-            <LessonSlide
-              slide={currentSlide}
-              slideIndex={slideIndex}
-              totalSlides={slideHistory.length}
-              onPrev={() => {
-                const i = Math.max(0, slideIndex - 1);
-                setSlideIndex(i);
-                setCurrentSlide(slideHistory[i]);
-              }}
-              onNext={() => {
-                const i = Math.min(slideHistory.length - 1, slideIndex + 1);
-                setSlideIndex(i);
-                setCurrentSlide(slideHistory[i]);
-              }}
-            />
+          <div style={{
+            display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center",
+            height: "100%", textAlign: "center", padding: 24, color: "var(--text-muted, #64748b)",
+          }}>
+            <span style={{ fontSize: 44, marginBottom: 12 }}>📊</span>
+            <p style={{ margin: 0, fontSize: 14, fontWeight: 700, color: "var(--text-primary, #1a1a1a)" }}>
+              Slides will appear here
+            </p>
+            <p style={{ margin: "6px 0 0", fontSize: 12 }}>
+              Your AI tutor's lesson slides will show up in this panel as you learn.
+            </p>
           </div>
         )}
 
@@ -1389,13 +1257,13 @@ export default function SessionPage() {
   const avatarInner = (
     <>
       <div style={styles.avatarBox}>
-        <div style={styles.avatarPulse} className={voiceStatus !== "idle" ? "avatar-pulse-anim" : ""}>
+        <div style={styles.avatarPulse} className={voiceActive ? "avatar-pulse-anim" : ""}>
           <img src="/images/aitutor 4 schools-robo.png" style={{ width: "100%", height: "100%", objectFit: "contain" }} alt="AI Tutor" />
         </div>
         <p style={styles.avatarCaption}>AI Tutor Avatar</p>
         <p style={styles.avatarSub}>Coming Soon</p>
       </div>
-      {voiceStatus !== "idle" && (
+      {voiceActive && (
         <div style={styles.speakingBadge}>
           <span style={styles.speakingDot} />
           AI Tutor is speaking...
@@ -1544,9 +1412,9 @@ export default function SessionPage() {
           onSend={(text, opts) => sessionSend(text, opts)}
           streaming={busy}
           onStop={() => {}}
-          voiceStatus={voiceStatus}
+          voiceStatus={voiceUiStatus}
           onVoiceStart={handleVoiceToggle}
-          onVoiceEnd={disconnectVoice}
+          onVoiceEnd={() => setVoiceActive(false)}
           disabled={isPaused}
           webSearchEnabled={webSearchEnabled}
           onWebSearchToggle={() => setWebSearchEnabled((v) => !v)}
@@ -1699,7 +1567,7 @@ export default function SessionPage() {
                 display: "flex",
                 alignItems: "center",
                 justifyContent: "center",
-              }} className={voiceStatus !== "idle" ? "avatar-pulse-anim" : ""}>
+              }} className={voiceActive ? "avatar-pulse-anim" : ""}>
                 <img src="/images/aitutor 4 schools-robo.png" style={{ width: 34, height: 34, objectFit: "contain" }} alt="AI Tutor" />
               </div>
               <p style={{ fontSize: 10, fontWeight: 700, color: "#334155", textAlign: "center", margin: 0, lineHeight: 1.3 }}>
@@ -1708,7 +1576,7 @@ export default function SessionPage() {
               <span style={{ fontSize: 9, background: "#fef3c7", color: "#92400e", borderRadius: 99, padding: "2px 7px", fontWeight: 600 }}>
                 Avatar
               </span>
-              {voiceStatus !== "idle" && (
+              {voiceActive && (
                 <div style={{
                   width: 8, height: 8, borderRadius: "50%",
                   background: "var(--accent-blue, #3b82f6)",

@@ -12,7 +12,7 @@ from app.middleware.auth import get_current_user
 from app.core.security import decode_access_token
 from app.models.user import User, ROLE_STUDENT
 from app.schemas.chat import MessageCreate, ChatResponse, ChatListItem, MessageResponse, QuizFeedbackRequest
-from app.services import chat_service, gemini_service, credit_service, session_agent_service
+from app.services import chat_service, gemini_service, platform_service, session_agent_service
 
 logger = logging.getLogger(__name__)
 
@@ -54,7 +54,7 @@ async def get_credits(
 ):
     return {
         "credits": float(current_user.credits),
-        "cost_per_message": credit_service.COST_PER_MESSAGE,
+        "cost_per_message": platform_service.COST_PER_MESSAGE,
     }
 
 
@@ -304,7 +304,7 @@ async def stream_message(
     student_prefs: dict | None = None
     if not session_system_prompt:
         try:
-            from app.services.settings_service import get_student_settings
+            from app.services.platform_service import get_student_settings
             _profile = await get_student_settings(db, current_user.id)
             student_prefs = {
                 "teaching_pace": _profile.teaching_pace,
@@ -431,14 +431,13 @@ async def stream_message(
             await chat_service.add_message(save_session, chat.id, "assistant", clean_text)
 
             from app.services.user_service import get_user_by_id
-            from app.services import gamification_service
             fresh_user = await get_user_by_id(save_session, current_user.id)
             if fresh_user:
-                await credit_service.check_and_deduct_credit(save_session, fresh_user)
+                await platform_service.check_and_deduct_credit(save_session, fresh_user)
                 yield f"data: {json.dumps({'type': 'credits', 'content': str(float(fresh_user.credits))})}\n\n"
                 try:
-                    await gamification_service.award_xp(save_session, current_user.id, 5, "chat_message")
-                    await gamification_service.check_and_update_streak(save_session, current_user.id)
+                    await platform_service.award_xp(save_session, current_user.id, 5, "chat_message")
+                    await platform_service.check_and_update_streak(save_session, current_user.id)
                 except Exception:
                     pass
 
@@ -523,7 +522,7 @@ async def websocket_chat(websocket: WebSocket):
 
                 user = await get_user_by_id(db, user_id)
                 if user:
-                    await credit_service.check_and_deduct_credit(db, user)
+                    await platform_service.check_and_deduct_credit(db, user)
                     await websocket.send_json({"type": "credits", "content": str(float(user.credits))})
 
                 if chat_title == "New Chat":

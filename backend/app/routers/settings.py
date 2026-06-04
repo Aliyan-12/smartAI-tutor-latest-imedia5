@@ -17,7 +17,7 @@ from app.schemas.settings import (
     NotificationPrefsUpdate,
     NotificationPrefsResponse,
 )
-from app.services import settings_service
+from app.services import platform_service
 
 
 class ChangePasswordRequest(BaseModel):
@@ -35,7 +35,7 @@ async def get_profile(
     db: AsyncSession = Depends(get_db),
 ):
     """Student: get their profile (name, email, year group, XP, streak)."""
-    data = await settings_service.update_profile(
+    data = await platform_service.update_profile(
         db, user_id=current_user.id, student_id=current_user.id
     )
     await db.commit()
@@ -49,7 +49,7 @@ async def update_profile(
     db: AsyncSession = Depends(get_db),
 ):
     """Student: update their display name, year group, and/or key stage."""
-    data = await settings_service.update_profile(
+    data = await platform_service.update_profile(
         db,
         user_id=current_user.id,
         student_id=current_user.id,
@@ -67,7 +67,7 @@ async def get_learning_preferences(
     db: AsyncSession = Depends(get_db),
 ):
     """Student: get their learning preferences."""
-    profile = await settings_service.get_student_settings(db, current_user.id)
+    profile = await platform_service.get_student_settings(db, current_user.id)
     await db.commit()
     return LearningPreferencesResponse.model_validate(profile)
 
@@ -80,7 +80,7 @@ async def update_learning_preferences(
 ):
     """Student: update their learning preferences."""
     data = {k: v for k, v in payload.model_dump().items() if v is not None}
-    profile = await settings_service.update_learning_preferences(
+    profile = await platform_service.update_learning_preferences(
         db, current_user.id, data
     )
     await db.commit()
@@ -95,7 +95,7 @@ async def update_notifications(
 ):
     """Student: update their notification preferences."""
     prefs_data = {k: v for k, v in payload.model_dump().items()}
-    updated = await settings_service.update_notifications(
+    updated = await platform_service.update_notifications(
         db, current_user.id, prefs_data
     )
     await db.commit()

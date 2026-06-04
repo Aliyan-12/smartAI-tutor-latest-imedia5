@@ -22,7 +22,7 @@ from google.genai import types
 
 from app.core.config import settings
 from app.db.session import async_session_factory
-from app.services import chat_service, credit_service, rag_service
+from app.services import chat_service, platform_service, rag_service
 from app.services import session_agent_service
 from app.services.gemini_service import SYSTEM_PROMPT, generate_chat_title
 
@@ -112,7 +112,7 @@ async def build_voice_system_prompt(
     else:
         # No appointment — personalise using the student's stored learning preferences
         try:
-            from app.services.settings_service import get_student_settings
+            from app.services.platform_service import get_student_settings
             from app.services.gemini_service import build_personalised_system_prompt
             async with async_session_factory() as db:
                 _profile = await get_student_settings(db, user_id)
@@ -297,7 +297,7 @@ async def save_voice_turn(
 
             fresh_user = await get_user_by_id(db, user_id)
             if fresh_user:
-                await credit_service.check_and_deduct_credit(db, fresh_user)
+                await platform_service.check_and_deduct_credit(db, fresh_user)
                 await send_fn({"type": "credits", "content": str(float(fresh_user.credits))})
 
             if chat.title == "New Chat" and user_text:

@@ -8,7 +8,7 @@ from app.models.user import User, ROLE_STUDENT
 from app.schemas.subscription import (
     SubscriptionPlan, SubscriptionCreate, SubscriptionResponse, CreditTransactionResponse,
 )
-from app.services.credit_service import (
+from app.services.platform_service import (
     SUBSCRIPTION_PLANS, subscribe_user, get_user_subscriptions, get_transactions,
 )
 

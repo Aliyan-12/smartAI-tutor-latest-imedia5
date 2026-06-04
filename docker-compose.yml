@@ -16,25 +16,6 @@ services:
       timeout: 5s
       retries: 5
 
-  presenton:
-    image: ghcr.io/presenton/presenton:latest
-    restart: unless-stopped
-    ports:
-      - "5000:80"
-    environment:
-      LLM: google
-      GOOGLE_API_KEY: ${GEMINI_API_KEY}
-      GOOGLE_MODEL: models/gemini-2.5-flash
-      IMAGE_PROVIDER: pexels
-      PEXELS_API_KEY: ${PEXELS_API_KEY}
-      CAN_CHANGE_KEYS: "false"
-      AUTH_USERNAME: ${PRESENTON_USER:-}
-      AUTH_PASSWORD: ${PRESENTON_PASSWORD:-}
-    volumes:
-      - presenton_data:/app_data
-      - ./presenton-patches/get_layout_by_name.py:/app/servers/fastapi/templates/get_layout_by_name.py:ro
-      - ./presenton-patches/export_utils.py:/app/servers/fastapi/utils/export_utils.py:ro
-
   backend:
     build: ./backend
     restart: unless-stopped
@@ -48,14 +29,10 @@ services:
     depends_on:
       db:
         condition: service_healthy
-      presenton:
-        condition: service_started
     env_file:
       - .env
     environment:
       POSTGRES_HOST: db
-      PRESENTON_URL: http://presenton
-      PRESENTON_PUBLIC_URL: http://localhost:5000
     volumes:
       - ./backend:/app
       - backend_uploads:/app/uploads
@@ -70,5 +47,4 @@ services:
 
 volumes:
   pgdata:
-  presenton_data:
   backend_uploads:

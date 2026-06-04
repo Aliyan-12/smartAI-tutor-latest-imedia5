@@ -17,7 +17,7 @@ from app.schemas.subscription import CreditTransactionResponse
 from app.services.user_service import (
     create_user, get_user_by_id, get_user_by_email, list_users, count_users, update_user,
 )
-from app.services.credit_service import add_credits, get_transactions
+from app.services.platform_service import add_credits, get_transactions
 
 router = APIRouter(prefix="/api/admin", tags=["admin"])
 

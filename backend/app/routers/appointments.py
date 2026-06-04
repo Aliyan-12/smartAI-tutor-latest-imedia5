@@ -13,7 +13,7 @@ from app.models.user import User, ROLE_PARENT, ROLE_TEACHER, ROLE_STUDENT
 from app.models.appointment import Appointment
 from app.schemas.user import UserResponse
 from app.schemas.appointment import AppointmentCreate, AppointmentStatusUpdate, AppointmentResponse, AvailabilityResponse, SessionJoinRequest
-from app.services import appointment_service, email_service
+from app.services import appointment_service, platform_service
 from app.services.user_service import get_user_by_id
 
 logger = logging.getLogger(__name__)
@@ -100,7 +100,7 @@ async def book_appointment(
             if parent_user:
                 parent_email = parent_user.email
 
-        email_service.send_booking_confirmation(
+        platform_service.send_booking_confirmation(
             student_email=student.email,
             student_name=student.name,
             teacher_name=teacher.name,
