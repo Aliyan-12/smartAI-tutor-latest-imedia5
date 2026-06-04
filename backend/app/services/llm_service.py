@@ -1,6 +1,12 @@
 """
 LangChain LLM factory for SmartAI Tutor.
-Provides a singleton ChatGoogleGenerativeAI instance with optional tool binding.
+
+Two pipelines, two models:
+  - get_llm()      → premium SESSION model (Gemini 3 tier) — session pipeline, tools, MCQ.
+  - get_chat_llm() → free /chat model (lighter)           — simple-chat pipeline.
+
+Both return a shared singleton, optionally bound with tools (bind_tools makes a new
+Runnable each call, so binding never pollutes the singleton).
 """
 import logging
 from typing import Optional
@@ -12,25 +18,44 @@ from app.core.config import settings
 
 logger = logging.getLogger(__name__)
 
-_llm: Optional[ChatGoogleGenerativeAI] = None
+_llm: Optional[ChatGoogleGenerativeAI] = None       # premium session
+_chat_llm: Optional[ChatGoogleGenerativeAI] = None  # free /chat
 
 
 def get_llm(tools: list = None) -> BaseChatModel:
     """
-    Return the shared LangChain LLM instance, optionally bound with tools.
+    Premium SESSION LLM (Gemini 3 tier). Used by the session pipeline, session tools,
+    and structured MCQ generation.
 
-    - tools=None  → returns the raw ChatGoogleGenerativeAI singleton (for streaming
-                     and structured output via astream / with_structured_output)
-    - tools=[...]  → returns a new tool-bound instance (bind_tools creates a new
-                     Runnable each call, so no singleton pollution)
+    - tools=None  → raw ChatGoogleGenerativeAI singleton (astream / with_structured_output)
+    - tools=[...] → a new tool-bound Runnable (no singleton pollution)
     """
     global _llm
     if _llm is None:
         _llm = ChatGoogleGenerativeAI(
-            model=settings.gemini_model_fast,
+            model=settings.gemini_session_model,
             google_api_key=settings.gemini_api_key,
             temperature=1.0,
             max_retries=5,
         )
-        logger.info(f"LLM singleton created: model={settings.gemini_model_fast}")
+        logger.info(f"Session LLM singleton created: model={settings.gemini_session_model}")
     return _llm.bind_tools(tools) if tools else _llm
+
+
+def get_chat_llm(tools: list = None) -> BaseChatModel:
+    """
+    Free /chat LLM (lighter model). Used by the standalone simple-chat pipeline.
+
+    - tools=None  → raw ChatGoogleGenerativeAI singleton (astream)
+    - tools=[...] → a new tool-bound Runnable (no singleton pollution)
+    """
+    global _chat_llm
+    if _chat_llm is None:
+        _chat_llm = ChatGoogleGenerativeAI(
+            model=settings.gemini_chat_model,
+            google_api_key=settings.gemini_api_key,
+            temperature=1.0,
+            max_retries=5,
+        )
+        logger.info(f"Chat LLM singleton created: model={settings.gemini_chat_model}")
+    return _chat_llm.bind_tools(tools) if tools else _chat_llm

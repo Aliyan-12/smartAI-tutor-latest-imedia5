@@ -376,6 +376,7 @@ async def stream_response_async(
     tool_context=None,  # ToolContext | None  — avoids circular import at module level
     image_data: Optional[str] = None,
     image_mime: str = "image/jpeg",
+    tool_set: str = "session",  # "session" = full session tools, "chat" = /chat subset
 ) -> AsyncGenerator[str, None]:
     """
     True async streaming generator backed by LangChain astream().
@@ -394,12 +395,21 @@ async def stream_response_async(
     messages = _build_lc_messages(history, user_message, rag_chunks, _system, image_data, image_mime)
 
     if tool_context is not None:
-        from app.tools.session_tools import make_session_tools
-        tools = make_session_tools(tool_context)
+        if tool_set == "chat":
+            from app.tools.chat_tools import make_chat_tools
+            tools = make_chat_tools(tool_context)
+        else:
+            from app.tools.session_tools import make_session_tools
+            tools = make_session_tools(tool_context)
     else:
         tools = []
 
-    llm = get_llm(tools=tools if tools else None)
+    # Premium session → get_llm (Gemini 3 tier); free /chat → get_chat_llm (lighter).
+    if tool_set == "chat":
+        from app.services.llm_service import get_chat_llm
+        llm = get_chat_llm(tools=tools if tools else None)
+    else:
+        llm = get_llm(tools=tools if tools else None)
     logger.info(
         f"stream_response_async: history={len(history)} msgs, "
         f"rag_chunks={len(rag_chunks) if rag_chunks else 0}, "

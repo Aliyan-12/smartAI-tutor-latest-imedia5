@@ -21,6 +21,10 @@ class Settings(BaseSettings):
     gemini_api_key: str = ""
     gemini_model: str = "gemini-2.5-pro" #"gemini-2.5-flash"
     gemini_model_fast: str = "gemini-2.5-flash"
+    # Per-pipeline LLMs: premium session vs free /chat.
+    # Set GEMINI_SESSION_MODEL to a Gemini 3 id when ready.
+    gemini_session_model: str = "gemini-2.5-pro"
+    gemini_chat_model: str = "gemini-2.5-flash"
 
     jwt_secret_key: str = "change-this-to-a-random-64-char-string"
     jwt_algorithm: str = "HS256"

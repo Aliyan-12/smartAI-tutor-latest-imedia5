@@ -1,11 +1,21 @@
+import asyncio
+import base64
 import logging
+from uuid import uuid4
+
+from fastapi import WebSocket, WebSocketDisconnect
+from starlette.websockets import WebSocketState
 from sqlalchemy import select, desc
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 from typing import List, Optional, Tuple
 
+from app.core.security import decode_access_token
+from app.db.session import async_session_factory
 from app.models.chat import Chat, Message
+from app.models.user import ROLE_STUDENT
 from app.schemas.documents import RetrievedChunk
+from app.services import gemini_service
 
 logger = logging.getLogger(__name__)
 
@@ -138,3 +148,269 @@ async def delete_chat_by_session(db: AsyncSession, session_id: str, user_id: int
     await db.delete(chat)
     await db.flush()
     return True
+
+
+# ===========================================================================
+# Simple-chat WebSocket pipeline  (/chat — the FREE chat for everyone)
+#
+# A standalone, non-session chat: SIMPLE_CHAT_SYSTEM_PROMPT + RAG, NO tools
+# (web/deep search + file/photo come later). Same transport/segment/TTS/voice
+# plumbing as the premium session, but its own turn logic. The session pipeline
+# (premium, full tools, lessons) lives in session_agent_service and is separate.
+# ===========================================================================
+
+_active_chat_ws: dict = {}
+
+
+async def _run_chat_turn(send, chat_id: int, user_id: int, *, saved_user_text,
+                         ai_content, image_b64=None, image_mime="image/jpeg",
+                         research=False, tts=True):
+    """One simple-chat turn: save user msg, stream + segment reply, save once, turn_end."""
+    from app.services import session_agent_service as _sa  # shared segment/filler/turn helpers (lazy → no cycle)
+
+    await send({"type": "turn_start", "turn_id": uuid4().hex})
+
+    if tts:
+        nf = await asyncio.to_thread(_sa.get_neutral_filler)
+        if nf and nf.get("audio_b64"):
+            await send({"type": "filler", "text": nf["text"], "audio_b64": nf["audio_b64"]})
+
+    # Attached PDF/DOCX/PPTX → extract text + inject; images stay for Gemini vision.
+    if image_b64 and image_mime and not image_mime.startswith("image/"):
+        doc_text = await asyncio.to_thread(_sa._extract_doc_text, image_b64, image_mime)
+        image_b64 = None
+        if doc_text:
+            ai_content = f"[ATTACHED FILE CONTENT]\n{doc_text[:8000]}\n\n{ai_content}"
+
+    if research and ai_content:
+        ai_content = _sa._RESEARCH_PREFIX + ai_content
+
+    message_id = None
+    clean = ""
+    async with async_session_factory() as db:
+        chat = await get_chat_by_id(db, chat_id)
+        if not chat:
+            await send({"type": "error", "message": "Chat not found.", "recoverable": False})
+            await send({"type": "turn_end", "message_id": None, "full_text": ""})
+            return
+
+        if saved_user_text is not None:
+            await add_message(db, chat_id, "user", saved_user_text)
+        history, rag_chunks = await build_context(db, chat_id, user_query=saved_user_text or ai_content)
+        chat_title = chat.title
+        chat_session_id = chat.session_id
+        await db.commit()
+
+        # Simple system prompt (+ the student's learning preferences). NO session tools.
+        from app.services.gemini_service import SIMPLE_CHAT_SYSTEM_PROMPT, build_personalised_system_prompt
+        system_prompt = SIMPLE_CHAT_SYSTEM_PROMPT
+        try:
+            from app.services.platform_service import get_student_settings
+            prof = await get_student_settings(db, user_id)
+            system_prompt = build_personalised_system_prompt({
+                "teaching_pace": prof.teaching_pace,
+                "learning_style": prof.learning_style or [],
+                "teaching_preferences": prof.teaching_preferences or {},
+                "interests": prof.interests or [],
+                "learning_goals": prof.learning_goals,
+            }, base_prompt=SIMPLE_CHAT_SYSTEM_PROMPT)
+        except Exception:
+            pass
+
+        # /chat tool subset (web_search + deep_research) bound to the chat LLM.
+        from app.tools.session_tools import ToolContext
+        chat_tool_ctx = ToolContext(
+            db=db, student_id=user_id, appointment_id=0,
+            subject="", key_stage="", chat_session_id=chat_session_id,
+        )
+
+        hist_slice = history[:-1] if saved_user_text is not None else history
+        segmenter = _sa.SentenceSegmenter()
+        seq = 0
+        full: list = []
+        import json as _json2
+        async for raw in gemini_service.stream_response_async(
+            hist_slice, ai_content, rag_chunks=rag_chunks,
+            system_prompt_override=system_prompt,
+            tool_context=chat_tool_ctx, tool_set="chat",  # ← /chat subset only
+            image_data=image_b64, image_mime=image_mime,
+        ):
+            token = _sa._coerce_str(raw)
+            stripped = token.strip()
+            # Tool-result tokens → structured `tool` events; never spoken/shown.
+            if stripped.startswith("[TOOL_RESULT:") and stripped.endswith("]"):
+                try:
+                    tr = _json2.loads(stripped[len("[TOOL_RESULT:"):-1])
+                    await send({"type": "tool", "tool": tr.get("tool", ""), "data": tr.get("data", {})})
+                except Exception:
+                    pass
+                continue
+            full.append(token)
+            for sentence in segmenter.feed(token):
+                await send(await _sa.build_segment(sentence, seq, tts))
+                seq += 1
+        remainder = segmenter.flush()
+        if remainder:
+            await send(await _sa.build_segment(remainder, seq, tts))
+            seq += 1
+
+        complete = "".join(full)
+        clean = _sa.strip_display_markers(complete).strip()
+        if not clean or "[Error:" in complete:
+            await send({"type": "error", "message": "Couldn't generate a reply — please try again.", "recoverable": True})
+            await send({"type": "turn_end", "message_id": None, "full_text": ""})
+            return
+
+        msg = await add_message(db, chat_id, "assistant", clean)
+        message_id = msg.id
+        try:
+            from app.services.user_service import get_user_by_id
+            from app.services import platform_service
+            fresh = await get_user_by_id(db, user_id)
+            if fresh:
+                await platform_service.check_and_deduct_credit(db, fresh)
+                await send({"type": "credits", "value": float(fresh.credits)})
+                try:
+                    await platform_service.award_xp(db, user_id, 5, "chat_message")
+                    await platform_service.check_and_update_streak(db, user_id)
+                except Exception:
+                    pass
+            if chat_title == "New Chat" and saved_user_text:
+                title = gemini_service.generate_chat_title(saved_user_text)
+                fresh_chat = await get_chat_by_session(db, chat_session_id, user_id)
+                if fresh_chat:
+                    await update_chat_title(db, fresh_chat, title)
+                    await send({"type": "title", "value": title})
+        except Exception:
+            logger.warning("Chat credit/XP/title update failed for user %s", user_id)
+        await db.commit()
+
+    await send({"type": "turn_end", "message_id": message_id, "full_text": clean})
+
+
+async def _handle_chat_message(send, chat_id, user_id, data):
+    text = (data.get("text") or "").strip()
+    image_b64 = data.get("image_b64")
+    if not text and not image_b64:
+        return
+    saved = text if text else "(shared an image)"
+    ai = text or "Please look at the attached image and help me understand it."
+    # Simple-chat TEXT mode → reply is text only (no TTS).
+    await _run_chat_turn(send, chat_id, user_id, saved_user_text=saved, ai_content=ai,
+                         image_b64=image_b64, image_mime=data.get("image_mime") or "image/jpeg",
+                         research=bool(data.get("research")), tts=False)
+
+
+async def _handle_chat_audio(send, chat_id, user_id, data):
+    audio_b64 = data.get("audio_b64")
+    if not audio_b64:
+        return
+    if not bool(data.get("stt", True)):
+        await send({"type": "error", "message": "Voice needs speech-to-text enabled.", "recoverable": True})
+        await send({"type": "turn_end", "message_id": None, "full_text": ""})
+        return
+    mime = data.get("mime") or "audio/webm"
+    try:
+        audio_bytes = base64.b64decode(audio_b64)
+    except Exception:
+        await send({"type": "error", "message": "Bad audio data.", "recoverable": True})
+        await send({"type": "turn_end", "message_id": None, "full_text": ""})
+        return
+    from app.services.voice_agent_service import speech_to_text
+    ext = (mime.split("/")[-1] or "webm").split(";")[0]
+    transcript = await asyncio.to_thread(speech_to_text, audio_bytes, f"audio.{ext}")
+    if not transcript:
+        await send({"type": "error", "message": "Sorry, I couldn't hear that — please try again.", "recoverable": True})
+        await send({"type": "turn_end", "message_id": None, "full_text": ""})
+        return
+    await send({"type": "user_transcript", "text": transcript})
+    # Simple-chat VOICE mode → spoken reply (STT in, TTS out), same as the session loop.
+    await _run_chat_turn(send, chat_id, user_id, saved_user_text=transcript, ai_content=transcript,
+                         tts=True)
+
+
+async def run_chat_ws(websocket: WebSocket) -> None:
+    """Simple-chat WebSocket (text + voice). Thin router delegates here."""
+    await websocket.accept()
+
+    token = websocket.query_params.get("token")
+    session_id_q = websocket.query_params.get("session_id")
+    if not token:
+        await websocket.close(code=4001, reason="Missing auth token")
+        return
+    payload = decode_access_token(token)
+    if not payload:
+        await websocket.close(code=4001, reason="Invalid token")
+        return
+    user_id = int(payload.get("sub", 0))
+    role = payload.get("role", "")
+    if not user_id or role != ROLE_STUDENT:
+        await websocket.close(code=4003, reason="Only students can use chat")
+        return
+
+    existing = _active_chat_ws.get(user_id)
+    if existing is not None and existing is not websocket:
+        try:
+            await existing.close(code=4000, reason="Replaced by new chat")
+        except Exception:
+            pass
+    _active_chat_ws[user_id] = websocket
+    current_turn: Optional[asyncio.Task] = None
+
+    async def send(d: dict) -> None:
+        try:
+            if websocket.client_state == WebSocketState.CONNECTED:
+                await websocket.send_json(d)
+        except Exception:
+            pass
+
+    try:
+        async with async_session_factory() as db:
+            chat = None
+            if session_id_q:
+                chat = await get_chat_by_session(db, session_id_q, user_id)
+            if not chat:
+                chat = await create_chat(db, user_id)
+                await db.commit()
+            chat_id = chat.id
+            chat_session_id = chat.session_id
+
+        await send({"type": "ready", "session_id": chat_session_id})
+        logger.info("Chat WS ready: user=%s chat=%s", user_id, chat_id)
+
+        from app.services.session_agent_service import _guard_turn  # shared timeout/cancel guard
+        _handlers = {"user_message": _handle_chat_message, "user_audio": _handle_chat_audio}
+        while True:
+            try:
+                data = await websocket.receive_json()
+            except (WebSocketDisconnect, RuntimeError):
+                break
+            except Exception:
+                break
+            mtype = data.get("type")
+            if mtype == "ping":
+                await send({"type": "pong"})
+            elif mtype == "stop":
+                if current_turn and not current_turn.done():
+                    current_turn.cancel()
+            elif mtype in _handlers:
+                if current_turn and not current_turn.done():
+                    continue
+                current_turn = asyncio.create_task(
+                    _guard_turn(send, _handlers[mtype](send, chat_id, user_id, data))
+                )
+    except WebSocketDisconnect:
+        pass
+    except Exception as e:  # noqa: BLE001
+        logger.error("Chat WS error: %s", e, exc_info=True)
+    finally:
+        if current_turn and not current_turn.done():
+            current_turn.cancel()
+        if _active_chat_ws.get(user_id) is websocket:
+            del _active_chat_ws[user_id]
+        try:
+            if websocket.client_state == WebSocketState.CONNECTED:
+                await websocket.close()
+        except Exception:
+            pass
+        logger.info("Chat WS closed: user=%s", user_id)
