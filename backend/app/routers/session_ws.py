@@ -359,6 +359,9 @@ async def _guard_turn(send, coro) -> None:
     except asyncio.TimeoutError:
         await send({"type": "error", "message": "The tutor took too long — please try again.", "recoverable": True})
         await send({"type": "turn_end", "message_id": None, "full_text": ""})
+    except asyncio.CancelledError:
+        # user pressed stop — end the turn cleanly so the client unblocks
+        await send({"type": "turn_end", "message_id": None, "full_text": ""})
     except Exception as e:  # noqa: BLE001
         logger.error("Session turn failed: %s", e, exc_info=True)
         await send({"type": "error", "message": "Something went wrong — please try again.", "recoverable": True})
@@ -395,6 +398,7 @@ async def session_ws(websocket: WebSocket):
         except Exception:
             pass
     _active_ws[user_id] = websocket
+    current_turn: asyncio.Task | None = None
 
     async def send(d: dict) -> None:
         try:
@@ -422,10 +426,18 @@ async def session_ws(websocket: WebSocket):
         await send({"type": "ready", "session_id": chat_session_id})
         logger.info("Session WS ready: user=%s chat=%s appt=%s", user_id, chat_id, appt_id)
 
+        # Each turn runs as a task so the receive loop stays responsive (handles
+        # ping/stop, keeps the connection alive during long TTS turns) and so we
+        # can enforce ONE turn at a time on the server (ignores re-sends).
+        _handlers = {
+            "user_message": _handle_user_message,
+            "quiz_result": _handle_quiz_result,
+            "user_audio": _handle_user_audio,
+        }
         while True:
             try:
                 data = await websocket.receive_json()
-            except WebSocketDisconnect:
+            except (WebSocketDisconnect, RuntimeError):
                 break
             except Exception:
                 break
@@ -434,19 +446,22 @@ async def session_ws(websocket: WebSocket):
             if mtype == "ping":
                 await send({"type": "pong"})
             elif mtype == "stop":
-                continue  # inline turn model — input is disabled client-side during a turn
-            elif mtype == "user_message":
-                await _guard_turn(send, _handle_user_message(send, chat_id, user_id, data))
-            elif mtype == "quiz_result":
-                await _guard_turn(send, _handle_quiz_result(send, chat_id, user_id, data))
-            elif mtype == "user_audio":
-                await _guard_turn(send, _handle_user_audio(send, chat_id, user_id, data))
+                if current_turn and not current_turn.done():
+                    current_turn.cancel()
+            elif mtype in _handlers:
+                if current_turn and not current_turn.done():
+                    continue  # a turn is already running — ignore the re-send
+                current_turn = asyncio.create_task(
+                    _guard_turn(send, _handlers[mtype](send, chat_id, user_id, data))
+                )
 
     except WebSocketDisconnect:
         pass
     except Exception as e:  # noqa: BLE001
         logger.error("Session WS error: %s", e, exc_info=True)
     finally:
+        if current_turn and not current_turn.done():
+            current_turn.cancel()
         if _active_ws.get(user_id) is websocket:
             del _active_ws[user_id]
         try:

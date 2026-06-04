@@ -14,4 +14,7 @@ COPY . .
 
 EXPOSE 8001
 
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8001", "--reload"]
+# WebSocket keepalive: long session turns (slow CPU TTS) must not be dropped by
+# uvicorn's default 20s ws ping timeout — matches the voice-WS requirement.
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8001", "--reload", \
+     "--ws-ping-interval", "30", "--ws-ping-timeout", "300", "--timeout-keep-alive", "300"]

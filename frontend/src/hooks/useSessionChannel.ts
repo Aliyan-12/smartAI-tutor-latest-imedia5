@@ -347,6 +347,7 @@ export function useSessionChannel(opts: SessionChannelOpts) {
       tts: ttsEnabledRef.current,
     });
     if (!ok) { setError("Not connected — reconnecting…"); return; }
+    busyAt.current = true; // block rapid double-sends before the re-render
     // optimistic user bubble — render the attachment inline (DB is authoritative on re-hydrate)
     const isImage = !!sendOpts?.imageMime?.startsWith("image/");
     setMessages((prev) => [...prev, {
@@ -366,6 +367,7 @@ export function useSessionChannel(opts: SessionChannelOpts) {
     if (busyAt.current) return;
     const ok = _send({ type: "quiz_result", topic, score, strong, weak, tts: ttsEnabledRef.current });
     if (!ok) return;
+    busyAt.current = true;
     setMessages((prev) => [...prev, {
       id: -Date.now(), chat_id: 0, role: "quiz_result" as const,
       content: `Quiz completed: ${Math.round(score)}% on "${topic}"`,
@@ -381,6 +383,7 @@ export function useSessionChannel(opts: SessionChannelOpts) {
     if (busyAt.current) return;
     const ok = _send({ type: "user_audio", audio_b64: audioB64, mime, tts: ttsEnabledRef.current });
     if (!ok) return;
+    busyAt.current = true;
     setBusy(true);
     setStatus("waiting");
     armWatchdog();
