@@ -2,7 +2,7 @@
 
 ## What This System Is
 
-SmartAI Tutor is a commercial AI-powered tutoring platform for UK GCSE students (Key Stages 1–5). It delivers structured AI lessons using Google Gemini 2.5 Flash, a RAG knowledge base built on pgvector, and real-time voice via the Gemini Live API. The platform is deployed at **dev.smartaitutor.online**.
+SmartAI Tutor is a commercial AI-powered tutoring platform for UK GCSE students (Key Stages 1–5). It delivers structured AI lessons using Google Gemini, a RAG knowledge base built on pgvector, and real-time voice via a custom **STT → turn → Kokoro-TTS** pipeline over WebSocket (the old Gemini Live path has been removed). The platform is deployed at **dev.smartaitutor.online**.
 
 ---
 
@@ -13,8 +13,8 @@ SmartAI Tutor is a commercial AI-powered tutoring platform for UK GCSE students 
 | Frontend | React 18 + TypeScript + Vite | 5173 (dev) / 3000 (Docker) |
 | Backend | FastAPI (Python 3.11) | 8001 |
 | Database | PostgreSQL 17 + pgvector 0.8.2 | 5432 |
-| AI — text | Google Gemini 2.5 Flash (streaming SSE) | — |
-| AI — voice | Gemini Live API (bidirectional WebSocket) | — |
+| AI — text | Google Gemini (LangChain, streamed over WebSocket) | — |
+| AI — voice | Custom STT (Gemini) → Kokoro TTS, over the chat/session WebSocket | — |
 | AI — embed | Gemini embedding-001 (768d vectors) | — |
 
 Vector search: pgvector HNSW cosine, top-5 chunks, min 0.3 similarity.
@@ -64,7 +64,7 @@ backend/app/
 frontend/src/
   components/     — Sidebar, WelcomeScreen, ChatWindow, ChatInput, LottiePlayer, etc.
   context/        — AuthContext (JWT state)
-  hooks/          — useChat (streaming SSE), useVoice (Gemini Live WebSocket)
+  hooks/          — useSessionChannel (chat/session WS pipeline), useVoiceCapture (mic VAD → user_audio), useVoice (single-shot "Read aloud" TTS), useChat (dashboard list/credits)
   pages/          — All page components (see Navigation Rules below)
   services/       — api.ts (all API endpoints, typed)
   types/          — TypeScript interfaces
@@ -157,11 +157,11 @@ The AI always leads; it never waits for the student to initiate.
 - Top-5 chunks retrieved per query at cosine similarity ≥ 0.3
 - Injected into Gemini system prompt as context
 
-### TTS Mute Fix (SessionPage.tsx)
-- `ttsEnabledRef = useRef(true)` + sync effect; all callbacks read `ttsEnabledRef.current` (not stale `ttsEnabled` state)
-- `cancelStreamTTS` is destructured from `useVoice` and called immediately when user mutes
-- `onToken` callbacks are gated: `(t: string) => { if (ttsEnabledRef.current) feedStreamTTS(t); }` — stops feeding the TTS API mid-stream if muted
-- When muted: zero calls to `/api/voice/speak`
+### TTS Mute (useSessionChannel)
+TTS is now generated **server-side** as per-sentence segments (`{type:"segment", audio_b64, duration_ms}`) bundled with each turn — there is no client-side streaming-TTS queue anymore.
+- `ttsEnabled` is passed into `useSessionChannel`; `ttsEnabledRef` mirrors it so the player reads the live value.
+- `playAudio()` skips a segment's audio when `!ttsEnabledRef.current`, and a sync effect pauses any in-flight clip the instant the user mutes — text still reveals at a word-per-minute cadence.
+- The client sends `tts: ttsEnabledRef.current` on each message; for the simple `/chat` the backend overrides this by mode (text turn = no TTS, voice turn = TTS).
 
 ### Quiz QUIZ_OFFER Topic Rule
 The AI must write specific concepts taught in QUIZ_OFFER, not generic unit names:

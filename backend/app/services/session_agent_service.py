@@ -15,7 +15,6 @@ from typing import Optional
 from uuid import uuid4
 
 import soundfile as sf
-from pydantic import BaseModel
 
 from fastapi import WebSocket, WebSocketDisconnect
 from starlette.websockets import WebSocketState
@@ -1322,8 +1321,6 @@ async def build_segment(text: str, seq: int, tts: bool) -> dict:
 # Filler phrases  (merged from filler_service)
 # ===========================================================================
 
-WAITING_CATEGORIES = ["acknowledge", "thinking", "checking", "encourage"]
-_DEFAULT_CATEGORY = "thinking"
 _manifest_cache: Optional[dict] = None
 
 
@@ -1357,13 +1354,6 @@ def _random_phrase(category: str) -> Optional[dict]:
     return random.choice(bucket["phrases"])
 
 
-def _any_phrase() -> Optional[dict]:
-    for bucket in get_manifest().get("categories", {}).values():
-        if bucket.get("phrases"):
-            return random.choice(bucket["phrases"])
-    return None
-
-
 def get_neutral_filler() -> Optional[dict]:
     """A short NEUTRAL bridge ("Okay.", "Right.") + its audio, played the instant the
     student sends — covers the <1s before the model's first sentence (the real reaction)."""
@@ -1377,53 +1367,6 @@ def get_neutral_filler() -> Optional[dict]:
     except Exception as e:  # noqa: BLE001
         logger.warning("Neutral filler clip read failed (%s): %s", phrase.get("file"), e)
     return {"text": phrase["text"], "audio_b64": audio_b64}
-
-
-class FillerPick(BaseModel):
-    category: str
-
-
-def _classify_filler(message: str, available: list) -> str:
-    from langchain_core.messages import SystemMessage, HumanMessage
-    from app.services.llm_service import get_llm
-
-    cat_lines = "\n".join(f"- {c}: {get_manifest()['categories'][c]['when']}" for c in available)
-    system = (
-        "You pick a short 'filler' phrase a tutor says the instant a student sends a "
-        "message, to fill the brief moment before the full answer is ready. "
-        "Choose the ONE category that best fits the student's message.\n\n"
-        f"Categories:\n{cat_lines}\n\n"
-        f"Respond with category set to exactly one of: {', '.join(available)}."
-    )
-    result: FillerPick = get_llm().with_structured_output(FillerPick).invoke([
-        SystemMessage(content=system),
-        HumanMessage(content=f'Student just said: "{message[:500]}". Pick the best category.'),
-    ])
-    return result.category
-
-
-def pick_filler(message: str) -> Optional[dict]:
-    """Classify the just-sent message and return which situational filler to play."""
-    manifest = get_manifest()
-    if not manifest.get("categories"):
-        return None
-    available = [c for c in WAITING_CATEGORIES if c in manifest["categories"]]
-    category = _DEFAULT_CATEGORY
-    if available:
-        try:
-            chosen = _classify_filler(message, available)
-            if chosen in available:
-                category = chosen
-        except Exception as e:  # noqa: BLE001
-            logger.warning("filler-pick classification failed, using default: %s", e)
-    phrase = _random_phrase(category) or _random_phrase(_DEFAULT_CATEGORY) or _any_phrase()
-    if not phrase:
-        return None
-    return {
-        "category": category, "slug": phrase["slug"], "text": phrase["text"],
-        "file": phrase["file"], "duration_ms": phrase.get("duration_ms"),
-        "audio_url": f"/api/voice/fillers/audio/{phrase['slug']}",
-    }
 
 
 # ===========================================================================

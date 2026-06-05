@@ -4,11 +4,11 @@ import { X, BookOpen } from "lucide-react";
 import Sidebar from "../components/Sidebar";
 import ChatWindow from "../components/ChatWindow";
 import ChatInput from "../components/ChatInput";
-import AssessmentMode from "../components/AssessmentMode";
-import { useChat } from "../hooks/useChat";
+import { useSessionChannel } from "../hooks/useSessionChannel";
+import { useVoiceCapture } from "../hooks/useVoiceCapture";
 import { useVoice } from "../hooks/useVoice";
-import { appointmentsApi } from "../services/api";
-import type { ChatMessage, Assessment, Appointment } from "../types";
+import { chatApi, appointmentsApi, chatWsUrl } from "../services/api";
+import type { ChatMessage, ChatListItem, Chat, Appointment } from "../types";
 
 // Derive a subject theme from a chat session title/topic text
 const CHAT_SUBJECT_THEMES: { keywords: string[]; color: string; bg: string; icon: string }[] = [
@@ -34,145 +34,149 @@ function detectSubjectTheme(text: string): { color: string; bg: string; icon: st
 export default function ChatPage() {
   const { sessionId } = useParams<{ sessionId?: string }>();
   const navigate = useNavigate();
-
-  const {
-    messages,
-    chatList,
-    activeSessionId,
-    streaming,
-    streamContent,
-    credits,
-    quizOffer,
-    loadChats,
-    loadCredits,
-    loadChat,
-    startNewChat,
-    sendMessage,
-    deleteChat,
-    stopStreaming,
-    clearQuizOffer,
-  } = useChat();
-
-  const {
-    voiceStatus,
-    isVoiceActive,
-    voiceError,
-    clearVoiceError,
-    connectVoice,
-    disconnectVoice,
-    speakText,
-  } = useVoice();
-
-  const [voiceMessages, setVoiceMessages] = useState<ChatMessage[]>([]);
-  const [voiceAiStream, setVoiceAiStream] = useState("");
-  const userTranscriptRef = useRef("");
-  const voiceSessionRef = useRef<string | null>(null);
-  const [studentAppointments, setStudentAppointments] = useState<Appointment[]>([]);
-
-  useEffect(() => {
-    loadCredits();
-    loadChats();
-    appointmentsApi.list().then((data) => setStudentAppointments(data as Appointment[])).catch(() => {});
-  }, [loadCredits, loadChats]);
-
-  useEffect(() => {
-    if (sessionId && sessionId !== activeSessionId) {
-      loadChat(sessionId);
-    }
-  }, [sessionId]); // eslint-disable-line react-hooks/exhaustive-deps
-
   const location = useLocation();
 
+  // ── sidebar / chat-list / credits (managed directly; messages live in the channel) ──
+  const [chatList, setChatList] = useState<ChatListItem[]>([]);
+  const [credits, setCredits] = useState<number | null>(null);
+  const [studentAppointments, setStudentAppointments] = useState<Appointment[]>([]);
+  const [voiceActive, setVoiceActive] = useState(false);
+  const [webSearchEnabled, setWebSearchEnabled] = useState(false);
+  const [researchEnabled, setResearchEnabled] = useState(false);
+
+  const { speakText } = useVoice();
+
+  const loadChats = useCallback(async () => {
+    try { setChatList((await chatApi.listChats()) as ChatListItem[]); } catch { /* ignore */ }
+  }, []);
+  const loadCredits = useCallback(async () => {
+    try { setCredits((await chatApi.getCredits()).credits); } catch { /* ignore */ }
+  }, []);
+
+  // ── simple-chat pipeline (text + voice on one WebSocket: /api/chat/ws) ──
+  const connectedSidRef = useRef<string | null>(null);
+  const sessionIdParamRef = useRef<string | null>(sessionId ?? null);
+  const pendingPromptRef = useRef<string | null>(null);
+
+  const channel = useSessionChannel({
+    buildUrl: chatWsUrl,
+    // Backend forces text→no-TTS and voice→TTS by message type; `true` lets the
+    // voice-mode audio segments actually play on the client.
+    ttsEnabled: true,
+    onReady: (sid) => {
+      connectedSidRef.current = sid;
+      if (!sessionIdParamRef.current) {
+        // a brand-new chat was just created server-side — adopt its id in the URL
+        sessionIdParamRef.current = sid;
+        navigate(`/chat/${sid}`, { replace: true });
+        void loadChats();
+      }
+    },
+    onCredits: (v) => setCredits(v),
+    onTool: () => { /* web_search / deep_research results are folded into the streamed answer */ },
+  });
+  const {
+    messages, liveText, fillerText, busy, status: liveStatus,
+    sendMessage, sendAudio, stopTurn, hydrate, setMessages, disconnect, resume, error, clearError,
+  } = channel;
+
+  // Hands-free voice: capture the utterance and send it over the SAME chat socket
+  // as `user_audio` (STT in → spoken reply out). Mic pauses while a turn runs.
+  useVoiceCapture({
+    active: voiceActive,
+    paused: busy,
+    onUtterance: (b64, mime) => sendAudio(b64, mime),
+    onError: (msg) => { console.warn(msg); setVoiceActive(false); },
+  });
+
+  const voiceUiStatus: "idle" | "connecting" | "listening" | "processing" | "speaking" = !voiceActive
+    ? "idle"
+    : liveStatus === "speaking"
+    ? "speaking"
+    : busy
+    ? "processing"
+    : "listening";
+
+  // initial loads
   useEffect(() => {
-    const prompt = (location.state as { prompt?: string } | null)?.prompt;
-    if (prompt) {
+    void loadCredits();
+    void loadChats();
+    appointmentsApi.list().then((d) => setStudentAppointments(d as Appointment[])).catch(() => {});
+  }, [loadCredits, loadChats]);
+
+  // capture a one-shot prompt passed via navigation state, send once connected
+  useEffect(() => {
+    const p = (location.state as { prompt?: string } | null)?.prompt;
+    if (p) {
+      pendingPromptRef.current = p;
       navigate(location.pathname, { replace: true, state: {} });
-      sendMessage(prompt);
     }
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const handleVoiceStart = useCallback(() => {
-    setVoiceMessages([]);
-    setVoiceAiStream("");
-    userTranscriptRef.current = "";
-    voiceSessionRef.current = activeSessionId;
-
-    connectVoice(activeSessionId, {
-      onUserTranscript: (chunk) => {
-        userTranscriptRef.current += chunk;
-        setVoiceMessages((prev) => {
-          const last = prev[prev.length - 1];
-          if (last && last.role === "user" && last.id === -1) {
-            return [...prev.slice(0, -1), { ...last, content: userTranscriptRef.current }];
-          }
-          return [...prev, {
-            id: -1,
-            chat_id: 0,
-            role: "user" as const,
-            content: userTranscriptRef.current,
-            timestamp: new Date().toISOString(),
-          }];
-        });
-      },
-      onAiTranscriptChunk: (chunk) => {
-        setVoiceAiStream((prev) => prev + chunk);
-      },
-      onTurnComplete: () => {
-        setVoiceAiStream((current) => {
-          if (current.trim()) {
-            setVoiceMessages((prev) => [
-              ...prev,
-              {
-                id: Date.now() + 1,
-                chat_id: 0,
-                role: "assistant" as const,
-                content: current,
-                timestamp: new Date().toISOString(),
-              },
-            ]);
-          }
-          return "";
-        });
-        setVoiceMessages((prev) =>
-          prev.map((m) => (m.id === -1 ? { ...m, id: Date.now() - 1 } : m))
-        );
-        userTranscriptRef.current = "";
-      },
-      onCreditsUpdate: () => {
-        loadCredits();
-      },
-      onSessionCreated: (sid) => {
-        voiceSessionRef.current = sid;
-        navigate(`/chat/${sid}`, { replace: true });
-        loadChats();
-      },
-      onError: () => {},
-    });
-  }, [activeSessionId, connectVoice, navigate, loadChats, loadCredits]);
-
-  const handleVoiceEnd = useCallback(() => {
-    disconnectVoice();
-    const sid = voiceSessionRef.current || activeSessionId;
-    if (sid) {
-      loadChat(sid);
+  // (re)connect whenever the target chat changes; hydrate its history from the DB
+  useEffect(() => {
+    sessionIdParamRef.current = sessionId ?? null;
+    if (sessionId && sessionId === connectedSidRef.current) return; // already on this chat
+    disconnect();
+    connectedSidRef.current = sessionId ?? null;
+    if (sessionId) {
+      chatApi.getChat(sessionId)
+        .then((c) => hydrate((c as Chat).messages))
+        .catch(() => setMessages([]));
+    } else {
+      setMessages([]);
     }
-    loadChats();
-    setVoiceMessages([]);
-    setVoiceAiStream("");
-    userTranscriptRef.current = "";
-    voiceSessionRef.current = null;
-  }, [disconnectVoice, activeSessionId, loadChat, loadChats]);
+    resume(sessionId ?? null);
+  }, [sessionId]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const allMessages = isVoiceActive ? [...messages, ...voiceMessages] : messages;
-  const currentStreamContent = isVoiceActive ? voiceAiStream : streamContent;
-  const isStreaming = isVoiceActive ? voiceAiStream.length > 0 : streaming;
+  // send the pending one-shot prompt as soon as the socket is ready
+  useEffect(() => {
+    if (channel.connected && pendingPromptRef.current) {
+      const p = pendingPromptRef.current;
+      pendingPromptRef.current = null;
+      sendMessage(p);
+    }
+  }, [channel.connected]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Detect subject theme from active chat messages
-  const activeSession = chatList.find((c) => c.session_id === activeSessionId);
+  // refresh credits + chat list (title) at the end of each turn
+  const prevBusyRef = useRef(false);
+  useEffect(() => {
+    if (prevBusyRef.current && !busy) { void loadCredits(); void loadChats(); }
+    prevBusyRef.current = busy;
+  }, [busy, loadCredits, loadChats]);
+
+  // ── chat management ──
+  const handleSelectChat = useCallback((sid: string) => { navigate(`/chat/${sid}`); }, [navigate]);
+  const handleNewChat = useCallback(() => { navigate("/chat"); }, [navigate]);
+  const handleDeleteChat = useCallback(async (sid: string) => {
+    try { await chatApi.deleteChat(sid); } catch { /* ignore */ }
+    if (sid === sessionId) navigate("/chat");
+    await loadChats();
+  }, [sessionId, navigate, loadChats]);
+
+  const handleSend = useCallback((
+    text: string,
+    opts?: { imageData?: string; imageMime?: string; fileName?: string; webSearch?: boolean; research?: boolean },
+  ) => {
+    sendMessage(text, {
+      imageData: opts?.imageData,
+      imageMime: opts?.imageMime,
+      fileName: opts?.fileName,
+      research: opts?.research ?? researchEnabled,
+    });
+  }, [sendMessage, researchEnabled]);
+
+  const handleVoiceStart = useCallback(() => setVoiceActive(true), []);
+  const handleVoiceEnd = useCallback(() => setVoiceActive(false), []);
+
+  const showWelcome = messages.length === 0 && !busy && !liveText;
+
+  // subject theme from active chat
+  const activeSession = chatList.find((c) => c.session_id === sessionId);
   const themeSource = [
     activeSession?.title ?? "",
-    allMessages.find((m) => m.role === "user")?.content ?? "",
-    allMessages.find((m) => m.role === "assistant")?.content ?? "",
+    messages.find((m) => m.role === "user")?.content ?? "",
+    messages.find((m) => m.role === "assistant")?.content ?? "",
   ].join(" ");
   const subjectTheme = themeSource.trim() ? detectSubjectTheme(themeSource) : null;
 
@@ -180,12 +184,12 @@ export default function ChatPage() {
     <div className="app-layout">
       <Sidebar
         chatList={chatList}
-        activeSessionId={activeSessionId}
+        activeSessionId={sessionId ?? null}
         credits={credits}
         appointments={studentAppointments}
-        onNewChat={startNewChat}
-        onSelectChat={loadChat}
-        onDeleteChat={deleteChat}
+        onNewChat={handleNewChat}
+        onSelectChat={handleSelectChat}
+        onDeleteChat={handleDeleteChat}
         onLoadChats={loadChats}
       />
 
@@ -245,7 +249,7 @@ export default function ChatPage() {
           </div>
         )}
         <div className="chat-container">
-          {allMessages.length === 0 && !isStreaming && (
+          {showWelcome && (
             <div style={{
               flex: 1, display: "flex", flexDirection: "column",
               alignItems: "center", justifyContent: "center",
@@ -308,7 +312,7 @@ export default function ChatPage() {
                   <button key={s.label} className="cp-subject-pill"
                     style={{ background: s.bg, color: s.color, border: `1.5px solid ${s.color}33`,
                       animationDelay: `${i * 0.05}s` }}
-                    onClick={() => sendMessage(s.prompt)}>
+                    onClick={() => handleSend(s.prompt)}>
                     {s.label}
                   </button>
                 ))}
@@ -324,7 +328,7 @@ export default function ChatPage() {
                 ].map((p) => (
                   <button key={p.title} className="cp-suggestion"
                     style={{ animationDelay: p.delay }}
-                    onClick={() => sendMessage(p.body)}>
+                    onClick={() => handleSend(p.body)}>
                     <div style={{ fontSize: 18, marginBottom: 4 }}>{p.icon}</div>
                     <div style={{ fontSize: 12, fontWeight: 700, color: "#374151", marginBottom: 2 }}>{p.title}</div>
                     <div style={{ fontSize: 11, color: "#9ca3af", lineHeight: 1.4 }}>{p.body}</div>
@@ -338,48 +342,37 @@ export default function ChatPage() {
             </div>
           )}
           <ChatWindow
-            messages={allMessages}
-            streaming={isStreaming}
-            streamContent={currentStreamContent}
+            messages={messages}
+            streaming={false}
+            streamContent=""
             onSpeak={speakText}
+            liveText={liveText}
+            liveStatus={liveStatus}
+            fillerText={fillerText}
           />
         </div>
 
-        {voiceError && (
+        {error && (
           <div className="voice-error-bar">
-            <span>{voiceError}</span>
-            <button onClick={clearVoiceError} className="voice-error-close">
+            <span>{error}</span>
+            <button onClick={clearError} className="voice-error-close">
               <X size={14} />
             </button>
           </div>
         )}
 
-        {quizOffer ? (
-          <AssessmentMode
-            quizOffer={quizOffer}
-            onComplete={(assessment: Assessment) => {
-              clearQuizOffer();
-              const reportMsg: ChatMessage = {
-                id: Date.now(),
-                chat_id: 0,
-                role: "assistant",
-                content: `**Quiz Complete: ${assessment.topic}**\n\nScore: ${assessment.score_percent.toFixed(0)}%\n${assessment.report_text || ""}`,
-                timestamp: new Date().toISOString(),
-              };
-              // The assessment is saved in DB. Just show the result in chat.
-            }}
-            onDecline={clearQuizOffer}
-          />
-        ) : (
-          <ChatInput
-            onSend={sendMessage}
-            streaming={streaming}
-            onStop={stopStreaming}
-            voiceStatus={voiceStatus}
-            onVoiceStart={handleVoiceStart}
-            onVoiceEnd={handleVoiceEnd}
-          />
-        )}
+        <ChatInput
+          onSend={handleSend}
+          streaming={busy}
+          onStop={stopTurn}
+          voiceStatus={voiceUiStatus}
+          onVoiceStart={handleVoiceStart}
+          onVoiceEnd={handleVoiceEnd}
+          webSearchEnabled={webSearchEnabled}
+          onWebSearchToggle={() => setWebSearchEnabled((v) => !v)}
+          researchEnabled={researchEnabled}
+          onResearchToggle={() => setResearchEnabled((v) => !v)}
+        />
       </div>
     </div>
   );

@@ -43,12 +43,6 @@ export interface ChatListItem {
   last_message?: string;
 }
 
-export interface StreamEvent {
-  type: "start" | "token" | "end" | "title" | "credits" | "error" | "quiz_offer";
-  content?: string;
-  session_id?: string;
-}
-
 export interface SubscriptionPlan {
   name: string;
   credits: number;

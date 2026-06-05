@@ -97,156 +97,7 @@ export const chatApi = {
     });
     return handleResponse<{ session_id: string; messages: Array<{ id: number; chat_id: number; role: string; content: string; timestamp: string }> }>(res);
   },
-
-  streamMessage(
-    message: string,
-    sessionId: string | null,
-    onEvent: (event: { type: string; content?: string; session_id?: string }) => void,
-    onDone: () => void,
-    onError: (err: Error) => void,
-    extras?: {
-      imageData?: string;
-      imageMime?: string;
-      webSearch?: boolean;
-      research?: boolean;
-    }
-  ) {
-    const token = getToken();
-    const controller = new AbortController();
-
-    const body: Record<string, unknown> = { message, session_id: sessionId };
-    if (extras?.imageData) body.image_data = extras.imageData;
-    if (extras?.imageMime) body.image_mime = extras.imageMime;
-    if (extras?.webSearch) body.web_search = extras.webSearch;
-    if (extras?.research) body.research = extras.research;
-
-    fetch(`${API_BASE}/chat/stream`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${token}`,
-      },
-      body: JSON.stringify(body),
-      signal: controller.signal,
-    })
-      .then(async (res) => {
-        if (!res.ok) {
-          const body = await res.json().catch(() => ({}));
-          throw new Error(body.detail || "Stream request failed");
-        }
-
-        const reader = res.body?.getReader();
-        if (!reader) throw new Error("No response body");
-
-        const decoder = new TextDecoder();
-        let buffer = "";
-
-        while (true) {
-          const { done, value } = await reader.read();
-          if (done) break;
-
-          buffer += decoder.decode(value, { stream: true });
-          const lines = buffer.split("\n");
-          buffer = lines.pop() || "";
-
-          for (const line of lines) {
-            const trimmed = line.trim();
-            if (!trimmed.startsWith("data: ")) continue;
-            try {
-              const parsed = JSON.parse(trimmed.slice(6));
-              onEvent(parsed);
-            } catch {
-              // skip malformed lines
-            }
-          }
-        }
-        onDone();
-      })
-      .catch((err) => {
-        if (err.name !== "AbortError") {
-          onError(err);
-        }
-      });
-
-    return () => controller.abort();
-  },
-
-  streamQuizFeedback(
-    sessionId: string,
-    topic: string,
-    score: number,
-    strong: string[],
-    weak: string[],
-    onEvent: (event: { type: string; content?: string; session_id?: string }) => void,
-    onDone: () => void,
-    onError: (err: Error) => void,
-    questionDetails?: Array<{ question_text: string; chosen_text: string; correct_text: string; is_correct: boolean }>
-  ) {
-    const token = getToken();
-    const controller = new AbortController();
-
-    fetch(`${API_BASE}/chat/quiz-feedback`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-      body: JSON.stringify({ session_id: sessionId, topic, score, strong, weak, question_details: questionDetails }),
-      signal: controller.signal,
-    })
-      .then(async (res) => {
-        if (!res.ok) {
-          const body = await res.json().catch(() => ({}));
-          throw new Error(body.detail || "Quiz feedback request failed");
-        }
-        const reader = res.body?.getReader();
-        if (!reader) throw new Error("No response body");
-        const decoder = new TextDecoder();
-        let buffer = "";
-        while (true) {
-          const { done, value } = await reader.read();
-          if (done) break;
-          buffer += decoder.decode(value, { stream: true });
-          const lines = buffer.split("\n");
-          buffer = lines.pop() || "";
-          for (const line of lines) {
-            const trimmed = line.trim();
-            if (!trimmed.startsWith("data: ")) continue;
-            try { onEvent(JSON.parse(trimmed.slice(6))); } catch { /* skip */ }
-          }
-        }
-        onDone();
-      })
-      .catch((err) => { if (err.name !== "AbortError") onError(err); });
-
-    return () => controller.abort();
-  },
 };
-
-export interface FillerPhrase {
-  text: string;
-  slug: string;
-  file: string;
-  duration_ms: number;
-}
-
-export interface FillerCategory {
-  when: string;
-  phrases: FillerPhrase[];
-}
-
-export interface FillerManifest {
-  voice?: string;
-  speed?: number;
-  count?: number;
-  categories: Record<string, FillerCategory>;
-}
-
-export interface FillerPick {
-  category: string;
-  slug: string;
-  text: string;
-  file: string;
-  duration_ms: number | null;
-  audio_url: string;
-}
 
 // Build the unified session WebSocket URL (auth via query token, like the voice WS).
 export function sessionWsUrl(appointmentId: number | null, sessionId: string | null): string {
@@ -254,6 +105,15 @@ export function sessionWsUrl(appointmentId: number | null, sessionId: string | n
   const proto = window.location.protocol === "https:" ? "wss:" : "ws:";
   let url = `${proto}//${window.location.host}/api/sessions/ws?token=${encodeURIComponent(token)}`;
   if (appointmentId) url += `&appointment_id=${appointmentId}`;
+  if (sessionId) url += `&session_id=${encodeURIComponent(sessionId)}`;
+  return url;
+}
+
+// Build the simple-chat WebSocket URL (text + voice on one socket), auth via query token.
+export function chatWsUrl(sessionId: string | null): string {
+  const token = getToken() ?? "";
+  const proto = window.location.protocol === "https:" ? "wss:" : "ws:";
+  let url = `${proto}//${window.location.host}/api/chat/ws?token=${encodeURIComponent(token)}`;
   if (sessionId) url += `&session_id=${encodeURIComponent(sessionId)}`;
   return url;
 }
@@ -267,31 +127,6 @@ export const voiceApi = {
     });
     if (!res.ok) throw new Error("TTS request failed");
     return res.blob();
-  },
-
-  // ── Thinking-filler player ────────────────────────────────────────────────
-  async fillersManifest(): Promise<FillerManifest> {
-    const res = await fetch(`${API_BASE}/voice/fillers/manifest`, { headers: authHeaders() });
-    if (!res.ok) throw new Error("Failed to load filler manifest");
-    return res.json();
-  },
-
-  async fillerAudioBlob(slug: string): Promise<Blob> {
-    const res = await fetch(`${API_BASE}/voice/fillers/audio/${encodeURIComponent(slug)}`, {
-      headers: authHeaders(),
-    });
-    if (!res.ok) throw new Error("Failed to load filler clip");
-    return res.blob();
-  },
-
-  async pickFiller(message: string): Promise<FillerPick> {
-    const res = await fetch(`${API_BASE}/voice/fillers/pick`, {
-      method: "POST",
-      headers: authHeaders(),
-      body: JSON.stringify({ message }),
-    });
-    if (!res.ok) throw new Error("Filler pick failed");
-    return res.json();
   },
 };
 

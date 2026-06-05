@@ -21,7 +21,14 @@ interface Segment {
 }
 
 export interface SessionChannelOpts {
-  appointmentId: number;
+  /** Session pipeline: the appointment to attach to. Omit for the standalone /chat. */
+  appointmentId?: number;
+  /**
+   * Override the WebSocket URL. When omitted, the unified *session* URL is used
+   * (`sessionWsUrl(appointmentId, sessionId)`). The simple /chat passes
+   * `buildUrl: chatWsUrl` to point at `/api/chat/ws` instead. Same protocol either way.
+   */
+  buildUrl?: (sessionId: string | null) => string;
   ttsEnabled: boolean;
   onTool?: (tool: string, data: Record<string, unknown>) => void;
   onCredits?: (value: number) => void;
@@ -277,7 +284,10 @@ export function useSessionChannel(opts: SessionChannelOpts) {
     if (reconnectTimerRef.current) { clearTimeout(reconnectTimerRef.current); reconnectTimerRef.current = null; }
 
     setStatus("connecting");
-    const ws = new WebSocket(sessionWsUrl(optsRef.current.appointmentId, lastSessionIdRef.current));
+    const url = optsRef.current.buildUrl
+      ? optsRef.current.buildUrl(lastSessionIdRef.current)
+      : sessionWsUrl(optsRef.current.appointmentId ?? null, lastSessionIdRef.current);
+    const ws = new WebSocket(url);
     wsRef.current = ws;
 
     ws.onopen = () => { connectingRef.current = false; startHeartbeat(); };
@@ -392,6 +402,9 @@ export function useSessionChannel(opts: SessionChannelOpts) {
     armWatchdog();
   }, []);
 
+  /** Cancel the in-flight turn server-side without closing the socket. */
+  const stopTurn = useCallback(() => { _send({ type: "stop" }); }, []);
+
   const hydrate = useCallback((msgs: ChatMessage[]) => { setMessages(msgs); }, []);
   const clearError = useCallback(() => setError(null), []);
 
@@ -401,7 +414,7 @@ export function useSessionChannel(opts: SessionChannelOpts) {
   return {
     connected, status, messages, liveText, fillerText, busy, error,
     connect, disconnect, pause, resume,
-    sendMessage, sendQuizResult, sendAudio,
+    sendMessage, sendQuizResult, sendAudio, stopTurn,
     hydrate, setMessages, clearError,
   };
 }
