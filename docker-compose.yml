@@ -6,12 +6,8 @@ services:
       POSTGRES_USER: ${POSTGRES_USER:-}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-}
       POSTGRES_DB: ${POSTGRES_DB:-}
-    # DB is reached by the backend over the internal Docker network (POSTGRES_HOST=db),
-    # so we do NOT publish 5432 to the host (avoids clashing with a native postgres
-    # and keeps the DB off the public interface). For host access, use:
-    #   ports: ["127.0.0.1:5433:5432"]
-    expose:
-      - "5432"
+    ports:
+      - "5432:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
@@ -34,6 +30,7 @@ services:
     env_file:
       - .env
     environment:
+      POSTGRES_HOST: db
       GEMINI_SESSION_MODEL: ${GEMINI_SESSION_MODEL:-gemini-2.5-pro}
       GEMINI_CHAT_MODEL: ${GEMINI_CHAT_MODEL:-gemini-2.5-flash}
     volumes:
