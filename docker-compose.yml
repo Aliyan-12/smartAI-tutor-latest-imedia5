@@ -19,8 +19,6 @@ services:
   backend:
     build: ./backend
     restart: unless-stopped
-    # WebSocket keepalive: long session turns must not be dropped by uvicorn's
-    # default 20s ws ping timeout (overrides the image CMD; no rebuild needed).
     command: >
       uvicorn app.main:app --host 0.0.0.0 --port 8001 --reload
       --ws-ping-interval 30 --ws-ping-timeout 300 --timeout-keep-alive 300
@@ -32,8 +30,6 @@ services:
     env_file:
       - .env
     environment:
-      POSTGRES_HOST: db
-      # Per-pipeline LLMs: premium session vs free /chat (override in .env)
       GEMINI_SESSION_MODEL: ${GEMINI_SESSION_MODEL:-gemini-2.5-pro}
       GEMINI_CHAT_MODEL: ${GEMINI_CHAT_MODEL:-gemini-2.5-flash}
     volumes:
