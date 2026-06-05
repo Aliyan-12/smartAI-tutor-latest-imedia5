@@ -1,16 +1,7 @@
-from pydantic import BaseModel, Field
 from datetime import datetime
-from typing import Optional, List
+from typing import List
 
-
-class MessageCreate(BaseModel):
-    message: str = Field(..., min_length=1, max_length=4000)
-    session_id: Optional[str] = None
-    # New optional fields for attachments and search modes
-    image_data: Optional[str] = None      # base64-encoded image (no data URI prefix)
-    image_mime: Optional[str] = None      # e.g. "image/jpeg", "image/png"
-    web_search: bool = False              # enable Google Search grounding
-    research: bool = False                # enable multi-step deep research
+from pydantic import BaseModel
 
 
 class MessageResponse(BaseModel):
@@ -40,17 +31,3 @@ class ChatListItem(BaseModel):
     created_at: datetime
 
     model_config = {"from_attributes": True}
-
-
-class StreamChunk(BaseModel):
-    type: str
-    content: str
-    session_id: Optional[str] = None
-
-
-class QuizFeedbackRequest(BaseModel):
-    session_id: str
-    topic: str
-    score: float = 0.0
-    strong: List[str] = []
-    weak: List[str] = []

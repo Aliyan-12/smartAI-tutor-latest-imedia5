@@ -9,7 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func
 
 from app.models.documents import Document, DocumentChunk
-from app.services.embedding_service import embed_batch
+from app.services.rag_service import embed_batch
 from app.core.config import settings
 
 logger = logging.getLogger(__name__)

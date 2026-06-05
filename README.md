@@ -135,7 +135,7 @@ frontend/
   src/
     components/     # Sidebar, ChatWindow, ChatInput, WelcomeScreen
     context/        # AuthContext (JWT state)
-    hooks/          # useChat (streaming), useVoice (Gemini Live)
+    hooks/          # useSessionChannel (chat/session WS), useVoiceCapture (mic VAD), useVoice (Read-aloud TTS)
     pages/          # ChatPage, LoginPage, RegisterPage, AdminDashboard,
                     #   TeacherDashboard, KnowledgeBasePage
     services/       # API client (all endpoints)
@@ -161,10 +161,10 @@ The Docker setup uses `pgvector/pgvector:pg16` image which includes pgvector pre
 
 - **RAG Knowledge Base**: Upload curriculum documents, auto-chunk and embed with Gemini, retrieve via pgvector HNSW index
 - **UK GCSE Curriculum**: Documents tagged by Key Stage, Subject, Exam Board, Tier, and Unit
-- **Real-time Voice**: Gemini Live API for bidirectional audio streaming with automatic speech detection
+- **Real-time Voice**: custom STT (Gemini) → turn → Kokoro TTS over the chat/session WebSocket, with client-side mic VAD
 - **Multi-role**: Admin (full control), Teacher (manage content + monitor students), Student (chat + voice)
 - **Credit System**: Per-message billing with subscription plans
-- **Streaming**: SSE for text chat, WebSocket for voice, real-time transcript display
+- **Streaming**: one WebSocket per chat/session — turns stream as sentence segments with bundled TTS audio
 
 ## Environment Variables
 

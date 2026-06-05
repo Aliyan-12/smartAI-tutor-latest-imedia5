@@ -8,7 +8,6 @@ from app.models.appointment import Appointment
 from app.models.student_profile import StudentProfile, TopicMastery
 from app.models.lesson_plan import LessonPlan
 from app.models.assignment import Homework, HomeworkAssignment
-from app.models.session_slide import SessionSlide, SessionPresentation
 
 __all__ = [
     "User", "Chat", "Message",
@@ -20,6 +19,4 @@ __all__ = [
     "StudentProfile", "TopicMastery",
     "LessonPlan",
     "Homework", "HomeworkAssignment",
-    "SessionSlide",
-    "SessionPresentation",
 ]

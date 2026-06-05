@@ -2,17 +2,16 @@ import { useState, useEffect, useRef, useCallback } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { Lock, X, Pause, Play, Volume2, VolumeX, AlertTriangle } from "lucide-react";
 import ResizablePanels from "../components/ResizablePanels";
-import { appointmentsApi, assessmentsApi, sessionsApi, gamificationApi, slidesApi, voiceApi } from "../services/api";
-import type { FillerManifest, FillerPhrase, FillerPick } from "../services/api";
+import { appointmentsApi, assessmentsApi, sessionsApi, gamificationApi, chatApi } from "../services/api";
 import ChatWindow from "../components/ChatWindow";
 import ChatInput from "../components/ChatInput";
 import AssessmentMode from "../components/AssessmentMode";
 import PostSessionScreen from "../components/PostSessionScreen";
-import LessonSlide from "../components/LessonSlide";
-import { useChat } from "../hooks/useChat";
 import { useVoice } from "../hooks/useVoice";
+import { useSessionChannel } from "../hooks/useSessionChannel";
+import { useVoiceCapture } from "../hooks/useVoiceCapture";
 import { useAuth } from "../context/AuthContext";
-import type { Assessment, ChatMessage, SlideData } from "../types";
+import type { Assessment, ChatMessage, QuizOffer } from "../types";
 
 type SessionState = "loading" | "passcode" | "active" | "ended";
 type LearnTab = "learn" | "test";
@@ -112,10 +111,6 @@ function getCurrentPhaseIndex(elapsedMin: number, phases: typeof PHASES_30) {
   return phases.length - 1;
 }
 
-// Filler manifest cached at module scope so it's fetched ONCE per browser session
-// (not on every SessionPage visit). Clips themselves are fetched on demand.
-let _cachedFillerManifest: FillerManifest | null = null;
-
 export default function SessionPage() {
   const { appointmentId } = useParams<{ appointmentId: string }>();
   const navigate = useNavigate();
@@ -165,28 +160,17 @@ export default function SessionPage() {
   const [practiceAnswering, setPracticeAnswering] = useState(false);
   const [testAnswering, setTestAnswering] = useState(false);
 
-  // Single flag: blob shows while true; cleared when TTS fires (or stream ends if TTS off)
-  const [aiWaiting, setAiWaiting] = useState(false);
-  const aiWaitingRef = useRef(false);
   const [toolResults, setToolResults] = useState<Array<{ tool: string; data: Record<string, unknown>; id: string }>>([]);
 
   // Attachment / web-search opts for ChatInput
   const [webSearchEnabled, setWebSearchEnabled] = useState(false);
   const [researchEnabled, setResearchEnabled] = useState(false);
 
-  // Word-by-word reveal while TTS plays
-  const [ttsRevealedText, setTtsRevealedText] = useState<string>("");
-  const [revealContent, setRevealContent] = useState<string | null>(null);
-  const revealIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const localStreamRef = useRef<string>("");
-  const lastAiIdBeforeSendRef = useRef<number | null>(null);
-
-  // Thinking-filler player: short pre-recorded phrase shown + played during the
-  // wait between "send" and the real response's TTS starting.
-  const [fillerText, setFillerText] = useState<string | null>(null);
-  const fillerActiveRef = useRef(false);
-  const fillerGenRef = useRef(0); // invalidates stale sequences on rapid re-send
-  const fillerAudioRef = useRef<HTMLAudioElement | null>(null);
+  // Session chat state (driven by the unified WebSocket pipeline — useSessionChannel)
+  const [sessionId, setSessionId] = useState<string | null>(null);
+  const sessionIdRef = useRef<string | null>(null);
+  const [quizOffer, setQuizOffer] = useState<QuizOffer | null>(null);
+  const hydrateRef = useRef<(m: ChatMessage[]) => void>(() => {});
 
   const [sessionBriefing, setSessionBriefing] = useState<{
     hook?: string;
@@ -199,16 +183,9 @@ export default function SessionPage() {
 
   const hasAutoStartedRef = useRef(false);
 
-  const {
-    messages, streaming, streamContent, sendMessage, stopStreaming,
-    initSessionChat, activeSessionId, quizOffer, clearQuizOffer, sendQuizFeedback,
-  } = useChat();
-
-  const { voiceStatus, playing, speakText, connectVoice, disconnectVoice, isVoiceActive, startStreamTTS, feedStreamTTS, endStreamTTS, cancelStreamTTS, sendQuizResult } = useVoice();
-  const [voiceMessages, setVoiceMessages] = useState<{ role: string; content: string }[]>([]);
-  const voiceMessagesRef = useRef<{ role: string; content: string }[]>([]);
-  const voiceAiTurnRef = useRef("");
-  const [voiceQuizTopic, setVoiceQuizTopic] = useState<string | null>(null);
+  const { speakText } = useVoice();
+  // Custom voice-to-voice loop (mic → STT → same turn pipeline → Kokoro TTS).
+  const [voiceActive, setVoiceActive] = useState(false);
 
   const [sessionKeyStage, setSessionKeyStage] = useState("");
   const [previewAppt, setPreviewAppt] = useState<{
@@ -219,10 +196,6 @@ export default function SessionPage() {
     description: string;
     passcode: string | null;
   } | null>(null);
-  const [currentSlide, setCurrentSlide] = useState<SlideData | null>(null);
-  const [slideHistory, setSlideHistory] = useState<SlideData[]>([]);
-  const [slideIndex, setSlideIndex] = useState(0);
-  const slidePollingRefs = useRef<Map<number, number>>(new Map());
 
   const apptId = appointmentId ? parseInt(appointmentId) : 0;
 
@@ -233,139 +206,75 @@ export default function SessionPage() {
 
   const [ttsEnabled, setTtsEnabled] = useState(true);
   const ttsEnabledRef = useRef(true);
-  // Keep ref in sync; cancel active TTS stream immediately when user mutes
-  useEffect(() => {
-    ttsEnabledRef.current = ttsEnabled;
-    if (!ttsEnabled) cancelStreamTTS();
-  }, [ttsEnabled]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { ttsEnabledRef.current = ttsEnabled; }, [ttsEnabled]);
 
-  // Keep aiWaitingRef in sync for use in setTimeout callbacks
-  useEffect(() => { aiWaitingRef.current = aiWaiting; }, [aiWaiting]);
-
-  // ── Thinking-filler player helpers ──────────────────────────────────────
-  const stopFiller = useCallback(() => {
-    fillerActiveRef.current = false;
-    fillerGenRef.current++;           // invalidate any in-flight sequence
-    if (fillerAudioRef.current) {
-      try { fillerAudioRef.current.pause(); } catch { /* ignore */ }
-      fillerAudioRef.current = null;
-    }
-    setFillerText(null);
-  }, []);
-
-  // Fetch the clip on demand (no bulk pre-caching) and play it. `stillWanted`
-  // lets the caller skip playback if the sequence was superseded mid-fetch.
-  const playFillerClip = useCallback(
-    async (slug: string, text: string, stillWanted?: () => boolean): Promise<void> => {
-      setFillerText(text);
-      let url: string;
-      try {
-        const blob = await voiceApi.fillerAudioBlob(slug);
-        url = URL.createObjectURL(blob);
-      } catch {
-        return;
-      }
-      if (stillWanted && !stillWanted()) { URL.revokeObjectURL(url); return; }
-      await new Promise<void>((resolve) => {
-        const audio = new Audio(url);
-        fillerAudioRef.current = audio;
-        const done = () => { URL.revokeObjectURL(url); resolve(); };
-        audio.onended = done;
-        audio.onerror = done;
-        audio.onpause = done;           // resolves at once if stopFiller() pauses it
-        audio.play().catch(done);
-      });
-    },
-    []
-  );
-
-  // Pick + play one or two fillers while we wait for the real response's TTS.
-  const startFillerSequence = useCallback(async (message: string) => {
-    if (!ttsEnabledRef.current) return;       // muted -> plain blob, no filler
-    fillerActiveRef.current = true;
-    const myGen = ++fillerGenRef.current;
-    // Still the active sequence AND the student is still waiting?
-    const alive = () => fillerGenRef.current === myGen && aiWaitingRef.current;
-
-    // Lazily load the manifest once per browser session (module-level cache).
-    if (!_cachedFillerManifest) {
-      try {
-        _cachedFillerManifest = await voiceApi.fillersManifest();
-      } catch {
-        if (fillerGenRef.current === myGen) fillerActiveRef.current = false;
-        return;
-      }
-    }
-    if (!alive()) return;
-    const manifest = _cachedFillerManifest;
-
-    let pick: FillerPick;
+  // ── Unified session chat pipeline (single WebSocket) ──────────────────────
+  const reloadHistory = useCallback(async () => {
+    if (!apptId) return;
     try {
-      pick = await voiceApi.pickFiller(message);
-    } catch {
-      if (fillerGenRef.current === myGen) fillerActiveRef.current = false;
-      return;
-    }
-    if (!alive()) return;             // real TTS started / superseded while classifying
+      const data: any = await chatApi.getOrCreateSessionChat(apptId);
+      sessionIdRef.current = data.session_id;
+      setSessionId(data.session_id);
+      hydrateRef.current((data.messages || []).map((m: any) => ({
+        id: m.id, chat_id: m.chat_id, role: m.role, content: m.content, timestamp: m.timestamp,
+      })));
+    } catch { /* ignore */ }
+  }, [apptId]);
 
-    await playFillerClip(pick.slug, pick.text, alive);
-
-    // Loop a 2nd filler if the student is still waiting (real TTS not yet started).
-    if (alive()) {
-      const bucket = manifest.categories[pick.category] || manifest.categories["thinking"];
-      const phrases: FillerPhrase[] = bucket?.phrases ?? [];
-      const second = phrases.length ? phrases[Math.floor(Math.random() * phrases.length)] : null;
-      if (second) await playFillerClip(second.slug, second.text, alive);
-    }
-
-    // Fillers exhausted but still waiting -> fall back to the plain pulsing blob.
-    if (alive()) setFillerText(null);
-  }, [playFillerClip]);
-
-  // TTS word-by-word reveal: start when TTS begins playing
-  useEffect(() => {
-    if (playing) {
-      stopFiller();              // real answer's TTS started -> kill any filler
-      setAiWaiting(false);
-      aiWaitingRef.current = false;
-      const content = localStreamRef.current.trim();
-      if (!content) return;
-      const words = content.split(" ");
-      setRevealContent(content);
-      setTtsRevealedText(words[0] || "");
-      let i = 1;
-      if (revealIntervalRef.current) clearInterval(revealIntervalRef.current);
-      revealIntervalRef.current = setInterval(() => {
-        i++;
-        setTtsRevealedText(words.slice(0, i).join(" "));
-        if (i >= words.length) {
-          clearInterval(revealIntervalRef.current!);
-          revealIntervalRef.current = null;
-        }
-      }, 60);
-    } else {
-      if (revealIntervalRef.current) {
-        clearInterval(revealIntervalRef.current);
-        revealIntervalRef.current = null;
+  const channel = useSessionChannel({
+    appointmentId: apptId,
+    ttsEnabled,
+    onTool: (tool, data) => {
+      if (tool === "generate_quiz") {
+        setQuizOffer({
+          topic: (data.topic as string) || "",
+          chat_session_id: sessionIdRef.current || "",
+          assessment_id: data.assessment_id as number | undefined,
+          questions: data.questions as QuizOffer["questions"],
+        });
+      } else {
+        setToolResults((prev) => [...prev, { tool, data, id: Date.now().toString() }]);
       }
-      setRevealContent(null);
-      setTtsRevealedText("");
-    }
-  }, [playing]); // eslint-disable-line react-hooks/exhaustive-deps
+    },
+    onCredits: () => {},
+    onReady: (sid) => { sessionIdRef.current = sid; setSessionId(sid); void reloadHistory(); },
+  });
+  hydrateRef.current = channel.hydrate;
+  const { messages, liveText, fillerText, busy, status: liveStatus } = channel;
+  const messagesLenRef = useRef(0);
+  messagesLenRef.current = messages.length;
+  const clearQuizOffer = useCallback(() => setQuizOffer(null), []);
 
-  // Cleanup reveal interval on unmount
-  useEffect(() => () => {
-    if (revealIntervalRef.current) clearInterval(revealIntervalRef.current);
-  }, []);
+  // Hands-free voice loop: capture the student's utterance and send it over the
+  // SAME session WebSocket as `user_audio`. The mic is paused while a turn runs
+  // (AI thinking/speaking) so the tutor's own TTS is never recorded.
+  useVoiceCapture({
+    active: voiceActive && !isPaused,
+    paused: busy,
+    onUtterance: (b64, mime) => channel.sendAudio(b64, mime),
+    onError: (msg) => { console.warn(msg); setVoiceActive(false); },
+  });
 
-  // Stop any playing filler clip on unmount. The manifest + clips are loaded
-  // lazily on first send (no pre-caching) — see startFillerSequence.
-  useEffect(() => () => {
-    if (fillerAudioRef.current) {
-      try { fillerAudioRef.current.pause(); } catch { /* ignore */ }
-      fillerAudioRef.current = null;
+  // Voice-bar status for ChatInput (maps the loop's state to the UI labels).
+  const voiceUiStatus: "idle" | "connecting" | "listening" | "processing" | "speaking" = !voiceActive
+    ? "idle"
+    : liveStatus === "speaking"
+    ? "speaking"
+    : busy
+    ? "processing"
+    : "listening";
+
+  // Open the session WebSocket while active; close it on pause; reopen on resume;
+  // close permanently when the lesson ends. Chat is independent of the timer.
+  useEffect(() => {
+    if (sessionState === "active" && !isPaused) {
+      channel.resume(sessionIdRef.current);
+    } else if (sessionState === "active" && isPaused) {
+      channel.pause();
+    } else if (sessionState === "ended") {
+      channel.disconnect();
     }
-  }, []);
+  }, [sessionState, isPaused]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleJoin = async (overrideCode?: string) => {
     if (!appointmentId) return;
@@ -397,17 +306,8 @@ export default function SessionPage() {
       }
 
       setSessionState("active");
-      initSessionChat(parseInt(appointmentId));
-
-      // Load persisted slides for this session
-      try {
-        const persistedSlides = await slidesApi.getSessionSlides(parseInt(appointmentId));
-        if (persistedSlides.length > 0) {
-          setSlideHistory(persistedSlides);
-          setCurrentSlide(persistedSlides[persistedSlides.length - 1]);
-          setSlideIndex(persistedSlides.length - 1);
-        }
-      } catch {}
+      // The session WebSocket is opened/closed by the lifecycle effect below,
+      // driven by sessionState + isPaused.
 
       // Restore any in-progress test so a page refresh doesn't lose quiz state
       try {
@@ -466,29 +366,22 @@ export default function SessionPage() {
     handleStartTest();
   }, [quizOffer]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Voice quiz trigger: when AI voice response contains a quiz offer
-  useEffect(() => {
-    if (!voiceQuizTopic) return;
-    if (testAssessment || testLoading || testResult) { setVoiceQuizTopic(null); return; }
-    setLearnTab("test");
-    handleStartTest(voiceQuizTopic);
-    setVoiceQuizTopic(null);
-  }, [voiceQuizTopic]); // eslint-disable-line react-hooks/exhaustive-deps
-
   // Auto-start the lesson when the session becomes active and chat is empty
   useEffect(() => {
-    if (sessionState !== "active") return;
+    if (sessionState !== "active" || isPaused) return;
     if (messages.length > 0) return;
-    if (streaming) return;
+    if (busy) return;
     if (hasAutoStartedRef.current) return;
-    if (!activeSessionId) return;
+    if (!sessionId) return;
     hasAutoStartedRef.current = true;
     setTimeout(() => {
+      // History may have hydrated from DB in the meantime — don't auto-start then.
+      if (messagesLenRef.current > 0 || busy) return;
       const topicsMatch = previewAppt?.description?.match(/Topics:\s*([^\n]+)/);
       const topicText = topicsMatch?.[1] || sessionTitle || sessionSubject || "today's topic";
       sessionSend(`Let's start our lesson on ${topicText}! I'm ready to begin.`);
     }, 800);
-  }, [sessionState, messages.length, streaming, activeSessionId]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [sessionState, messages.length, busy, sessionId, isPaused]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     if (sessionState !== "active" || !sessionStartedAt || isPaused) return;
@@ -520,9 +413,7 @@ export default function SessionPage() {
     if (!q) return;
     const opts = q.options.map((o, i) => `${["A", "B", "C", "D"][i]}: ${o}.`).join(" ");
     if (!ttsEnabledRef.current) return;
-    startStreamTTS();
-    feedStreamTTS(`Question ${testCurrentQ + 1}: ${q.question_text}. Options are: ${opts}`);
-    endStreamTTS();
+    speakText(`Question ${testCurrentQ + 1}: ${q.question_text}. Options are: ${opts}`);
   }, [testCurrentQ, testAssessment?.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Auto-read feedback via TTS (both chat and voice mode)
@@ -532,18 +423,14 @@ export default function SessionPage() {
     const explanation = testFeedback.explanation ? ` ${testFeedback.explanation}` : "";
     const fullText = `${result}${explanation}`;
     if (!ttsEnabledRef.current) return;
-    startStreamTTS();
-    feedStreamTTS(fullText);
-    endStreamTTS();
+    speakText(fullText);
   }, [testFeedback]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Auto-read final test score via TTS (both chat and voice mode)
   useEffect(() => {
     if (!testResult || !ttsEnabledRef.current) return;
     const weakMsg = testResult.weak.length > 0 ? `Areas to review: ${testResult.weak.join(", ")}.` : "Great job on all topics!";
-    startStreamTTS();
-    feedStreamTTS(`Quiz complete! You scored ${Math.round(testResult.score)} percent. ${weakMsg}`);
-    endStreamTTS();
+    speakText(`Quiz complete! You scored ${Math.round(testResult.score)} percent. ${weakMsg}`);
   }, [testResult]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Listen for tool_result events dispatched by useChat
@@ -576,8 +463,8 @@ export default function SessionPage() {
       setIsPaused(false);
       await appointmentsApi.updateStatus(apptId, "started").catch(() => {});
     } else {
-      // Pause — disconnect voice if active
-      if (isVoiceActive) disconnectVoice();
+      // Pause — stop the voice loop if active
+      if (voiceActive) setVoiceActive(false);
       if (timerRef.current) clearInterval(timerRef.current);
       setPausedAt(Date.now());
       setIsPaused(true);
@@ -733,44 +620,9 @@ export default function SessionPage() {
         setTestFeedback(null);
         clearQuizOffer();
 
-        // Build per-question detail for the AI so it can address specific wrong answers
-        const questionDetails = capturedQuestions.map((q) => ({
-          question_text: q.question_text,
-          chosen_text: q.student_answer !== null && q.student_answer !== undefined
-            ? (q.options[q.student_answer] ?? `Option ${q.student_answer + 1}`)
-            : "No answer",
-          correct_text: q.correct_answer !== null && q.correct_answer !== undefined
-            ? (q.options[q.correct_answer] ?? `Option ${q.correct_answer + 1}`)
-            : "Unknown",
-          is_correct: q.is_correct === true,
-        }));
-
-        // Notify AI of quiz result — adds a visible quiz_result bubble + AI responds in chat/voice
-        if (isVoiceActive) {
-          sendQuizResult(quizTopic, quizScore, quizStrong, quizWeak);
-        } else if (activeSessionId) {
-          lastAiIdBeforeSendRef.current = [...messages].reverse().find((m) => m.role === "assistant")?.id ?? null;
-          localStreamRef.current = "";
-          setAiWaiting(true);
-          aiWaitingRef.current = true;
-          stopFiller();
-          void startFillerSequence("I just finished the quiz, how did I do?");
-          sendQuizFeedback(activeSessionId, quizTopic, quizScore, quizStrong, quizWeak, {
-            onStreamStart: () => { localStreamRef.current = ""; if (ttsEnabledRef.current) startStreamTTS(); },
-            onToken: (t: string) => { localStreamRef.current += t; if (ttsEnabledRef.current) feedStreamTTS(t); },
-            onStreamComplete: () => {
-              if (ttsEnabledRef.current) {
-                endStreamTTS();
-                setTimeout(() => {
-                  if (aiWaitingRef.current) { setAiWaiting(false); aiWaitingRef.current = false; }
-                }, 8000);
-              } else {
-                setAiWaiting(false);
-                aiWaitingRef.current = false;
-              }
-            },
-          }, questionDetails);
-        }
+        // Notify the AI of the quiz result — adds a visible quiz_result bubble,
+        // then the AI responds via the unified pipeline (text or voice).
+        channel.sendQuizResult(quizTopic, quizScore, quizStrong, quizWeak);
       } catch (err: any) {
         setTestError(err.message || "Failed to complete test");
       }
@@ -783,18 +635,8 @@ export default function SessionPage() {
     return `${m.toString().padStart(2, "0")}:${s.toString().padStart(2, "0")}`;
   };
 
-  // Merge DB messages with live voice transcripts so they stream in real-time
-  const voiceChatMessages: ChatMessage[] = voiceMessages.map((m, i) => ({
-    id: -(i + 1),
-    chat_id: 0,
-    role: m.role as "user" | "assistant",
-    content: m.content,
-    timestamp: new Date().toISOString(),
-  }));
-  const displayMessages = voiceChatMessages.length > 0
-    ? [...messages, ...voiceChatMessages]
-    : messages;
-  voiceMessagesRef.current = voiceMessages; // keep ref in sync for stale-closure-free access
+  // Text and voice turns both flow through the session channel's message list.
+  const displayMessages = messages;
 
   const totalSeconds = durationMinutes * 60;
   const elapsedSeconds = totalSeconds - timeRemaining;
@@ -810,155 +652,25 @@ export default function SessionPage() {
     ? "#d97706"
     : "var(--accent-blue, var(--accent))";
 
-  const MAX_SLIDES = 15;
-
-  // Clean up any active slide polling intervals on unmount
-  useEffect(() => {
-    const refs = slidePollingRefs.current;
-    return () => { refs.forEach((id) => clearInterval(id)); };
-  }, []);
-
-  const generateSlide = useCallback(async (text: string) => {
-    if (!text || !text.trim()) return;
-    if (slideHistory.length >= MAX_SLIDES) return;
-
-    const result = await slidesApi.generate(
-      text,
-      sessionSubject,
-      sessionKeyStage,
-      apptId || undefined,
-      slideHistory.map((s) => s.topic),
-    );
-    if (!result) return; // skipped by backend (not slide-worthy)
-
-    const placeholder: SlideData = {
-      slide_id: result.slide_id,
-      status: "generating",
-      topic: result.topic,
-      presentation_id: null,
-      viewer_url: null,
-      pptx_url: null,
-    };
-    const newIndex = slideHistory.length;
-    setSlideHistory((prev) => [...prev, placeholder]);
-    setCurrentSlide(placeholder);
-    setSlideIndex(newIndex);
-
-    // Poll until ready or failed (max 3 min)
-    const intervalId = window.setInterval(async () => {
-      const updated = await slidesApi.getSlide(result.slide_id);
-      if (!updated) return;
-      if (updated.status === "ready" || updated.status === "failed") {
-        clearInterval(intervalId);
-        slidePollingRefs.current.delete(result.slide_id);
-        setSlideHistory((prev) =>
-          prev.map((s) => (s.slide_id === result.slide_id ? updated : s))
-        );
-        setCurrentSlide((prev) =>
-          prev?.slide_id === result.slide_id ? updated : prev
-        );
-      }
-    }, 3000);
-    slidePollingRefs.current.set(result.slide_id, intervalId);
-    setTimeout(() => {
-      if (slidePollingRefs.current.has(result.slide_id)) {
-        clearInterval(intervalId);
-        slidePollingRefs.current.delete(result.slide_id);
-      }
-    }, 180_000);
-  }, [sessionSubject, sessionKeyStage, apptId, slideHistory]);
 
   const sessionSend = useCallback(
-    (text: string, sendOpts?: { imageData?: string; imageMime?: string; webSearch?: boolean; research?: boolean }) => {
-      lastAiIdBeforeSendRef.current = [...messages].reverse().find((m) => m.role === "assistant")?.id ?? null;
-      localStreamRef.current = "";
-      setAiWaiting(true);
-      aiWaitingRef.current = true;
-      stopFiller();
-      void startFillerSequence(text);
-      sendMessage(text, {
-        suppressNavigation: true,
-        onStreamStart: () => { localStreamRef.current = ""; if (ttsEnabledRef.current) startStreamTTS(); },
-        onToken: (t: string) => { localStreamRef.current += t; if (ttsEnabledRef.current) feedStreamTTS(t); },
-        onStreamComplete: () => {
-          if (ttsEnabledRef.current) {
-            endStreamTTS();
-            // Safety: if TTS never fires within 8s, clear the blob
-            setTimeout(() => {
-              if (aiWaitingRef.current) {
-                setAiWaiting(false);
-                aiWaitingRef.current = false;
-              }
-            }, 8000);
-          } else {
-            setAiWaiting(false);
-            aiWaitingRef.current = false;
-          }
-        },
+    (text: string, sendOpts?: { imageData?: string; imageMime?: string; fileName?: string; webSearch?: boolean; research?: boolean }) => {
+      // The unified pipeline owns optimistic display, TTS sync, and commit.
+      channel.sendMessage(text, {
         imageData: sendOpts?.imageData,
         imageMime: sendOpts?.imageMime,
-        webSearch: sendOpts?.webSearch,
+        fileName: sendOpts?.fileName,
         research: sendOpts?.research,
       });
     },
-    [messages, sendMessage, startStreamTTS, feedStreamTTS, endStreamTTS, stopFiller, startFillerSequence]
+    [channel.sendMessage] // eslint-disable-line react-hooks/exhaustive-deps
   );
 
+  // Toggle the hands-free voice loop. No new socket — mic audio rides the same
+  // session WebSocket (useVoiceCapture above sends it as `user_audio`).
   const handleVoiceToggle = useCallback(() => {
-    if (isVoiceActive) {
-      disconnectVoice();
-      // Clear live voice transcripts and reload DB-saved messages after a short delay
-      setVoiceMessages([]);
-      setTimeout(() => { if (apptId) initSessionChat(apptId); }, 1200);
-    } else {
-      connectVoice(activeSessionId, {
-        onUserTranscript: (chunk) => {
-          setVoiceMessages((prev) => {
-            const last = prev[prev.length - 1];
-            if (last && last.role === "user") {
-              return [...prev.slice(0, -1), { role: "user", content: last.content + chunk }];
-            }
-            return [...prev, { role: "user", content: chunk }];
-          });
-        },
-        onAiTranscriptChunk: (chunk) => {
-          voiceAiTurnRef.current += chunk;
-          // Recompute full clean text from accumulated buffer so any partial
-          // bracket sequences still arriving are stripped from display.
-          const displayText = voiceAiTurnRef.current
-            .replace(/\[[A-Z_:][^\]]*$/, "") // strip partial [...] still arriving
-            .trimEnd();
-          setVoiceMessages((prev) => {
-            const last = prev[prev.length - 1];
-            if (last && last.role === "assistant") {
-              return [...prev.slice(0, -1), { role: "assistant", content: displayText }];
-            }
-            return displayText ? [...prev, { role: "assistant", content: displayText }] : prev;
-          });
-        },
-        onTurnComplete: () => {
-          voiceAiTurnRef.current = "";
-        },
-        onTurnSaved: () => {
-          // Capture count before async DB reload to avoid stale closure
-          const savedCount = voiceMessagesRef.current.length;
-          if (apptId) {
-            initSessionChat(apptId).then(() => {
-              // Remove only the completed-turn messages; any new messages the user
-              // started during the DB load are preserved (slice keeps them).
-              setVoiceMessages((prev) => prev.slice(savedCount));
-            });
-          } else {
-            setVoiceMessages([]);
-          }
-        },
-        onCreditsUpdate: () => {},
-        onSessionCreated: () => {},
-        onError: (msg) => console.error("Voice error:", msg),
-        onQuizOffer: (topic) => { setVoiceQuizTopic(topic); },
-      }, apptId);
-    }
-  }, [isVoiceActive, connectVoice, disconnectVoice, activeSessionId, apptId, initSessionChat]);
+    setVoiceActive((v) => !v);
+  }, []);
 
   if (sessionState === "loading") {
     return (
@@ -1349,22 +1061,17 @@ export default function SessionPage() {
           </div>
         ) : null}
         {!isPaused && learnTab === "learn" && (
-          <div style={styles.learnMessagesWrap}>
-            <LessonSlide
-              slide={currentSlide}
-              slideIndex={slideIndex}
-              totalSlides={slideHistory.length}
-              onPrev={() => {
-                const i = Math.max(0, slideIndex - 1);
-                setSlideIndex(i);
-                setCurrentSlide(slideHistory[i]);
-              }}
-              onNext={() => {
-                const i = Math.min(slideHistory.length - 1, slideIndex + 1);
-                setSlideIndex(i);
-                setCurrentSlide(slideHistory[i]);
-              }}
-            />
+          <div style={{
+            display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center",
+            height: "100%", textAlign: "center", padding: 24, color: "var(--text-muted, #64748b)",
+          }}>
+            <span style={{ fontSize: 44, marginBottom: 12 }}>📊</span>
+            <p style={{ margin: 0, fontSize: 14, fontWeight: 700, color: "var(--text-primary, #1a1a1a)" }}>
+              Slides will appear here
+            </p>
+            <p style={{ margin: "6px 0 0", fontSize: 12 }}>
+              Your AI tutor's lesson slides will show up in this panel as you learn.
+            </p>
           </div>
         )}
 
@@ -1534,7 +1241,7 @@ export default function SessionPage() {
                 )}
               </div>
             )}
-            {playing && !testAssessment && !testResult && (
+            {liveStatus === "speaking" && !testAssessment && !testResult && (
               <div style={styles.ttsOverlay}>
                 <span style={{ fontSize: 36 }}>🔊</span>
                 <p style={styles.pausedOverlayText}>AI Tutor is speaking...</p>
@@ -1550,13 +1257,13 @@ export default function SessionPage() {
   const avatarInner = (
     <>
       <div style={styles.avatarBox}>
-        <div style={styles.avatarPulse} className={voiceStatus !== "idle" ? "avatar-pulse-anim" : ""}>
+        <div style={styles.avatarPulse} className={voiceActive ? "avatar-pulse-anim" : ""}>
           <img src="/images/aitutor 4 schools-robo.png" style={{ width: "100%", height: "100%", objectFit: "contain" }} alt="AI Tutor" />
         </div>
         <p style={styles.avatarCaption}>AI Tutor Avatar</p>
         <p style={styles.avatarSub}>Coming Soon</p>
       </div>
-      {voiceStatus !== "idle" && (
+      {voiceActive && (
         <div style={styles.speakingBadge}>
           <span style={styles.speakingDot} />
           AI Tutor is speaking...
@@ -1602,7 +1309,7 @@ export default function SessionPage() {
             </button>
           </div>
         )}
-        {!isPaused && messages.length === 0 && !streaming ? (
+        {!isPaused && messages.length === 0 && !busy ? (
           <div style={{ padding: "40px 20px", display: "flex", flexDirection: "column", alignItems: "center", gap: 14, textAlign: "center" }}>
             <style>{`
               @keyframes sp-float { 0%,100%{transform:translateY(0)} 50%{transform:translateY(-6px)} }
@@ -1618,13 +1325,11 @@ export default function SessionPage() {
           <>
             <ChatWindow
               messages={displayMessages}
-              streaming={streaming}
-              streamContent={streamContent}
+              streaming={false}
+              streamContent=""
               onSpeak={speakText}
-              isWaiting={aiWaiting}
-              revealContent={revealContent}
-              revealedText={ttsRevealedText}
-              lastKnownAiId={lastAiIdBeforeSendRef.current}
+              liveText={liveText}
+              liveStatus={liveStatus}
               fillerText={fillerText}
             />
             {toolResults.map((tr) => {
@@ -1705,11 +1410,11 @@ export default function SessionPage() {
       <div style={styles.chatInputWrap}>
         <ChatInput
           onSend={(text, opts) => sessionSend(text, opts)}
-          streaming={streaming}
-          onStop={stopStreaming}
-          voiceStatus={voiceStatus}
+          streaming={busy}
+          onStop={() => {}}
+          voiceStatus={voiceUiStatus}
           onVoiceStart={handleVoiceToggle}
-          onVoiceEnd={disconnectVoice}
+          onVoiceEnd={() => setVoiceActive(false)}
           disabled={isPaused}
           webSearchEnabled={webSearchEnabled}
           onWebSearchToggle={() => setWebSearchEnabled((v) => !v)}
@@ -1862,7 +1567,7 @@ export default function SessionPage() {
                 display: "flex",
                 alignItems: "center",
                 justifyContent: "center",
-              }} className={voiceStatus !== "idle" ? "avatar-pulse-anim" : ""}>
+              }} className={voiceActive ? "avatar-pulse-anim" : ""}>
                 <img src="/images/aitutor 4 schools-robo.png" style={{ width: 34, height: 34, objectFit: "contain" }} alt="AI Tutor" />
               </div>
               <p style={{ fontSize: 10, fontWeight: 700, color: "#334155", textAlign: "center", margin: 0, lineHeight: 1.3 }}>
@@ -1871,7 +1576,7 @@ export default function SessionPage() {
               <span style={{ fontSize: 9, background: "#fef3c7", color: "#92400e", borderRadius: 99, padding: "2px 7px", fontWeight: 600 }}>
                 Avatar
               </span>
-              {voiceStatus !== "idle" && (
+              {voiceActive && (
                 <div style={{
                   width: 8, height: 8, borderRadius: "50%",
                   background: "var(--accent-blue, #3b82f6)",

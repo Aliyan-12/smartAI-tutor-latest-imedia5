@@ -23,6 +23,8 @@ export interface ChatMessage {
   role: "user" | "assistant" | "system" | "quiz_result";
   content: string;
   timestamp: string;
+  imageUrl?: string;   // attached image preview (data URL) for the live session
+  fileName?: string;   // attached non-image file (PDF/DOC) name
 }
 
 export interface Chat {
@@ -39,12 +41,6 @@ export interface ChatListItem {
   title: string;
   created_at: string;
   last_message?: string;
-}
-
-export interface StreamEvent {
-  type: "start" | "token" | "end" | "title" | "credits" | "error" | "quiz_offer";
-  content?: string;
-  session_id?: string;
 }
 
 export interface SubscriptionPlan {

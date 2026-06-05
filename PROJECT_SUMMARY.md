@@ -1,7 +1,7 @@
 # SmartAI Tutor — Project Summary
 
-> **Last updated:** 2026-06-02
-> **Recent changes:** Thinking-filler player (engaging waits) · Kokoro TTS (af_sky) replaces gTTS · LangChain migration (gemini_service + llm_service) · TTS-synced word-by-word streaming · End-lesson confirmation modal · Session report 400 fix · Production deploy (dev.smartaitutor.online)
+> **Last updated:** 2026-06-05
+> **Recent changes:** Both chat and session now run over **one WebSocket each** (`/api/chat/ws`, `/api/sessions/ws`) with segment-bundled Kokoro TTS · **Gemini Live removed** — voice is a custom STT → turn → TTS loop on the same socket · **SSE chat pipeline removed** (`/api/chat/stream`, `/api/chat/quiz-feedback`) · Services consolidated (rag/platform/voice_agent/session_agent/lesson) · **Two-LLM split** (`get_llm` session vs `get_chat_llm` chat) · `chat_tools` (web/deep search) for simple chat · Neutral-bridge fillers (classifier removed) · Presenton/slides removed
 
 SmartAI Tutor is an AI-powered tutoring platform built for UK GCSE curriculum (Key Stages 1-5). It provides personalized learning through text chat and real-time voice conversation, grounded in actual course materials via a Retrieval-Augmented Generation (RAG) system. Teachers and admins upload curriculum content (PDF, DOCX, PPTX) organized by Key Stage, subject, exam board, and tier. When students ask questions, the system automatically retrieves relevant document chunks using pgvector similarity search and injects them into the Gemini AI prompt, producing accurate, curriculum-aligned answers.
 
@@ -27,10 +27,12 @@ Chunks injected into Gemini prompt as [KNOWLEDGE BASE CONTEXT]
 + Appointment/session context injected (subject, topics, ability level)
     |
     v
-Gemini 2.5 Flash generates curriculum-grounded response (with tool calls for quiz/slides)
+Gemini generates curriculum-grounded response (LangChain astream; tool calls for quiz/homework/mastery/research)
     |
     v
-Streamed to student (text via SSE, voice via Gemini Live API)
+Backend orchestrates one WebSocket per chat/session: reply streamed as ordered sentence
+"segments" (text + bundled Kokoro TTS audio + duration). Voice turns transcribe mic audio
+(STT) first, then run the identical turn pipeline.
     |
     v
 XP awarded -> Topic mastery updated -> Session report generated (quiz score, strong/weak areas)
@@ -79,24 +81,24 @@ Documents are organized following the UK national curriculum hierarchy:
 |-----------|------------------------------------------------------|----------------------------------------------|
 | Core | `config.py`, `security.py` | Settings, JWT + bcrypt, RAG config |
 | DB | `session.py`, `init_db.py` | Async SQLAlchemy + asyncpg, pgvector HNSW index |
-| Models | `user.py`, `chat.py`, `documents.py`, `subscription.py`, `appointment.py`, `lesson_plan.py`, `assessment.py`, `assignment.py`, `student_profile.py`, `session_slide.py`, `parent_student.py` | ORM models for all entities |
+| Models | `user.py`, `chat.py`, `documents.py`, `subscription.py`, `appointment.py`, `lesson_plan.py`, `assessment.py`, `assignment.py`, `student_profile.py`, `parent_student.py` | ORM models for all entities |
 | Schemas | `user.py`, `chat.py`, `documents.py`, `subscription.py`, `appointment.py`, `lesson.py`, `assessment.py`, `gamification.py`, `settings.py`, `assignment.py` | Pydantic request/response validation |
-| Services | `gemini_service.py`, `llm_service.py` (LangChain LLM singleton), `embedding_service.py`, `retrieval_service.py`, `document_service.py`, `chat_service.py`, `voice_service.py` (Kokoro TTS), `voice_agent_service.py`, `filler_service.py` (thinking-filler picker), `credit_service.py`, `user_service.py`, `appointment_service.py`, `session_agent_service.py`, `lesson_service.py`, `lesson_structure_service.py`, `assessment_service.py`, `assignment_service.py`, `gamification_service.py`, `email_service.py`, `scraper_service.py`, `slides_service.py`, `settings_service.py` | Business logic |
-| Routers | `auth.py`, `chat.py`, `voice.py`, `documents.py`, `admin.py`, `teacher.py`, `parent.py`, `appointments.py`, `sessions.py`, `lessons.py`, `assessments.py`, `assignments.py`, `gamification.py`, `settings.py`, `slides.py`, `subscription.py`, `health.py` | REST, SSE, WebSocket endpoints |
+| Services | `gemini_service.py` (LangChain streaming, tool loop, MCQ), `llm_service.py` (`get_llm` session + `get_chat_llm` chat singletons), `rag_service.py` (embedding + pgvector retrieval — merged), `document_service.py`, `chat_service.py` (incl. simple-chat WS pipeline), `voice_agent_service.py` (Kokoro TTS + Gemini STT), `session_agent_service.py` (session prompts + segment/filler + WS turn loop), `lesson_service.py` (+ lesson structure), `platform_service.py` (credits/subscriptions + email + gamification + settings + scraper — merged), `appointment_service.py`, `assessment_service.py`, `assignment_service.py`, `user_service.py` | Business logic |
+| Tools | `session_tools.py` (full session tool suite: quiz, homework, mastery, lesson-phase, evaluate, report, web/deep search), `chat_tools.py` (simple-chat subset: web/deep search) | LangChain `@tool` closures + `ToolContext` |
+| Routers | `auth.py`, `chat.py`, `voice.py`, `documents.py`, `admin.py`, `teacher.py`, `parent.py`, `appointments.py`, `sessions.py`, `lessons.py`, `assessments.py`, `assignments.py`, `gamification.py`, `settings.py`, `subscription.py`, `health.py` | REST + WebSocket endpoints |
 | Middleware | `auth.py`, `rate_limit.py` | JWT guard, role-based access, rate limiting |
-| Scripts | `setup.py`, `seed.py`, `seed_voice_fillers.py` | DB setup/seed; pre-generate Kokoro filler-phrase clips (`python -m app.seed_voice_fillers`) |
+| Scripts | `setup.py`, `seed.py`, `seed_voice_fillers.py` | DB setup/seed; pre-generate the Kokoro **neutral-bridge** filler clips (`python -m app.seed_voice_fillers`) |
 
 ### Key Backend Features
 
 - **Multi-role system**: Admin, Teacher, Student, Parent with role-based access control (JWT + bcrypt)
 - **RAG pipeline**: pgvector HNSW index (M=16, ef=64, cosine ops), Gemini text-embedding-001 (768d), top-5 chunks with min 0.3 similarity
 - **Document processing**: PDF (pypdf), DOCX (python-docx), PPTX (python-pptx) extraction; 500-token chunks with 50-token overlap; batch embedding; status tracking (pending → ready/failed)
-- **Chat**: Gemini 2.5 Flash streaming (SSE + WebSocket), auto-generated titles, 20-message context window + RAG context injection, per-message credit deduction
-- **Voice**: Gemini Live API for real-time bidirectional audio (native STT + TTS), continuous conversation with auto VAD; **Kokoro-82M** (`af_sky` voice, local CPU, ~280ms) powers `/api/voice/speak` TTS, pre-warmed at startup
-- **Thinking-filler player**: pre-recorded tutor "filler" phrases ("That's a great question…", "Let me check that…") played + shown the instant a student sends a message, filling the gap before the real answer's TTS. A fast Gemini Flash classifier (`filler_service.pick_filler`) picks the best situational phrase; reasoning is never shown. Assets generated by `seed_voice_fillers.py` into `uploads/voices/`
+- **Chat**: two separate WebSocket pipelines — premium **session** (`/api/sessions/ws`, full tool suite, `get_llm`) and free **simple chat** (`/api/chat/ws`, `chat_tools` subset, `get_chat_llm`). Backend orchestrates each turn: saves the user message once, streams the reply as ordered sentence segments with bundled Kokoro audio, commits the assistant message once with the authoritative DB id (`turn_end`). Auto-generated titles, 20-message context window + RAG injection, per-message credit deduction. A per-turn `asyncio.wait_for` timeout means the socket can never hang.
+- **Voice (custom loop)**: the mic is captured client-side with RMS silence-VAD (`useVoiceCapture`); each utterance is sent as `user_audio` over the **same** chat/session WebSocket, transcribed by Gemini STT (`voice_agent_service.speech_to_text`), run through the **identical** turn pipeline, and spoken back as the segment audio. **Kokoro-82M** (`af_sky`, local CPU, ~280 ms) powers all TTS (`text_to_speech`, also `/api/voice/speak` for "Read aloud"), pre-warmed in lifespan. (The old Gemini Live socket was removed.)
+- **Neutral-bridge filler**: a tiny neutral phrase ("Okay.", "Right.", "Let me see.") + its Kokoro clip is sent at turn start to cover the <1 s before the first real segment; the **model's own first sentence** carries the actual reaction (praise/correction). The old situational-filler classifier was removed — only the `neutral` bucket in `seed_voice_fillers.py` remains, read by `session_agent_service.get_neutral_filler()`.
 - **Session/Appointment system**: Teacher or parent books sessions; status flow (booked → confirmed → in_progress → completed/cancelled/terminated/paused); session passcode support
-- **Session slides**: AI-generated lesson slides (JSONB: title, subtitle, key_points, key_terms) created during session chat via slides_service; served to frontend in real-time
-- **Quiz/Assessment system**: Gemini tool call generates quiz questions during sessions; answer evaluation; scoring (score_percent, correct_answers); strong/weak topic analysis
+- **Quiz/Assessment system**: a `generate_quiz` session tool generates quiz questions during sessions; answer evaluation; scoring (score_percent, correct_answers); strong/weak topic analysis (quiz feedback rides the same session WebSocket via a `quiz_result` message)
 - **Session reports**: Post-session AI-generated report (summary, quiz score, understanding level, strong areas, areas to improve, next session recommendation)
 - **Lesson planning**: AI-generated lesson plans (plan_blocks JSONB), checkpoint/resume state, topic listing from knowledge base
 - **Gamification**: XP awards per message/quiz/session; level progression; daily streaks; topic mastery (not_started → learning → proficient → mastered); XP dashboard; next-topic recommendations
@@ -115,8 +117,8 @@ Documents are organized following the UK national curriculum hierarchy:
 | Layer | Files | Purpose |
 |-----------|--------------------------------------------------|----------------------------------------------|
 | Context | `AuthContext.tsx` | Global auth state, JWT persistence |
-| Hooks | `useChat.ts`, `useVoice.ts` | Chat SSE streaming, Gemini Live WebSocket |
-| Services | `api.ts` | API client for all 17 backend router groups |
+| Hooks | `useSessionChannel.ts` (chat/session WS client + ordered segment player), `useVoiceCapture.ts` (mic RMS-VAD → `user_audio`), `useVoice.ts` (single-shot "Read aloud" TTS), `useChat.ts` (dashboard list/credits) | Real-time pipeline + helpers |
+| Services | `api.ts` | API client for all backend router groups (`sessionWsUrl`/`chatWsUrl` helpers) |
 | Pages | See full list below | Role-based pages |
 | Components | `Sidebar`, `ChatWindow`, `ChatInput`, `WelcomeScreen`, `StudentDashboard`, `StudentProgress`, `LessonSetupWizard`, `LessonSlide`, `PostSessionScreen`, `AssessmentMode` | Reusable UI |
 
@@ -160,7 +162,7 @@ Documents are organized following the UK national curriculum hierarchy:
 - **My Sessions (SessionsPage)**: Active/paused session resume card; Recent Sessions and All Sessions tabs; subject filter; AI tutor tip card
 - **Assignments (AssignmentsPage)**: To Do / Completed / All tabs; Calendar view button; "Ask AI Tutor" link for help
 - **Settings (SettingsPage)**: Learning preferences (style, pace, voice, hints); notification preferences; account security
-- **Real-time voice mode**: Mic button opens Gemini Live API WebSocket; continuous PCM audio streaming; auto VAD; live transcripts in chat bubbles with "Listen" button; AI audio playback
+- **Real-time voice mode**: Mic button toggles hands-free voice on the existing chat/session WebSocket — `useVoiceCapture` records each utterance with client-side RMS silence-VAD, sends it as `user_audio`, and the spoken reply plays back as segment audio (text reveals in lockstep). Mic pauses while the tutor speaks (half-duplex). "Read aloud" buttons use single-shot `/api/voice/speak`
 - **Unified sidebar**: Role-aware navigation with "Soon" labels on upcoming features
 
 ---
@@ -180,19 +182,14 @@ Documents are organized following the UK national curriculum hierarchy:
 | GET | /api/chat/list | List student's chats |
 | GET | /api/chat/credits | Get credit balance |
 | GET | /api/chat/:sessionId | Get chat with messages |
-| POST | /api/chat/stream | Send message (SSE stream) |
 | DELETE | /api/chat/:sessionId | Delete a chat |
-| POST | /api/chat/for-appointment/:id | Get/create session chat |
-| WS | /api/chat/ws | WebSocket chat |
+| POST | /api/chat/for-appointment/:id | Get/create the chat bound to an appointment (session) |
+| WS | /api/chat/ws | **Simple-chat pipeline** — text (no TTS) + voice (STT→TTS); `user_message`/`user_audio` → segment stream |
 
 ### Voice
 | Method | Endpoint | Description |
 |--------|---------------------------|------------------------------|
-| POST | /api/voice/speak | Text-to-speech (Kokoro `af_sky`) |
-| WS | /api/voice/ws | Real-time voice (Gemini Live) |
-| GET | /api/voice/fillers/manifest | Filler catalog (for pre-caching) |
-| GET | /api/voice/fillers/audio/:slug | Stream a filler WAV clip |
-| POST | /api/voice/fillers/pick | Classify message → which filler to play/show |
+| POST | /api/voice/speak | Single-shot text-to-speech (Kokoro `af_sky`) — used by "Read aloud" |
 
 ### Documents (Knowledge Base)
 | Method | Endpoint | Description |
@@ -250,13 +247,14 @@ Documents are organized following the UK national curriculum hierarchy:
 | POST | /api/appointments/:id/join | Student joins session |
 | POST | /api/appointments/:id/start-session | Begin session |
 
-### Sessions (Quiz within appointments)
+### Sessions (premium session pipeline + quiz)
 | Method | Endpoint | Description |
 |--------|-----------------------------------------------|--------------------------|
-| POST | /api/sessions/:appointmentId/quiz/start | Start quiz |
-| GET | /api/sessions/:appointmentId/quiz/latest | Get latest attempt |
-| POST | /api/sessions/:appointmentId/quiz/:id/answer | Submit answer |
-| POST | /api/sessions/:appointmentId/finish | Complete session + report |
+| WS | /api/sessions/ws | **Session pipeline** — full tool suite, lesson logic, segment-bundled TTS, voice loop |
+| POST | /api/sessions/:appointmentId/practice | Start/generate a practice quiz |
+| GET | /api/sessions/:appointmentId/practice/latest | Latest practice attempt |
+| POST | /api/sessions/:appointmentId/test | Start/generate a test quiz |
+| GET | /api/sessions/:appointmentId/test/latest | Latest test attempt |
 
 ### Lessons
 | Method | Endpoint | Description |
@@ -296,13 +294,6 @@ Documents are organized following the UK national curriculum hierarchy:
 | POST | /api/gamification/streak-check | Update daily streak |
 | GET | /api/gamification/next-topics | RAG-based topic recommendations |
 
-### Slides
-| Method | Endpoint | Description |
-|--------|-------------------------------|--------------------------|
-| GET | /api/slides/session/:sessionId | Get slides for session |
-| POST | /api/slides/generate | Generate new slide |
-| PATCH | /api/slides/:id | Update slide |
-
 ### Settings
 | Method | Endpoint | Description |
 |--------|-------------------------------|--------------------------|
@@ -326,18 +317,17 @@ Documents are organized following the UK national curriculum hierarchy:
 | Backend | FastAPI (Python 3.11+) |
 | Frontend | React 18 + TypeScript (Vite 6) |
 | Database | PostgreSQL 17 + pgvector 0.8.2 |
-| AI Model | Google Gemini 2.5 Flash / 2.5 Pro (via LangChain `ChatGoogleGenerativeAI`) |
-| LLM orchestration | LangChain (`langchain-google-genai` ≥4.0) — async `astream()`, `with_structured_output()` |
+| AI Model | Google Gemini via LangChain `ChatGoogleGenerativeAI` — two singletons: `get_llm()` (session/premium, `GEMINI_SESSION_MODEL`) and `get_chat_llm()` (free chat, `GEMINI_CHAT_MODEL`) |
+| LLM orchestration | LangChain (`langchain-google-genai` ≥4.0) — async `astream()`, `with_structured_output()`, `@tool` calling |
 | Embeddings | Gemini text-embedding-001 (768d with output_dimensionality) |
-| Voice (Live) | Gemini Live API (native bidirectional audio, WebSocket) |
-| TTS | Kokoro-82M (`af_sky`, local CPU, `kokoro` + `soundfile`); pre-warmed in lifespan |
+| Voice | Custom STT → turn → TTS loop on the chat/session WebSocket. STT: Gemini transcription; client-side RMS silence-VAD for end-of-utterance |
+| TTS | Kokoro-82M (`af_sky`, local CPU, `kokoro` + `soundfile`); per-sentence segments; pre-warmed in lifespan |
 | Vector Index | pgvector HNSW (M=16, ef=64, cosine similarity) |
 | Auth | JWT (python-jose) + bcrypt (passlib) |
 | Document parsing | pypdf, python-docx, python-pptx |
-| Web scraping | BeautifulSoup4 |
-| Email | Dummy SMTP (dev), HTML templates via email_service.py |
-| Slide generation | Presenton (self-hosted, Docker image `ghcr.io/presenton/presenton:latest`) |
-| Containerisation | Docker + Docker Compose (4 services: db, presenton, backend, frontend) |
+| Web scraping | BeautifulSoup4 (in `platform_service`) |
+| Email | Dummy SMTP (dev), HTML templates (in `platform_service`) |
+| Containerisation | Docker + Docker Compose (3 services: db, backend, frontend) |
 | Reverse proxy | Nginx (inside frontend container for dev; host Nginx + Certbot for production) |
 
 ---
@@ -370,11 +360,10 @@ Services started by Docker Compose:
 | Service | Image / Build | Host Port | Purpose |
 |---------|--------------|-----------|---------|
 | db | pgvector/pgvector:pg17 | 5432 (internal only) | PostgreSQL + pgvector |
-| presenton | ghcr.io/presenton/presenton:latest | 5000 | AI slide generator |
-| backend | ./backend | 8001 | FastAPI (uvicorn) |
+| backend | ./backend | 8001 | FastAPI (uvicorn) — started with `--ws-ping-interval 30 --ws-ping-timeout 300 --timeout-keep-alive 300` so long TTS turns aren't dropped |
 | frontend | ./frontend | 3000 | React app served by nginx |
 
-The frontend nginx container also reverse-proxies `/api/` → `backend:8001` and `/ws/` on the Docker internal network.
+The frontend nginx container also reverse-proxies `/api/` → `backend:8001` (including the `/api/chat/ws` and `/api/sessions/ws` WebSocket upgrades) on the Docker internal network.
 
 ### Option B — Local development (no Docker)
 
@@ -409,10 +398,11 @@ Architecture:
 ```
 Browser → host Nginx (443/80, Certbot SSL)
             ├── /          → localhost:3000  (frontend Docker container)
-            ├── /api/      → localhost:8001  (backend Docker container, proxy_buffering off for SSE)
-            ├── /ws/       → localhost:8001  (WebSocket upgrade)
-            └── /slides/   → localhost:5000  (Presenton Docker container)
+            ├── /api/      → localhost:8001  (backend Docker container)
+            └── /api/.../ws → localhost:8001  (WebSocket upgrade — chat + session pipelines)
 ```
+
+The host Nginx `/api/` block must allow WebSocket upgrades (`proxy_set_header Upgrade`/`Connection`) and use a long `proxy_read_timeout` so long TTS turns aren't dropped.
 
 Deployment steps on VPS:
 ```bash
@@ -422,21 +412,24 @@ docker compose build --no-cache frontend backend
 docker compose up -d
 ```
 
-`PRESENTON_PUBLIC_URL` in `docker-compose.yml` is set to `https://dev.smartaitutor.online/slides` so slide iframe URLs resolve correctly in the browser.
-
 ---
 
 ## Chat Feature Split (Free vs Paid)
 
-| Feature | Simple Chat `/chat` | AI Session (paid) |
-|---------|--------------------|--------------------|
-| RAG curriculum answers | ✅ | ✅ |
-| Quiz generation | ❌ | ✅ |
-| Slide generation | ❌ | ✅ |
-| Voice mode | ✅ | ✅ |
-| XP / gamification | ✅ | ✅ |
+Two **separate pipelines** that share the low-level plumbing (WS transport, segment streaming, Kokoro TTS, mic VAD) but have their own turn logic, system prompt, tool set, and LLM — think Haiku vs Opus.
 
-Simple chat uses `SIMPLE_CHAT_SYSTEM_PROMPT` (no `[QUIZ_OFFER]` / `[SLIDE_TRIGGER]` instructions). Session chat uses the full personalised system prompt. The distinction is made in `backend/app/routers/chat.py` via the `is_session` flag (derived from the `appointment_id` FK on the chat).
+| | Simple Chat `/chat` (`/api/chat/ws`) | AI Session — paid (`/api/sessions/ws`) |
+|---|--------------------|--------------------|
+| LLM | `get_chat_llm()` (`GEMINI_CHAT_MODEL`) | `get_llm()` (`GEMINI_SESSION_MODEL`, premium) |
+| System prompt | `SIMPLE_CHAT_SYSTEM_PROMPT` + student prefs | full personalised session prompt + lesson plan |
+| Tools | `chat_tools` — web search + deep research only | `session_tools` — quiz, homework, mastery, lesson-phase, evaluate, report, web/deep search |
+| RAG curriculum answers | ✅ | ✅ |
+| Lesson logic / quiz / homework | ❌ | ✅ |
+| Text mode | reply text only (**no TTS**) | TTS optional (Read-aloud toggle) |
+| Voice mode | STT → reply → TTS | STT → reply → TTS |
+| XP / credits | ✅ | ✅ |
+
+Both run as backend-orchestrated WebSocket turns (`chat_service.run_chat_ws` / `session_agent_service.run_session_ws`). For the simple chat, the backend forces text turns to skip TTS and voice turns to use it (by message type). Tool context for `/chat` carries no `appointment_id`.
 
 ---
 
@@ -470,8 +463,51 @@ Simple chat uses `SIMPLE_CHAT_SYSTEM_PROMPT` (no `[QUIZ_OFFER]` / `[SLIDE_TRIGGE
 | Frontend — Docker nginx | 3000 | http://localhost:3000 |
 | Backend (FastAPI/uvicorn) | 8001 | http://localhost:8001 |
 | PostgreSQL | 5432 | localhost:5432 |
-| Presenton | 5000 | http://localhost:5000 |
 | API Docs (Swagger) | 8001 | http://localhost:8001/docs |
+
+---
+
+## Recent Changes (2026-06-05)
+
+### Gemini Live removed → custom voice-to-voice on the same socket (Phase 4 done)
+The real-time Gemini Live path (`/api/voice/ws`, `voice_agent_service` live-config/seed/tool-call/per-turn-RAG functions) was **deleted**. Voice now runs through the existing chat/session WebSocket: `useVoiceCapture` records the utterance with client-side RMS silence-VAD → sends `user_audio` → backend transcribes (Gemini STT) → runs the identical turn pipeline → replies as segment audio. `useVoice` is now a single-shot "Read aloud" hook only.
+
+### Simple `/chat` migrated to its own WebSocket pipeline
+`/api/chat/ws` (`chat_service.run_chat_ws`) replaces the old SSE chat. Text turns reply text-only (no TTS); voice turns do STT→TTS. The dead SSE routes (`/api/chat/stream`, `/api/chat/quiz-feedback`), `chatApi.streamMessage`/`streamQuizFeedback`, and `useChat`'s streaming half were removed; `useChat` is now just dashboard list/credits.
+
+### Two-LLM split + `chat_tools`
+`llm_service` exposes `get_llm()` (premium session, `GEMINI_SESSION_MODEL`) and `get_chat_llm()` (free chat, `GEMINI_CHAT_MODEL`). New `app/tools/chat_tools.py` binds a small subset (web search + deep research) to the chat LLM; `gemini_service.stream_response_async` picks the tool set + model via a `tool_set` arg.
+
+### Service consolidation + Presenton/slides removal
+`embedding_service`+`retrieval_service` → `rag_service`; `voice_service` → `voice_agent_service`; `credit`/`email`/`gamification`/`settings`/`scraper` → `platform_service`; `filler_service` → `session_agent_service`; `lesson_structure_service` → `lesson_service`. The Presenton slide generator, `slides_service`, the slides router, and the `session_slide` model were removed (the Learn tab now shows a "slides will appear here" placeholder).
+
+### Neutral-bridge fillers
+The situational filler classifier (`pick_filler`) and its 7 categories were removed. Only the `neutral` bucket remains (`get_neutral_filler()`) — the model's first sentence carries the real reaction. Re-run `python -m app.seed_voice_fillers --force` if the catalog changed.
+
+---
+
+## Recent Changes (2026-06-03)
+
+> *Note: file names below reflect that date. They were later consolidated — `session_ws.py`/`segment_service.py` logic now lives in `routers/sessions.py` + `session_agent_service.py`; `filler_service.py` merged into `session_agent_service.py`. See Recent Changes 2026-06-05.*
+
+### Solid session chat + TTS pipeline — unified WebSocket (Phase 1)
+The old session chat raced three uncoordinated channels (SSE text + N `/voice/speak` HTTP calls + filler audio) with a fixed-60 ms reveal and optimistic message ids; it drifted, duplicated openings, and **froze after ~8–9 messages** (stuck ■ STOP, re-send pileup). Rebuilt as one backend-orchestrated WebSocket.
+
+- **`backend/app/routers/session_ws.py`** (new) — `/api/session/ws`. Per turn: saves the user message once, streams the reply, and emits ordered `segment` events (one sentence + its bundled Kokoro audio + duration). Tool calls → structured `tool` events; finishes with `turn_end {message_id, full_text}` (authoritative DB id). A per-turn `asyncio.wait_for` timeout guarantees the socket can never hang. Also accepts `quiz_result` (quiz feedback rides the same pipeline) and `user_audio` (scaffolding for the future custom voice loop — **not wired up yet**).
+- **`backend/app/services/segment_service.py`** (new) — streaming `SentenceSegmenter` + `build_segment()` (Kokoro TTS per sentence, bounded by a semaphore, duration measured via soundfile).
+- **`backend/app/services/chat_service.py`** — added reusable `get_or_create_session_chat()`.
+- **`frontend/src/hooks/useSessionChannel.ts`** (new) — WS client + ordered segment player that reveals each sentence's words over its audio's exact duration (true lockstep; WPM fallback when muted). Commits messages only on `turn_end` via server id → no duplicates/leaks. Lifecycle: open on active, close on pause, reopen on resume, close on end; heartbeat + reconnect-with-backoff + client watchdog (freeze recovery). One in-flight turn (input disabled) kills the re-send pileup.
+- **`SessionPage.tsx` / `ChatWindow.tsx`** — swapped the `useChat` SSE + `useVoice` stream-TTS + filler tangle for `useSessionChannel`; ChatWindow renders committed messages + one live turn (`liveText`/`liveStatus`). Quiz question/score read-aloud now uses single-shot `speakText`.
+- **`frontend/nginx.conf`** — added a `/api/session/ws` WS-upgrade block. **Production host Nginx needs the same block added manually.**
+- Gemini Live voice mode was left untouched at this point — *(superseded: Phase 4 is now done, Gemini Live removed — see Recent Changes 2026-06-05).*
+
+### Phase 2 — smart fillers
+The pre-recorded clips are now a **neutral bridge** (new `neutral` bucket in `seed_voice_fillers.py`: "Okay.", "Right.", "Let me see."). The backend sends one neutral `filler` (text + audio) at turn start; the **model's own first sentence** carries the real contextual reaction (praise/correction/"let's dive in"). No more "Good question" misfires. `filler_service.get_neutral_filler()` + the hook's `playFiller` (clears the instant the first real segment plays). **Re-run the seeder** to generate the neutral clips: `docker compose exec backend python -m app.seed_voice_fillers --force` (degrades to no filler until then).
+
+### Phase 3 — images & files
+- **Input box:** 100×100 image thumbnail preview before send (chip for non-image files) — `ChatInput.tsx`.
+- **Chat bubble:** the image/file renders above the message text — `ChatWindow.tsx` (`ChatMessage` gained optional `imageUrl`/`fileName`).
+- **Backend:** images → Gemini vision (already); attached **PDF/DOCX/PPTX → text extracted** (`document_service.extract_text` via a temp file) and injected into the prompt so the AI can answer about the file — `session_ws.py:_extract_doc_text`.
 
 ---
 
@@ -489,6 +525,7 @@ Simple chat uses `SIMPLE_CHAT_SYSTEM_PROMPT` (no `[QUIZ_OFFER]` / `[SLIDE_TRIGGE
 - `gemini_service.py` rewritten on LangChain: native async `astream()` (true non-blocking streaming), `.with_structured_output(MCQQuestionList)` for quiz generation (replaces fragile JSON-repair), LangChain message types for prompt building.
 
 ### Thinking-filler player (NEW) — making empty waits engaging
+> *Superseded (2026-06-05): the situational classifier and the `/fillers/*` routes were removed; only a single neutral-bridge bucket remains. Historical detail below.*
 - **`app/seed_voice_fillers.py`** (seeder, run once): pre-generates 28 short tutor "filler" phrases with the **same `af_sky` voice** into `uploads/voices/<slug>.wav` + `manifest.json`, grouped by situation (`acknowledge`, `thinking`, `checking`, `encourage`, `praise`, `gentle_correct`, `transition`). Idempotent (`--force`, `--list`). Run: `python -m app.seed_voice_fillers`. Heavy deps are lazy-imported so `--list` works without Kokoro.
 - **`services/filler_service.py`** + voice routes `GET /fillers/manifest`, `GET /fillers/audio/{slug}`, `POST /fillers/pick`. `pick_filler()` runs a fast Gemini Flash structured-output call to choose the best **waiting** bucket for the just-sent message (the model's reasoning is used only to pick — never shown to the student). LLM call offloaded via `asyncio.to_thread`.
 - **Frontend** (`SessionPage.tsx` + `ChatWindow.tsx`): on session start, pre-caches every clip as an object URL. On send, fires `pickFiller` **in parallel** with the real chat stream (never delays the answer), shows a distinctive italic **filler bubble** (gradient pill + animated equaliser — clearly not the real answer) and plays the clip; loops a 2nd filler if the wait runs long. When the real response's TTS starts (`playing`), `stopFiller()` halts the clip and word-by-word reveal begins; when TTS ends the message commits to `messages`. A generation token guards rapid re-sends; muted = no filler. Design choice: **smart pre-classifier only** (Gemini reasoning isn't parseable mid-stream).
@@ -538,6 +575,7 @@ Simple chat uses `SIMPLE_CHAT_SYSTEM_PROMPT` (no `[QUIZ_OFFER]` / `[SLIDE_TRIGGE
 - All subject/lesson links → `/lesson/setup` (never `/chat`)
 
 ### TTS Mute Fix (SessionPage.tsx)
+> *Superseded (2026-06-05): client-side streaming TTS (`feedStreamTTS`/`cancelStreamTTS`) was removed; TTS is now server-side per-sentence segments and muting is handled by `useSessionChannel` (it skips/pauses segment audio when `ttsEnabled` is false). Historical detail below.*
 - `ttsEnabledRef = useRef(true)` + sync effect; all callbacks read `ttsEnabledRef.current` (not stale `ttsEnabled` state)
 - `cancelStreamTTS` destructured from `useVoice` and called **immediately** when mute is toggled off — stops any active in-flight TTS stream
 - All `onToken` callbacks gated: `if (!ttsEnabledRef.current) return;` before `feedStreamTTS(t)`

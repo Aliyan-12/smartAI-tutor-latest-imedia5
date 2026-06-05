@@ -13,11 +13,13 @@ export default defineConfig({
     port: 5173,
     allowedHosts: [".ngrok-free.app", ".ngrok.io"],
     proxy: {
-      "/api/voice/ws": {
+      // WebSocket pipelines need explicit ws:true upgrade entries (the /api
+      // catch-all below is HTTP-only and won't upgrade them).
+      "/api/chat/ws": {
         target: "ws://localhost:8001",
         ws: true,
       },
-      "/api/chat/ws": {
+      "/api/sessions/ws": {
         target: "ws://localhost:8001",
         ws: true,
       },

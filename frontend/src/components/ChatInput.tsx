@@ -4,7 +4,7 @@ import { Send, Mic, Square, PhoneOff, Plus, Paperclip, Globe, Search, X } from "
 type VoiceStatus = "idle" | "connecting" | "listening" | "processing" | "speaking";
 
 interface Props {
-  onSend: (text: string, opts?: { imageData?: string; imageMime?: string; webSearch?: boolean; research?: boolean }) => void;
+  onSend: (text: string, opts?: { imageData?: string; imageMime?: string; fileName?: string; webSearch?: boolean; research?: boolean }) => void;
   streaming: boolean;
   onStop: () => void;
   voiceStatus: VoiceStatus;
@@ -78,9 +78,10 @@ export default function ChatInput({
   const handleSend = useCallback(() => {
     const trimmed = input.trim();
     if ((!trimmed && !attachedImage) || busy) return;
-    onSend(trimmed || "(shared an image)", {
+    onSend(trimmed, {
       imageData: attachedImage?.data,
       imageMime: attachedImage?.mime,
+      fileName: attachedImage?.name,
       webSearch: webSearchEnabled,
       research: researchEnabled,
     });
@@ -180,26 +181,45 @@ export default function ChatInput({
         }
       `}</style>
 
-      {/* Attached image preview */}
+      {/* Attached image / file preview (100×100 thumbnail for images, chip for docs) */}
       {attachedImage && (
-        <div style={{
-          display: "flex", alignItems: "center", gap: 8,
-          padding: "6px 12px",
-          background: "var(--bg-secondary, #f1f5f9)",
-          borderRadius: 8,
-          marginBottom: 6,
-          fontSize: 12,
-        }}>
-          <Paperclip size={12} />
-          <span style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-            {attachedImage.name}
-          </span>
-          <button
-            onClick={() => setAttachedImage(null)}
-            style={{ background: "none", border: "none", cursor: "pointer", padding: 2, display: "flex", alignItems: "center" }}
-          >
-            <X size={12} />
-          </button>
+        <div style={{ marginBottom: 8 }}>
+          {attachedImage.mime.startsWith("image/") ? (
+            <div style={{ position: "relative", width: 100, height: 100 }}>
+              <img
+                src={`data:${attachedImage.mime};base64,${attachedImage.data}`}
+                alt={attachedImage.name}
+                style={{ width: 100, height: 100, objectFit: "cover", borderRadius: 10, border: "1px solid var(--border-color, #e2e8f0)" }}
+              />
+              <button
+                onClick={() => setAttachedImage(null)}
+                title="Remove"
+                style={{
+                  position: "absolute", top: -8, right: -8, width: 22, height: 22, borderRadius: "50%",
+                  background: "#0f172a", color: "#fff", border: "2px solid #fff", cursor: "pointer",
+                  display: "flex", alignItems: "center", justifyContent: "center", padding: 0,
+                }}
+              >
+                <X size={12} />
+              </button>
+            </div>
+          ) : (
+            <div style={{
+              display: "inline-flex", alignItems: "center", gap: 8, padding: "8px 12px",
+              background: "var(--bg-secondary, #f1f5f9)", borderRadius: 10, fontSize: 12, maxWidth: 260,
+            }}>
+              <Paperclip size={14} />
+              <span style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                {attachedImage.name}
+              </span>
+              <button
+                onClick={() => setAttachedImage(null)}
+                style={{ background: "none", border: "none", cursor: "pointer", padding: 2, display: "flex", alignItems: "center" }}
+              >
+                <X size={12} />
+              </button>
+            </div>
+          )}
         </div>
       )}
 

@@ -142,8 +142,8 @@ def make_session_tools(ctx: ToolContext) -> list:
         score_percent: 0-100, from the assessment result if available.
         Call after receiving a quiz score or observing practice performance.
         """
-        from app.services import gamification_service
-        await gamification_service.update_topic_mastery(
+        from app.services import platform_service
+        await platform_service.update_topic_mastery(
             db=ctx.db,
             student_id=ctx.student_id,
             subject=ctx.subject,
@@ -208,7 +208,7 @@ def make_session_tools(ctx: ToolContext) -> list:
         Returns a structured score 0-3, specific feedback, and misconceptions identified.
         """
         from app.services.llm_service import get_llm
-        from app.services import gamification_service
+        from app.services import platform_service
 
         class AnswerEvaluation(BaseModel):
             score: int
@@ -243,7 +243,7 @@ def make_session_tools(ctx: ToolContext) -> list:
         if topic:
             score_pct = (evaluation.score / 3.0) * 100
             try:
-                await gamification_service.update_topic_mastery(
+                await platform_service.update_topic_mastery(
                     db=ctx.db,
                     student_id=ctx.student_id,
                     subject=ctx.subject,

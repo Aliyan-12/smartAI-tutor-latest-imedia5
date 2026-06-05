@@ -21,6 +21,10 @@ class Settings(BaseSettings):
     gemini_api_key: str = ""
     gemini_model: str = "gemini-2.5-pro" #"gemini-2.5-flash"
     gemini_model_fast: str = "gemini-2.5-flash"
+    # Per-pipeline LLMs: premium session vs free /chat.
+    # Set GEMINI_SESSION_MODEL to a Gemini 3 id when ready.
+    gemini_session_model: str = "gemini-2.5-pro"
+    gemini_chat_model: str = "gemini-2.5-flash"
 
     jwt_secret_key: str = "change-this-to-a-random-64-char-string"
     jwt_algorithm: str = "HS256"
@@ -51,13 +55,6 @@ class Settings(BaseSettings):
 
     max_appointments_per_week: int = 100
     default_class_price: float = 25.00
-
-    presenton_url: str = "http://localhost:5000"
-    presenton_public_url: str = "http://localhost:5000"
-    presenton_api_key: str = ""
-    presenton_user: str = "smartai"
-    presenton_password: str = "smartai123"
-    pexels_api_key: str = ""
 
     @property
     def database_url(self) -> str:

@@ -1,340 +1,170 @@
 """
-Voice Agent Service — business logic for the Gemini Live voice session.
+Voice audio service — Kokoro TTS + Gemini STT.
 
-Handles: system prompt assembly, connection-time RAG, history seeding,
-tool call processing, turn-complete DB persistence, per-turn RAG injection.
-The voice WebSocket router is kept as pure transport glue and delegates
-all intelligence here.
+Low-level audio helpers shared by the chat/session WebSocket pipelines and the
+`/api/voice/speak` endpoint. The real-time Gemini Live path (system-prompt
+assembly, live config, history seeding, tool-call handling, per-turn RAG
+injection) has been removed — voice now runs through the unified turn pipeline
+(STT in → turn → segment-bundled Kokoro TTS out).
 """
+import io as _io
 import logging
-from typing import Callable, Awaitable
+import os
+import re as _re
+import struct
+import tempfile
+from typing import Optional
 
+import numpy as np
+import soundfile as sf
+from kokoro import KPipeline
+from google import genai
 from google.genai import types
 
-from app.db.session import async_session_factory
-from app.services import chat_service, credit_service, retrieval_service
-from app.services import session_agent_service
-from app.services.gemini_service import SYSTEM_PROMPT, generate_chat_title
+from app.core.config import settings
+from app.services.gemini_service import SYSTEM_PROMPT
 
 logger = logging.getLogger(__name__)
 
-LIVE_MODEL = "gemini-2.5-flash-native-audio-preview-12-2025"
 
-_OFFER_QUIZ_FN = types.FunctionDeclaration(
-    name="offer_quiz",
-    description=(
-        "Offer the student an interactive multiple-choice quiz on a specific topic. "
-        "Call this after fully explaining a concept to test understanding. "
-        "After calling this tool say: 'I have prepared a quiz for you — check the Test tab!'"
-    ),
-    parameters=types.Schema(
-        type=types.Type.OBJECT,
-        properties={
-            "topic": types.Schema(
-                type=types.Type.STRING,
-                description="Specific topic name to quiz on, e.g. 'Cell Structure', 'Photosynthesis'",
-            )
-        },
-        required=["topic"],
-    ),
-)
+# ===========================================================================
+# Low-level audio: Kokoro TTS + Gemini STT
+# ===========================================================================
 
-SendFn = Callable[[dict], Awaitable[None]]
+_client = None
 
 
-async def fetch_session_rag(appointment_id: int, subject: str, key_stage: str) -> str:
-    """Connection-time RAG: fetch vectorised KB chunks for the session's assigned topics."""
-    try:
-        from app.models.appointment import Appointment
-        from sqlalchemy import select
-
-        async with async_session_factory() as db:
-            result = await db.execute(select(Appointment).where(Appointment.id == appointment_id))
-            appt = result.scalar_one_or_none()
-            if not appt:
-                return ""
-            unit_names = session_agent_service._parse_unit_names(appt.description or "")
-            if not unit_names:
-                return ""
-            return await session_agent_service._fetch_unit_kb_content_rag(
-                db, unit_names, subject, key_stage,
-                top_k_per_unit=5, max_chars=3500,
-            )
-    except Exception as e:
-        logger.warning(f"Session RAG fetch failed: {e}")
-        return ""
+def _get_client() -> genai.Client:
+    global _client
+    if _client is None:
+        _client = genai.Client(api_key=settings.gemini_api_key)
+    return _client
 
 
-async def build_voice_system_prompt(
-    appointment_id: int | None,
-    user_id: int,
-    history_len: int = 0,
-) -> tuple[str, str, str]:
-    """
-    Assemble the full voice-session system prompt.
-    Returns (system_text, appt_subject, appt_key_stage).
-    Includes connection-time KB injection and voice behavioural rules.
-    history_len is forwarded to build_session_system_prompt so the AI knows
-    whether this is a fresh session or a continuation.
-    """
-    appt_subject = ""
-    appt_key_stage = ""
+_kokoro: Optional[KPipeline] = None
 
-    if appointment_id:
-        try:
-            from app.models.appointment import Appointment
-            from sqlalchemy import select
+# Voice: af_sky — energetic, bright, expressive American English.
+# lang_code MUST match the voice prefix: "a" for af_*/am_*, "b" for bf_*/bm_*.
+TTS_VOICE = "af_sky"
+TTS_SPEED = 1.05
 
-            async with async_session_factory() as db:
-                system_text = await session_agent_service.build_session_system_prompt(
-                    db, appointment_id, user_id, history_len=history_len
-                )
-                result = await db.execute(
-                    select(Appointment).where(Appointment.id == appointment_id)
-                )
-                appt = result.scalar_one_or_none()
-                if appt:
-                    appt_subject = appt.subject or ""
-                    appt_key_stage = appt.key_stage or ""
-        except Exception as e:
-            logger.warning(f"Failed to build session voice prompt: {e}")
-            system_text = SYSTEM_PROMPT
-    else:
-        # No appointment — personalise using the student's stored learning preferences
-        try:
-            from app.services.settings_service import get_student_settings
-            from app.services.gemini_service import build_personalised_system_prompt
-            async with async_session_factory() as db:
-                _profile = await get_student_settings(db, user_id)
-                _prefs = {
-                    "teaching_pace": _profile.teaching_pace,
-                    "learning_style": _profile.learning_style or [],
-                    "teaching_preferences": _profile.teaching_preferences or {},
-                    "interests": _profile.interests or [],
-                    "learning_goals": _profile.learning_goals,
-                }
-            system_text = build_personalised_system_prompt(_prefs)
-        except Exception:
-            system_text = SYSTEM_PROMPT
 
-    # Inject connection-time KB content into system prompt
-    if appointment_id and appt_subject:
-        rag_kb = await fetch_session_rag(appointment_id, appt_subject, appt_key_stage)
-        if rag_kb:
-            system_text += (
-                "\n\n[ASSIGNED CURRICULUM — use as PRIMARY knowledge source for all explanations and quizzes]\n"
-                + rag_kb
-                + "\n[END CURRICULUM]"
-            )
-            logger.info(
-                f"Voice: injected {len(rag_kb)} chars of KB into system prompt "
-                f"for appointment {appointment_id}"
-            )
+def _get_kokoro() -> KPipeline:
+    """Lazy-init the Kokoro pipeline (American English, af_sky voice)."""
+    global _kokoro
+    if _kokoro is None:
+        logger.info("Initialising Kokoro TTS pipeline (lang_code='a', voice=af_sky)...")
+        _kokoro = KPipeline(lang_code="a")
+        logger.info("Kokoro TTS pipeline ready.")
+    return _kokoro
 
-    # Inject training style examples from model_training KB
-    training_style_section = ""
-    if appointment_id and appt_subject:
-        try:
-            from app.services import retrieval_service as _ret
-            async with async_session_factory() as db:
-                style_examples = await _ret.retrieve_training_style_examples(
-                    db=db,
-                    query=f"{appt_subject} teaching explanation",
-                    subject=appt_subject,
-                    top_k=2,
-                )
-                if style_examples:
-                    examples_text = "\n\n".join(
-                        f"[Tutor Example {i+1}]: {ex}" for i, ex in enumerate(style_examples)
-                    )
-                    training_style_section = (
-                        "\n\nEXPERT TUTOR STYLE — Mirror this tone:\n"
-                        + examples_text
-                        + "\n"
-                    )
-        except Exception as e:
-            logger.warning(f"Voice training style injection failed (non-fatal): {e}")
 
-    if training_style_section:
-        system_text += training_style_section
+def _prep_tts_text(text: str) -> str:
+    """Strip markdown Kokoro would read literally; keep prosody punctuation."""
+    text = _re.sub(r'\*{1,3}([^*]+)\*{1,3}', r'\1', text)
+    text = _re.sub(r'^#{1,6}\s+', '', text, flags=_re.MULTILINE)
+    text = _re.sub(r'`+([^`]+)`+', r'\1', text)
+    text = _re.sub(r'^\s*[-*•]\s+', '', text, flags=_re.MULTILINE)
+    text = _re.sub(r'\n{2,}', '. ', text)
+    text = _re.sub(r'\n', ' ', text)
+    text = _re.sub(r'\[[A-Z_:][^\]]*\]', '', text)
+    text = _re.sub(r' {2,}', ' ', text)
+    return text.strip()
 
-    continuation_note = (
-        "\n- CONTINUATION: Chat history has been seeded. Do NOT re-introduce yourself or repeat "
-        "topics already covered. Pick up naturally. Reference quiz results from this session "
-        "when relevant — praise strong performance warmly, and guide the student to revisit weak areas."
-        if history_len > 0 else ""
+
+def _pcm_to_wav(pcm_data: bytes, sample_rate: int = 24000, num_channels: int = 1, bits_per_sample: int = 16) -> bytes:
+    """Convert raw PCM bytes to a WAV file (kept for STT / voice_converse callers)."""
+    data_size = len(pcm_data)
+    header = struct.pack(
+        '<4sI4s4sIHHIIHH4sI',
+        b'RIFF', 36 + data_size, b'WAVE',
+        b'fmt ', 16, 1, num_channels, sample_rate,
+        sample_rate * num_channels * bits_per_sample // 8,
+        num_channels * bits_per_sample // 8, bits_per_sample,
+        b'data', data_size,
     )
-
-    system_text += (
-        "\n\nVOICE SESSION RULES:\n"
-        "- This is a real-time VOICE session. Keep every spoken response SHORT — maximum 3-4 sentences.\n"
-        "- FIRST HALF of session (QUIZ LOCKED): After EVERY explanation, end with ONE short inline interaction. STRICTLY ROTATE through: sentence recall ('In one sentence, what is X?'), sequence ('Which step comes first?'), purpose ('What is the role of X?'), cause/effect ('What causes X?'). Use True/False sparingly — at most once every 3-4 turns. After the student answers, affirm in one sentence then continue.\n"
-        "- SECOND HALF of session (QUIZ PHASE): STOP asking inline questions entirely. After covering 1-2 more concepts, call the `offer_quiz` tool to trigger a formal quiz in the Test tab instead.\n"
-        "- Speak conversationally — like a friendly teacher, not a textbook. No lists or headers.\n"
-        "- Wait for the student's reply before introducing the next concept.\n"
-        "- Stay strictly on topics from the [ASSIGNED CURRICULUM] above.\n"
-        "- To offer a quiz (only when QUIZ PHASE is active per the session prompt), call the `offer_quiz` tool. "
-        "Then say: 'Great work! I have set up a quick test for you — check the Test tab when you are ready.'\n"
-        "- Do NOT verbally ask quiz questions — the Test panel handles that automatically.\n"
-        "- Between turns you may receive [RELEVANT CURRICULUM CONTEXT] blocks — treat them as "
-        "additional reference material for your next response, not as user messages.\n"
-        "- NEVER include [SLIDE_TRIGGER], [QUIZ_OFFER:...], or any bracket-marker tokens in your spoken responses — "
-        "these are text-only internal signals and must NOT appear in voice output."
-        + continuation_note
-    )
-
-    return system_text, appt_subject, appt_key_stage
+    return header + pcm_data
 
 
-def make_live_config(system_text: str) -> types.LiveConnectConfig:
-    """Build Gemini Live configuration: audio modality, voice, transcription, quiz tool."""
-    return types.LiveConnectConfig(
-        response_modalities=[types.Modality.AUDIO],
-        speech_config=types.SpeechConfig(
-            voice_config=types.VoiceConfig(
-                prebuilt_voice_config=types.PrebuiltVoiceConfig(voice_name="Puck")
-            ),
-        ),
-        system_instruction=types.Content(parts=[types.Part(text=system_text)]),
-        input_audio_transcription=types.AudioTranscriptionConfig(),
-        output_audio_transcription=types.AudioTranscriptionConfig(),
-        tools=[types.Tool(function_declarations=[_OFFER_QUIZ_FN])],
-    )
+def text_to_speech(text: str, lang: str = "en") -> tuple[bytes, str]:
+    """Kokoro TTS (af_sky). Returns (wav_bytes, "audio/wav")."""
+    clean = _prep_tts_text(text)
+    if not clean or clean.startswith("[Error"):
+        raise ValueError("Cannot generate speech for empty or error text")
+
+    pipeline = _get_kokoro()
+    chunks = [audio for _, _, audio in pipeline(clean, voice=TTS_VOICE, speed=TTS_SPEED)]
+    if not chunks:
+        raise ValueError("Kokoro returned no audio for the provided text")
+
+    buf = _io.BytesIO()
+    sf.write(buf, np.concatenate(chunks).astype(np.float32), samplerate=24000, format="WAV")
+    return buf.getvalue(), "audio/wav"
 
 
-async def seed_chat_history(gemini_session, history: list[dict]) -> None:
-    """Seed Gemini Live with the shared chat history so voice and text stay in sync."""
-    if not history:
-        return
-    seed_turns = [
-        types.Content(
-            role="user" if msg["role"] == "user" else "model",
-            parts=[types.Part(text=msg["content"])],
-        )
-        for msg in history[-20:]
-    ]
+def speech_to_text(audio_bytes: bytes, filename: str = "audio.webm") -> Optional[str]:
     try:
-        await gemini_session.send_client_content(turns=seed_turns, turn_complete=False)
-        logger.info(f"Voice: seeded {len(seed_turns)} history messages into Gemini Live")
-    except Exception as e:
-        logger.warning(f"History seeding failed (non-fatal): {e}")
+        client = _get_client()
+        suffix = os.path.splitext(filename)[1] or ".webm"
+        mime_map = {
+            ".webm": "audio/webm", ".ogg": "audio/ogg", ".mp3": "audio/mpeg",
+            ".wav": "audio/wav", ".m4a": "audio/mp4", ".mp4": "audio/mp4",
+        }
+        mime_type = mime_map.get(suffix.lower(), "audio/webm")
 
+        with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tmp:
+            tmp.write(audio_bytes)
+            tmp_path = tmp.name
 
-async def handle_tool_calls(tool_call, send_fn: SendFn, quiz_count: int = 0) -> list:
-    """
-    Process Gemini Live tool calls. Sends quiz_offer WS events to the browser.
-    Enforces a maximum of 3 quizzes per session.
-    Returns FunctionResponse list to forward back to Gemini.
-    """
-    MAX_QUIZZES = 3
-    fn_responses = []
-    for fc in tool_call.function_calls:
-        if fc.name == "offer_quiz":
-            if quiz_count >= MAX_QUIZZES:
-                logger.info(f"Voice: quiz offer BLOCKED — session limit reached ({quiz_count}/{MAX_QUIZZES})")
-                fn_responses.append(
-                    types.FunctionResponse(
-                        id=fc.id,
-                        name=fc.name,
-                        response={
-                            "error": (
-                                f"Quiz limit reached ({MAX_QUIZZES} per session). "
-                                "Do not offer any more quizzes. Continue teaching instead."
-                            )
-                        },
-                    )
-                )
-                continue
-            topic = (dict(fc.args) if fc.args else {}).get("topic", "")
-            await send_fn({"type": "quiz_offer", "content": topic})
-            logger.info(f"Voice: quiz offered via tool — topic='{topic}' ({quiz_count+1}/{MAX_QUIZZES})")
-            fn_responses.append(
-                types.FunctionResponse(
-                    id=fc.id,
-                    name=fc.name,
-                    response={"result": "Quiz sent to student Test tab"},
-                )
-            )
-    return fn_responses
-
-
-async def save_voice_turn(
-    session_id: str,
-    user_id: int,
-    user_text: str,
-    ai_text: str,
-    send_fn: SendFn,
-) -> tuple[str, int]:
-    """
-    Persist voice turn transcripts to the shared chat DB, deduct one credit,
-    and auto-title the chat if needed.
-    Returns (session_id, chat_id).
-    """
-    try:
-        from app.services.user_service import get_user_by_id
-
-        async with async_session_factory() as db:
-            chat = await chat_service.get_chat_by_session(db, session_id, user_id)
-            if not chat:
-                chat = await chat_service.create_chat(db, user_id)
-                session_id = chat.session_id
-                await send_fn({"type": "session", "content": chat.session_id})
-
-            if user_text:
-                await chat_service.add_message(db, chat.id, "user", user_text)
-            if ai_text:
-                await chat_service.add_message(db, chat.id, "assistant", ai_text)
-
-            fresh_user = await get_user_by_id(db, user_id)
-            if fresh_user:
-                await credit_service.check_and_deduct_credit(db, fresh_user)
-                await send_fn({"type": "credits", "content": str(float(fresh_user.credits))})
-
-            if chat.title == "New Chat" and user_text:
-                title = generate_chat_title(user_text)
-                await chat_service.update_chat_title(db, chat, title)
-                await send_fn({"type": "title", "content": title})
-
-            await db.commit()
-            return session_id, chat.id
-    except Exception as e:
-        logger.error(f"Voice DB save error: {e}")
-        return session_id, 0
-
-
-async def inject_per_turn_rag(
-    gemini_session,
-    user_text: str,
-    subject: str = "",
-    key_stage: str = "",
-) -> None:
-    """
-    Per-turn RAG: retrieve relevant KB chunks for the user's speech and inject
-    them into Gemini Live before its next response so answers are curriculum-grounded.
-    Works in both session voice (subject+key_stage filtered) and simple chat voice
-    (unfiltered — searches the full KB).
-    """
-    try:
-        async with async_session_factory() as db:
-            rag_chunks = await retrieval_service.retrieve_relevant_chunks(
-                db, user_text,
-                subject=subject or None,
-                key_stage=key_stage or None,
-                top_k=4,
-            )
-        if rag_chunks:
-            ctx = "\n".join(f"- {c.content[:350]}" for c in rag_chunks[:3])
-            await gemini_session.send_client_content(
-                turns=types.Content(
+        uploaded = client.files.upload(file=tmp_path, config={"mime_type": mime_type})
+        response = client.models.generate_content(
+            model=settings.gemini_model,
+            contents=[
+                types.Content(
                     role="user",
-                    parts=[types.Part(
-                        text=f"[RELEVANT CURRICULUM CONTEXT for your next response:\n{ctx}\n]"
-                    )],
-                ),
-                turn_complete=False,
-            )
-            logger.info(
-                f"Voice: injected {len(rag_chunks)} RAG chunks for query '{user_text[:60]}'"
-            )
+                    parts=[
+                        types.Part.from_uri(file_uri=uploaded.uri, mime_type=mime_type),
+                        types.Part(text="Transcribe this audio exactly as spoken. Return only the transcribed text, nothing else. If the audio is empty or unclear, return an empty string."),
+                    ],
+                )
+            ],
+        )
+        os.unlink(tmp_path)
+
+        transcribed = response.text.strip()
+        return transcribed or None
     except Exception as e:
-        logger.warning(f"Per-turn RAG injection failed (non-fatal): {e}")
+        logger.error(f"Gemini STT error: {e}")
+        return None
+
+
+def voice_converse(audio_bytes: bytes, history: list, filename: str = "audio.webm") -> dict:
+    transcribed = speech_to_text(audio_bytes, filename)
+    if not transcribed:
+        return {"error": "Could not understand the audio. Please try again or type your message."}
+
+    try:
+        client = _get_client()
+        contents = []
+        for msg in history:
+            role = "user" if msg["role"] == "user" else "model"
+            contents.append(types.Content(role=role, parts=[types.Part(text=msg["content"])]))
+        contents.append(types.Content(role="user", parts=[types.Part(text=transcribed)]))
+
+        response = client.models.generate_content(
+            model=settings.gemini_model,
+            contents=contents,
+            config=types.GenerateContentConfig(system_instruction=SYSTEM_PROMPT),
+        )
+        ai_text = response.text
+
+        try:
+            tts_audio = text_to_speech(ai_text)
+        except Exception as tts_err:
+            logger.warning(f"TTS failed: {tts_err}")
+            tts_audio = None
+
+        return {"transcribed": transcribed, "response": ai_text, "audio": tts_audio}
+    except Exception as e:
+        logger.error(f"Voice converse error: {e}")
+        return {"transcribed": transcribed, "response": None, "error": "AI response failed. Your question was: " + transcribed}

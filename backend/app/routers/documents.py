@@ -11,7 +11,7 @@ from app.middleware.auth import require_teacher
 from app.models.user import User
 from app.models.documents import KEY_STAGES, SUBJECTS, EXAM_BOARDS, TIERS, KB_TYPES, Document, DocumentChunk
 from app.schemas.documents import DocumentResponse, DocumentListResponse, ScrapeRequest, LinkImportRequest, CurriculumInfo
-from app.services import document_service, scraper_service
+from app.services import document_service, platform_service
 from app.core.config import settings
 
 logger = logging.getLogger(__name__)
@@ -91,7 +91,7 @@ async def scrape_document(
     db: AsyncSession = Depends(get_db),
 ):
     try:
-        scraped_text = await scraper_service.scrape_url(payload.url)
+        scraped_text = await platform_service.scrape_url(payload.url)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
@@ -130,9 +130,9 @@ async def import_link(
 ):
     try:
         if payload.source_type == "onedrive":
-            file_bytes, ext = await scraper_service.download_onedrive_link(payload.url)
+            file_bytes, ext = await platform_service.download_onedrive_link(payload.url)
         elif payload.source_type == "gdocs":
-            file_bytes, ext = await scraper_service.download_gdocs_link(payload.url)
+            file_bytes, ext = await platform_service.download_gdocs_link(payload.url)
         else:
             raise ValueError(f"Unknown source type: {payload.source_type}")
     except ValueError as e:

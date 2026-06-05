@@ -4,6 +4,7 @@ pre-lesson intelligence, session checkpoints, and post-session report generation
 """
 import json
 import logging
+import re
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
@@ -696,3 +697,174 @@ async def get_appointment_report(
     except (json.JSONDecodeError, TypeError):
         # If stored as plain text (legacy), return wrapped
         return {"summary": plan.session_summary}
+
+
+# ===========================================================================
+# Structured lesson-plan blocks  (merged from lesson_structure_service)
+# Auto-generates time-boxed plan_blocks at booking time for the session AI.
+# ===========================================================================
+
+_STEPS_BY_MODE_GOAL: Dict[str, Dict[str, List[str]]] = {
+    "ai_recommended": {
+        "homework":      ["Quick Recap", "Review Homework Problem", "Work Through Together", "Practice Similar Question", "Review & Next Steps"],
+        "learn_scratch": ["Quick Recap", "Core Concept Introduction", "Worked Examples", "Guided Practice", "Review & Next Steps"],
+        "catch_up":      ["Quick Recap", "Missed Content Overview", "Worked Examples", "Catch-Up Exercises", "Review & Next Steps"],
+        "revision":      ["Quick Recap", "Key Concept Review", "Exam-Style Questions", "Mark Scheme Discussion", "Review & Next Steps"],
+    },
+    "slides": {
+        "_any": ["Quick Recap", "Slide: Key Concepts", "Slide: Worked Examples", "Guided Questions", "Summary"],
+    },
+    "worksheet": {
+        "_any": ["Introduction", "Guided Worksheet", "Check & Explain Answers", "Extension Question", "Summary"],
+    },
+    "quiz": {
+        "_any": ["Warm Up", "Quiz Round 1", "Review Mistakes", "Quiz Round 2", "Final Score & Next Steps"],
+    },
+}
+
+_STEP_META: Dict[str, tuple] = {
+    "Quick Recap":           ("recap",    "Ask ONE prior-knowledge question. Accept any answer — if the student says 'I don't know', reply 'No problem, we'll cover that!' and move straight to the next teaching step. Do NOT try to teach during this step. Maximum 1-2 student exchanges, then MOVE ON."),
+    "Warm Up":               ("recap",    "Ask ONE prior-knowledge question. Accept any answer — if the student says 'I don't know', reply 'No problem, we'll cover that!' and move straight to the next teaching step. Maximum 1-2 student exchanges, then MOVE ON."),
+    "Introduction":          ("recap",    "In 1-2 sentences tell the student what they'll learn today. Ask what they already know about this topic, accept any answer, then move on to teaching."),
+    "Core Concept Introduction": ("teach",   "TEACH ONLY — do NOT ask questions. Explain this concept clearly in 2-3 sentences with one real-world example. Then immediately move on to the next step."),
+    "Missed Content Overview":   ("teach",   "TEACH ONLY — do NOT ask questions. Explain the missed concept clearly in 2-3 sentences with one real-world example. Then immediately move on to the next step."),
+    "Key Concept Review":        ("teach",   "TEACH ONLY — do NOT ask questions. Explain this concept clearly in 2-3 sentences, reinforcing key points and correcting misconceptions. Then move on to the next step."),
+    "Slide: Key Concepts":       ("teach",   "TEACH ONLY — do NOT ask questions. Present ONE key concept per response. Explain it in 2-3 sentences with an example. Then move on."),
+    "Slide: Worked Examples":    ("teach",   "TEACH ONLY — do NOT ask questions. Work through ONE example step-by-step out loud ('I do — watch me'). Narrate each step clearly. Then move on to practice."),
+    "Review Homework Problem":   ("teach",   "Ask which specific question the student is stuck on. Walk through the method step-by-step — narrate each step clearly without asking questions mid-explanation. Move to practice once explained."),
+    "Work Through Together":     ("practice", "Pose ONE practice question. Say 'Have a go — what would you do first?' Wait for their attempt. Guide step-by-step only if stuck. Give specific one-sentence feedback, then move on."),
+    "Worked Examples":           ("practice", "Show ONE worked example fully ('I do'). Then say 'Now you try a similar one' and give them a parallel problem ('We do'). Give specific feedback, then move on to the next step."),
+    "Guided Practice":           ("practice", "Give 1-2 practice questions ('You do'). Ask the student to attempt independently. Guide only if stuck — don't give the answer. Give specific feedback after each attempt, then move to the next step."),
+    "Catch-Up Exercises":        ("practice", "Give 1-2 catch-up questions directly on the missed topic. Ask the student to attempt each one. Provide clear, specific feedback. Move to review once complete."),
+    "Practice Similar Question": ("practice", "Give ONE question similar to the homework problem. Ask the student to attempt it. Guide only if stuck. Give one-sentence feedback confirming or correcting, then wrap up."),
+    "Guided Worksheet":          ("practice", "Give the first worksheet question. Ask the student to attempt it. If stuck, ask 'What information do you have?' to guide them. Give feedback, then move to the next question."),
+    "Check & Explain Answers":   ("practice", "Go through each answer one at a time. For any mistakes, explain the correct method in 1-2 sentences — do not just give the answer. Move on once all reviewed."),
+    "Extension Question":        ("practice", "Offer ONE challenging extension question. Say 'This one's harder — give it your best shot.' Give detailed feedback after their attempt, then wrap up."),
+    "Guided Questions":          ("practice", "Give ONE guided question. Say 'Have a go — what do you think?' Wait for their attempt. Guide step-by-step only if stuck. Give specific feedback, then move on."),
+    "Exam-Style Questions":      ("practice", "Give ONE exam-style question. Ask the student to attempt it fully before any help. Give specific exam-focused feedback on their answer, then move on."),
+    "Mark Scheme Discussion":    ("practice", "Walk through the mark scheme for the attempted question. Highlight where marks are awarded and 1-2 common errors to avoid. Move on once discussed."),
+    "Quiz Round 1":              ("quiz",     "Call the generate_quiz tool to offer an interactive quiz on the specific concepts taught this session. Before calling, say: 'We have covered a lot -- let me set you a quick test!'"),
+    "Quiz Round 2":              ("quiz",     "Call the generate_quiz tool to offer a second interactive quiz focusing on any gaps identified in Round 1. Before calling, say: 'Let us go again -- this time focusing on what we need to sharpen up!'"),
+    "Review Mistakes":           ("review",   "Go through any incorrect answers from the previous quiz. Clarify each misconception in 1-2 sentences. Move on once all reviewed."),
+    "Final Score & Next Steps":  ("review",   "Summarise the 3 most important things learned. Give personalised encouragement. Suggest one thing to review independently. Then continue — offer harder practice or move to a new topic. Do NOT say goodbye or imply the session is ending."),
+    "Review & Next Steps":       ("review",   "Give a brief mid-topic recap: 2-3 sentences summarising what was just covered. Highlight one thing the student did well. Then IMMEDIATELY continue — either move to the next topic in the TOPICS list, or deepen practice. Do NOT say goodbye, 'see you next time', or imply the session is ending. The student ends the session — you do not."),
+    "Summary":                   ("review",   "Give a brief mid-topic recap: 2-3 sentences summarising what was just covered. Then IMMEDIATELY continue to the next topic or offer harder practice. Do NOT say goodbye or imply the session is over."),
+}
+
+_DEFAULT_AI_INSTRUCTION = "Guide the student through this step clearly and check understanding before moving on."
+_DEFAULT_TYPE = "teach"
+
+
+def _distribute_time(n_middle_steps: int, duration: int) -> List[int]:
+    """First step = 5 min recap, last = 10 min review, rest split evenly."""
+    if duration <= 20:
+        each = max(5, (duration - 5) // max(1, n_middle_steps))
+        return [5] + [each] * n_middle_steps
+    reserved = 5 + 10
+    middle = duration - reserved
+    each = max(5, middle // max(1, n_middle_steps))
+    return [5] + [each] * n_middle_steps + [10]
+
+
+def generate_plan_blocks(
+    learn_mode: str,
+    goal: str,
+    duration_minutes: int,
+    topics: List[str],
+    subject: str,
+) -> dict:
+    """Returns a plan_blocks dict containing a 'steps' list of structured lesson steps."""
+    mode = learn_mode or "ai_recommended"
+    goal = goal or "learn_scratch"
+    topic_label = topics[0] if topics else subject
+
+    mode_goals = _STEPS_BY_MODE_GOAL.get(mode)
+    if mode_goals is None:
+        mode_goals = _STEPS_BY_MODE_GOAL["ai_recommended"]
+
+    if "_any" in mode_goals:
+        raw_titles = mode_goals["_any"]
+    else:
+        raw_titles = mode_goals.get(goal, mode_goals.get("learn_scratch", [
+            "Quick Recap", "Core Concept Introduction", "Guided Practice", "Review & Next Steps"
+        ]))
+
+    _substitutable = {"Core Concept Introduction", "Missed Content Overview", "Key Concept Review", "Worked Examples"}
+    titles: List[str] = []
+    for t in raw_titles:
+        if t in _substitutable and topic_label:
+            titles.append(f"{t}: {topic_label}")
+        else:
+            titles.append(t)
+
+    n_steps = len(titles)
+    if n_steps == 0:
+        return {"steps": []}
+
+    if n_steps == 1:
+        durations = [duration_minutes]
+    elif n_steps == 2:
+        durations = [5, max(5, duration_minutes - 5)]
+    else:
+        n_middle = n_steps - 2
+        durations = _distribute_time(n_middle, duration_minutes)
+        while len(durations) < n_steps:
+            durations.append(5)
+        durations = durations[:n_steps]
+
+    steps = []
+    for i, (title, dur) in enumerate(zip(titles, durations), start=1):
+        base_title = title.split(":")[0].strip() if ":" in title else title
+        meta = _STEP_META.get(base_title) or _STEP_META.get(title)
+        step_type = meta[0] if meta else _DEFAULT_TYPE
+        ai_instruction = meta[1] if meta else _DEFAULT_AI_INSTRUCTION
+        steps.append({
+            "order": i, "title": title, "duration_minutes": dur,
+            "type": step_type, "ai_instruction": ai_instruction,
+        })
+
+    return {"steps": steps, "learn_mode": mode, "goal": goal, "total_duration_minutes": duration_minutes}
+
+
+async def auto_create_lesson_plan(db: AsyncSession, appointment, student_id: int) -> None:
+    """Automatically create (or update) a LessonPlan with structured plan_blocks
+    for a student self-booked AI session. Called non-fatally from /book."""
+    desc = appointment.description or ""
+    type_match = re.search(r"Session type:\s*([^\n]+)", desc, re.IGNORECASE)
+    session_type = type_match.group(1).strip() if type_match else "General Tutoring"
+
+    goal_map = {
+        "Homework Help": "homework", "Learn from Scratch": "learn_scratch",
+        "Catch Up": "catch_up", "Revision": "revision",
+    }
+    goal = goal_map.get(session_type, "learn_scratch")
+
+    topics_match = re.search(r"Topics?:\s*([^\n]+)", desc, re.IGNORECASE)
+    topics = [t.strip() for t in topics_match.group(1).split(",") if t.strip()] if topics_match else []
+    learn_mode = getattr(appointment, "learn_mode", "ai_recommended") or "ai_recommended"
+
+    plan_blocks = generate_plan_blocks(
+        learn_mode=learn_mode, goal=goal,
+        duration_minutes=appointment.duration_minutes or 60,
+        topics=topics, subject=appointment.subject,
+    )
+
+    result = await db.execute(select(LessonPlan).where(LessonPlan.appointment_id == appointment.id))
+    existing = result.scalar_one_or_none()
+
+    if existing:
+        existing.plan_blocks = plan_blocks
+        logger.info(f"Updated existing LessonPlan for appointment_id={appointment.id}")
+    else:
+        lp = LessonPlan(
+            appointment_id=appointment.id, student_id=student_id, created_by=student_id,
+            subject=appointment.subject, key_stage=appointment.key_stage,
+            goal=goal, plan_blocks=plan_blocks, status="planned",
+        )
+        db.add(lp)
+        logger.info(
+            f"Created LessonPlan for appointment_id={appointment.id}, "
+            f"learn_mode={learn_mode}, goal={goal}, steps={len(plan_blocks.get('steps', []))}"
+        )
+
+    await db.flush()

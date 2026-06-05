@@ -8,7 +8,7 @@ from app.db.session import get_db
 from app.middleware.auth import require_student, require_any_authenticated
 from app.models.user import User, ROLE_STUDENT, ROLE_PARENT
 from app.schemas.assessment import AssessmentStart, AnswerSubmit, AssessmentResponse, AssessmentQuestionResponse
-from app.services import assessment_service, gemini_service, email_service
+from app.services import assessment_service, gemini_service, platform_service
 from app.services.user_service import get_user_by_id
 
 logger = logging.getLogger(__name__)
@@ -114,7 +114,7 @@ async def complete_assessment(
         if parent_user:
             parent_email = parent_user.email
 
-    email_service.send_assessment_report(
+    platform_service.send_assessment_report(
         student_email=current_user.email,
         student_name=current_user.name,
         topic=completed.topic,
@@ -124,16 +124,15 @@ async def complete_assessment(
 
     # Award XP and update mastery
     try:
-        from app.services import gamification_service
-        await gamification_service.award_xp(db, current_user.id, 50, "quiz_complete")
+        await platform_service.award_xp(db, current_user.id, 50, "quiz_complete")
         if completed.score_percent >= 80:
-            await gamification_service.award_xp(db, current_user.id, 100, "quiz_high_score")
+            await platform_service.award_xp(db, current_user.id, 100, "quiz_high_score")
         if completed.score_percent >= 100:
-            await gamification_service.award_xp(db, current_user.id, 200, "quiz_perfect")
-        await gamification_service.check_and_update_streak(db, current_user.id)
+            await platform_service.award_xp(db, current_user.id, 200, "quiz_perfect")
+        await platform_service.check_and_update_streak(db, current_user.id)
 
         for topic_tag in (completed.strong_topics or []) + (completed.weak_topics or []):
-            await gamification_service.update_topic_mastery(
+            await platform_service.update_topic_mastery(
                 db, current_user.id, completed.subject,
                 completed.key_stage, topic_tag, completed.score_percent,
             )

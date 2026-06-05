@@ -2,11 +2,12 @@
 seed_voice_fillers.py
 =====================
 
-Pre-generate Kokoro TTS audio for short tutoring "filler" / "thinking" phrases
-so the AI can *immediately* say something natural the moment a student stops
-speaking (e.g. "That's a great question...", "Let me check that...",
-"Good thinking...") instead of sitting in a silent blue-ball wait while the real
-response is still being generated.
+Pre-generate Kokoro TTS audio for short NEUTRAL bridge phrases ("Okay.",
+"Right.", "Let me see.") played the instant a student sends a message, covering
+only the <1s gap before the real reply's TTS begins. The contextual reaction
+(praise / correction / "let's dive in") now comes from the model's own first
+sentence via the segment pipeline, so the old situational-filler classifier was
+removed and only the neutral bridge bucket remains.
 
 Think of this like a database seeder / migration: you run it ONCE (and again
 whenever you change the phrase catalog). It is idempotent — existing clips are
@@ -15,13 +16,7 @@ skipped unless you pass --force.
 WHAT IT PRODUCES
 ----------------
   uploads/voices/<slug>.wav      one WAV per phrase (same voice as the AI: af_sky)
-  uploads/voices/manifest.json   catalog the player + thinking-token selector read
-
-The phrases are grouped by tutoring SITUATION (acknowledge / thinking / checking
-/ encourage / praise / gentle_correct / transition). Each category carries a
-"when" hint so a later step can feed the model's hidden reasoning ("thinking
-token") a tiny menu and let it pick which filler to play + which text to show —
-without ever exposing the raw reasoning to the student.
+  uploads/voices/manifest.json   catalog get_neutral_filler() reads
 
 HOW TO RUN  (from the backend/ directory, so `app` is importable)
 -----------------------------------------------------------------
@@ -33,7 +28,7 @@ In Docker:
   docker compose exec backend python -m app.seed_voice_fillers
 
 Voice continuity: clips are generated with the EXACT same Kokoro voice/speed the
-live tutor uses (reuses voice_service.text_to_speech), so the filler and the real
+tutor uses (reuses voice_agent_service.text_to_speech), so the filler and the real
 answer sound like one continuous teacher, not two different people.
 """
 from __future__ import annotations
@@ -54,79 +49,28 @@ from pathlib import Path
 # deps aren't installed (e.g. a bare local venv). Real generation needs the same
 # environment as the backend (Docker), where Kokoro + soundfile are available.
 
-# Kokoro language code used by voice_service (must match the voice prefix: "a" for af_*/am_*)
+# Kokoro language code used by voice_agent_service (must match the voice prefix: "a" for af_*/am_*)
 LANG_CODE = "a"
 SAMPLE_RATE = 24000
 
 
 # ---------------------------------------------------------------------------
-# Phrase catalog — grouped by tutoring situation.
-# Keep phrases GENERIC (no topic words) so they're reusable across every lesson.
-# Each category has a "when" hint that documents, for the phase-2 thinking-token
-# selector, the situation in which that bucket of fillers is appropriate.
+# Phrase catalog — a single "neutral" bridge bucket.
+# Keep phrases GENERIC (no topic words) and neutral (never presume praise or
+# correctness) so they're reusable across every lesson and turn.
 # ---------------------------------------------------------------------------
 FILLER_CATALOG: dict[str, dict] = {
-    "acknowledge": {
-        "when": "Immediately after the student asks a question, before you begin answering.",
+    "neutral": {
+        "when": "A tiny neutral bridge played the instant the student sends, covering only the <1s before the real reply begins. Never presumes praise or correctness.",
         "phrases": [
-            "That's a great question.",
-            "Ooh, I like that question.",
-            "Good question, let's dig into it.",
-            "Great thing to ask.",
-        ],
-    },
-    "thinking": {
-        "when": "While you work out the answer and the real response is still being generated.",
-        "phrases": [
-            "Let me think about that for a moment.",
-            "Hmm, let me work through this.",
-            "Right, let me put this together for you.",
-            "Okay, let me think this through.",
-        ],
-    },
-    "checking": {
-        "when": "When you need to look something up or double-check the material before answering.",
-        "phrases": [
-            "Let me check that for you.",
-            "One moment while I look that up.",
-            "Let me pull up the right details.",
-            "Let me make sure I get this exactly right.",
-        ],
-    },
-    "encourage": {
-        "when": "When the student has just attempted an answer or is mid-effort, to keep them going.",
-        "phrases": [
-            "Good thinking.",
-            "Nice effort.",
-            "I like how you're thinking about this.",
-            "You're on the right track.",
-        ],
-    },
-    "praise": {
-        "when": "When the student gives a correct or strong answer.",
-        "phrases": [
-            "Excellent!",
-            "That's exactly right.",
-            "Brilliant work.",
-            "Spot on, well done.",
-        ],
-    },
-    "gentle_correct": {
-        "when": "When the student's answer is wrong or shows a misconception, easing into the correction.",
-        "phrases": [
-            "Not quite, let's look again.",
-            "Close! Let me show you.",
-            "Good try, let's revisit that together.",
-            "Almost, let me clear that up.",
-        ],
-    },
-    "transition": {
-        "when": "When you're moving on to the next idea or step of the lesson.",
-        "phrases": [
-            "Okay, let's move on.",
-            "Right, let's keep going.",
-            "Great, onto the next part.",
-            "Let's build on that.",
+            "Okay.",
+            "Right.",
+            "Mm-hmm.",
+            "Let me see.",
+            "One sec.",
+            "Alright.",
+            "Got it.",
+            "Sure.",
         ],
     },
 }
@@ -165,7 +109,7 @@ def _wav_duration_ms(wav_bytes: bytes) -> int:
 
 def generate_clip(text: str, out_path: Path) -> int:
     """Render one phrase to a WAV file. Returns its duration in milliseconds."""
-    from app.services.voice_service import text_to_speech  # lazy: pulls in Kokoro/torch
+    from app.services.voice_agent_service import text_to_speech  # lazy: pulls in Kokoro/torch
     wav_bytes, _mime = text_to_speech(text)  # same af_sky voice as the live tutor
     out_path.write_bytes(wav_bytes)
     return _wav_duration_ms(wav_bytes)
@@ -198,7 +142,7 @@ def main() -> int:
         return 0
 
     # Heavy imports happen here (not at module top) so --list works without Kokoro.
-    from app.services.voice_service import TTS_VOICE, TTS_SPEED, _get_kokoro
+    from app.services.voice_agent_service import TTS_VOICE, TTS_SPEED, _get_kokoro
 
     out_dir = voices_dir()
     print(f"Output folder: {out_dir}")

@@ -129,7 +129,7 @@ async def _run_post_session_pipeline(db: AsyncSession, appointment: Appointment)
     from app.models.lesson_plan import LessonPlan
     from app.models.assessment import Assessment
     from app.models.chat import Chat, Message
-    from app.services import lesson_service, gamification_service, email_service
+    from app.services import lesson_service, platform_service
 
     key_stage = appointment.key_stage or "KS4"
 
@@ -228,10 +228,10 @@ async def _run_post_session_pipeline(db: AsyncSession, appointment: Appointment)
     try:
         score_percent = float(report.get("quiz_score_percent") or 70.0)
         xp_amount = _calculate_session_xp(score_percent, appointment.duration_minutes)
-        await gamification_service.award_xp(
+        await platform_service.award_xp(
             db, appointment.student_id, xp_amount, reason="session_completed"
         )
-        await gamification_service.check_and_update_streak(db, appointment.student_id)
+        await platform_service.check_and_update_streak(db, appointment.student_id)
 
         topics_covered = report.get("topics_covered") or []
         if not topics_covered:
@@ -240,7 +240,7 @@ async def _run_post_session_pipeline(db: AsyncSession, appointment: Appointment)
                 if lesson_plan else [appointment.subject]
             )
         for topic in topics_covered:
-            await gamification_service.update_topic_mastery(
+            await platform_service.update_topic_mastery(
                 db=db,
                 student_id=appointment.student_id,
                 subject=appointment.subject,
@@ -269,7 +269,7 @@ async def _run_post_session_pipeline(db: AsyncSession, appointment: Appointment)
         if student and student.parent_id:
             p_result = await db.execute(select(User).where(User.id == student.parent_id))
             parent = p_result.scalar_one_or_none()
-        email_service.send_session_report(
+        platform_service.send_session_report(
             to_email=parent.email if parent else None,
             student_name=student.name if student else "Student",
             subject=appointment.subject,

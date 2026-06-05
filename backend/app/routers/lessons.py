@@ -20,7 +20,7 @@ from app.schemas.lesson import (
     CheckpointSaveRequest,
     ContinuationResponse,
 )
-from app.services import lesson_service, gamification_service
+from app.services import lesson_service, platform_service
 
 logger = logging.getLogger(__name__)
 
@@ -246,8 +246,8 @@ async def start_lesson_plan(
     plan = await lesson_service.update_lesson_status(db, plan, "in_progress")
 
     # Award XP for starting a lesson and update streak
-    await gamification_service.award_xp(db, current_user.id, 10, reason="lesson_started")
-    await gamification_service.check_and_update_streak(db, current_user.id)
+    await platform_service.award_xp(db, current_user.id, 10, reason="lesson_started")
+    await platform_service.check_and_update_streak(db, current_user.id)
     await db.commit()
 
     return LessonPlanResponse.model_validate(plan)
@@ -303,11 +303,11 @@ async def complete_lesson_plan(
     plan = await lesson_service.update_lesson_status(db, plan, "completed")
 
     # Award XP for completing a lesson
-    await gamification_service.award_xp(db, current_user.id, 50, reason="lesson_completed")
+    await platform_service.award_xp(db, current_user.id, 50, reason="lesson_completed")
 
     # Update topic mastery with a completion score of 70 (baseline for completing)
     topic_label = plan.subtopic or plan.unit_name or plan.subject
-    await gamification_service.update_topic_mastery(
+    await platform_service.update_topic_mastery(
         db=db,
         student_id=current_user.id,
         subject=plan.subject,
@@ -317,7 +317,7 @@ async def complete_lesson_plan(
     )
 
     # Update streak
-    await gamification_service.check_and_update_streak(db, current_user.id)
+    await platform_service.check_and_update_streak(db, current_user.id)
     await db.commit()
 
     return LessonPlanResponse.model_validate(plan)
