@@ -31,6 +31,8 @@ function detectSubjectTheme(text: string): { color: string; bg: string; icon: st
   return null;
 }
 
+type SendOpts = { imageData?: string; imageMime?: string; fileName?: string; research?: boolean };
+
 export default function ChatPage() {
   const { sessionId } = useParams<{ sessionId?: string }>();
   const navigate = useNavigate();
@@ -54,9 +56,14 @@ export default function ChatPage() {
   }, []);
 
   // ── simple-chat pipeline (text + voice on one WebSocket: /api/chat/ws) ──
+  // No socket is opened (and no chat row is created) until the user actually
+  // sends the first message from a fresh /chat. A queued send is flushed once
+  // the socket reports `ready` with the new chat's id.
   const connectedSidRef = useRef<string | null>(null);
   const sessionIdParamRef = useRef<string | null>(sessionId ?? null);
-  const pendingPromptRef = useRef<string | null>(null);
+  const pendingSendRef = useRef<{ text: string; opts: SendOpts } | null>(null);
+  const sendMessageRef = useRef<(t: string, o?: SendOpts) => void>(() => {});
+  const queueSendRef = useRef<(t: string, o: SendOpts) => void>(() => {});
 
   const channel = useSessionChannel({
     buildUrl: chatWsUrl,
@@ -66,10 +73,15 @@ export default function ChatPage() {
     onReady: (sid) => {
       connectedSidRef.current = sid;
       if (!sessionIdParamRef.current) {
-        // a brand-new chat was just created server-side — adopt its id in the URL
+        // brand-new chat created server-side on first send — adopt its id in the URL
         sessionIdParamRef.current = sid;
         navigate(`/chat/${sid}`, { replace: true });
-        void loadChats();
+      }
+      // flush the message typed on the fresh /chat screen (sidebar refreshes after the turn)
+      const pending = pendingSendRef.current;
+      if (pending) {
+        pendingSendRef.current = null;
+        sendMessageRef.current(pending.text, pending.opts);
       }
     },
     onCredits: (v) => setCredits(v),
@@ -79,6 +91,7 @@ export default function ChatPage() {
     messages, liveText, fillerText, busy, status: liveStatus,
     sendMessage, sendAudio, stopTurn, hydrate, setMessages, disconnect, resume, error, clearError,
   } = channel;
+  sendMessageRef.current = sendMessage;
 
   // Hands-free voice: capture the utterance and send it over the SAME chat socket
   // as `user_audio` (STT in → spoken reply out). Mic pauses while a turn runs.
@@ -104,39 +117,33 @@ export default function ChatPage() {
     appointmentsApi.list().then((d) => setStudentAppointments(d as Appointment[])).catch(() => {});
   }, [loadCredits, loadChats]);
 
-  // capture a one-shot prompt passed via navigation state, send once connected
+  // a one-shot prompt passed via navigation state → send it (connecting if needed)
   useEffect(() => {
     const p = (location.state as { prompt?: string } | null)?.prompt;
     if (p) {
-      pendingPromptRef.current = p;
       navigate(location.pathname, { replace: true, state: {} });
+      queueSendRef.current(p, {});
     }
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // (re)connect whenever the target chat changes; hydrate its history from the DB
+  // Connect only for an EXISTING chat (/chat/:id). A fresh /chat opens no socket
+  // and creates no chat row until the user sends (handled in queueSend/onReady).
   useEffect(() => {
     sessionIdParamRef.current = sessionId ?? null;
-    if (sessionId && sessionId === connectedSidRef.current) return; // already on this chat
-    disconnect();
-    connectedSidRef.current = sessionId ?? null;
-    if (sessionId) {
-      chatApi.getChat(sessionId)
-        .then((c) => hydrate((c as Chat).messages))
-        .catch(() => setMessages([]));
-    } else {
+    if (!sessionId) {
+      if (connectedSidRef.current !== null) { disconnect(); connectedSidRef.current = null; }
+      pendingSendRef.current = null;
       setMessages([]);
+      return;
     }
-    resume(sessionId ?? null);
+    if (sessionId === connectedSidRef.current) return; // already on this chat
+    disconnect();
+    connectedSidRef.current = sessionId;
+    chatApi.getChat(sessionId)
+      .then((c) => hydrate((c as Chat).messages))
+      .catch(() => setMessages([]));
+    resume(sessionId);
   }, [sessionId]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  // send the pending one-shot prompt as soon as the socket is ready
-  useEffect(() => {
-    if (channel.connected && pendingPromptRef.current) {
-      const p = pendingPromptRef.current;
-      pendingPromptRef.current = null;
-      sendMessage(p);
-    }
-  }, [channel.connected]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // refresh credits + chat list (title) at the end of each turn
   const prevBusyRef = useRef(false);
@@ -154,17 +161,29 @@ export default function ChatPage() {
     await loadChats();
   }, [sessionId, navigate, loadChats]);
 
+  // Send if connected; otherwise queue + open the socket (which creates the chat),
+  // and onReady flushes the queued message → no empty chats from just visiting /chat.
+  const queueSend = useCallback((text: string, opts: SendOpts) => {
+    if (channel.connected) {
+      sendMessage(text, opts);
+    } else {
+      pendingSendRef.current = { text, opts };
+      resume(null);
+    }
+  }, [channel.connected, sendMessage, resume]);
+  queueSendRef.current = queueSend;
+
   const handleSend = useCallback((
     text: string,
     opts?: { imageData?: string; imageMime?: string; fileName?: string; webSearch?: boolean; research?: boolean },
   ) => {
-    sendMessage(text, {
+    queueSend(text, {
       imageData: opts?.imageData,
       imageMime: opts?.imageMime,
       fileName: opts?.fileName,
       research: opts?.research ?? researchEnabled,
     });
-  }, [sendMessage, researchEnabled]);
+  }, [queueSend, researchEnabled]);
 
   const handleVoiceStart = useCallback(() => setVoiceActive(true), []);
   const handleVoiceEnd = useCallback(() => setVoiceActive(false), []);

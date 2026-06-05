@@ -107,21 +107,39 @@ export function useSessionChannel(opts: SessionChannelOpts) {
   };
 
   // ── per-segment reveal + audio (the sync core) ──
+  // Reveal the segment's RAW text (newlines/markdown preserved) in phrase-sized
+  // chunks — never word-by-word, and never flattening whitespace, so the live
+  // stream renders as proper markdown. Segments already carry their own trailing
+  // separator, so we just append (no manual spacing).
+  const CHUNK_WORDS = 5;
   const revealSegment = (seg: Segment): Promise<void> =>
     new Promise((resolve) => {
-      const words = seg.text.split(/\s+/).filter(Boolean);
-      if (words.length === 0) { resolve(); return; }
+      const text = seg.text;
+      if (!text) { resolve(); return; }
+      const base = liveTextRef.current;
+
+      // Checkpoints at every CHUNK_WORDS-th word boundary, indexing into the raw
+      // string so newlines/markdown between words are preserved when sliced.
+      const ends: number[] = [];
+      const re = /\S+/g;
+      let m: RegExpExecArray | null;
+      let words = 0;
+      while ((m = re.exec(text)) !== null) {
+        words++;
+        if (words % CHUNK_WORDS === 0) ends.push(m.index + m[0].length);
+      }
+      if (ends.length === 0 || ends[ends.length - 1] !== text.length) ends.push(text.length);
+
       const total = seg.duration_ms && seg.duration_ms > 0
         ? seg.duration_ms
-        : words.length * DEFAULT_MS_PER_WORD;
-      const per = Math.max(25, total / words.length);
+        : (words || 1) * DEFAULT_MS_PER_WORD;
+      const per = Math.max(40, total / ends.length);
       let i = 0;
       const tick = () => {
-        const sep = liveTextRef.current ? " " : "";
-        liveTextRef.current += sep + words[i];
+        liveTextRef.current = base + text.slice(0, ends[i]);
         setLiveText(liveTextRef.current);
         i++;
-        if (i >= words.length) { resolve(); return; }
+        if (i >= ends.length) { resolve(); return; }
         revealTimerRef.current = setTimeout(tick, per);
       };
       tick();
@@ -327,10 +345,17 @@ export function useSessionChannel(opts: SessionChannelOpts) {
 
   /** Pause: close the socket (lesson clock pauses independently). Keeps sessionId. */
   const pause = useCallback(() => { _closeIntentional(); }, [_closeIntentional]);
-  /** Resume: reopen the socket; onReady will re-hydrate authoritative history. */
+  /**
+   * Resume / open the socket for an EXPLICIT target.
+   * The passed value is authoritative: `null` means a fresh chat (no session_id),
+   * so it must NOT fall back to the previous chat's id — otherwise "New Chat"
+   * would reconnect to the last chat. (Drop-reconnect still reuses lastSessionId
+   * via the onclose handler, which calls connect() directly.)
+   */
   const resume = useCallback((sessionId: string | null) => {
     reconnectAttemptsRef.current = 0;
-    connect(sessionId ?? lastSessionIdRef.current);
+    lastSessionIdRef.current = sessionId;
+    connect(sessionId);
   }, [connect]);
   /** End the lesson: close permanently, no reconnect. */
   const disconnect = useCallback(() => { _closeIntentional(); }, [_closeIntentional]);

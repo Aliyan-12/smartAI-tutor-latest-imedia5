@@ -1263,32 +1263,36 @@ class SentenceSegmenter:
         return out
 
     def flush(self) -> Optional[str]:
-        seg = self._buf.strip()
+        # Preserve raw text (incl. newlines) so the client can rebuild markdown.
+        seg = self._buf
         self._buf = ""
         return seg or None
 
     def _take(self) -> Optional[str]:
+        # Each segment keeps its trailing separator (the sentence-ending space or
+        # the "\n"/"\n\n" break) so that concatenating all segments reproduces the
+        # original text verbatim — which is what makes markdown (lists, paragraphs)
+        # render correctly during the live stream, not just after turn_end.
         buf = self._buf
         para = buf.find("\n\n")
         if para != -1:
-            seg = buf[:para].strip()
-            self._buf = buf[para + 2:].lstrip()
-            return seg
+            end = para + 2
+            self._buf = buf[end:]
+            return buf[:end]
         for m in _SENT_END.finditer(buf):
             i = m.end()
             if i >= len(buf):
                 break
             if buf[i] in " \n\t":
-                seg = buf[:i].strip()
-                self._buf = buf[i:].lstrip()
-                return seg
+                end = i + 1
+                self._buf = buf[end:]
+                return buf[:end]
         if len(buf) >= self._max:
             cut = buf.rfind(" ", 0, self._max)
             if cut <= 0:
                 cut = self._max
-            seg = buf[:cut].strip()
-            self._buf = buf[cut:].lstrip()
-            return seg
+            self._buf = buf[cut:]
+            return buf[:cut]
         return None
 
 
@@ -1301,15 +1305,17 @@ def _wav_duration_ms(wav: bytes) -> int:
 
 
 async def build_segment(text: str, seq: int, tts: bool) -> dict:
-    """{type:"segment"} payload: cleaned display text + optional bundled audio."""
-    display = strip_display_markers(text).strip()
+    """{type:"segment"} payload: display text (markdown/newlines preserved for the
+    live stream) + optional bundled audio (TTS runs on the stripped text)."""
+    display = strip_display_markers(text)          # keep newlines/spacing for markdown
+    tts_src = display.strip()                       # Kokoro gets clean text only
     audio_b64 = None
     duration_ms = None
-    if tts and len(display) >= _MIN_TTS_CHARS:
+    if tts and len(tts_src) >= _MIN_TTS_CHARS:
         try:
             from app.services.voice_agent_service import text_to_speech
             async with _tts_semaphore:
-                wav, _mime = await asyncio.to_thread(text_to_speech, display)
+                wav, _mime = await asyncio.to_thread(text_to_speech, tts_src)
             audio_b64 = base64.b64encode(wav).decode("ascii")
             duration_ms = _wav_duration_ms(wav)
         except Exception as e:  # noqa: BLE001 - a failed clip must not break the turn
