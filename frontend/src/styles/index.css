@@ -416,7 +416,7 @@ input, textarea, select {
 .message {
   display: flex;
   gap: 10px;
-  max-width: 780px;
+  /* max-width: 780px; */
   width: 100%;
   margin: 0 auto;
   align-items: flex-start;
