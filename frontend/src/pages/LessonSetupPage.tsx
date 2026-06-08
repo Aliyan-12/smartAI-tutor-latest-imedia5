@@ -8,7 +8,8 @@ import {
 } from "lucide-react";
 import Sidebar from "../components/Sidebar";
 import { useAuth } from "../context/AuthContext";
-import { gamificationApi, assignmentsApi, appointmentsApi, lessonsApi } from "../services/api";
+import { gamificationApi, assignmentsApi, appointmentsApi, curriculumApi } from "../services/api";
+import type { HubSubject } from "../services/api";
 import type { StudentProfile, MyAssignment } from "../types";
 
 // ── Goal → session type mapping ─────────────────────────────────────────────
@@ -255,6 +256,8 @@ export default function LessonSetupPage() {
     locationState.subject ?? searchParams.get("subject") ?? ""
   );
   const [keyStage, setKeyStage] = useState("");
+  const [yearGroup, setYearGroup] = useState("");
+  const [subjectId, setSubjectId] = useState<number | null>(null);
   const [selectedTopics, setSelectedTopics] = useState<string[]>([]);
   const [goal, setGoal] = useState<GoalId>(locationState.goal ?? "learn_scratch");
   const [learnMode, setLearnMode] = useState<LearnMode>("ai_recommended");
@@ -270,9 +273,10 @@ export default function LessonSetupPage() {
   const topicDropdownRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // ── KB data state ───────────────────────────────────────────────────────
-  const [kbSubjects, setKbSubjects] = useState<string[]>([]);
-  const [kbStages, setKbStages] = useState<string[]>([]);
+  // ── Curriculum data state (Resource Hub mirror) ──────────────────────────
+  const [hubSubjects, setHubSubjects] = useState<HubSubject[]>([]);
+  const [hubYears, setHubYears] = useState<string[]>([]);
+  const [kbStages, setKbStages] = useState<string[]>([]);   // key stages
   const [kbUnits, setKbUnits] = useState<Array<{ id: number; title: string; unit_name: string }>>([]);
 
   // ── Other data state ────────────────────────────────────────────────────
@@ -287,30 +291,54 @@ export default function LessonSetupPage() {
   // ── Derived ─────────────────────────────────────────────────────────────
   const canSubmit = subject.trim() !== "" && keyStage.trim() !== "" && selectedTopics.length > 0;
 
-  // Fetch subjects + key stages from KB
+  // Curriculum cascade (Resource Hub): KeyStage → Year → Subject → Unit/Topic.
+  // 1. Key stages on mount.
   useEffect(() => {
-    lessonsApi.getAvailableFilters()
-      .then((data: any) => {
-        setKbSubjects(data.subjects ?? []);
-        setKbStages(data.key_stages ?? []);
-      })
+    curriculumApi.getKeyStages()
+      .then((data) => setKbStages(data.keystages ?? []))
       .catch(() => {});
   }, []);
 
-  // Fetch units when subject + key stage both selected
+  // 2. Year groups when the key stage changes.
   useEffect(() => {
-    if (!subject || !keyStage) {
+    if (!keyStage) { setHubYears([]); return; }
+    curriculumApi.getYears(keyStage)
+      .then((data) => setHubYears(data.years ?? []))
+      .catch(() => setHubYears([]));
+  }, [keyStage]);
+
+  // 3. Subjects only once BOTH key stage AND year group are chosen (strict cascade).
+  useEffect(() => {
+    if (!keyStage || !yearGroup) { setHubSubjects([]); return; }
+    curriculumApi.getSubjects(keyStage, yearGroup)
+      .then((data) => setHubSubjects(data.subjects ?? []))
+      .catch(() => setHubSubjects([]));
+  }, [keyStage, yearGroup]);
+
+  // 4. Derive subjectId from the chosen subject name (covers prefilled modes too).
+  useEffect(() => {
+    if (subject && hubSubjects.length) {
+      const match = hubSubjects.find((s) => s.name === subject);
+      setSubjectId(match ? match.id : null);
+    } else {
+      setSubjectId(null);
+    }
+  }, [subject, hubSubjects]);
+
+  // 5. Units (the "topics" picker) when the subject is resolved.
+  useEffect(() => {
+    if (!subjectId || !keyStage) {
       setKbUnits([]);
       setSelectedTopics([]);
       return;
     }
-    lessonsApi.getUnits(subject, keyStage)
-      .then((data: any) => {
-        setKbUnits(data.units ?? []);
+    curriculumApi.getUnits(subjectId, keyStage, yearGroup || undefined)
+      .then((data) => {
+        setKbUnits((data.units ?? []).map((u) => ({ id: u.id, title: u.title, unit_name: u.title })));
         setSelectedTopics([]);
       })
       .catch(() => setKbUnits([]));
-  }, [subject, keyStage]);
+  }, [subjectId, keyStage, yearGroup]);
 
   // Close topic dropdown on outside click
   useEffect(() => {
@@ -333,6 +361,7 @@ export default function LessonSetupPage() {
         setProfile(p);
         if (p.key_stage) {
           setStudentKeyStage(p.key_stage);
+          setKeyStage((cur) => cur || p.key_stage!);
           const available = getAvailableDurations(p.key_stage);
           setDuration(available.includes(40) ? 40 : available[0]);
         }
@@ -353,10 +382,22 @@ export default function LessonSetupPage() {
       .finally(() => setAssignmentLoading(false));
   }, []);
 
-  // Reset on subject change
+  // Reset topics on subject change (key stage is chosen earlier in the cascade)
   const handleSubjectChange = (val: string) => {
     setSubject(val);
-    setKeyStage("");
+    setSelectedTopics([]);
+  };
+
+  // Reset the downstream cascade when key stage / year group change
+  const handleKeyStageChange = (val: string) => {
+    setKeyStage(val);
+    setYearGroup("");
+    setSubject("");
+    setSelectedTopics([]);
+  };
+  const handleYearGroupChange = (val: string) => {
+    setYearGroup(val);
+    setSubject("");
     setSelectedTopics([]);
   };
 
@@ -411,6 +452,7 @@ export default function LessonSetupPage() {
       `Session type: ${sessionType}`,
       `Learning mode: ${learnMode}`,
     ];
+    if (yearGroup) descParts.push(`Year group: ${yearGroup}`);
     if (extraDetails.trim()) descParts.push(extraDetails.trim());
 
     try {
@@ -691,39 +733,58 @@ export default function LessonSetupPage() {
                   </div>
                 </div>
 
-                {/* Subject · Key Stage · Topic — single row */}
+                {/* Key Stage · Year Group · Subject · Topic — single row */}
                 <div className="lsp-step1-row" style={{ display: "flex", gap: 12, alignItems: "flex-start" }}>
-                  {/* Subject */}
-                  <div style={{ flex: 1, minWidth: 120 }}>
-                    <label style={s.label}>Subject</label>
+                  {/* Key Stage */}
+                  <div style={{ flex: 1, minWidth: 110 }}>
+                    <label style={s.label}>Key Stage</label>
                     <div style={s.selectWrap}>
                       <select
                         style={s.select as React.CSSProperties}
-                        value={subject}
-                        onChange={(e) => handleSubjectChange(e.target.value)}
+                        value={keyStage}
+                        onChange={(e) => handleKeyStageChange(e.target.value)}
                       >
-                        <option value="">Select subject...</option>
-                        {kbSubjects.map((sub) => (
-                          <option key={sub} value={sub}>{getSubjectEmoji(sub)} {sub}</option>
+                        <option value="">Select key stage...</option>
+                        {kbStages.map((ks) => (
+                          <option key={ks} value={ks}>{ks}</option>
                         ))}
                       </select>
                       <ChevronDown size={15} style={s.selectArrow as React.CSSProperties} />
                     </div>
                   </div>
 
-                  {/* Key Stage */}
-                  <div style={{ flex: 1, minWidth: 120 }}>
-                    <label style={s.label}>Key Stage</label>
+                  {/* Year Group */}
+                  <div style={{ flex: 1, minWidth: 110 }}>
+                    <label style={s.label}>Year Group</label>
                     <div style={s.selectWrap}>
                       <select
-                        style={{ ...s.select as React.CSSProperties, opacity: subject ? 1 : 0.5 }}
-                        value={keyStage}
-                        onChange={(e) => { setKeyStage(e.target.value); setSelectedTopics([]); }}
-                        disabled={!subject}
+                        style={{ ...s.select as React.CSSProperties, opacity: keyStage ? 1 : 0.5 }}
+                        value={yearGroup}
+                        onChange={(e) => handleYearGroupChange(e.target.value)}
+                        disabled={!keyStage}
                       >
-                        <option value="">Select key stage...</option>
-                        {kbStages.map((ks) => (
-                          <option key={ks} value={ks}>{ks}</option>
+                        <option value="">{keyStage ? "Select year group..." : "Choose key stage first"}</option>
+                        {hubYears.map((y) => (
+                          <option key={y} value={y}>{y}</option>
+                        ))}
+                      </select>
+                      <ChevronDown size={15} style={s.selectArrow as React.CSSProperties} />
+                    </div>
+                  </div>
+
+                  {/* Subject */}
+                  <div style={{ flex: 1, minWidth: 120 }}>
+                    <label style={s.label}>Subject</label>
+                    <div style={s.selectWrap}>
+                      <select
+                        style={{ ...s.select as React.CSSProperties, opacity: yearGroup ? 1 : 0.5 }}
+                        value={subject}
+                        onChange={(e) => handleSubjectChange(e.target.value)}
+                        disabled={!yearGroup}
+                      >
+                        <option value="">{yearGroup ? "Select subject..." : "Choose year group first"}</option>
+                        {hubSubjects.map((sub) => (
+                          <option key={sub.id} value={sub.name}>{getSubjectEmoji(sub.name)} {sub.name}</option>
                         ))}
                       </select>
                       <ChevronDown size={15} style={s.selectArrow as React.CSSProperties} />

@@ -174,7 +174,11 @@ def make_session_tools(ctx: ToolContext) -> list:
         if not plan or not plan.plan_blocks:
             return {"error": "no_plan", "next_step": None}
 
-        state = plan.session_state or {"current_step": 0, "completed_steps": []}
+        # Copy + setdefault so we coexist with other session_state keys
+        # (e.g. slide_state written by the slide tools) and never KeyError.
+        state = dict(plan.session_state) if plan.session_state else {}
+        state.setdefault("current_step", 0)
+        state.setdefault("completed_steps", [])
         state["completed_steps"].append({
             "step": completed_step,
             "performance": student_performance,
@@ -368,6 +372,42 @@ def make_session_tools(ctx: ToolContext) -> list:
         }
 
     @tool
+    async def show_resource(resource_hub_id: int, slide_index: int = 1) -> dict:
+        """
+        Display a teaching resource (slide deck, worksheet, mark scheme, or link) on
+        the student's screen and jump to a specific slide/page. Call when you begin
+        teaching from a resource or want to switch to a different one. slide_index is
+        1-based. The returned slide_content is the text on that slide — teach from it.
+        """
+        from app.services.session_resource_service import slide_action
+        return await slide_action(
+            ctx.db, ctx.appointment_id, mode="show",
+            resource_hub_id=resource_hub_id, slide_index=slide_index,
+        )
+
+    @tool
+    async def advance_lesson_slide() -> dict:
+        """
+        Move the on-screen resource FORWARD to the next slide/page (or the next
+        resource when the current deck ends). Call ONLY after the student has
+        understood the current slide and correctly answered its questions. The
+        returned slide_content is the next slide's text — teach from it.
+        """
+        from app.services.session_resource_service import slide_action
+        return await slide_action(ctx.db, ctx.appointment_id, mode="advance")
+
+    @tool
+    async def retreat_lesson_slide() -> dict:
+        """
+        Move the on-screen resource BACK to the previous slide/page. Call when the
+        student did not understand the current slide or answered its question
+        incorrectly, so you can re-teach the earlier slide. The returned
+        slide_content is that slide's text — re-teach from it.
+        """
+        from app.services.session_resource_service import slide_action
+        return await slide_action(ctx.db, ctx.appointment_id, mode="retreat")
+
+    @tool
     async def web_search(query: str, num_results: int = 5) -> dict:
         """
         Search the web for current information relevant to the student's question.
@@ -486,6 +526,9 @@ def make_session_tools(ctx: ToolContext) -> list:
         advance_lesson_phase,
         evaluate_answer,
         generate_session_report,
+        show_resource,
+        advance_lesson_slide,
+        retreat_lesson_slide,
         web_search,
         deep_research,
     ]

@@ -46,6 +46,14 @@ class Settings(BaseSettings):
     upload_dir: str = "uploads/documents"
     max_upload_size_mb: int = 50
 
+    # Resource Hub (external curriculum + content source).
+    # resourcehub_api_url already includes the "/api" prefix; the client appends "/v1/...".
+    resourcehub_api_key: str = ""
+    resourcehub_api_url: str = "https://hub.resourcefullearning.co.uk/api"
+    resource_sync_enabled: bool = True
+    curriculum_sync_hours: int = 12
+    resource_sync_hours: int = 6
+
     email_enabled: bool = False
     email_smtp_host: str = "smtp.gmail.com"
     email_smtp_port: int = 587

@@ -128,8 +128,10 @@ async def build_context(
         try:
             from app.core.config import settings
             if settings.rag_enabled:
-                from app.services.rag_service import retrieve_relevant_chunks
-                rag_chunks = await retrieve_relevant_chunks(db=db, query=user_query)
+                # Free simple chat: loosely grounded in Resource Hub content
+                # (no curriculum filter — just similarity).
+                from app.services.rag_service import retrieve_hub_chunks
+                rag_chunks = await retrieve_hub_chunks(db=db, query=user_query)
         except Exception as e:
             logger.warning(f"RAG retrieval skipped: {e}")
 

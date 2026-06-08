@@ -83,6 +83,55 @@ def extract_text(file_path: str, file_type: str) -> str:
     return extractor(file_path)
 
 
+# ---------------------------------------------------------------------------
+# Per-page / per-slide extraction — preserves page boundaries so each chunk
+# can be tied to the slide/page it came from (drives the session slide viewer).
+# ---------------------------------------------------------------------------
+
+def extract_pages_from_pdf(file_path: str) -> List[Tuple[int, str]]:
+    """Return [(page_number, text)] (1-based)."""
+    from pypdf import PdfReader
+    reader = PdfReader(file_path)
+    return [(i, (page.extract_text() or "").strip()) for i, page in enumerate(reader.pages, start=1)]
+
+
+def extract_slides_from_pptx(file_path: str) -> List[Tuple[int, str]]:
+    """Return [(slide_number, text)] (1-based), including slide notes when present."""
+    from pptx import Presentation
+    prs = Presentation(file_path)
+    slides: List[Tuple[int, str]] = []
+    for i, slide in enumerate(prs.slides, start=1):
+        parts: List[str] = []
+        for shape in slide.shapes:
+            if hasattr(shape, "text") and shape.text and shape.text.strip():
+                parts.append(shape.text.strip())
+        try:
+            if slide.has_notes_slide:
+                note = slide.notes_slide.notes_text_frame.text
+                if note and note.strip():
+                    parts.append(f"[Notes] {note.strip()}")
+        except Exception:
+            pass
+        slides.append((i, "\n".join(parts)))
+    return slides
+
+
+def extract_pages(file_path: str, file_type: str) -> List[Tuple[int, str]]:
+    """
+    Dispatch to a paginated extractor. PDFs and PPTX yield one entry per
+    page/slide; docx/txt have no pages, so they return a single entry at index 1.
+    """
+    if file_type == "pdf":
+        return extract_pages_from_pdf(file_path)
+    if file_type == "pptx":
+        return extract_slides_from_pptx(file_path)
+    if file_type == "docx":
+        return [(1, extract_text_from_docx(file_path))]
+    if file_type == "txt":
+        return [(1, Path(file_path).read_text(encoding="utf-8"))]
+    raise ValueError(f"Unsupported file type: {file_type}")
+
+
 def chunk_text(text: str, chunk_size: int = 500, overlap: int = 50) -> List[Tuple[str, int]]:
     text = re.sub(r"\n{3,}", "\n\n", text).strip()
     if not text:

@@ -231,7 +231,7 @@ async def _fetch_unit_kb_content_rag(
 
     for unit_name in unit_names:
         query = unit_name.replace("-", " ").strip()
-        chunks = await rag_service.retrieve_relevant_chunks(
+        chunks = await rag_service.retrieve_hub_chunks(
             db=db,
             query=query,
             subject=subject,
@@ -1013,6 +1013,19 @@ QUIZ RULES — FOLLOW EXACTLY:
   Before calling the tool, say: "We have covered a lot -- let me set you a quick test!"
 - After the quiz tool is called, the student will see the quiz in their interface. Continue naturally.
 - NEVER apologise. If you made an error earlier, just correct course and continue.
+
+TEACHING SLIDES — TEACH FROM THE ON-SCREEN RESOURCES (IMPORTANT):
+- This lesson has real teaching slides shown on the student's screen. You MUST teach from them, not from memory.
+- IMMEDIATELY at the very start of the lesson (your first teaching turn), call advance_lesson_slide() to load the first slide onto the student's screen. Do this BEFORE you start explaining the topic — the student should see slide 1 while you introduce it.
+- Each slide tool returns "slide_content" — the actual text on the slide now showing. ALWAYS base your explanation on that exact slide_content.
+- TEACH IT LIKE A WARM HUMAN TUTOR, not a narrator. Use the slide as your backbone — cover every point on it — but bring it to life:
+    • Add your own casual, real-world examples and simple analogies a child would relate to ("It's a bit like…").
+    • Add an extra sentence or two of your own explanation so the concept truly lands — don't just read the slide word-for-word.
+    • React naturally to what the student says, answer their questions in your own words, and weave their answers back into the lesson.
+    • Keep it warm, encouraging and conversational. Stay on THIS slide's concept — don't jump ahead to content on later slides.
+- When the student understands the current slide AND has answered its question correctly, call advance_lesson_slide() to move on, then teach that next slide's slide_content the same way.
+- If the student is confused or answers incorrectly, call retreat_lesson_slide() to go back, and re-teach the earlier slide more simply before advancing again.
+- Call these tools SILENTLY (never write the call as text, never mention "slides loading"). The viewer updates automatically.
 
 END-OF-SESSION REPORT:
 - After delivering the final session summary/review (the last phase), call the generate_session_report tool.

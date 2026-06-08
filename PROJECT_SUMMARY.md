@@ -1,38 +1,41 @@
 # SmartAI Tutor — Project Summary
 
-> **Last updated:** 2026-06-05
-> **Recent changes:** Both chat and session now run over **one WebSocket each** (`/api/chat/ws`, `/api/sessions/ws`) with segment-bundled Kokoro TTS · **Gemini Live removed** — voice is a custom STT → turn → TTS loop on the same socket · **SSE chat pipeline removed** (`/api/chat/stream`, `/api/chat/quiz-feedback`) · Services consolidated (rag/platform/voice_agent/session_agent/lesson) · **Two-LLM split** (`get_llm` session vs `get_chat_llm` chat) · `chat_tools` (web/deep search) for simple chat · Neutral-bridge fillers (classifier removed) · Presenton/slides removed
+> **Last updated:** 2026-06-08
+> **Recent changes:** **Resource Hub integration** — curriculum (KS → Year → Subject → Unit → Topic) + all teaching files now come from the external Resource Hub, mirrored into local `rh_*` tables by two scheduled jobs (APScheduler); file resources (slides/worksheets/mark schemes) are vectorized **per-slide** and the session AI teaches **slide-by-slide** with an on-screen viewer (`advance_lesson_slide`/`retreat_lesson_slide`/`show_resource` tools). Legacy admin KB unwired · Both chat and session run over **one WebSocket each** (`/api/chat/ws`, `/api/sessions/ws`) with segment-bundled Kokoro TTS · **Gemini Live removed** — voice is a custom STT → turn → TTS loop on the same socket · Services consolidated · **Two-LLM split** (`get_llm` session vs `get_chat_llm` chat)
 
-SmartAI Tutor is an AI-powered tutoring platform built for UK GCSE curriculum (Key Stages 1-5). It provides personalized learning through text chat and real-time voice conversation, grounded in actual course materials via a Retrieval-Augmented Generation (RAG) system. Teachers and admins upload curriculum content (PDF, DOCX, PPTX) organized by Key Stage, subject, exam board, and tier. When students ask questions, the system automatically retrieves relevant document chunks using pgvector similarity search and injects them into the Gemini AI prompt, producing accurate, curriculum-aligned answers.
+SmartAI Tutor is an AI-powered tutoring platform built for UK GCSE curriculum (Key Stages 1-5). It provides personalized learning through text chat and real-time voice conversation, grounded in actual course materials via a Retrieval-Augmented Generation (RAG) system. Curriculum and teaching content come from the external **Resource Hub** (`hub.resourcefullearning.co.uk`) — the single source of truth for the whole curriculum tree (Key Stage → Year Group → Subject → Unit → Topic) and every teaching file (slides, worksheets, mark schemes, homework, videos, links). Two scheduled jobs mirror the hub into local `rh_*` tables; file-based resources are downloaded and vectorized **per slide/page**. When students ask questions (or the AI teaches a slide), the system retrieves the relevant hub chunks via pgvector similarity search and injects them into the Gemini prompt, producing accurate, curriculum-aligned answers. (The legacy admin-uploaded knowledge base is unwired/dormant.)
 
 ---
 
 ## System Architecture
 
 ```
-Teacher uploads documents (PDF/DOCX/PPTX)
+Resource Hub (hub.resourcefullearning.co.uk)  ──APScheduler jobs──►  local rh_* mirror
+   • Job 1: keystages → years → subjects → units → topics (+ availability edges)
+   • Job 2: resources → download file (pdf/pptx/docx) → per-slide extract →
+            Chunking (500 tokens, 50 overlap) → Gemini Embedding (768d) → rh_document_chunks (HNSW)
     |
     v
-Text Extraction -> Chunking (500 tokens, 50 overlap) -> Gemini Embedding (768d) -> pgvector HNSW storage
+Student asks question  /  AI teaches the current slide
     |
     v
-Student asks question
+Embed query -> pgvector cosine search over rh_document_chunks -> Top-5 chunks (min similarity 0.3)
+   (sessions filter tight: subject/key-stage/unit + goal resource types; simple chat filters loose)
     |
     v
-Embed query -> pgvector cosine search (HNSW index) -> Top-5 chunks (min similarity 0.3)
-    |
-    v
-Chunks injected into Gemini prompt as [KNOWLEDGE BASE CONTEXT]
+Chunks injected into Gemini prompt as [KNOWLEDGE BASE CONTEXT]  (+ the current slide's text)
 + Student preferences (learning style, teaching pace) injected into system prompt
 + Appointment/session context injected (subject, topics, ability level)
     |
     v
-Gemini generates curriculum-grounded response (LangChain astream; tool calls for quiz/homework/mastery/research)
+Gemini generates curriculum-grounded response (LangChain astream; tool calls for
+quiz/homework/mastery/research + show_resource/advance_lesson_slide/retreat_lesson_slide)
     |
     v
 Backend orchestrates one WebSocket per chat/session: reply streamed as ordered sentence
-"segments" (text + bundled Kokoro TTS audio + duration). Voice turns transcribe mic audio
-(STT) first, then run the identical turn pipeline.
+"segments" (text + bundled Kokoro TTS audio + duration); slide tools emit `tool` events that
+drive the on-screen ResourceViewer. Voice turns transcribe mic audio (STT) first, then run the
+identical turn pipeline.
     |
     v
 XP awarded -> Topic mastery updated -> Session report generated (quiz score, strong/weak areas)
@@ -42,15 +45,18 @@ XP awarded -> Topic mastery updated -> Session report generated (quiz score, str
 
 ## UK GCSE Curriculum Structure
 
-Documents are organized following the UK national curriculum hierarchy:
+Curriculum comes from the **Resource Hub** and is mirrored into `rh_*` tables following the hub's hierarchy (each node keyed by the hub's own `hub_id`):
 
-| Field | Values | Purpose |
-|------------|---------------------------------------------------|----------------------------------------|
-| key_stage | KS1, KS2, KS3, KS4, KS5 | Year group level (ages 5-18) |
-| subject | Biology, Chemistry, Physics, Maths, English, etc. | Subject area |
-| exam_board | AQA, Edexcel, OCR, WJEC, None | GCSE exam board (KS4+) |
-| tier | Foundation, Higher, None | Exam difficulty tier |
-| unit_name | Free text | E.g. "Eukaryotic and Prokaryotic Cells" |
+| Level | Source field | Example |
+|-------|--------------|---------|
+| Key Stage | `RHKeyStage.code` | KS1, KS2, KS3, KS4, KS5 |
+| Year Group | `RHYearGroup` (per key stage) | Year 1 … Year 13 |
+| Subject | `RHSubject` | Maths, Science, … |
+| Unit | `RHUnit` (per subject) | "UNIT 1: The Human Body" |
+| Topic | `RHTopic` (per unit, optional) | "1. What are the five senses?" |
+| Resource | `RHResource` | slides / worksheet / mark scheme / homework / youtube / link |
+
+`RHAvailability` records which subjects/units exist for each (key stage, year group). Resources reference the curriculum **by name** (subject / unitTitle / topicTitle + keyStage + yearGroup). *(The legacy `documents` table's exam_board/tier/unit_name fields still exist but are dormant.)*
 
 ### Key Stage Reference
 
@@ -81,19 +87,21 @@ Documents are organized following the UK national curriculum hierarchy:
 |-----------|------------------------------------------------------|----------------------------------------------|
 | Core | `config.py`, `security.py` | Settings, JWT + bcrypt, RAG config |
 | DB | `session.py`, `init_db.py` | Async SQLAlchemy + asyncpg, pgvector HNSW index |
-| Models | `user.py`, `chat.py`, `documents.py`, `subscription.py`, `appointment.py`, `lesson_plan.py`, `assessment.py`, `assignment.py`, `student_profile.py`, `parent_student.py` | ORM models for all entities |
+| Models | `user.py`, `chat.py`, `documents.py`, `resource_hub.py` (**`rh_*` mirror — curriculum + resources + vectors**), `subscription.py`, `appointment.py`, `lesson_plan.py`, `assessment.py`, `assignment.py`, `student_profile.py`, `parent_student.py` | ORM models for all entities |
 | Schemas | `user.py`, `chat.py`, `documents.py`, `subscription.py`, `appointment.py`, `lesson.py`, `assessment.py`, `gamification.py`, `settings.py`, `assignment.py` | Pydantic request/response validation |
-| Services | `gemini_service.py` (LangChain streaming, tool loop, MCQ), `llm_service.py` (`get_llm` session + `get_chat_llm` chat singletons), `rag_service.py` (embedding + pgvector retrieval — merged), `document_service.py`, `chat_service.py` (incl. simple-chat WS pipeline), `voice_agent_service.py` (Kokoro TTS + Gemini STT), `session_agent_service.py` (session prompts + segment/filler + WS turn loop), `lesson_service.py` (+ lesson structure), `platform_service.py` (credits/subscriptions + email + gamification + settings + scraper — merged), `appointment_service.py`, `assessment_service.py`, `assignment_service.py`, `user_service.py` | Business logic |
-| Tools | `session_tools.py` (full session tool suite: quiz, homework, mastery, lesson-phase, evaluate, report, web/deep search), `chat_tools.py` (simple-chat subset: web/deep search) | LangChain `@tool` closures + `ToolContext` |
-| Routers | `auth.py`, `chat.py`, `voice.py`, `documents.py`, `admin.py`, `teacher.py`, `parent.py`, `appointments.py`, `sessions.py`, `lessons.py`, `assessments.py`, `assignments.py`, `gamification.py`, `settings.py`, `subscription.py`, `health.py` | REST + WebSocket endpoints |
+| Services | `gemini_service.py` (LangChain streaming, tool loop, MCQ), `llm_service.py` (`get_llm` session + `get_chat_llm` chat singletons), `rag_service.py` (embedding + pgvector retrieval incl. `retrieve_hub_chunks`), `resource_hub_client.py` (**async hub API client**), `resource_sync_service.py` (**Job 1 curriculum + Job 2 resource vectorize**), `curriculum_service.py` (**read API over the `rh_*` mirror**), `session_resource_service.py` (**slide playlist + advance/retreat navigation**), `document_service.py` (extract incl. per-slide `extract_pages`), `chat_service.py` (incl. simple-chat WS pipeline), `voice_agent_service.py` (Kokoro TTS + Gemini STT), `session_agent_service.py` (session prompts + segment/filler + WS turn loop), `lesson_service.py`, `platform_service.py` (credits/email/gamification/settings/scraper — merged), `appointment_service.py`, `assessment_service.py`, `assignment_service.py`, `user_service.py` | Business logic |
+| Jobs | `jobs/scheduler.py` (**APScheduler `AsyncIOScheduler` — runs the two sync jobs on startup + intervals**) | Background scheduling |
+| Tools | `session_tools.py` (full session tool suite: quiz, homework, mastery, lesson-phase, evaluate, report, **show_resource / advance_lesson_slide / retreat_lesson_slide**, web/deep search), `chat_tools.py` (simple-chat subset: web/deep search) | LangChain `@tool` closures + `ToolContext` |
+| Routers | `auth.py`, `chat.py`, `voice.py`, `documents.py`, `curriculum.py` (**Resource Hub read API + admin sync**), `admin.py`, `teacher.py`, `parent.py`, `appointments.py`, `sessions.py`, `lessons.py`, `assessments.py`, `assignments.py`, `gamification.py`, `settings.py`, `subscription.py`, `health.py` | REST + WebSocket endpoints |
 | Middleware | `auth.py`, `rate_limit.py` | JWT guard, role-based access, rate limiting |
-| Scripts | `setup.py`, `seed.py`, `seed_voice_fillers.py` | DB setup/seed; pre-generate the Kokoro **neutral-bridge** filler clips (`python -m app.seed_voice_fillers`) |
+| Scripts | `setup.py` (DB setup + **explicit `rh_*` table DDL/migrations**), `seed.py`, `seed_voice_fillers.py` | DB setup/seed; pre-generate the Kokoro **neutral-bridge** filler clips (`python -m app.seed_voice_fillers`) |
 
 ### Key Backend Features
 
 - **Multi-role system**: Admin, Teacher, Student, Parent with role-based access control (JWT + bcrypt)
-- **RAG pipeline**: pgvector HNSW index (M=16, ef=64, cosine ops), Gemini text-embedding-001 (768d), top-5 chunks with min 0.3 similarity
-- **Document processing**: PDF (pypdf), DOCX (python-docx), PPTX (python-pptx) extraction; 500-token chunks with 50-token overlap; batch embedding; status tracking (pending → ready/failed)
+- **Resource Hub integration**: the external hub is the single source of truth for curriculum + content; two APScheduler jobs mirror it into `rh_*` tables (curriculum every 12 h, resources every 6 h, + an initial sync on boot + admin manual trigger). File resources are vectorized **per slide/page**; the session AI teaches slide-by-slide with `show_resource`/`advance_lesson_slide`/`retreat_lesson_slide` tools driving an on-screen viewer. (Legacy admin KB unwired.)
+- **RAG pipeline**: pgvector HNSW index (M=16, ef=64, cosine ops), Gemini text-embedding-001 (768d), top-5 chunks with min 0.3 similarity — now over `rh_document_chunks` (`rag_service.retrieve_hub_chunks`; sessions filter by curriculum + goal resource types, simple chat filters loosely)
+- **Document processing**: PDF (pypdf), DOCX (python-docx), PPTX (python-pptx) extraction — whole-text *and* **per-slide/page** (`extract_pages`, so each chunk keeps its `slide_index`); 500-token chunks with 50-token overlap; batch embedding; status tracking (pending → ready/failed/skipped)
 - **Chat**: two separate WebSocket pipelines — premium **session** (`/api/sessions/ws`, full tool suite, `get_llm`) and free **simple chat** (`/api/chat/ws`, `chat_tools` subset, `get_chat_llm`). Backend orchestrates each turn: saves the user message once, streams the reply as ordered sentence segments with bundled Kokoro audio, commits the assistant message once with the authoritative DB id (`turn_end`). Auto-generated titles, 20-message context window + RAG injection, per-message credit deduction. A per-turn `asyncio.wait_for` timeout means the socket can never hang.
 - **Voice (custom loop)**: the mic is captured client-side with RMS silence-VAD (`useVoiceCapture`); each utterance is sent as `user_audio` over the **same** chat/session WebSocket, transcribed by Gemini STT (`voice_agent_service.speech_to_text`), run through the **identical** turn pipeline, and spoken back as the segment audio. **Kokoro-82M** (`af_sky`, local CPU, ~280 ms) powers all TTS (`text_to_speech`, also `/api/voice/speak` for "Read aloud"), pre-warmed in lifespan. (The old Gemini Live socket was removed.)
 - **Neutral-bridge filler**: a tiny neutral phrase ("Okay.", "Right.", "Let me see.") + its Kokoro clip is sent at turn start to cover the <1 s before the first real segment; the **model's own first sentence** carries the actual reaction (praise/correction). The old situational-filler classifier was removed — only the `neutral` bucket in `seed_voice_fillers.py` remains, read by `session_agent_service.get_neutral_filler()`.
@@ -259,13 +267,24 @@ Documents are organized following the UK national curriculum hierarchy:
 ### Lessons
 | Method | Endpoint | Description |
 |--------|-------------------------------|--------------------------|
-| GET | /api/lessons/available-filters | Subjects/key stages with ready docs |
-| GET | /api/lessons/units | Units for subject + key stage |
-| GET | /api/lessons/topics | Topics from knowledge base |
+| GET | /api/lessons/available-filters | Subjects/key stages (repointed to the `rh_*` mirror) |
+| GET | /api/lessons/units | Units for subject + key stage (from the `rh_*` mirror) |
+| GET | /api/lessons/topics | Topics (from the `rh_*` mirror) |
 | POST | /api/lessons/generate-plan | Generate AI lesson plan |
 | GET | /api/lessons/:planId | Get lesson plan |
 | POST | /api/lessons/:planId/checkpoint | Save session state |
 | POST | /api/lessons/:planId/continue | Continue from checkpoint |
+
+### Curriculum (Resource Hub mirror)
+| Method | Endpoint | Description |
+|--------|-------------------------------|--------------------------|
+| GET | /api/curriculum/keystages | Key stages from the hub mirror (`KS1–KS5`) |
+| GET | /api/curriculum/years?keyStage= | Year groups for a key stage |
+| GET | /api/curriculum/subjects?keyStage=&yearGroup= | Subjects for a (key stage, year group) — via `rh_availability`, falls back to the global catalogue |
+| GET | /api/curriculum/units?subjectId=&keyStage=&yearGroup= | Units for a subject |
+| GET | /api/curriculum/topics?unitId= | Topics within a unit |
+| POST | /api/curriculum/sync?target=all\|curriculum\|resources | **Admin** — trigger a sync job on demand |
+| GET | /api/curriculum/sync/status | **Admin** — last-run status/counts/errors per job |
 
 ### Assessments
 | Method | Endpoint | Description |
@@ -322,7 +341,8 @@ Documents are organized following the UK national curriculum hierarchy:
 | Embeddings | Gemini text-embedding-001 (768d with output_dimensionality) |
 | Voice | Custom STT → turn → TTS loop on the chat/session WebSocket. STT: Gemini transcription; client-side RMS silence-VAD for end-of-utterance |
 | TTS | Kokoro-82M (`af_sky`, local CPU, `kokoro` + `soundfile`); per-sentence segments; pre-warmed in lifespan |
-| Vector Index | pgvector HNSW (M=16, ef=64, cosine similarity) |
+| Vector Index | pgvector HNSW (M=16, ef=64, cosine similarity) — over `document_chunks` (legacy) + `rh_document_chunks` (Resource Hub) |
+| Curriculum source | External **Resource Hub** API mirrored into `rh_*` tables by APScheduler jobs (`httpx` client; curriculum every 12 h, resources every 6 h) |
 | Auth | JWT (python-jose) + bcrypt (passlib) |
 | Document parsing | pypdf, python-docx, python-pptx |
 | Web scraping | BeautifulSoup4 (in `platform_service`) |
@@ -464,6 +484,39 @@ Both run as backend-orchestrated WebSocket turns (`chat_service.run_chat_ws` / `
 | Backend (FastAPI/uvicorn) | 8001 | http://localhost:8001 |
 | PostgreSQL | 5432 | localhost:5432 |
 | API Docs (Swagger) | 8001 | http://localhost:8001/docs |
+
+---
+
+## Recent Changes (2026-06-08) — Resource Hub Integration
+
+The whole curriculum + all teaching content now come from the external **Resource Hub** (`https://hub.resourcefullearning.co.uk`, auth via `RESOURCEHUB_API_KEY`), mirrored locally and used everywhere (lesson setup, sessions, simple chat, student profile). The legacy admin-uploaded knowledge base (`documents`/`document_chunks`) is **unwired** (left dormant for a later cleanup).
+
+### New `rh_*` schema — `backend/app/models/resource_hub.py` (9 tables)
+`RHKeyStage`, `RHYearGroup`, `RHSubject`, `RHUnit`, `RHTopic`, `RHAvailability` ((key_stage, year_group)→subject/unit edges that power "different subjects per year group"), `RHResource` (metadata + `vectorize_status` + `raw_json`), and `RHDocument` / `RHDocumentChunk` (the vector store — chunks carry a `slide_index`, HNSW cosine index like `DocumentChunk`). Resources link to the curriculum **by name** (`subject`/`unitTitle`/`topicTitle` + keyStage + yearGroup), resolved to FK ids best-effort at sync time. Auto-created by `init_db`/`create_all`; explicit idempotent DDL also added to `app/setup.py` so the tables can be migrated on a server (`python -m app.setup`).
+
+### Sync jobs + scheduler
+- **`resource_hub_client.py`** (new) — async `httpx` client (Bearer auth, pagination, retries) over the hub's `/api/v1/curriculum/*` + `/resources` endpoints.
+- **`resource_sync_service.py`** (new) — **Job 1 `sync_curriculum()`** mirrors keystages→years→subjects→units→topics + availability edges (idempotent upsert by `hub_id`, prunes deletions). **Job 2 `sync_resources()`** pages `/resources`, upserts `RHResource`, and for file-based types with a `fileUrl` (pdf/powerpoint/worksheet/docx/mark-scheme) downloads → **per-slide/page extract** (`document_service.extract_pages`) → chunk → `embed_batch` → `RHDocumentChunk` rows tagged with `slide_index`. youtube/external_link = metadata only (`skipped`); a content-hash skip avoids re-vectorizing unchanged files; an HTML-guard fails clearly if the hub serves an HTML page instead of the file.
+- **`app/jobs/scheduler.py`** (new) — APScheduler `AsyncIOScheduler` started in `main.py` lifespan: an initial sync on startup + intervals (`CURRICULUM_SYNC_HOURS`=12, `RESOURCE_SYNC_HOURS`=6). Admin manual trigger via `POST /api/curriculum/sync`.
+
+### Read API + retrieval repoint
+- **`routers/curriculum.py` + `services/curriculum_service.py`** (new) — GET keystages/years/subjects/units/topics over the mirror (subjects honour `rh_availability`). `lessons.py` curriculum endpoints + `lesson_service.get_topics_for_subject`/`get_subtopics` repointed to `rh_*`.
+- **`rag_service.retrieve_hub_chunks(...)`** (new) — pgvector cosine search over `RHDocumentChunk ⋈ RHDocument ⋈ RHResource`, filterable by curriculum + resource type. **Sessions** filter tight (subject/key stage/unit + goal types); **simple chat** filters loose (just similarity). `chat_service`, `session_agent_service` and `platform_service` now call `retrieve_hub_chunks` instead of the old `retrieve_relevant_chunks`.
+
+### Session slide-teaching (the AI teaches from the slides)
+- At session start a **resource playlist** is built from the lesson's key stage/year/subject/unit, filtered by the goal→type map (homework→worksheets/homework; catch_up→slides/homework/worksheets; exam_prep→mark scheme/slides/links; learn_scratch→slides). Position (`current_resource_id` + `current_slide_index`) persists in `LessonPlan.session_state["slide_state"]` — `session_resource_service.py` (new).
+- New `@tool`s in `session_tools.py`: **`show_resource(resource_hub_id, slide_index)`**, **`advance_lesson_slide()`**, **`retreat_lesson_slide()`** — they move the on-screen slide and return that slide's `slide_content`. The system prompt instructs the AI to load slide 1 immediately, teach each slide's content **tutor-style** (own examples/analogies, react to the student), advance on a correct answer, and retreat when the student struggles. Tool results surface as `{type:"tool", tool, data}` WS events.
+- **Frontend `components/ResourceViewer.tsx`** (new) renders the current resource in the session **Learn tab** — PDF via `fileUrl#page=N`, PowerPoint/Word via the Office Online embed, YouTube/links inline — driven by `show_resource` events from `useSessionChannel` (`SessionPage` `onTool`). File URLs are upgraded `http→https` so the iframe/Office viewer can load them.
+
+### Frontend curriculum swap
+- **`curriculumApi`** added to `services/api.ts` (keystages/years/subjects/units/topics + admin sync).
+- **`LessonSetupPage`** — strict cascade **Key Stage → Year Group → Subject → Topic**: a Year Group selector was added, subjects only load once both key stage *and* year group are chosen (`subjectId` numeric, topics from `unitId`).
+- **`SettingsPage`** — the student's Key Stage + Year Group pickers now come from `curriculumApi` (hub `KS1–KS5` + per-key-stage year groups) instead of the old hardcoded list that included `GCSE`/`A-Level`/`Degree`.
+
+### Config / env (new) + deps
+`RESOURCEHUB_API_KEY`, `RESOURCEHUB_API_URL`, `RESOURCE_SYNC_ENABLED`, `CURRICULUM_SYNC_HOURS`, `RESOURCE_SYNC_HOURS` (in `config.py`, `.env`, `.env.example`, `docker-compose.yml`). Dependency added: `apscheduler` (httpx/pypdf/python-pptx already present). `frontend/nginx.conf` now serves `index.html` `no-cache` + hashed `/assets/*` immutable so deploys are picked up without a hard-refresh.
+
+> **Hub-side requirement:** resource `fileUrl`s must be served as the **actual file** (correct `Content-Type`, public over **HTTPS**) — the Office viewer fetches PowerPoint/Word server-side, so the upload path must not fall through to the hub's SPA `index.html`.
 
 ---
 

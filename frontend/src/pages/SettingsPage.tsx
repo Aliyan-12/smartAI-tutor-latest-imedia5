@@ -1,21 +1,20 @@
 import { useState, useEffect } from "react";
 import { User, Sliders, BookOpen, Bell, Shield, Save, LogOut, Eye, EyeOff } from "lucide-react";
 import Sidebar from "../components/Sidebar";
-import { settingsApi } from "../services/api";
+import { settingsApi, curriculumApi } from "../services/api";
 import { useAuth } from "../context/AuthContext";
 import type { LearningPreferences } from "../types";
 
 type Tab = "profile" | "preferences" | "learning" | "notifications" | "account";
 
-const YEAR_GROUPS = ["Year 1","Year 2","Year 3","Year 4","Year 5","Year 6","Year 7","Year 8","Year 9","Year 10","Year 11","Year 12","Year 13"];
-const KEY_STAGES = [
-  { value: "KS1", label: "KS1 — Years 1 & 2" },
-  { value: "KS2", label: "KS2 — Years 3 to 6" },
-  { value: "KS3", label: "KS3 — Years 7 to 9" },
-  { value: "GCSE", label: "GCSE — Years 10 & 11" },
-  { value: "A-Level", label: "A-Level — Years 12 & 13" },
-  { value: "Degree", label: "Degree — University" },
-];
+// Friendly labels for the hub's key stage codes (options themselves come from the Resource Hub).
+const KS_LABELS: Record<string, string> = {
+  KS1: "KS1 — Years 1 & 2",
+  KS2: "KS2 — Years 3 to 6",
+  KS3: "KS3 — Years 7 to 9",
+  KS4: "KS4 — Years 10 & 11 (GCSE)",
+  KS5: "KS5 — Years 12 & 13 (A-Level)",
+};
 const LEARNING_STYLES = [
   { id: "visual",     icon: "👁", label: "Visual" },
   { id: "auditory",   icon: "👂", label: "Auditory" },
@@ -45,6 +44,9 @@ export default function SettingsPage() {
   const [name, setName] = useState(user?.name ?? "");
   const [yearGroup, setYearGroup] = useState("");
   const [keyStage, setKeyStage] = useState("");
+  // Key stages + year groups sourced from the Resource Hub (not hardcoded).
+  const [hubKeyStages, setHubKeyStages] = useState<string[]>([]);
+  const [hubYears, setHubYears] = useState<string[]>([]);
 
   // Preferences (local only for now)
   const [voiceResponses, setVoiceResponses] = useState(true);
@@ -94,6 +96,26 @@ export default function SettingsPage() {
       }
     }).catch(() => {});
   }, []);
+
+  // Key stages from the Resource Hub.
+  useEffect(() => {
+    curriculumApi.getKeyStages()
+      .then((d) => setHubKeyStages(d.keystages ?? []))
+      .catch(() => {});
+  }, []);
+
+  // Year groups for the chosen key stage.
+  useEffect(() => {
+    if (!keyStage) { setHubYears([]); return; }
+    curriculumApi.getYears(keyStage)
+      .then((d) => setHubYears(d.years ?? []))
+      .catch(() => setHubYears([]));
+  }, [keyStage]);
+
+  const handleKeyStageChange = (val: string) => {
+    setKeyStage(val);
+    setYearGroup("");  // year group depends on key stage
+  };
 
   const showToast = (msg: string) => {
     setToast(msg); setTimeout(() => setToast(null), 2500);
@@ -418,14 +440,27 @@ export default function SettingsPage() {
                 <label style={{ fontSize: 13, fontWeight: 600, color: "#374151", display: "block", marginBottom: 4 }}>Full Name</label>
                 <input className="sett-input" value={name} onChange={(e) => setName(e.target.value)} placeholder="Your full name" />
                 <label style={{ fontSize: 13, fontWeight: 600, color: "#374151", display: "block", marginBottom: 4 }}>Key Stage</label>
-                <select className="sett-select" value={keyStage} onChange={(e) => setKeyStage(e.target.value)} style={{ width: "100%", marginBottom: 4 }}>
+                <select className="sett-select" value={keyStage} onChange={(e) => handleKeyStageChange(e.target.value)} style={{ width: "100%", marginBottom: 16 }}>
                   <option value="">Select your key stage...</option>
-                  {KEY_STAGES.map((ks) => (
-                    <option key={ks.value} value={ks.value}>{ks.label}</option>
+                  {hubKeyStages.map((ks) => (
+                    <option key={ks} value={ks}>{KS_LABELS[ks] ?? ks}</option>
+                  ))}
+                </select>
+                <label style={{ fontSize: 13, fontWeight: 600, color: "#374151", display: "block", marginBottom: 4 }}>Year Group</label>
+                <select
+                  className="sett-select"
+                  value={yearGroup}
+                  onChange={(e) => setYearGroup(e.target.value)}
+                  disabled={!keyStage}
+                  style={{ width: "100%", marginBottom: 4, opacity: keyStage ? 1 : 0.5 }}
+                >
+                  <option value="">{keyStage ? "Select your year group..." : "Choose a key stage first"}</option>
+                  {hubYears.map((y) => (
+                    <option key={y} value={y}>{y}</option>
                   ))}
                 </select>
                 <p style={{ fontSize: 12, color: "#64748b", marginTop: 4, marginBottom: 20 }}>
-                  This determines which session lengths are available to you.
+                  Your key stage and year group come from the curriculum and personalise your lessons.
                 </p>
                 <button className="sett-save-btn" onClick={saveProfile} disabled={saving}>
                   <Save size={14} style={{ marginRight: 6, verticalAlign: "middle" }} />
