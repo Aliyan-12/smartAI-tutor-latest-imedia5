@@ -132,6 +132,53 @@ def extract_pages(file_path: str, file_type: str) -> List[Tuple[int, str]]:
     raise ValueError(f"Unsupported file type: {file_type}")
 
 
+def convert_to_pdf(src_path: str, out_dir: str) -> Optional[str]:
+    """Convert a PPTX/PPT/DOC/DOCX file to PDF via headless LibreOffice.
+
+    LibreOffice renders one slide → one PDF page, so the resulting PDF can be
+    deep-linked to a specific slide with `#page=N` in the session viewer (the
+    Office Online embed cannot be navigated programmatically). Animations are
+    flattened to each slide's final state. Returns the produced PDF path, or
+    None when LibreOffice is unavailable or the conversion fails (non-fatal —
+    the caller falls back to the Office embed).
+    """
+    import shutil
+    import subprocess
+    import tempfile
+
+    soffice = shutil.which("soffice") or shutil.which("libreoffice")
+    if not soffice:
+        logger.warning("LibreOffice (soffice) not found — cannot render slides to PDF.")
+        return None
+
+    os.makedirs(out_dir, exist_ok=True)
+    # A throwaway per-conversion user profile avoids the shared-profile lock that
+    # otherwise blocks concurrent / repeated headless runs.
+    profile_dir = tempfile.mkdtemp(prefix="lo_profile_")
+    try:
+        subprocess.run(
+            [
+                soffice, "--headless", "--norestore", "--nodefault", "--nologo",
+                f"-env:UserInstallation=file://{profile_dir}",
+                "--convert-to", "pdf", "--outdir", out_dir, src_path,
+            ],
+            check=True, capture_output=True, timeout=180,
+        )
+    except (subprocess.CalledProcessError, subprocess.TimeoutExpired) as exc:
+        stderr = getattr(exc, "stderr", b"") or b""
+        logger.warning(
+            "LibreOffice PDF conversion failed for %s: %s",
+            src_path, stderr.decode("utf-8", "ignore")[:300] or exc,
+        )
+        return None
+    finally:
+        import shutil as _shutil
+        _shutil.rmtree(profile_dir, ignore_errors=True)
+
+    out_pdf = os.path.join(out_dir, Path(src_path).stem + ".pdf")
+    return out_pdf if os.path.exists(out_pdf) else None
+
+
 def chunk_text(text: str, chunk_size: int = 500, overlap: int = 50) -> List[Tuple[str, int]]:
     text = re.sub(r"\n{3,}", "\n\n", text).strip()
     if not text:

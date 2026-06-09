@@ -6,10 +6,13 @@ Subject → Unit → Topic). Admin endpoints trigger / inspect the sync jobs.
 """
 import asyncio
 import logging
+from pathlib import Path
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi.responses import FileResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import settings
 from app.db.session import get_db
 from app.middleware.auth import require_any_authenticated, require_admin
 from app.models.user import User
@@ -18,6 +21,31 @@ from app.services import curriculum_service, resource_sync_service
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/curriculum", tags=["curriculum"])
+
+
+def _rh_slides_dir() -> Path:
+    return Path(settings.upload_dir).resolve().parent / "rh_slides"
+
+
+@router.get("/resources/{hub_id}/slides.pdf")
+async def get_resource_slides_pdf(hub_id: int):
+    """Serve the LibreOffice-rendered slide PDF for a resource.
+
+    Public + framable on purpose: it is loaded in the session ResourceViewer
+    iframe with `#page=N` so the AI can drive slide-by-slide navigation. The
+    Resource Hub already serves the underlying files publicly.
+    """
+    path = _rh_slides_dir() / f"{hub_id}.pdf"
+    if not path.exists():
+        raise HTTPException(status_code=404, detail="Rendered slides not available")
+    return FileResponse(
+        str(path),
+        media_type="application/pdf",
+        headers={
+            "Cache-Control": "public, max-age=3600",
+            "Content-Disposition": "inline",
+        },
+    )
 
 
 @router.get("/keystages")

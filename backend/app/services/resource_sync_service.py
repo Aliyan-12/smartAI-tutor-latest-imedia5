@@ -17,6 +17,7 @@ import logging
 import os
 import tempfile
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 import httpx
@@ -233,6 +234,34 @@ def _detect_file_type(url: Optional[str], resource_type: Optional[str]) -> Optio
     return "pdf" if url else None
 
 
+def _rh_slides_dir() -> str:
+    """uploads/rh_slides/ — sibling of settings.upload_dir, holds rendered slide PDFs."""
+    d = Path(settings.upload_dir).resolve().parent / "rh_slides"
+    d.mkdir(parents=True, exist_ok=True)
+    return str(d)
+
+
+def _render_resource_pdf(src_path: str, hub_id: int) -> Optional[str]:
+    """Render an Office file to a navigable PDF stored at uploads/rh_slides/<hub_id>.pdf.
+
+    Returns the app-served URL path the session viewer loads in its iframe
+    (/api/curriculum/resources/<hub_id>/slides.pdf), or None if LibreOffice is
+    unavailable / conversion fails (the viewer then falls back to the Office embed).
+    """
+    out_dir = _rh_slides_dir()
+    produced = document_service.convert_to_pdf(src_path, out_dir)
+    if not produced:
+        return None
+    final = os.path.join(out_dir, f"{hub_id}.pdf")
+    try:
+        if os.path.abspath(produced) != os.path.abspath(final):
+            os.replace(produced, final)
+    except OSError as exc:
+        logger.warning("Could not store rendered PDF for resource %s: %s", hub_id, exc)
+        return None
+    return f"/api/curriculum/resources/{hub_id}/slides.pdf"
+
+
 async def _download(url: str, dest_path: str) -> None:
     headers = {}
     if settings.resourcehub_api_key:
@@ -251,6 +280,7 @@ async def _vectorize_resource(db, resource: RHResource) -> None:
         resource.vectorize_status = "skipped"
         return
 
+    rendered_pdf_url: Optional[str] = None
     tmp = tempfile.NamedTemporaryFile(delete=False, suffix=f".{file_type}")
     tmp.close()
     try:
@@ -265,6 +295,13 @@ async def _vectorize_resource(db, resource: RHResource) -> None:
         pages: List[Tuple[int, str]] = await asyncio.to_thread(
             document_service.extract_pages, tmp.name, file_type
         )
+        # Office formats (pptx/docx) can't be deep-linked in the Office embed, so
+        # render them to a navigable PDF for the in-session viewer (#page=N).
+        # Native PDFs are already navigable via their own fileUrl. Non-fatal.
+        if file_type in ("pptx", "docx"):
+            rendered_pdf_url = await asyncio.to_thread(
+                _render_resource_pdf, tmp.name, resource.hub_id
+            )
     except Exception as exc:  # noqa: BLE001
         resource.vectorize_status = "failed"
         resource.error_message = str(exc)[:500]
@@ -275,6 +312,9 @@ async def _vectorize_resource(db, resource: RHResource) -> None:
             os.unlink(tmp.name)
         except OSError:
             pass
+
+    # Record the rendered-PDF URL (None → viewer uses the Office embed fallback).
+    resource.rendered_pdf_url = rendered_pdf_url
 
     # Per-slide chunks: (slide_index, content, token_count)
     slide_chunks: List[Tuple[int, str, int]] = []
@@ -394,11 +434,18 @@ async def sync_resources() -> Dict[str, Any]:
 
                 # Vectorize file-based resources (skip videos / links / unchanged).
                 rtype = resource.resource_type
+                # Office decks need a rendered PDF for the slide viewer; if a
+                # previously-synced one lacks it, re-process even when unchanged.
+                _ftype = _detect_file_type(resource.file_url, rtype)
+                _missing_pdf = _ftype in ("pptx", "docx") and not resource.rendered_pdf_url
                 if rtype in NON_FILE_RESOURCE_TYPES or not resource.file_url:
                     resource.vectorize_status = "skipped"
                     counts["skipped"] += 1
-                elif not is_new and resource.content_hash == new_hash and resource.vectorize_status == "ready":
-                    pass  # unchanged, already vectorized
+                elif (
+                    not is_new and resource.content_hash == new_hash
+                    and resource.vectorize_status == "ready" and not _missing_pdf
+                ):
+                    pass  # unchanged, already vectorized + rendered
                 else:
                     await _vectorize_resource(db, resource)
                     if resource.vectorize_status == "ready":

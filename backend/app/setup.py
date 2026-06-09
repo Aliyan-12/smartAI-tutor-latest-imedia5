@@ -148,6 +148,7 @@ async def run_setup(fresh: bool = False):
             content_hash VARCHAR(64),
             page_count INTEGER DEFAULT 0,
             error_message TEXT,
+            rendered_pdf_url TEXT,
             raw_json JSONB,
             synced_at TIMESTAMP WITH TIME ZONE,
             created_at TIMESTAMP WITH TIME ZONE,

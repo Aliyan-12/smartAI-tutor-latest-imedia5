@@ -133,6 +133,9 @@ async def get_slide_payload(db: AsyncSession, resource: RHResource, slide_index:
         "title": resource.title,
         "resource_type": resource.resource_type,
         "file_url": _https(resource.file_url),
+        # App-served, slide-navigable PDF for Office decks (None for native
+        # PDFs / links → viewer uses file_url / embed instead).
+        "pdf_url": resource.rendered_pdf_url,
         "youtube_url": _https(resource.youtube_url),
         "external_url": _https(resource.external_url),
         "slide_index": slide_index,

@@ -154,6 +154,9 @@ class RHResource(Base):
     content_hash: Mapped[str] = mapped_column(String(64), nullable=True)
     page_count: Mapped[int] = mapped_column(Integer, default=0)
     error_message: Mapped[str] = mapped_column(Text, nullable=True)
+    # App-served URL of the LibreOffice-rendered, slide-navigable PDF (Office
+    # formats only). NULL → viewer falls back to the Office Online embed.
+    rendered_pdf_url: Mapped[str] = mapped_column(Text, nullable=True)
 
     raw_json: Mapped[dict] = mapped_column(JSONB, nullable=True)
     synced_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)

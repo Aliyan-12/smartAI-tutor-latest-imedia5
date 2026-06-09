@@ -9,6 +9,8 @@ export interface ResourceSlide {
   title: string;
   resourceType: string;
   fileUrl: string | null;
+  /** App-served, slide-navigable PDF (Office decks rendered by LibreOffice). */
+  pdfUrl: string | null;
   youtubeUrl: string | null;
   externalUrl: string | null;
   slideIndex: number;
@@ -29,9 +31,13 @@ function viewerSrc(slide: ResourceSlide): string | null {
   const type = (slide.resourceType || "").toLowerCase();
   if (type === "youtube" && slide.youtubeUrl) return youtubeEmbed(slide.youtubeUrl);
   if (type === "external_link" && slide.externalUrl) return slide.externalUrl;
+  // Rendered slide deck (PPTX/DOC → PDF): navigable to the exact slide the AI is
+  // teaching via the #page fragment. Preferred over the Office embed, which can't
+  // be driven programmatically.
+  if (slide.pdfUrl) return `${slide.pdfUrl}#page=${slide.slideIndex}&toolbar=0`;
   if (slide.fileUrl) {
     if (type === "pdf") return `${slide.fileUrl}#page=${slide.slideIndex}&toolbar=0`;
-    // powerpoint / worksheet / mark_scheme / docx → Office Online viewer
+    // powerpoint / worksheet / mark_scheme / docx with no rendered PDF → Office embed
     return officeEmbed(slide.fileUrl);
   }
   if (slide.externalUrl) return slide.externalUrl;
@@ -54,6 +60,13 @@ export default function ResourceViewer({ slide }: { slide: ResourceSlide }) {
   const src = viewerSrc(slide);
   const typeLabel = TYPE_LABEL[(slide.resourceType || "").toLowerCase()] || slide.resourceType || "Resource";
   const showSlideCount = slide.pageCount > 1;
+
+  // A PDF viewer reliably honours #page=N only on initial load, so for PDFs we
+  // remount per slide (the file is cached, so the reload is instant) to guarantee
+  // the page actually changes. The Office embed can't be navigated and is slow to
+  // reload, so it stays mounted across slides.
+  const isPdf = !!slide.pdfUrl || (slide.resourceType || "").toLowerCase() === "pdf";
+  const frameKey = isPdf ? `${slide.resourceHubId}-${slide.slideIndex}` : `${slide.resourceHubId}`;
 
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%", background: "#fff" }}>
@@ -86,7 +99,7 @@ export default function ResourceViewer({ slide }: { slide: ResourceSlide }) {
       <div style={{ flex: 1, minHeight: 0, position: "relative", background: "#f8fafc" }}>
         {src ? (
           <iframe
-            key={slide.resourceHubId}
+            key={frameKey}
             src={src}
             title={slide.title}
             style={{ position: "absolute", inset: 0, width: "100%", height: "100%", border: "none" }}

@@ -244,6 +244,7 @@ export default function SessionPage() {
             title: (data.title as string) || "",
             resourceType: (data.resource_type as string) || "",
             fileUrl: (data.file_url as string) ?? null,
+            pdfUrl: (data.pdf_url as string) ?? null,
             youtubeUrl: (data.youtube_url as string) ?? null,
             externalUrl: (data.external_url as string) ?? null,
             slideIndex: (data.slide_index as number) || 1,
