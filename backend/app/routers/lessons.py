@@ -32,20 +32,11 @@ async def available_filters(
     current_user: User = Depends(require_any_authenticated),
     db: AsyncSession = Depends(get_db),
 ):
-    """Return distinct subjects and key stages that have ready documents."""
-    from sqlalchemy import select, distinct
-    from app.models.documents import Document
+    """Return subjects and key stages from the Resource Hub mirror."""
+    from app.services import curriculum_service
 
-    subj_result = await db.execute(
-        select(distinct(Document.subject)).where(Document.status == "ready").order_by(Document.subject)
-    )
-    subjects = [r[0] for r in subj_result.all()]
-
-    ks_result = await db.execute(
-        select(distinct(Document.key_stage)).where(Document.status == "ready").order_by(Document.key_stage)
-    )
-    key_stages = [r[0] for r in ks_result.all()]
-
+    subjects = await curriculum_service.get_subject_names(db)
+    key_stages = await curriculum_service.get_keystages(db)
     return {"subjects": subjects, "key_stages": key_stages}
 
 
@@ -56,20 +47,14 @@ async def list_units(
     current_user: User = Depends(require_any_authenticated),
     db: AsyncSession = Depends(get_db),
 ):
-    """Return document titles (units/lessons) for a subject + key stage from knowledge base."""
-    from sqlalchemy import select
-    from app.models.documents import Document
+    """Return units for a subject + key stage from the Resource Hub mirror."""
+    from app.services import curriculum_service
 
-    result = await db.execute(
-        select(Document.id, Document.title, Document.unit_name)
-        .where(Document.subject == subject, Document.key_stage == key_stage, Document.status == "ready")
-        .order_by(Document.title)
-    )
-    rows = result.all()
+    units = await curriculum_service.get_units_by_subject_name(db, subject, key_stage)
     return {
         "units": [
-            {"id": r.id, "title": r.title, "unit_name": r.unit_name or r.title}
-            for r in rows
+            {"id": u["id"], "title": u["title"], "unit_name": u["title"]}
+            for u in units
         ]
     }
 

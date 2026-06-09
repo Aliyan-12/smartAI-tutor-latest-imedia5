@@ -588,6 +588,55 @@ export const lessonsApi = {
   },
 };
 
+// Curriculum sourced from the Resource Hub mirror (rh_* tables).
+export interface HubSubject { id: number; name: string; }
+export interface HubUnit { id: number; title: string; unit_number: number | null; }
+export interface HubTopic { id: number; title: string; }
+
+export const curriculumApi = {
+  async getKeyStages() {
+    const res = await fetch(`${API_BASE}/curriculum/keystages`, { headers: authHeaders() });
+    return handleResponse<{ keystages: string[] }>(res);
+  },
+  async getYears(keyStage?: string) {
+    const query = keyStage ? `?${new URLSearchParams({ keyStage })}` : "";
+    const res = await fetch(`${API_BASE}/curriculum/years${query}`, { headers: authHeaders() });
+    return handleResponse<{ years: string[] }>(res);
+  },
+  async getSubjects(keyStage?: string, yearGroup?: string) {
+    const params = new URLSearchParams();
+    if (keyStage) params.set("keyStage", keyStage);
+    if (yearGroup) params.set("yearGroup", yearGroup);
+    const qs = params.toString() ? `?${params}` : "";
+    const res = await fetch(`${API_BASE}/curriculum/subjects${qs}`, { headers: authHeaders() });
+    return handleResponse<{ subjects: HubSubject[] }>(res);
+  },
+  async getUnits(subjectId: number, keyStage?: string, yearGroup?: string) {
+    const params = new URLSearchParams({ subjectId: String(subjectId) });
+    if (keyStage) params.set("keyStage", keyStage);
+    if (yearGroup) params.set("yearGroup", yearGroup);
+    const res = await fetch(`${API_BASE}/curriculum/units?${params}`, { headers: authHeaders() });
+    return handleResponse<{ units: HubUnit[] }>(res);
+  },
+  async getTopics(unitId: number) {
+    const query = new URLSearchParams({ unitId: String(unitId) });
+    const res = await fetch(`${API_BASE}/curriculum/topics?${query}`, { headers: authHeaders() });
+    return handleResponse<{ topics: HubTopic[] }>(res);
+  },
+  async triggerSync(target: "all" | "curriculum" | "resources" = "all") {
+    const query = new URLSearchParams({ target });
+    const res = await fetch(`${API_BASE}/curriculum/sync?${query}`, {
+      method: "POST",
+      headers: authHeaders(),
+    });
+    return handleResponse(res);
+  },
+  async getSyncStatus() {
+    const res = await fetch(`${API_BASE}/curriculum/sync/status`, { headers: authHeaders() });
+    return handleResponse(res);
+  },
+};
+
 export const slidesApi = {
   generate: async (
     text: string,

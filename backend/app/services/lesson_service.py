@@ -8,11 +8,10 @@ import re
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
-from sqlalchemy import select, func, distinct
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from app.models.documents import Document, DocumentChunk
 from app.models.lesson_plan import LessonPlan
 
 logger = logging.getLogger(__name__)
@@ -26,59 +25,36 @@ async def get_topics_for_subject(
     db: AsyncSession, subject: str, key_stage: str
 ) -> List[Dict[str, Any]]:
     """
-    Return a list of unique unit_name values (with document counts) for the
-    given subject and key_stage, restricted to documents with status='ready'.
+    Return the units for the given subject + key stage from the Resource Hub
+    mirror, shaped as {unit_name, document_count} for backward compatibility.
     """
-    result = await db.execute(
-        select(
-            Document.unit_name,
-            func.count(Document.id).label("document_count"),
-        )
-        .where(
-            Document.subject == subject,
-            Document.key_stage == key_stage,
-            Document.status == "ready",
-            Document.unit_name.isnot(None),
-        )
-        .group_by(Document.unit_name)
-        .order_by(Document.unit_name)
-    )
-    rows = result.all()
-    return [{"unit_name": row.unit_name, "document_count": row.document_count} for row in rows]
+    from app.services import curriculum_service
+
+    units = await curriculum_service.get_units_by_subject_name(db, subject, key_stage)
+    return [{"unit_name": u["title"], "document_count": 0} for u in units]
 
 
 async def get_subtopics(
     db: AsyncSession, subject: str, unit_name: str
 ) -> List[str]:
     """
-    Return unique topic_tag values from DocumentChunk rows whose parent Document
-    matches *subject* and *unit_name*.
+    Return the topic titles for a unit (matched by title) from the Resource Hub
+    mirror.
     """
-    doc_result = await db.execute(
-        select(Document.id).where(
-            Document.subject == subject,
-            Document.unit_name == unit_name,
-            Document.status == "ready",
-        )
-    )
-    doc_ids = [row[0] for row in doc_result.all()]
+    from app.models.resource_hub import RHUnit, RHTopic
 
-    if not doc_ids:
+    unit = (await db.execute(
+        select(RHUnit).where(RHUnit.title == unit_name)
+    )).scalar_one_or_none()
+    if unit is None:
         return []
 
-    from app.models.assessment import AssessmentQuestion, Assessment
-
-    aq_result = await db.execute(
-        select(distinct(AssessmentQuestion.topic_tag))
-        .join(Assessment, Assessment.id == AssessmentQuestion.assessment_id)
-        .where(
-            Assessment.subject == subject,
-            AssessmentQuestion.topic_tag.isnot(None),
-            AssessmentQuestion.topic_tag != "",
-        )
-    )
-    tags = [row[0] for row in aq_result.all() if row[0]]
-    return sorted(set(tags))
+    rows = (await db.execute(
+        select(RHTopic.title)
+        .where(RHTopic.unit_hub_id == unit.hub_id)
+        .order_by(RHTopic.position, RHTopic.id)
+    )).all()
+    return [r[0] for r in rows]
 
 
 # ---------------------------------------------------------------------------

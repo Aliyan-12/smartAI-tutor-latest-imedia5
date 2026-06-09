@@ -189,6 +189,108 @@ async def retrieve_relevant_chunks(
         return []
 
 
+HUB_SQL = """
+    SELECT
+        c.id              AS chunk_id,
+        c.rh_document_id,
+        c.slide_index,
+        r.hub_id          AS resource_hub_id,
+        r.title           AS resource_title,
+        r.resource_type,
+        COALESCE(r.subject_name, '') AS subject,
+        COALESCE(r.key_stage, '')    AS key_stage,
+        c.content,
+        1 - (c.embedding <=> $1::vector) AS similarity
+    FROM rh_document_chunks c
+    JOIN rh_documents d ON d.id = c.rh_document_id
+    JOIN rh_resources r ON r.id = d.resource_id
+    WHERE c.embedding IS NOT NULL
+      AND d.status = 'ready'
+"""
+
+
+async def retrieve_hub_chunks(
+    db,
+    query: str,
+    *,
+    key_stage: Optional[str] = None,
+    year_group: Optional[str] = None,
+    subject: Optional[str] = None,
+    unit_title: Optional[str] = None,
+    topic_title: Optional[str] = None,
+    resource_types: Optional[List[str]] = None,
+    top_k: Optional[int] = None,
+) -> List[RetrievedChunk]:
+    """
+    Similarity search over vectorized Resource Hub content (rh_document_chunks),
+    optionally filtered by curriculum coordinates + resource type. Sessions pass
+    tight filters (unit/topic + goal resource types); simple chat passes loose
+    ones (subject / key stage).
+    """
+    if top_k is None:
+        top_k = settings.rag_top_k
+
+    try:
+        query_embedding = await embed_query(query)
+    except Exception as e:
+        logger.warning(f"Hub query embedding failed, skipping RAG: {e}")
+        return []
+
+    embedding_literal = "[" + ",".join(str(v) for v in query_embedding) + "]"
+    clauses: List[str] = []
+    params: list = [embedding_literal, top_k]
+    idx = 3
+
+    def add(cond: str, val) -> None:
+        nonlocal idx
+        clauses.append(cond.format(idx))
+        params.append(val)
+        idx += 1
+
+    if key_stage:
+        add("AND r.key_stage = ${}", key_stage)
+    if year_group:
+        add("AND r.year_group = ${}", year_group)
+    if subject:
+        add("AND r.subject_name = ${}", subject)
+    if unit_title:
+        add("AND r.unit_title = ${}", unit_title)
+    if topic_title:
+        add("AND r.topic_title = ${}", topic_title)
+    if resource_types:
+        add("AND r.resource_type = ANY(${})", list(resource_types))
+
+    sql_str = f"{HUB_SQL} {' '.join(clauses)} ORDER BY c.embedding <=> $1::vector LIMIT $2"
+
+    try:
+        conn = await db.connection()
+        raw_conn = await conn.get_raw_connection()
+        asyncpg_conn = raw_conn.dbapi_connection._connection
+        rows = await asyncpg_conn.fetch(sql_str, *params)
+
+        chunks: List[RetrievedChunk] = []
+        for row in rows:
+            sim = float(row["similarity"])
+            if sim < settings.rag_min_similarity:
+                continue
+            chunks.append(RetrievedChunk(
+                chunk_id=row["chunk_id"],
+                document_id=row["rh_document_id"],
+                document_title=row["resource_title"],
+                subject=row["subject"],
+                key_stage=row["key_stage"],
+                content=row["content"],
+                similarity=sim,
+            ))
+
+        if chunks:
+            logger.info(f"Hub RAG retrieved {len(chunks)} chunks (top: {chunks[0].similarity:.3f})")
+        return chunks
+    except Exception as e:
+        logger.warning(f"Hub pgvector search failed, skipping RAG: {e}")
+        return []
+
+
 async def retrieve_training_style_examples(
     db,
     query: str,

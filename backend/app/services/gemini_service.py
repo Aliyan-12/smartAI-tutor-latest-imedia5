@@ -158,6 +158,9 @@ def _is_thinking_token(text: str) -> bool:
         "advance_lesson_phase",
         "evaluate_answer",
         "generate_session_report",
+        "show_resource",
+        "advance_lesson_slide",
+        "retreat_lesson_slide",
         "web_search",
         "deep_research",
     )
@@ -419,8 +422,12 @@ async def stream_response_async(
 
     _reset_tool_call_state()   # clear paren-tracking state for this stream
 
-    for _round in range(3):   # max 3 tool-call rounds
+    emitted_text = False        # have we yielded any visible answer text yet?
+    preamble_text = ""          # last tool-round's text, kept ONLY as a fallback
+
+    for _round in range(4):   # max 4 tool-call rounds
         full_response = None
+        round_parts: List[str] = []   # buffer THIS round's visible text
 
         try:
             async for chunk in llm.astream(messages):
@@ -436,19 +443,41 @@ async def stream_response_async(
                         logger.debug(f"Suppressed internal token: {content[:80]!r}")
                         # Still accumulate for full_response so tool calls parse correctly
                     else:
-                        yield content
+                        # Buffer — do NOT yield yet. We only learn whether this round is
+                        # the final answer (vs. tool preamble) once the round completes.
+                        # Yielding eagerly is exactly what duplicated the reply: the model
+                        # writes its answer, calls a tool, then RE-writes the answer next
+                        # round, so both copies reached the student.
+                        round_parts.append(content)
                 full_response = (full_response + chunk) if full_response is not None else chunk
         except Exception as e:
             logger.error(f"LangChain astream error (round {_round}): {e}")
             yield f"[Error: {_friendly_error(e)}]"
             return
 
-        # If no tool calls in the response, we are done
+        round_text = "".join(round_parts)
         tool_calls = getattr(full_response, "tool_calls", None) if full_response is not None else None
+
+        # No tool calls → this round IS the final answer. Emit it now.
         if not tool_calls:
+            if round_text:
+                yield round_text
+                emitted_text = True
+            elif not emitted_text and preamble_text:
+                # Model went silent after a tool — surface the earlier text so the
+                # student never gets an empty bubble.
+                yield preamble_text
+                emitted_text = True
             if _round > 0:
                 logger.info(f"Tool loop completed after {_round + 1} round(s)")
             break
+
+        # This round called tools. Any text it emitted is "preamble" the model writes
+        # before the call and then re-states next round → keep it only as a fallback.
+        # Run the tool(s) FIRST (so the viewer/quiz updates), THEN the next round's
+        # text is what the student sees → "execute tool, then respond".
+        if round_text.strip():
+            preamble_text = round_text
 
         tool_map = {t.name: t for t in tools}
         tool_messages = []
@@ -475,10 +504,19 @@ async def stream_response_async(
                 logger.error(f"Tool '{tool_name}' execution failed: {type(e).__name__}: {e}", exc_info=True)
 
         if not tool_messages:
+            # Couldn't run any tool — fall back to showing the preamble so the turn
+            # isn't silent.
+            if round_text and not emitted_text:
+                yield round_text
+                emitted_text = True
             break
 
         # Append assistant message + tool results, then loop for the next LLM turn
         messages = messages + [full_response] + tool_messages
+    else:
+        # Ran out of rounds while still calling tools — surface the last text we have.
+        if not emitted_text and preamble_text:
+            yield preamble_text
 
 
 # ---------------------------------------------------------------------------

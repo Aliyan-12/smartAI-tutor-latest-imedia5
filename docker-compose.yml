@@ -33,6 +33,11 @@ services:
       POSTGRES_HOST: db
       GEMINI_SESSION_MODEL: ${GEMINI_SESSION_MODEL:-gemini-2.5-pro}
       GEMINI_CHAT_MODEL: ${GEMINI_CHAT_MODEL:-gemini-2.5-flash}
+      RESOURCEHUB_API_KEY: ${RESOURCEHUB_API_KEY:-}
+      RESOURCEHUB_API_URL: ${RESOURCEHUB_API_URL:-}
+      RESOURCE_SYNC_ENABLED: ${RESOURCE_SYNC_ENABLED:-true}
+      CURRICULUM_SYNC_HOURS: ${CURRICULUM_SYNC_HOURS:-12}
+      RESOURCE_SYNC_HOURS: ${RESOURCE_SYNC_HOURS:-6}
     volumes:
       - ./backend:/app
       - backend_uploads:/app/uploads

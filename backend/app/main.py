@@ -11,7 +11,7 @@ from app.middleware.rate_limit import RateLimitMiddleware
 from app.routers import auth, chat, voice, health, admin, teacher, subscription, documents
 from app.routers import parent, appointments, assessments, gamification, lessons, assignments
 from app.routers import settings as settings_router
-from app.routers import sessions
+from app.routers import sessions, curriculum
 
 logging.basicConfig(
     level=logging.INFO,
@@ -38,9 +38,32 @@ async def lifespan(app: FastAPI):
     except Exception as _kokoro_err:
         logger.warning(f"Kokoro TTS pre-warm failed (non-fatal): {_kokoro_err}")
 
+    # Resource Hub: kick off an initial sync + start the periodic scheduler
+    # (all non-fatal — the app must boot even if the hub is unreachable). The
+    # initial sync is decoupled from the scheduler so it still runs if APScheduler
+    # is unavailable.
+    if settings.resource_sync_enabled:
+        try:
+            from app.services import resource_sync_service
+            asyncio.create_task(resource_sync_service.sync_curriculum())
+            asyncio.create_task(resource_sync_service.sync_resources())
+            logger.info("Resource Hub initial sync scheduled.")
+        except Exception as _sync_err:
+            logger.warning(f"Resource Hub initial sync failed (non-fatal): {_sync_err}")
+        try:
+            from app.jobs.scheduler import start_scheduler
+            start_scheduler()
+        except Exception as _sched_err:
+            logger.warning(f"Resource Hub scheduler not started (non-fatal): {_sched_err}")
+
     logger.info("=== SmartAI Tutor ready ===")
     yield
     logger.info("=== SmartAI Tutor shutting down ===")
+    try:
+        from app.jobs.scheduler import shutdown_scheduler
+        shutdown_scheduler()
+    except Exception:
+        pass
 
 
 app = FastAPI(
@@ -87,3 +110,4 @@ app.include_router(lessons.router)
 app.include_router(assignments.router)
 app.include_router(settings_router.router)
 app.include_router(sessions.router)
+app.include_router(curriculum.router)

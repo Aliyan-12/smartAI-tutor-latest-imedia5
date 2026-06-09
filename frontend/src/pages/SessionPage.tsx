@@ -5,6 +5,7 @@ import ResizablePanels from "../components/ResizablePanels";
 import { appointmentsApi, assessmentsApi, sessionsApi, gamificationApi, chatApi } from "../services/api";
 import ChatWindow from "../components/ChatWindow";
 import ChatInput from "../components/ChatInput";
+import ResourceViewer, { type ResourceSlide } from "../components/ResourceViewer";
 import AssessmentMode from "../components/AssessmentMode";
 import PostSessionScreen from "../components/PostSessionScreen";
 import { useVoice } from "../hooks/useVoice";
@@ -161,6 +162,9 @@ export default function SessionPage() {
   const [testAnswering, setTestAnswering] = useState(false);
 
   const [toolResults, setToolResults] = useState<Array<{ tool: string; data: Record<string, unknown>; id: string }>>([]);
+  // The resource/slide the AI is currently teaching from (drives the "learn" tab viewer).
+  const [currentResource, setCurrentResource] = useState<ResourceSlide | null>(null);
+  const SLIDE_TOOLS = ["show_resource", "advance_lesson_slide", "retreat_lesson_slide"];
 
   // Attachment / web-search opts for ChatInput
   const [webSearchEnabled, setWebSearchEnabled] = useState(false);
@@ -232,6 +236,22 @@ export default function SessionPage() {
           assessment_id: data.assessment_id as number | undefined,
           questions: data.questions as QuizOffer["questions"],
         });
+      } else if (SLIDE_TOOLS.includes(tool)) {
+        // The AI moved/showed a teaching resource — render it in the "learn" panel.
+        if (data.resource_hub_id) {
+          setCurrentResource({
+            resourceHubId: data.resource_hub_id as number,
+            title: (data.title as string) || "",
+            resourceType: (data.resource_type as string) || "",
+            fileUrl: (data.file_url as string) ?? null,
+            pdfUrl: (data.pdf_url as string) ?? null,
+            youtubeUrl: (data.youtube_url as string) ?? null,
+            externalUrl: (data.external_url as string) ?? null,
+            slideIndex: (data.slide_index as number) || 1,
+            pageCount: (data.page_count as number) || 1,
+          });
+          setLearnTab("learn");
+        }
       } else {
         setToolResults((prev) => [...prev, { tool, data, id: Date.now().toString() }]);
       }
@@ -1061,18 +1081,24 @@ export default function SessionPage() {
           </div>
         ) : null}
         {!isPaused && learnTab === "learn" && (
-          <div style={{
-            display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center",
-            height: "100%", textAlign: "center", padding: 24, color: "var(--text-muted, #64748b)",
-          }}>
-            <span style={{ fontSize: 44, marginBottom: 12 }}>📊</span>
-            <p style={{ margin: 0, fontSize: 14, fontWeight: 700, color: "var(--text-primary, #1a1a1a)" }}>
-              Slides will appear here
-            </p>
-            <p style={{ margin: "6px 0 0", fontSize: 12 }}>
-              Your AI tutor's lesson slides will show up in this panel as you learn.
-            </p>
-          </div>
+          currentResource ? (
+            <div style={{ flex: 1, minHeight: "70vh", display: "flex", flexDirection: "column" }}>
+              <ResourceViewer slide={currentResource} />
+            </div>
+          ) : (
+            <div style={{
+              display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center",
+              height: "100%", textAlign: "center", padding: 24, color: "var(--text-muted, #64748b)",
+            }}>
+              <span style={{ fontSize: 44, marginBottom: 12 }}>📊</span>
+              <p style={{ margin: 0, fontSize: 14, fontWeight: 700, color: "var(--text-primary, #1a1a1a)" }}>
+                Slides will appear here
+              </p>
+              <p style={{ margin: "6px 0 0", fontSize: 12 }}>
+                Your AI tutor's lesson slides will show up in this panel as you learn.
+              </p>
+            </div>
+          )
         )}
 
         {!isPaused && learnTab === "test" && (
@@ -1923,6 +1949,8 @@ const styles: Record<string, React.CSSProperties> = {
   learnContent: {
     flex: 1,
     overflowY: "auto",
+    display: "flex",
+    flexDirection: "column",
   },
   learnMessagesWrap: {
     height: "100%",
