@@ -7,7 +7,8 @@ import {
 } from "lucide-react";
 import Sidebar from "../components/Sidebar";
 import { useAuth } from "../context/AuthContext";
-import { appointmentsApi, teacherApi, parentApi, lessonsApi } from "../services/api";
+import { appointmentsApi, teacherApi, parentApi, curriculumApi } from "../services/api";
+import type { HubSubject } from "../services/api";
 import type { User as UserType } from "../types";
 
 // ── Session type constants ────────────────────────────────────────────────────
@@ -244,9 +245,12 @@ export default function BookSessionPage() {
   const [loadingAvailability, setLoadingAvailability] = useState(false);
   const [studentKeyStage, setStudentKeyStage] = useState("");
 
-  const [kbSubjects, setKbSubjects] = useState<string[]>([]);
+  // Curriculum sourced from the Resource Hub mirror (KS → Year → Subject → Unit).
+  const [hubSubjects, setHubSubjects] = useState<HubSubject[]>([]);
+  const [hubYears, setHubYears] = useState<string[]>([]);
+  const [subjectId, setSubjectId] = useState<number | null>(null);
   const [kbStages, setKbStages] = useState<string[]>([]);
-  const [kbUnits, setKbUnits] = useState<Array<{ id: number; title: string; unit_name: string }>>([]);
+  const [kbUnits, setKbUnits] = useState<Array<{ id: number; title: string; unit_name: string; has_resources: boolean }>>([]);
   const [selectedUnits, setSelectedUnits] = useState<string[]>([]);
 
   const [form, setForm] = useState({
@@ -254,6 +258,7 @@ export default function BookSessionPage() {
     teacher_id: isTeacher ? String(user?.id ?? "") : "",
     subject: "",
     key_stage: "",
+    year_group: "",
     session_type: "Learn from Scratch",
     title: "",
     date: "",
@@ -282,42 +287,70 @@ export default function BookSessionPage() {
   useEffect(() => {
     const load = async () => {
       try {
-        const filtersPromise = lessonsApi.getAvailableFilters();
+        const ksPromise = curriculumApi.getKeyStages();
         if (isTeacher) {
-          const [studentList, filters] = await Promise.all([
+          const [studentList, ks] = await Promise.all([
             teacherApi.getStudents() as Promise<UserType[]>,
-            filtersPromise,
+            ksPromise,
           ]);
           setStudents(studentList);
-          setKbSubjects(filters.subjects);
-          setKbStages(filters.key_stages);
+          setKbStages(ks.keystages ?? []);
         } else if (isParent) {
-          const [studentList, teacherList, filters] = await Promise.all([
+          const [studentList, teacherList, ks] = await Promise.all([
             parentApi.getStudents() as Promise<UserType[]>,
             appointmentsApi.getTeachers() as Promise<UserType[]>,
-            filtersPromise,
+            ksPromise,
           ]);
           setStudents(studentList);
           setTeachers(teacherList);
-          setKbSubjects(filters.subjects);
-          setKbStages(filters.key_stages);
+          setKbStages(ks.keystages ?? []);
         }
       } catch {}
     };
     load();
   }, [isTeacher, isParent]);
 
+  // Curriculum cascade (Resource Hub): KeyStage → Year → Subject → Unit/Topic.
+  // Year groups when the key stage changes.
   useEffect(() => {
-    if (!form.subject || !form.key_stage) {
+    if (!form.key_stage) { setHubYears([]); return; }
+    curriculumApi.getYears(form.key_stage)
+      .then((data) => setHubYears(data.years ?? []))
+      .catch(() => setHubYears([]));
+  }, [form.key_stage]);
+
+  // Subjects once BOTH key stage AND year group are chosen.
+  useEffect(() => {
+    if (!form.key_stage || !form.year_group) { setHubSubjects([]); return; }
+    curriculumApi.getSubjects(form.key_stage, form.year_group)
+      .then((data) => setHubSubjects(data.subjects ?? []))
+      .catch(() => setHubSubjects([]));
+  }, [form.key_stage, form.year_group]);
+
+  // Resolve subjectId from the chosen subject name.
+  useEffect(() => {
+    if (form.subject && hubSubjects.length) {
+      const m = hubSubjects.find((s) => s.name === form.subject);
+      setSubjectId(m ? m.id : null);
+    } else {
+      setSubjectId(null);
+    }
+  }, [form.subject, hubSubjects]);
+
+  // Units (the "topics" picker) once the subject is resolved.
+  useEffect(() => {
+    if (!subjectId || !form.key_stage) {
       setKbUnits([]);
       setSelectedUnits([]);
       return;
     }
-    lessonsApi
-      .getUnits(form.subject, form.key_stage)
-      .then((data) => { setKbUnits(data.units); setSelectedUnits([]); })
+    curriculumApi.getUnits(subjectId, form.key_stage, form.year_group || undefined)
+      .then((data) => {
+        setKbUnits((data.units ?? []).map((u) => ({ id: u.id, title: u.title, unit_name: u.title, has_resources: u.has_resources })));
+        setSelectedUnits([]);
+      })
       .catch(() => setKbUnits([]));
-  }, [form.subject, form.key_stage]);
+  }, [subjectId, form.key_stage, form.year_group]);
 
   useEffect(() => {
     if (!topicDropdownOpen) return;
@@ -356,6 +389,9 @@ export default function BookSessionPage() {
       const available = getAvailableDurations(ks);
       setForm((f) => ({
         ...f,
+        // Default the curriculum key stage to the student's own, but don't override
+        // a key stage the teacher/parent already picked.
+        key_stage: f.key_stage || ks,
         duration_minutes: available.includes(parseInt(f.duration_minutes)) ? f.duration_minutes : "40",
       }));
     } catch {
@@ -413,6 +449,7 @@ export default function BookSessionPage() {
           [
             selectedUnits.length > 0 ? `Topics: ${selectedUnits.join(", ")}` : "",
             form.session_type ? `Session type: ${form.session_type}` : "",
+            form.year_group ? `Year group: ${form.year_group}` : "",
             form.description || "",
           ].filter(Boolean).join("\n") || undefined,
         payment_amount: form.payment_amount ? parseFloat(form.payment_amount) : undefined,
@@ -443,6 +480,12 @@ export default function BookSessionPage() {
   const summaryComplete = !!(form.student_id && form.subject && form.date && form.time);
   const previewSteps = getPreviewSteps(form.session_type, form.duration_minutes);
   const durConfig = SESSION_TYPE_DURATIONS.find((d) => d.value === form.duration_minutes);
+  // Selected units with no teaching resources on the Hub (warning only — the
+  // session can still be booked; the AI falls back to general knowledge).
+  const unitsWithoutResources = selectedUnits.filter((u) => {
+    const unit = kbUnits.find((x) => x.unit_name === u);
+    return unit && !unit.has_resources;
+  });
 
   return (
     <div style={{ display: "flex", height: "100vh", overflow: "hidden", background: "#f8fafc" }}>
@@ -627,33 +670,48 @@ export default function BookSessionPage() {
                   </div>
                 </div>
 
-                {/* Subject · Key Stage · Topic — single row */}
-                <div style={{ display: "flex", gap: 12, marginBottom: 14, alignItems: "flex-start" }}>
-                  <div style={{ flex: 1, minWidth: 120 }}>
-                    <label style={s.label}>Subject *</label>
-                    <select
-                      value={form.subject}
-                      onChange={(e) => setForm((f) => ({ ...f, subject: e.target.value, key_stage: "", title: "" }))}
-                      required
-                      style={selectStyle}
-                    >
-                      <option value="">Select subject</option>
-                      {kbSubjects.map((sub) => (
-                        <option key={sub} value={sub}>{getSubjectEmoji(sub)} {sub}</option>
-                      ))}
-                    </select>
-                  </div>
-                  <div style={{ flex: 1, minWidth: 120 }}>
+                {/* Key Stage · Year Group · Subject · Topic — single row (Resource Hub cascade) */}
+                <div style={{ display: "flex", gap: 12, marginBottom: 14, alignItems: "flex-start", flexWrap: "wrap" }}>
+                  <div style={{ flex: 1, minWidth: 110 }}>
                     <label style={s.label}>Key Stage *</label>
                     <select
                       value={form.key_stage}
-                      onChange={(e) => setForm((f) => ({ ...f, key_stage: e.target.value }))}
-                      style={{ ...selectStyle, opacity: form.subject ? 1 : 0.5 }}
-                      disabled={!form.subject}
+                      onChange={(e) => setForm((f) => ({ ...f, key_stage: e.target.value, year_group: "", subject: "", title: "" }))}
+                      required
+                      style={selectStyle}
                     >
                       <option value="">Select key stage</option>
                       {kbStages.map((k) => (
                         <option key={k} value={k}>{k}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div style={{ flex: 1, minWidth: 110 }}>
+                    <label style={s.label}>Year Group *</label>
+                    <select
+                      value={form.year_group}
+                      onChange={(e) => setForm((f) => ({ ...f, year_group: e.target.value, subject: "", title: "" }))}
+                      style={{ ...selectStyle, opacity: form.key_stage ? 1 : 0.5 }}
+                      disabled={!form.key_stage}
+                    >
+                      <option value="">{form.key_stage ? "Select year group" : "Choose key stage first"}</option>
+                      {hubYears.map((y) => (
+                        <option key={y} value={y}>{y}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div style={{ flex: 1, minWidth: 120 }}>
+                    <label style={s.label}>Subject *</label>
+                    <select
+                      value={form.subject}
+                      onChange={(e) => setForm((f) => ({ ...f, subject: e.target.value }))}
+                      required
+                      style={{ ...selectStyle, opacity: form.year_group ? 1 : 0.5 }}
+                      disabled={!form.year_group}
+                    >
+                      <option value="">{form.year_group ? "Select subject" : "Choose year group first"}</option>
+                      {hubSubjects.map((sub) => (
+                        <option key={sub.id} value={sub.name}>{getSubjectEmoji(sub.name)} {sub.name}</option>
                       ))}
                     </select>
                   </div>
@@ -737,9 +795,18 @@ export default function BookSessionPage() {
                                 }}>
                                   {sel && <span style={{ color: "#fff", fontSize: 10, fontWeight: 900, lineHeight: 1 }}>✓</span>}
                                 </div>
-                                <span style={{ fontSize: 13, color: sel ? "#1a73e8" : "#0f172a", fontWeight: sel ? 600 : 400 }}>
+                                <span style={{ fontSize: 13, color: sel ? "#1a73e8" : "#0f172a", fontWeight: sel ? 600 : 400, flex: 1 }}>
                                   {unit.title}
                                 </span>
+                                {!unit.has_resources && (
+                                  <span style={{
+                                    fontSize: 10, fontWeight: 600, color: "#b45309",
+                                    background: "#fef3c7", borderRadius: 6, padding: "2px 6px",
+                                    flexShrink: 0, whiteSpace: "nowrap",
+                                  }}>
+                                    No Hub resources
+                                  </span>
+                                )}
                               </button>
                             );
                           })}
@@ -766,6 +833,27 @@ export default function BookSessionPage() {
                               >×</button>
                             </span>
                           ))}
+                        </div>
+                      )}
+
+                      {/* Warning: selected unit(s) have no Resource Hub material.
+                          The session can still be booked — the AI uses general knowledge. */}
+                      {unitsWithoutResources.length > 0 && (
+                        <div style={{
+                          display: "flex", alignItems: "flex-start", gap: 8, marginTop: 8,
+                          padding: "8px 10px", background: "#fffbeb",
+                          border: "1px solid #fde68a", borderRadius: 8,
+                        }}>
+                          <span style={{ fontSize: 13, lineHeight: 1.4 }}>⚠️</span>
+                          <span style={{ fontSize: 12, color: "#92400e", lineHeight: 1.4 }}>
+                            No resources on the Hub yet for{" "}
+                            <strong>
+                              {unitsWithoutResources
+                                .map((t) => kbUnits.find((u) => u.unit_name === t)?.title ?? t)
+                                .join(", ")}
+                            </strong>
+                            . You can still book the session — the AI tutor will teach from its general knowledge.
+                          </span>
                         </div>
                       )}
                     </div>
@@ -890,12 +978,6 @@ export default function BookSessionPage() {
                     style={inputStyle}
                   />
                 </div>
-
-                {form.subject && form.key_stage && kbUnits.length === 0 && (
-                  <p style={{ fontSize: 12, color: "var(--text-muted)", margin: "8px 0 0" }}>
-                    No KB documents for {form.subject} {form.key_stage} — AI will use general knowledge.
-                  </p>
-                )}
 
               </div>
 
@@ -1177,8 +1259,9 @@ export default function BookSessionPage() {
                     [
                       { label: "Student", value: selectedStudent?.name },
                       { label: "Teacher", value: selectedTeacher?.name },
-                      { label: "Subject", value: form.subject || undefined },
                       { label: "Key Stage", value: form.key_stage || undefined },
+                      { label: "Year Group", value: form.year_group || undefined },
+                      { label: "Subject", value: form.subject || undefined },
                       { label: "Goal", value: form.session_type || undefined },
                       { label: "Topics", value: selectedUnits.length > 0 ? selectedUnits.join(", ") : undefined },
                       { label: "Date & Time", value: formatDateTime() ?? undefined },

@@ -277,7 +277,7 @@ export default function LessonSetupPage() {
   const [hubSubjects, setHubSubjects] = useState<HubSubject[]>([]);
   const [hubYears, setHubYears] = useState<string[]>([]);
   const [kbStages, setKbStages] = useState<string[]>([]);   // key stages
-  const [kbUnits, setKbUnits] = useState<Array<{ id: number; title: string; unit_name: string }>>([]);
+  const [kbUnits, setKbUnits] = useState<Array<{ id: number; title: string; unit_name: string; has_resources: boolean }>>([]);
 
   // ── Other data state ────────────────────────────────────────────────────
   const [profile, setProfile] = useState<StudentProfile | null>(null);
@@ -290,6 +290,12 @@ export default function LessonSetupPage() {
 
   // ── Derived ─────────────────────────────────────────────────────────────
   const canSubmit = subject.trim() !== "" && keyStage.trim() !== "" && selectedTopics.length > 0;
+  // Selected units that have no teaching resources on the Hub (warning only —
+  // the session can still start; the AI falls back to general knowledge).
+  const topicsWithoutResources = selectedTopics.filter((t) => {
+    const u = kbUnits.find((x) => x.unit_name === t);
+    return u && !u.has_resources;
+  });
 
   // Curriculum cascade (Resource Hub): KeyStage → Year → Subject → Unit/Topic.
   // 1. Key stages on mount.
@@ -334,7 +340,7 @@ export default function LessonSetupPage() {
     }
     curriculumApi.getUnits(subjectId, keyStage, yearGroup || undefined)
       .then((data) => {
-        setKbUnits((data.units ?? []).map((u) => ({ id: u.id, title: u.title, unit_name: u.title })));
+        setKbUnits((data.units ?? []).map((u) => ({ id: u.id, title: u.title, unit_name: u.title, has_resources: u.has_resources })));
         setSelectedTopics([]);
       })
       .catch(() => setKbUnits([]));
@@ -879,9 +885,18 @@ export default function LessonSetupPage() {
                                 }}>
                                   {sel && <span style={{ color: "#fff", fontSize: 10, fontWeight: 900, lineHeight: 1 }}>✓</span>}
                                 </div>
-                                <span style={{ fontSize: 13, color: sel ? "#1a73e8" : "#0f172a", fontWeight: sel ? 600 : 400, lineHeight: 1.3 }}>
+                                <span style={{ fontSize: 13, color: sel ? "#1a73e8" : "#0f172a", fontWeight: sel ? 600 : 400, lineHeight: 1.3, flex: 1 }}>
                                   {unit.title}
                                 </span>
+                                {!unit.has_resources && (
+                                  <span style={{
+                                    fontSize: 10, fontWeight: 600, color: "#b45309",
+                                    background: "#fef3c7", borderRadius: 6, padding: "2px 6px",
+                                    flexShrink: 0, whiteSpace: "nowrap",
+                                  }}>
+                                    No Hub resources
+                                  </span>
+                                )}
                               </button>
                             );
                           })}
@@ -911,6 +926,27 @@ export default function LessonSetupPage() {
                             >×</button>
                           </span>
                         ))}
+                      </div>
+                    )}
+
+                    {/* Warning: selected unit(s) have no Resource Hub material.
+                        The session can still start — the AI uses general knowledge. */}
+                    {topicsWithoutResources.length > 0 && (
+                      <div style={{
+                        display: "flex", alignItems: "flex-start", gap: 8, marginTop: 8,
+                        padding: "8px 10px", background: "#fffbeb",
+                        border: "1px solid #fde68a", borderRadius: 8,
+                      }}>
+                        <span style={{ fontSize: 13, lineHeight: 1.4 }}>⚠️</span>
+                        <span style={{ fontSize: 12, color: "#92400e", lineHeight: 1.4 }}>
+                          No resources on the Hub yet for{" "}
+                          <strong>
+                            {topicsWithoutResources
+                              .map((t) => kbUnits.find((u) => u.unit_name === t)?.title ?? t)
+                              .join(", ")}
+                          </strong>
+                          . You can still start the session — your AI tutor will teach from its general knowledge.
+                        </span>
                       </div>
                     )}
                   </div>
