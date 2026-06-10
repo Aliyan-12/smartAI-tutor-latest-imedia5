@@ -1016,15 +1016,13 @@ QUIZ RULES — FOLLOW EXACTLY:
 
 TEACHING SLIDES — TEACH FROM THE ON-SCREEN RESOURCES (IMPORTANT):
 - This lesson has real teaching slides shown on the student's screen. You MUST teach STRICTLY in slide order (slide 1, then 2, then 3…), one slide per concept, never out of order.
-- GOLDEN RULE — NAVIGATE FIRST, THEN TEACH. The slide tool MUST be called BEFORE you explain a slide's content, never after. The student must already be looking at the slide while you teach it. The correct sequence every time is:
-    1. Call the slide tool (advance / retreat / show_resource) — this moves the viewer and returns "slide_content".
-    2. THEN, in your reply, teach what is on that slide_content.
-  Never describe a slide you have not navigated to. Never teach ahead of the viewer.
-- FIRST TEACHING TURN: call advance_lesson_slide() once to load slide 1, then introduce the lesson using that slide_content. Do not narrate two slides in one turn.
+- The CURRENT slide is ALWAYS shown to you each turn in an "ON-SCREEN SLIDE N of M" block, and the student is already looking at it. Teach THAT slide's content this turn — never teach ahead of the slide on screen.
+- FIRST TEACHING TURN: slide 1 is already on screen. Introduce the lesson using that slide's content. Do NOT call advance_lesson_slide on the first turn (that would skip slide 1). Do not narrate two slides in one turn.
+- ONE SLIDE PER TURN (teaching is sequential). Cover the current slide, ask at most one short check question tied to THAT slide, and wait. Never race forward several slides in a single reply.
+- MOVING ON: only when the student has engaged with the current slide (answered its question, or clearly signalled "got it / next / ok"), call advance_lesson_slide() ONCE *first*, then teach the new slide_content it returns. Each forward step = exactly one slide.
+- GOING BACK: if the student is confused or answers wrong, call retreat_lesson_slide() ONCE *first*, then re-teach that earlier slide_content more simply before advancing again.
+- JUMPING: use show_resource ONLY when the student explicitly asks to see a specific slide ("show me the touch slide") — it may skip directly to that slide. Never use it to race forward during normal teaching.
 - Each slide tool returns "slide_content" — the exact text on the slide now showing. ALWAYS base that turn's explanation on that exact slide_content and nothing further ahead.
-- ONE SLIDE PER TURN. Cover the current slide, ask at most one short check question tied to THAT slide, and wait. Do not race through several slides in a single message.
-- MOVING ON: only when the student has engaged with the current slide (answered its question, or clearly signalled "got it / next / ok"), call advance_lesson_slide() FIRST, then teach the new slide_content. Each forward step = exactly one slide.
-- GOING BACK: if the student is confused or answers wrong, call retreat_lesson_slide() FIRST, then re-teach that earlier slide_content more simply before advancing again.
 - TEACH LIKE A WARM HUMAN TUTOR, not a narrator. Use the slide as your backbone — cover its points — but bring it to life with your own casual real-world examples and simple analogies a child relates to ("It's a bit like…"), add a sentence or two of your own so it truly lands (don't read it word-for-word), and weave the student's answers back in. Stay on THIS slide's concept.
 - Call these tools SILENTLY (never write the call as text, never say "loading the next slide"). The viewer updates automatically.
 
@@ -1463,8 +1461,14 @@ def _build_quiz_ctx(topic: str, score: float, strong: list, weak: list) -> str:
 
 
 async def _run_turn(send, chat_id, user_id, *, saved_user_text, ai_content,
-                    image_b64=None, image_mime="image/jpeg", tts=True):
-    """Run one assistant turn: save-once, stream + segment, emit turn_end with the DB id."""
+                    image_b64=None, image_mime="image/jpeg", tts=True,
+                    anchor_slides=True):
+    """Run one assistant turn: save-once, stream + segment, emit turn_end with the DB id.
+
+    anchor_slides: when True (normal teaching turns), pin the turn to the on-screen
+    slide — show the current slide and inject its content + a fresh slide-progression
+    directive so the AI teaches slide-by-slide reliably. Off for quiz-feedback turns.
+    """
     await send({"type": "turn_start", "turn_id": uuid4().hex})
 
     if tts:
@@ -1519,6 +1523,45 @@ async def _run_turn(send, chat_id, user_id, *, saved_user_text, ai_content,
                     )
             except Exception:
                 logger.warning("ToolContext build failed for appt %s", appt_id)
+
+            # ── Slide-driven teaching anchor ──────────────────────────────────
+            # The model drifts away from calling the slide tools across a long
+            # session, which freezes the viewer and lets it teach off-slide. So on
+            # every teaching turn we (1) emit show_resource for the CURRENT slide so
+            # the viewer is always in sync (never blank/stuck), and (2) inject that
+            # slide's text + a fresh, salient progression directive into the model's
+            # input so it teaches the slide on screen and steps forward one slide at
+            # a time. This is far more reliable than the static system-prompt rule.
+            if anchor_slides and tool_context is not None:
+                try:
+                    from app.services import session_resource_service as _srs
+                    current_slide = await _srs.get_current_slide(db, appt_id)
+                except Exception:
+                    current_slide = None
+                    logger.warning("Slide anchor load failed for appt %s", appt_id)
+                if current_slide:
+                    # Sync the viewer immediately (strip the slide text — the client
+                    # doesn't need it and the AI teaches it in its own words).
+                    viewer_payload = {k: v for k, v in current_slide.items() if k != "slide_content"}
+                    await send({"type": "tool", "tool": "show_resource", "data": viewer_payload})
+                    _sc = (current_slide.get("slide_content") or "").strip()
+                    _n = current_slide.get("slide_index", 1)
+                    _tot = current_slide.get("page_count", 1)
+                    ai_content = (
+                        f"{ai_content}\n\n"
+                        f"━━━ ON-SCREEN SLIDE {_n} of {_tot} (showing on the student's screen right now) ━━━\n"
+                        f"{_sc or '(no extracted text on this slide — teach the concept it depicts)'}\n"
+                        "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+                        "SLIDE-DRIVEN TEACHING — apply EVERY turn, not only when the student asks:\n"
+                        "• Teach using THIS slide as your backbone — cover its content in your own warm "
+                        "words, then ask ONE short question about it. Never teach ahead of the slide on screen.\n"
+                        "• When the student has engaged with this slide (answered it, or said \"ok / got it / "
+                        "next / yes\"), call advance_lesson_slide ONCE *before* teaching, then teach the next "
+                        "slide it returns. Teaching always moves ONE slide forward per reply, in order.\n"
+                        "• If the student is confused or answers wrong, call retreat_lesson_slide ONCE and re-teach.\n"
+                        "• Only use show_resource when the student explicitly asks to jump to a specific slide.\n"
+                        "Keep what you say in sync with the slide on screen."
+                    )
 
         hist_slice = history[:-1] if saved_user_text is not None else history
 
@@ -1598,7 +1641,7 @@ async def _handle_quiz_result(send, chat_id, user_id, data):
         data.get("strong", []) or [], data.get("weak", []) or [],
     )
     await _run_turn(send, chat_id, user_id, saved_user_text=None, ai_content=quiz_ctx,
-                    tts=bool(data.get("tts", True)))
+                    tts=bool(data.get("tts", True)), anchor_slides=False)
 
 
 async def _handle_user_audio(send, chat_id, user_id, data):

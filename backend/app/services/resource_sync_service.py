@@ -89,7 +89,7 @@ async def sync_curriculum() -> Dict[str, Any]:
                         subjects_by_id[sid] = s.get("name", "")
                         subject_edges.add((ks, y, sid))
 
-            # Units + topics per subject.
+            # Units + topics per subject (full catalogue, year-agnostic).
             units_by_id: Dict[int, tuple] = {}   # uid -> (subject_id, title, unit_number)
             topics_by_id: Dict[int, tuple] = {}  # tid -> (unit_id, title, position)
             for sid in list(subjects_by_id.keys()):
@@ -103,6 +103,18 @@ async def sync_curriculum() -> Dict[str, Any]:
                         if tid is None:
                             continue
                         topics_by_id[tid] = (uid, t.get("title", ""), pos)
+
+            # Unit-level availability edges: which units belong to each
+            # (key_stage, year_group). Units link to a subject only, so a
+            # subject spans every year; the hub's units endpoint honours the
+            # keyStage/yearGroup filters, so we re-query per (ks, year, subject)
+            # to learn each unit's year. Powers year-group-scoped unit pickers.
+            unit_edges = set()  # (key_stage, year_group, subject_hub_id, unit_hub_id)
+            for ks, y, sid in subject_edges:
+                for u in await hub.get_units(sid, ks, y):
+                    uid = u.get("id")
+                    if uid is not None:
+                        unit_edges.add((ks, y, sid, uid))
 
         # ---- 2. Persist idempotently in one transaction ----
         async with async_session_factory() as db:
@@ -176,11 +188,19 @@ async def sync_curriculum() -> Dict[str, Any]:
                     await db.delete(obj)
             counts["topics"] = len(topics_by_id)
 
-            # availability (subject-level edges) — rebuild from scratch
-            await db.execute(delete(RHAvailability).where(RHAvailability.unit_hub_id.is_(None)))
+            # availability — rebuild subject-level AND unit-level edges from
+            # scratch. Subject-level edges (unit_hub_id NULL) drive the subject
+            # picker; unit-level edges (unit_hub_id set) scope the unit picker
+            # to a year group. sync_resources re-adds its derived subject edges
+            # on its own run (it checks for existence first).
+            await db.execute(delete(RHAvailability))
             for ks, y, sid in subject_edges:
                 db.add(RHAvailability(key_stage=ks, year_group=y, subject_hub_id=sid))
-            counts["availability"] = len(subject_edges)
+            for ks, y, sid, uid in unit_edges:
+                db.add(RHAvailability(
+                    key_stage=ks, year_group=y, subject_hub_id=sid, unit_hub_id=uid,
+                ))
+            counts["availability"] = len(subject_edges) + len(unit_edges)
 
             await db.commit()
 

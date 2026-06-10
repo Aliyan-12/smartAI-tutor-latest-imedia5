@@ -251,6 +251,13 @@ export default function SessionPage() {
             pageCount: (data.page_count as number) || 1,
           });
           setLearnTab("learn");
+          // Mobile shows ONE panel at a time (Chat | Learn); desktop renders the
+          // Learn panel alongside Chat. In hands-free VOICE mode the student is
+          // talking, not typing, so surface the slide the AI just navigated to —
+          // otherwise they'd stay on Chat and never see it. In text mode we leave
+          // their panel alone (auto-switching would yank them off the input every
+          // time they need to type an answer); they can tap Learn to follow along.
+          if (voiceActive) setMobilePanelView("learn");
         }
       } else {
         setToolResults((prev) => [...prev, { tool, data, id: Date.now().toString() }]);
