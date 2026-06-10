@@ -590,7 +590,7 @@ export const lessonsApi = {
 
 // Curriculum sourced from the Resource Hub mirror (rh_* tables).
 export interface HubSubject { id: number; name: string; }
-export interface HubUnit { id: number; title: string; unit_number: number | null; }
+export interface HubUnit { id: number; title: string; unit_number: number | null; has_resources: boolean; }
 export interface HubTopic { id: number; title: string; }
 
 export const curriculumApi = {

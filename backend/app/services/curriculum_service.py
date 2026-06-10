@@ -13,7 +13,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.resource_hub import (
-    RHKeyStage, RHYearGroup, RHSubject, RHUnit, RHTopic, RHAvailability,
+    RHKeyStage, RHYearGroup, RHSubject, RHUnit, RHTopic, RHAvailability, RHResource,
 )
 
 # Leading "Unit N" number, used to order units numerically (so the picker reads
@@ -32,6 +32,33 @@ def _unit_order(u: RHUnit) -> int:
 
 def _unit_sort_key(u: RHUnit):
     return (_unit_order(u), u.hub_id)
+
+
+async def _unit_titles_with_resources(
+    db: AsyncSession, subject_id: int,
+    key_stage: Optional[str], year_group: Optional[str], titles: List[str],
+) -> set:
+    """The unit titles (among `titles`) that have at least one Resource Hub resource.
+
+    Matches resources the SAME way the session's build_playlist does — by subject
+    name + key stage (+ year group) + unit title — so the lesson-setup "no resources"
+    warning accurately predicts whether the session will actually find any teaching
+    material for the chosen unit.
+    """
+    if not titles:
+        return set()
+    subj_name = (await db.execute(
+        select(RHSubject.name).where(RHSubject.hub_id == subject_id)
+    )).scalar_one_or_none()
+    q = select(RHResource.unit_title).where(RHResource.unit_title.in_(titles))
+    if subj_name:
+        q = q.where(RHResource.subject_name == subj_name)
+    if key_stage:
+        q = q.where(RHResource.key_stage == key_stage)
+    if year_group:
+        q = q.where(RHResource.year_group == year_group)
+    rows = (await db.execute(q.distinct())).all()
+    return {r[0] for r in rows}
 
 
 async def get_keystages(db: AsyncSession) -> List[str]:
@@ -116,7 +143,16 @@ async def get_units(
         )).scalars().all()
 
     rows = sorted(rows, key=_unit_sort_key)
-    return [{"id": u.hub_id, "title": u.title, "unit_number": u.unit_number} for u in rows]
+    covered = await _unit_titles_with_resources(
+        db, subject_id, key_stage, year_group, [u.title for u in rows]
+    )
+    return [
+        {
+            "id": u.hub_id, "title": u.title, "unit_number": u.unit_number,
+            "has_resources": u.title in covered,
+        }
+        for u in rows
+    ]
 
 
 async def get_topics_by_unit(db: AsyncSession, unit_id: int) -> List[Dict[str, Any]]:
