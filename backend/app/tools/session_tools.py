@@ -24,6 +24,10 @@ class ToolContext:
     subject: str
     key_stage: str
     chat_session_id: Optional[str] = None
+    # Turn-scoped guard: at most ONE slide move (advance/retreat/show) per reply,
+    # so the AI can't race several slides ahead in a single turn. Reset each turn
+    # because a fresh ToolContext is built per turn in _run_turn.
+    slide_moved: bool = False
 
 
 def make_session_tools(ctx: ToolContext) -> list:
@@ -375,11 +379,18 @@ def make_session_tools(ctx: ToolContext) -> list:
     async def show_resource(resource_hub_id: int, slide_index: int = 1) -> dict:
         """
         Display a teaching resource (slide deck, worksheet, mark scheme, or link) on
-        the student's screen and jump to a specific slide/page. Call when you begin
-        teaching from a resource or want to switch to a different one. slide_index is
-        1-based. The returned slide_content is the text on that slide — teach from it.
+        the student's screen and jump DIRECTLY to a specific slide/page. Use this ONLY
+        when the student explicitly asks to see a particular slide/topic ("show me the
+        touch slide", "go to that slide") — it may skip several slides at once to reach
+        the one they asked for. For normal sequential teaching use advance_lesson_slide
+        instead. slide_index is 1-based. The returned slide_content is the text on that
+        slide — teach from it.
         """
         from app.services.session_resource_service import slide_action
+        # An explicit, student-requested jump — allowed to span several slides in one
+        # call. It still counts as this turn's slide move, so a stray sequential
+        # advance/retreat afterwards is suppressed.
+        ctx.slide_moved = True
         return await slide_action(
             ctx.db, ctx.appointment_id, mode="show",
             resource_hub_id=resource_hub_id, slide_index=slide_index,
@@ -388,23 +399,42 @@ def make_session_tools(ctx: ToolContext) -> list:
     @tool
     async def advance_lesson_slide() -> dict:
         """
-        Move the on-screen resource FORWARD to the next slide/page (or the next
-        resource when the current deck ends). Call ONLY after the student has
-        understood the current slide and correctly answered its questions. The
-        returned slide_content is the next slide's text — teach from it.
+        Move the on-screen resource FORWARD by exactly ONE slide/page (or to the next
+        resource when the current deck ends). This is the normal sequential teaching
+        step — call it ONCE per reply, only after the student has understood the current
+        slide and answered its question. The returned slide_content is the next slide's
+        text — teach from it. (To jump straight to a slide the student asked for by name,
+        use show_resource instead.)
         """
         from app.services.session_resource_service import slide_action
+        if ctx.slide_moved:
+            # Teaching advances one slide per turn — don't race ahead.
+            payload = await slide_action(ctx.db, ctx.appointment_id, mode="show")
+            payload["note"] = (
+                "You've already moved a slide this turn. Teaching goes ONE slide per "
+                "reply — teach the current slide now and advance on the next turn."
+            )
+            return payload
+        ctx.slide_moved = True
         return await slide_action(ctx.db, ctx.appointment_id, mode="advance")
 
     @tool
     async def retreat_lesson_slide() -> dict:
         """
-        Move the on-screen resource BACK to the previous slide/page. Call when the
+        Move the on-screen resource BACK by exactly ONE slide/page. Call ONCE when the
         student did not understand the current slide or answered its question
-        incorrectly, so you can re-teach the earlier slide. The returned
-        slide_content is that slide's text — re-teach from it.
+        incorrectly, so you can re-teach the earlier slide. The returned slide_content
+        is that slide's text — re-teach from it.
         """
         from app.services.session_resource_service import slide_action
+        if ctx.slide_moved:
+            payload = await slide_action(ctx.db, ctx.appointment_id, mode="show")
+            payload["note"] = (
+                "You've already moved a slide this turn. Teach the current slide now; "
+                "move again on the next turn."
+            )
+            return payload
+        ctx.slide_moved = True
         return await slide_action(ctx.db, ctx.appointment_id, mode="retreat")
 
     @tool

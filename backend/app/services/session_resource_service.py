@@ -145,6 +145,21 @@ async def get_slide_payload(db: AsyncSession, resource: RHResource, slide_index:
     }
 
 
+async def get_current_slide(db: AsyncSession, appointment_id: int) -> Optional[Dict[str, Any]]:
+    """The slide the lesson is currently on, initialising to the FIRST slide of the
+    first resource when the lesson hasn't started navigating yet.
+
+    Returns the same payload as the slide tools (incl. slide_content for the AI), or
+    None when the lesson has no teaching resources. Used to anchor every teaching turn
+    to the on-screen slide so the viewer never freezes and the AI always teaches the
+    slide in view — independent of whether the model remembered to call a tool.
+    """
+    payload = await slide_action(db, appointment_id, mode="show")
+    if not payload or payload.get("error"):
+        return None
+    return payload
+
+
 async def slide_action(
     db: AsyncSession,
     appointment_id: int,
