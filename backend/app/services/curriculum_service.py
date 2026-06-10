@@ -6,6 +6,7 @@ curriculum endpoints. Subjects honour the (key_stage, year_group) availability
 edges and fall back to the global catalogue when the hub hasn't year-tagged a
 subject yet.
 """
+import re
 from typing import Any, Dict, List, Optional
 
 from sqlalchemy import select
@@ -14,6 +15,23 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.resource_hub import (
     RHKeyStage, RHYearGroup, RHSubject, RHUnit, RHTopic, RHAvailability,
 )
+
+# Leading "Unit N" number, used to order units numerically (so the picker reads
+# 1,2,…,10,11 rather than lexicographically — which sorts "Unit 10" before "Unit 2").
+_UNIT_NUM_RE = re.compile(r"unit\s*0*(\d+)", re.IGNORECASE)
+
+
+def _unit_order(u: RHUnit) -> int:
+    m = _UNIT_NUM_RE.search(u.title or "")
+    if m:
+        return int(m.group(1))
+    if u.unit_number:
+        return u.unit_number
+    return 10 ** 6
+
+
+def _unit_sort_key(u: RHUnit):
+    return (_unit_order(u), u.hub_id)
 
 
 async def get_keystages(db: AsyncSession) -> List[str]:
@@ -69,10 +87,35 @@ async def get_units(
     db: AsyncSession, subject_id: int,
     key_stage: Optional[str] = None, year_group: Optional[str] = None,
 ) -> List[Dict[str, Any]]:
-    rows = (await db.execute(
-        select(RHUnit).where(RHUnit.subject_hub_id == subject_id)
-        .order_by(RHUnit.id)
-    )).scalars().all()
+    """Units for a subject, scoped to a (key_stage, year_group) when given.
+
+    A subject (e.g. "Science") spans every year group, so the unfiltered list
+    mixes units from KS1–KS5. The (key_stage[, year_group]) → unit availability
+    edges built by the curriculum sync let us return only the units that belong
+    to the chosen key stage / year. Falls back to the full subject list when no
+    edges exist for that scope (e.g. a year the hub hasn't unit-tagged yet).
+    Always returned in ascending unit order.
+    """
+    rows: List[RHUnit] = []
+    if key_stage:
+        q = (
+            select(RHUnit)
+            .join(RHAvailability, RHAvailability.unit_hub_id == RHUnit.hub_id)
+            .where(
+                RHAvailability.subject_hub_id == subject_id,
+                RHAvailability.key_stage == key_stage,
+            )
+        )
+        if year_group:
+            q = q.where(RHAvailability.year_group == year_group)
+        rows = (await db.execute(q.distinct())).scalars().all()
+
+    if not rows:
+        rows = (await db.execute(
+            select(RHUnit).where(RHUnit.subject_hub_id == subject_id)
+        )).scalars().all()
+
+    rows = sorted(rows, key=_unit_sort_key)
     return [{"id": u.hub_id, "title": u.title, "unit_number": u.unit_number} for u in rows]
 
 
