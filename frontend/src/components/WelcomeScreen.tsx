@@ -979,8 +979,14 @@ export default function WelcomeScreen({ onPromptClick, onStatsLoaded }: Props) {
               : null;
             return (
               <div key={session.id} className="ws-cl-card" style={{ marginBottom: 16 }}>
-                <span className="ws-cl-badge" style={{ ...(isPaused ? { background: "#fef3c7", color: "#b45309" } : {}) }}>
-                  {isPaused ? "⏸ Paused" : "▶ Continue Learning"}
+                <span className="ws-cl-badge" style={{
+                  ...(isLessonComplete
+                    ? { background: "#dcfce7", color: "#15803d" }
+                    : isPaused
+                      ? { background: "#fef3c7", color: "#b45309" }
+                      : {}),
+                }}>
+                  {isLessonComplete ? "✅ Lesson Complete" : isPaused ? "⏸ Paused" : "▶ Continue Learning"}
                 </span>
                 <div className="ws-cl-body">
                   {/* Col 1 — Session info */}
