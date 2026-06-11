@@ -371,7 +371,14 @@ export default function SessionPage() {
           passcode: appt.passcode || null,
         });
         setDurationMinutes(appt.duration_minutes || 60);
-        setSessionState("passcode");
+        // A finished session can't be resumed — open the report straight away.
+        if (["completed", "terminated"].includes(appt.status)) {
+          setSessionTitle(appt.title || "");
+          setSessionSubject(appt.subject || "");
+          setSessionState("ended");
+        } else {
+          setSessionState("passcode");
+        }
       })
       .catch(() => setSessionState("passcode"));
   }, [appointmentId]); // eslint-disable-line react-hooks/exhaustive-deps

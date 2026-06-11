@@ -1,7 +1,7 @@
 import { useEffect, useState, useCallback, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
-import { gamificationApi, appointmentsApi, assignmentsApi, chatApi } from "../services/api";
+import { gamificationApi, appointmentsApi, assignmentsApi, chatApi, curriculumApi, settingsApi } from "../services/api";
 import type { DashboardData, Appointment, MyAssignment } from "../types";
 
 interface SessionSummary {
@@ -43,6 +43,37 @@ function getSubjectStyle(subject: string) {
   return SUBJECT_COLORS[subject.toLowerCase()] ?? { color: "#64748b", bg: "#f8fafc", icon: "📖" };
 }
 
+// Per-subject card art (cycled when there are more subjects than robot images) + copy.
+const SUBJECT_ROBOTS = [
+  "/images/session-robot-blue.png",
+  "/images/session-robot-green.png",
+  "/images/session-robot-org.png",
+];
+const SUBJECT_DESCS: Record<string, string> = {
+  maths: "Build confidence and solve problems, step by step",
+  mathematics: "Build confidence and solve problems, step by step",
+  science: "Explore ideas and understand how the world works",
+  biology: "Discover living things and how life works",
+  chemistry: "Understand materials, reactions and the elements",
+  physics: "Explore forces, energy and how the universe works",
+  english: "Improve your reading, writing and communication",
+  history: "Explore the past and how it shaped today",
+  geography: "Discover the world, its people and places",
+};
+
+/** Build a themed card (colour + image + copy) for a subject, by name + position. */
+function getSubjectCard(subject: string, i: number) {
+  const st = getSubjectStyle(subject);
+  return {
+    name: subject,
+    color: st.color,
+    bg: st.bg,
+    icon: st.icon,
+    img: SUBJECT_ROBOTS[i % SUBJECT_ROBOTS.length],
+    desc: SUBJECT_DESCS[subject.toLowerCase()] ?? `Learn ${subject} with your AI tutor, step by step.`,
+  };
+}
+
 function getGreeting(): string {
   const h = new Date().getHours();
   if (h < 12) return "Good morning";
@@ -80,6 +111,7 @@ export default function WelcomeScreen({ onPromptClick, onStatsLoaded }: Props) {
   const [dashData, setDashData] = useState<DashboardData | null>(null);
   const [appointments, setAppointments] = useState<Appointment[]>([]);
   const [assignments, setAssignments] = useState<MyAssignment[]>([]);
+  const [hubSubjects, setHubSubjects] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -112,6 +144,29 @@ export default function WelcomeScreen({ onPromptClick, onStatsLoaded }: Props) {
   useEffect(() => {
     load();
   }, [load]);
+
+  // Subjects available for the student's key stage + year group, sourced from the
+  // Resource Hub mirror. Drives the "Pick a Subject & Tutor" grid + subject
+  // recommendations. Year group comes from the student's learning preferences;
+  // key stage falls back to the dashboard profile.
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const prefs = (await settingsApi.getLearningPreferences()) as {
+          key_stage?: string | null; year_group?: string | null;
+        };
+        const ks = prefs?.key_stage || dashData?.profile?.key_stage || "";
+        const yr = prefs?.year_group || undefined;
+        if (!ks) { if (!cancelled) setHubSubjects([]); return; }
+        const d = await curriculumApi.getSubjects(ks, yr);
+        if (!cancelled) setHubSubjects((d.subjects ?? []).map((s) => s.name));
+      } catch {
+        if (!cancelled) setHubSubjects([]);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [dashData?.profile?.key_stage]);
 
   useEffect(() => {
     const active = appointments.filter((a) => ["started", "paused"].includes(a.status));
@@ -399,13 +454,26 @@ export default function WelcomeScreen({ onPromptClick, onStatsLoaded }: Props) {
         }
 
         .ws-cl-lp-msg {
-          font-size: 12px;
-          color: #475569;
-          line-height: 1.55;
+          font-size: 15px;
+          color: #334155;
+          line-height: 1.6;
+          font-weight: 500;
           display: -webkit-box;
           -webkit-line-clamp: 4;
           -webkit-box-orient: vertical;
           overflow: hidden;
+        }
+        .ws-cl-lp-foot {
+          display: flex;
+          align-items: flex-start;
+          gap: 6px;
+          margin-top: 12px;
+          padding-top: 10px;
+          border-top: 1px solid #e2e8f0;
+          font-size: 12px;
+          font-weight: 600;
+          color: #7c3aed;
+          line-height: 1.4;
         }
 
         .ws-cl-last-msg {
@@ -899,6 +967,8 @@ export default function WelcomeScreen({ onPromptClick, onStatsLoaded }: Props) {
               session.duration_minutes > 0
                 ? Math.min(100, Math.round((elapsedMins / session.duration_minutes) * 100))
                 : 0;
+            // Lesson time fully used → it's effectively over: no resuming, only the report.
+            const isLessonComplete = progressPct >= 100;
             const summary = sessionSummaries[session.id];
             const minsRemaining = session.duration_minutes > 0
               ? Math.max(0, session.duration_minutes - elapsedMins)
@@ -964,6 +1034,10 @@ export default function WelcomeScreen({ onPromptClick, onStatsLoaded }: Props) {
                           ? `"${session.description}"`
                           : "No messages yet — resume to continue your lesson."}
                     </div>
+                    <div className="ws-cl-lp-foot">
+                      <span>💡</span>
+                      <span>Keep exploring and asking great questions!</span>
+                    </div>
                   </div>
 
                   {/* Col 3 — Robot image */}
@@ -979,24 +1053,45 @@ export default function WelcomeScreen({ onPromptClick, onStatsLoaded }: Props) {
 
                   {/* Col 4 — Action buttons */}
                   <div className="ws-cl-actions">
-                    <button className="ws-cl-btn-primary" onClick={() => navigate(`/session/${session.id}`)}>
-                      ▶ Resume Lesson
-                    </button>
-                    <button className="ws-cl-btn-secondary" onClick={() => navigate("/lesson/setup")}>
-                      Start a Different Topic
-                    </button>
-                    <button
-                      className="ws-cl-btn-end"
-                      onClick={async () => {
-                        if (!window.confirm("End this lesson?")) return;
-                        try {
-                          await appointmentsApi.updateStatus(session.id, "completed");
-                          load();
-                        } catch { /* ignore */ }
-                      }}
-                    >
-                      End Lesson
-                    </button>
+                    {isLessonComplete ? (
+                      <>
+                        <button
+                          className="ws-cl-btn-primary"
+                          onClick={async () => {
+                            // Time's fully used — finalise the session (generates the
+                            // report) then open the report instead of resuming.
+                            try { await appointmentsApi.updateStatus(session.id, "completed"); } catch { /* ignore */ }
+                            navigate(`/session/${session.id}`);
+                          }}
+                        >
+                          📄 View Report
+                        </button>
+                        <button className="ws-cl-btn-secondary" onClick={() => navigate("/lesson/setup")}>
+                          Start a Different Topic
+                        </button>
+                      </>
+                    ) : (
+                      <>
+                        <button className="ws-cl-btn-primary" onClick={() => navigate(`/session/${session.id}`)}>
+                          ▶ Resume Lesson
+                        </button>
+                        <button className="ws-cl-btn-secondary" onClick={() => navigate("/lesson/setup")}>
+                          Start a Different Topic
+                        </button>
+                        <button
+                          className="ws-cl-btn-end"
+                          onClick={async () => {
+                            if (!window.confirm("End this lesson?")) return;
+                            try {
+                              await appointmentsApi.updateStatus(session.id, "completed");
+                              load();
+                            } catch { /* ignore */ }
+                          }}
+                        >
+                          End Lesson
+                        </button>
+                      </>
+                    )}
                   </div>
                 </div>
               </div>
@@ -1175,33 +1270,67 @@ export default function WelcomeScreen({ onPromptClick, onStatsLoaded }: Props) {
             )}
 
             {pendingAssignments.length === 0 && daily_plan.weak_spots.length === 0 && (
-              <div className="ws-rec-card" style={{ borderLeft: "3px solid #1a73e8", paddingLeft: 14 }}>
-                <div style={{
-                  width: 52, height: 52, borderRadius: 12,
-                  background: "#eff6ff", border: "1px solid #bfdbfe",
-                  display: "flex", alignItems: "center", justifyContent: "center",
-                  flexShrink: 0, overflow: "hidden",
-                }}>
-                  <img src="/images/robot-happy.png" alt="AI Tutor" draggable={false}
-                    style={{ width: 40, height: 40, objectFit: "contain" }} />
+              hubSubjects.length > 0 ? (
+                hubSubjects.slice(0, 3).map((name, i) => {
+                  const c = getSubjectCard(name, i);
+                  return (
+                    <div key={name} className="ws-rec-card" style={{ borderLeft: `3px solid ${c.color}`, paddingLeft: 14 }}>
+                      <div style={{
+                        width: 52, height: 52, borderRadius: 12,
+                        background: c.bg, border: `1px solid ${c.color}40`,
+                        display: "flex", alignItems: "center", justifyContent: "center",
+                        flexShrink: 0, fontSize: 26,
+                      }}>
+                        {c.icon}
+                      </div>
+                      <div className="ws-rec-body">
+                        <span className="ws-rec-label" style={{ color: c.color, background: `${c.color}14` }}>
+                          Recommended Subject
+                        </span>
+                        <p className="ws-rec-title">{c.name}</p>
+                        <p className="ws-rec-desc">{c.desc}</p>
+                      </div>
+                      <div className="ws-rec-right">
+                        <button
+                          className="ws-rec-start-btn"
+                          style={{ background: c.color }}
+                          onClick={() => navigate("/lesson/setup", { state: { subject: c.name } })}
+                        >
+                          Start Session
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })
+              ) : (
+                <div className="ws-rec-card" style={{ borderLeft: "3px solid #1a73e8", paddingLeft: 14 }}>
+                  <div style={{
+                    width: 52, height: 52, borderRadius: 12,
+                    background: "#eff6ff", border: "1px solid #bfdbfe",
+                    display: "flex", alignItems: "center", justifyContent: "center",
+                    flexShrink: 0, overflow: "hidden",
+                  }}>
+                    <img src="/images/robot-happy.png" alt="AI Tutor" draggable={false}
+                      style={{ width: 40, height: 40, objectFit: "contain" }} />
+                  </div>
+                  <div className="ws-rec-body">
+                    <span className="ws-rec-label" style={{ color: "#1a73e8", background: "#eff6ff", display: "flex", alignItems: "center", gap: 4 }}>
+                      <span style={{ color: "#1a73e8" }}>✦</span> Keep Learning
+                    </span>
+                    <p className="ws-rec-title">Explore a new topic today</p>
+                    <p className="ws-rec-desc">Pick any subject and continue learning at your own pace.</p>
+                  </div>
+                  <div className="ws-rec-right">
+                    <button
+                      className="ws-rec-start-btn"
+                      style={{ background: "#1a73e8" }}
+                      onClick={() => navigate("/lesson/setup")}
+                    >
+                      Start Session
+                    </button>
+                  </div>
                 </div>
-                <div className="ws-rec-body">
-                  <span className="ws-rec-label" style={{ color: "#1a73e8", background: "#eff6ff", display: "flex", alignItems: "center", gap: 4 }}>
-                    <span style={{ color: "#1a73e8" }}>✦</span> Keep Learning
-                  </span>
-                  <p className="ws-rec-title">Explore a new topic today</p>
-                  <p className="ws-rec-desc">Pick any subject and continue learning at your own pace.</p>
-                </div>
-                <div className="ws-rec-right">
-                  <button
-                    className="ws-rec-start-btn"
-                    style={{ background: "#1a73e8" }}
-                    onClick={() => navigate("/lesson/setup")}
-                  >
-                    Start Session
-                  </button>
-                </div>
-              </div>
+              )
             )}
           </div>
 
@@ -1229,65 +1358,44 @@ export default function WelcomeScreen({ onPromptClick, onStatsLoaded }: Props) {
             </button>
           </div>
           <div className="ws-subj-grid">
-            {[
-              {
-                name: "Maths",
-                desc: "Build confidence and solve problems, step by step",
-                bg: "#f0fdf4",
-                border: "#bbf7d0",
-                btnBg: "#22c55e",
-                img: "/images/session-robot-green.png",
-              },
-              {
-                name: "Science",
-                desc: "Explore ideas and understand how the world works",
-                bg: "#eff6ff",
-                border: "#bfdbfe",
-                btnBg: "#1a73e8",
-                img: "/images/session-robot-blue.png",
-              },
-              {
-                name: "English",
-                desc: "Improve your reading, writing and communication",
-                bg: "#fff7ed",
-                border: "#fed7aa",
-                btnBg: "#f97316",
-                img: "/images/session-robot-org.png",
-              },
-            ].map((s) => (
-              <div
-                key={s.name}
-                className="ws-subj-card"
-                style={{ background: s.bg, border: `1.5px solid ${s.border}` }}
-                onClick={() => navigate("/lesson/setup", { state: { subject: s.name } })}
-                onMouseEnter={(e) => {
-                  (e.currentTarget as HTMLDivElement).style.boxShadow = `0 8px 24px rgba(0,0,0,0.12)`;
-                }}
-                onMouseLeave={(e) => {
-                  (e.currentTarget as HTMLDivElement).style.boxShadow = "";
-                }}
-              >
-                <img
-                  src={s.img}
-                  alt={s.name}
-                  draggable={false}
-                  className="ws-subj-img"
-                  style={{}}
-                />
-                <span className="ws-subj-name">{s.name}</span>
-                <span className="ws-subj-desc">{s.desc}</span>
-                <button
-                  className="ws-subj-btn"
-                  style={{ background: s.btnBg }}
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    navigate("/lesson/setup", { state: { subject: s.name } });
+            {(hubSubjects.length > 0 ? hubSubjects : ["Maths", "Science", "English"])
+              .slice(0, 6)
+              .map((name, i) => {
+              const c = getSubjectCard(name, i);
+              return (
+                <div
+                  key={name}
+                  className="ws-subj-card"
+                  style={{ background: c.bg, border: `1.5px solid ${c.color}40` }}
+                  onClick={() => navigate("/lesson/setup", { state: { subject: c.name } })}
+                  onMouseEnter={(e) => {
+                    (e.currentTarget as HTMLDivElement).style.boxShadow = `0 8px 24px rgba(0,0,0,0.12)`;
+                  }}
+                  onMouseLeave={(e) => {
+                    (e.currentTarget as HTMLDivElement).style.boxShadow = "";
                   }}
                 >
-                  Choose {s.name} →
-                </button>
-              </div>
-            ))}
+                  <img
+                    src={c.img}
+                    alt={c.name}
+                    draggable={false}
+                    className="ws-subj-img"
+                  />
+                  <span className="ws-subj-name">{c.icon} {c.name}</span>
+                  <span className="ws-subj-desc">{c.desc}</span>
+                  <button
+                    className="ws-subj-btn"
+                    style={{ background: c.color }}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      navigate("/lesson/setup", { state: { subject: c.name } });
+                    }}
+                  >
+                    Choose {c.name} →
+                  </button>
+                </div>
+              );
+            })}
           </div>
         </div>
 
