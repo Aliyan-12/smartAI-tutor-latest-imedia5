@@ -431,7 +431,7 @@ export default function RegisterPage() {
           {/* Brand header */}
           <div className="rp-brand-hdr">
             <div className="rp-brand-badge">
-              <img src="/images/aitutor 4 schools-robo.png" alt="AI Tutor 4 Schools" />
+              <img src="/images/aitutor 4 schools-dark-bg-cropped.png" alt="AI Tutor 4 Schools" />
             </div>
             <div>
               <h1>AI Tutor <span style={{color:"#f97316"}}>4</span> Schools</h1>
@@ -460,7 +460,7 @@ export default function RegisterPage() {
                 <div className="rp-robo-orbit" />
               </div>
               <img
-                src="/images/aitutor 4 schools-robo.png"
+                src="/images/aitutor 4 schools-dark-bg.png"
                 alt="AI Tutor Robot"
                 className="rp-robo-img"
                 draggable={false}

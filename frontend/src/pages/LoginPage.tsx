@@ -424,7 +424,7 @@ export default function LoginPage() {
           {/* Brand header — z-index 10 */}
           <div className="lp-brand-hdr">
             <div className="lp-brand-badge">
-              <img src="/images/aitutor 4 schools-robo.png" alt="AI Tutor 4 Schools" />
+              <img src="/images/aitutor 4 schools-dark-bg-cropped.png" alt="AI Tutor 4 Schools" />
             </div>
             <div>
               <h1>AI Tutor <span style={{color:"#f97316"}}>4</span> Schools</h1>
@@ -455,7 +455,7 @@ export default function LoginPage() {
                 <div className="lp-robo-orbit" />
               </div>
               <img
-                src="/images/aitutor 4 schools-robo.png"
+                src="/images/aitutor 4 schools-dark-bg.png"
                 alt="AI Tutor Robot"
                 className="lp-robo-img"
                 draggable={false}
