@@ -22,6 +22,11 @@ class UserResponse(BaseModel):
     is_active: bool
     credits: float
     parent_id: Optional[int] = None
+    school_id: Optional[int] = None
+    is_verified: bool = True
+    onboarding_completed: bool = True
+    account_type: str = "individual"
+    auth_provider: str = "password"
     created_at: datetime
 
     model_config = {"from_attributes": True}

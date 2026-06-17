@@ -5,13 +5,14 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from starlette.middleware.sessions import SessionMiddleware
 
 from app.core.config import settings
 from app.middleware.rate_limit import RateLimitMiddleware
 from app.routers import auth, chat, voice, health, admin, teacher, subscription, documents
 from app.routers import parent, appointments, assessments, gamification, lessons, assignments
 from app.routers import settings as settings_router
-from app.routers import sessions, curriculum
+from app.routers import sessions, curriculum, school
 
 logging.basicConfig(
     level=logging.INFO,
@@ -29,6 +30,16 @@ async def lifespan(app: FastAPI):
     logger.info("=== SmartAI Tutor starting up — running DB init ===")
     from app.db.init_db import init_database
     await init_database()
+
+    # Initialise Casbin RBAC enforcer + ensure default role policies exist, so
+    # require_permission(...) works from the first request (non-fatal on failure).
+    try:
+        from app.services import casbin_service
+        await casbin_service.get_enforcer()
+        await casbin_service.seed_default_policies()
+        logger.info("Casbin RBAC enforcer ready.")
+    except Exception as _casbin_err:
+        logger.warning(f"Casbin enforcer init failed (non-fatal): {_casbin_err}")
 
     # Pre-warm Kokoro TTS pipeline so the first voice request is not slow
     try:
@@ -81,6 +92,14 @@ app.add_middleware(
     allow_headers=["*"],
 )
 app.add_middleware(RateLimitMiddleware)
+# Required by Authlib's OAuth handshake to stash state/nonce between redirect
+# and callback. Falls back to the JWT secret when SESSION_SECRET isn't set.
+app.add_middleware(
+    SessionMiddleware,
+    secret_key=settings.session_secret or settings.jwt_secret_key,
+    same_site="lax",
+    https_only=False,
+)
 
 
 @app.exception_handler(Exception)
@@ -111,3 +130,4 @@ app.include_router(assignments.router)
 app.include_router(settings_router.router)
 app.include_router(sessions.router)
 app.include_router(curriculum.router)
+app.include_router(school.router)

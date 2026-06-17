@@ -20,16 +20,27 @@ async def create_user(
     db: AsyncSession,
     name: str,
     email: str,
-    password: str,
+    password: Optional[str] = None,
     role: str = ROLE_STUDENT,
     credits: float = 100,
+    school_id: Optional[int] = None,
+    account_type: str = "individual",
+    auth_provider: str = "password",
+    is_verified: bool = False,
+    onboarding_completed: bool = False,
 ) -> User:
     user = User(
         name=name,
         email=email,
-        password_hash=hash_password(password),
+        # OAuth-only accounts have no local password.
+        password_hash=hash_password(password) if password else None,
         role=role,
         credits=credits,
+        school_id=school_id,
+        account_type=account_type,
+        auth_provider=auth_provider,
+        is_verified=is_verified,
+        onboarding_completed=onboarding_completed,
     )
     db.add(user)
     await db.flush()
@@ -39,7 +50,8 @@ async def create_user(
 
 async def authenticate_user(db: AsyncSession, email: str, password: str) -> Optional[User]:
     user = await get_user_by_email(db, email)
-    if not user or not verify_password(password, user.password_hash):
+    # No password_hash → OAuth-only account; can't log in with a password.
+    if not user or not user.password_hash or not verify_password(password, user.password_hash):
         return None
     return user
 

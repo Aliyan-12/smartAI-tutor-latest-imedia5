@@ -1,3 +1,5 @@
+from typing import Optional
+
 from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -5,7 +7,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.security import decode_access_token
 from app.db.session import get_db
 from app.services.user_service import get_user_by_id
-from app.models.user import User, ROLE_ADMIN, ROLE_TEACHER, ROLE_STUDENT, ROLE_PARENT
+from app.models.user import (
+    User, ROLE_SUPERADMIN, ROLE_ADMIN, ROLE_TEACHER, ROLE_STUDENT, ROLE_PARENT,
+)
 
 security_scheme = HTTPBearer()
 
@@ -50,8 +54,34 @@ def require_role(*allowed_roles: str):
 
 
 require_admin = require_role(ROLE_ADMIN)
-require_teacher = require_role(ROLE_ADMIN, ROLE_TEACHER)
+require_superadmin = require_role(ROLE_ADMIN, ROLE_SUPERADMIN)
+require_teacher = require_role(ROLE_ADMIN, ROLE_SUPERADMIN, ROLE_TEACHER)
 require_student = require_role(ROLE_STUDENT)
 require_parent = require_role(ROLE_PARENT)
-require_parent_or_teacher = require_role(ROLE_PARENT, ROLE_TEACHER, ROLE_ADMIN)
-require_any_authenticated = require_role(ROLE_ADMIN, ROLE_TEACHER, ROLE_STUDENT, ROLE_PARENT)
+require_parent_or_teacher = require_role(ROLE_PARENT, ROLE_TEACHER, ROLE_SUPERADMIN, ROLE_ADMIN)
+require_any_authenticated = require_role(
+    ROLE_SUPERADMIN, ROLE_ADMIN, ROLE_TEACHER, ROLE_STUDENT, ROLE_PARENT
+)
+
+
+def require_permission(obj: str, act: str):
+    """Casbin-backed dependency: allow only if the user's role may `act` on `obj`.
+    Use for new (especially school-scoped) endpoints. Existing routes keep using
+    the simpler `require_role(...)` dependencies above."""
+    async def permission_checker(current_user: User = Depends(get_current_user)) -> User:
+        from app.services import casbin_service
+        allowed = await casbin_service.check_permission(
+            current_user.role, current_user.school_id, obj, act
+        )
+        if not allowed:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=f"Access denied: cannot {act} {obj}",
+            )
+        return current_user
+    return permission_checker
+
+
+async def get_current_school_id(current_user: User = Depends(get_current_user)) -> Optional[int]:
+    """The caller's tenant id (None for the rare unattached account)."""
+    return current_user.school_id

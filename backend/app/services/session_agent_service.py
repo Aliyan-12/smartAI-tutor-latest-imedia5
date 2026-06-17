@@ -1026,6 +1026,13 @@ TEACHING SLIDES — TEACH FROM THE ON-SCREEN RESOURCES (IMPORTANT):
 - TEACH LIKE A WARM HUMAN TUTOR, not a narrator. Use the slide as your backbone — cover its points — but bring it to life with your own casual real-world examples and simple analogies a child relates to ("It's a bit like…"), add a sentence or two of your own so it truly lands (don't read it word-for-word), and weave the student's answers back in. Stay on THIS slide's concept.
 - Call these tools SILENTLY (never write the call as text, never say "loading the next slide"). The viewer updates automatically.
 
+VISUAL PUZZLES — TEACH HANDS-ON (Maths/Science):
+- For concepts that land better when SEEN and DONE (fractions, number lines, area, counting, labelling diagrams, sorting states of matter, food chains), put an INTERACTIVE puzzle on the student's screen instead of only describing it.
+- FLOW: (1) call list_available_puzzles to see what fits this subject/key stage, (2) call show_puzzle(puzzle_id, params) SILENTLY, (3) in your words, tell the student what to do, then STOP and wait. Their attempt comes back as a [PUZZLE RESULT] message.
+- On a CORRECT result: brief praise, then continue (next concept, or clear_puzzle and teach on). On INCORRECT: ONE hint tied to what's on screen, invite another try on the same puzzle — don't reveal the answer.
+- Choose puzzles that match the current concept and the student's level; keep params simple and age-appropriate. Don't spam puzzles — one focused puzzle per concept, then move on.
+- Never write the tool call as text and never read out raw params; the puzzle just appears on screen.
+
 END-OF-SESSION REPORT:
 - After delivering the final session summary/review (the last phase), call the generate_session_report tool.
   generate_session_report(
@@ -1644,6 +1651,29 @@ async def _handle_quiz_result(send, chat_id, user_id, data):
                     tts=bool(data.get("tts", True)), anchor_slides=False)
 
 
+def _build_puzzle_ctx(puzzle_id: str, prompt: str, answer, correct: bool) -> str:
+    verdict = "CORRECT" if correct else "INCORRECT"
+    return (
+        f"[PUZZLE RESULT] The student just attempted the on-screen puzzle '{puzzle_id}'.\n"
+        f"Question shown: {prompt}\n"
+        f"Their answer: {answer}\n"
+        f"Result: {verdict}.\n"
+        "Respond as the tutor in 1-2 sentences: if CORRECT, give brief specific praise "
+        "then continue (move to the next concept, or clear_puzzle and teach on). If "
+        "INCORRECT, give ONE encouraging hint tied to the visual and invite them to try "
+        "again on the SAME puzzle — do not reveal the answer yet."
+    )
+
+
+async def _handle_puzzle_result(send, chat_id, user_id, data):
+    ctx = _build_puzzle_ctx(
+        data.get("puzzle_id", "puzzle"), data.get("prompt", ""),
+        data.get("answer", ""), bool(data.get("correct")),
+    )
+    await _run_turn(send, chat_id, user_id, saved_user_text=None, ai_content=ctx,
+                    tts=bool(data.get("tts", True)), anchor_slides=False)
+
+
 async def _handle_user_audio(send, chat_id, user_id, data):
     """
     Custom voice loop. The client sends {stt: true, tts: ...} with the audio:
@@ -1751,6 +1781,7 @@ async def run_session_ws(websocket: WebSocket) -> None:
         _handlers = {
             "user_message": _handle_user_message,
             "quiz_result": _handle_quiz_result,
+            "puzzle_result": _handle_puzzle_result,
             "user_audio": _handle_user_audio,
         }
         while True:

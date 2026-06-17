@@ -166,6 +166,43 @@ def send_email(to_address: str, subject: str, body: str) -> bool:
         return True
 
 
+# ── Auth emails (verification + password reset) ────────────────────────────────
+def _frontend_link(path: str, token: str) -> str:
+    return f"{settings.frontend_base_url.rstrip('/')}/{path}?token={token}"
+
+
+async def send_verification_email(to: str, name: str, token: str) -> None:
+    import asyncio
+    link = _frontend_link("verify-email", token)
+    if not settings.email_enabled:
+        logger.info("[email disabled] verify link for %s: %s", to, link)
+    subject = "Verify your AI Tutor 4 Schools account"
+    body = (
+        f"<p>Hi {name},</p>"
+        "<p>Welcome to <strong>AI Tutor 4 Schools</strong>! Please verify your email "
+        "to activate your account:</p>"
+        f'<p><a href="{link}" style="background:#1a73e8;color:#fff;padding:10px 18px;'
+        'border-radius:8px;text-decoration:none;font-weight:600">Verify my email</a></p>'
+        f'<p>Or paste this link:<br><a href="{link}">{link}</a></p>'
+        "<p style='color:#64748b;font-size:13px'>This link expires in 24 hours.</p>"
+    )
+    await asyncio.to_thread(send_email, to, subject, body)
+
+
+async def send_password_reset(to: str, name: str, token: str) -> None:
+    import asyncio
+    link = _frontend_link("reset-password", token)
+    if not settings.email_enabled:
+        logger.info("[email disabled] reset link for %s: %s", to, link)
+    subject = "Reset your AI Tutor 4 Schools password"
+    body = (
+        f"<p>Hi {name},</p><p>Reset your password using the link below:</p>"
+        f'<p><a href="{link}">{link}</a></p>'
+        "<p style='color:#64748b;font-size:13px'>This link expires in 24 hours.</p>"
+    )
+    await asyncio.to_thread(send_email, to, subject, body)
+
+
 def send_booking_confirmation(
     student_email: str,
     student_name: str,

@@ -413,6 +413,28 @@ export function useSessionChannel(opts: SessionChannelOpts) {
     armWatchdog();
   }, []);
 
+  /** Send the student's puzzle attempt — the AI reacts (praise/advance or hint). */
+  const sendPuzzleResult = useCallback((
+    puzzleId: string, prompt: string, answer: unknown, correct: boolean,
+  ) => {
+    if (busyAt.current) return;
+    const ok = _send({
+      type: "puzzle_result",
+      puzzle_id: puzzleId, prompt, answer: String(answer), correct,
+      tts: ttsEnabledRef.current,
+    });
+    if (!ok) return;
+    busyAt.current = true;
+    setMessages((prev) => [...prev, {
+      id: -Date.now(), chat_id: 0, role: "quiz_result" as const,
+      content: `Puzzle ${correct ? "solved ✓" : "attempted"}: ${prompt}`,
+      timestamp: new Date().toISOString(),
+    }]);
+    setBusy(true);
+    setStatus("waiting");
+    armWatchdog();
+  }, []);
+
   /**
    * Send a recorded utterance for the custom voice loop.
    * `stt: true` — transcribe this audio to text first; `tts` — speak the reply.
@@ -439,7 +461,7 @@ export function useSessionChannel(opts: SessionChannelOpts) {
   return {
     connected, status, messages, liveText, fillerText, busy, error,
     connect, disconnect, pause, resume,
-    sendMessage, sendQuizResult, sendAudio, stopTurn,
+    sendMessage, sendQuizResult, sendPuzzleResult, sendAudio, stopTurn,
     hydrate, setMessages, clearError,
   };
 }
