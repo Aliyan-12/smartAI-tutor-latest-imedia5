@@ -501,7 +501,7 @@ export default function LoginPage() {
 
               <div className="lp-m-banner-hdr">
                 <div className="lp-m-banner-icon">
-                  <img src="/images/aitutor 4 schools-robo.png" alt="AI Tutor 4 Schools" style={{ width: 38, height: 38, objectFit: "contain", borderRadius: 8 }} />
+                  <img src="/images/aitutor 4 schools-dark-bg-cropped.png" alt="AI Tutor 4 Schools" style={{ width: 38, height: 38, objectFit: "contain", borderRadius: 8 }} />
                 </div>
                 <div>
                   <h3>AI Tutor <span style={{color:"#f97316"}}>4</span> Schools</h3>
@@ -525,7 +525,7 @@ export default function LoginPage() {
                     <div className="lp-m-robo-ring lp-m-robo-ring-2" />
                     <div className="lp-m-robo-orbit" />
                   </div>
-                  <img src="/images/aitutor 4 schools-robo.png" alt="AI Tutor Robot" className="lp-m-robo-img" draggable={false} />
+                  <img src="/images/aitutor 4 schools-dark-bg.png" alt="AI Tutor Robot" className="lp-m-robo-img" draggable={false} />
                 </div>
               </div>
 
