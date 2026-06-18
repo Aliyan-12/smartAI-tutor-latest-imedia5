@@ -6,6 +6,8 @@ import { appointmentsApi, assessmentsApi, sessionsApi, gamificationApi, chatApi 
 import ChatWindow from "../components/ChatWindow";
 import ChatInput from "../components/ChatInput";
 import ResourceViewer, { type ResourceSlide } from "../components/ResourceViewer";
+import PuzzlePlayer from "../components/PuzzlePlayer";
+import type { PuzzlePayload } from "../components/puzzles/types";
 import AssessmentMode from "../components/AssessmentMode";
 import PostSessionScreen from "../components/PostSessionScreen";
 import { useVoice } from "../hooks/useVoice";
@@ -164,6 +166,8 @@ export default function SessionPage() {
   const [toolResults, setToolResults] = useState<Array<{ tool: string; data: Record<string, unknown>; id: string }>>([]);
   // The resource/slide the AI is currently teaching from (drives the "learn" tab viewer).
   const [currentResource, setCurrentResource] = useState<ResourceSlide | null>(null);
+  // The interactive puzzle the AI has put on screen (overlays the slide while active).
+  const [currentPuzzle, setCurrentPuzzle] = useState<PuzzlePayload | null>(null);
   const SLIDE_TOOLS = ["show_resource", "advance_lesson_slide", "retreat_lesson_slide"];
 
   // Attachment / web-search opts for ChatInput
@@ -236,6 +240,14 @@ export default function SessionPage() {
           assessment_id: data.assessment_id as number | undefined,
           questions: data.questions as QuizOffer["questions"],
         });
+      } else if (tool === "show_puzzle") {
+        if (!data.error) {
+          setCurrentPuzzle(data as unknown as PuzzlePayload);
+          setLearnTab("learn");
+          if (voiceActive) setMobilePanelView("learn");
+        }
+      } else if (tool === "clear_puzzle") {
+        setCurrentPuzzle(null);
       } else if (SLIDE_TOOLS.includes(tool)) {
         // The AI moved/showed a teaching resource — render it in the "learn" panel.
         if (data.resource_hub_id) {
@@ -1095,7 +1107,16 @@ export default function SessionPage() {
           </div>
         ) : null}
         {!isPaused && learnTab === "learn" && (
-          currentResource ? (
+          currentPuzzle ? (
+            <div style={{ flex: 1, minHeight: "70vh", display: "flex", flexDirection: "column" }}>
+              <PuzzlePlayer
+                payload={currentPuzzle}
+                onSolved={(answer, correct) =>
+                  channel.sendPuzzleResult(currentPuzzle.puzzle_id, currentPuzzle.prompt, answer, correct)
+                }
+              />
+            </div>
+          ) : currentResource ? (
             <div style={{ flex: 1, minHeight: "70vh", display: "flex", flexDirection: "column" }}>
               <ResourceViewer slide={currentResource} />
             </div>

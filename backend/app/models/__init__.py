@@ -1,4 +1,6 @@
 from app.models.user import User
+from app.models.school import School
+from app.models.auth_tokens import EmailVerificationToken, OAuthIdentity
 from app.models.chat import Chat, Message
 from app.models.subscription import Subscription, CreditTransaction
 from app.models.documents import Document, DocumentChunk
@@ -14,7 +16,8 @@ from app.models.resource_hub import (
 )
 
 __all__ = [
-    "User", "Chat", "Message",
+    "User", "School", "EmailVerificationToken", "OAuthIdentity",
+    "Chat", "Message",
     "Subscription", "CreditTransaction",
     "Document", "DocumentChunk",
     "InviteCode",

@@ -8,6 +8,13 @@ export interface User {
   is_active: boolean;
   credits: number;
   parent_id?: number | null;
+  school_id?: number | null;
+  school_name?: string | null;
+  school_country?: string | null;
+  is_verified?: boolean;
+  onboarding_completed?: boolean;
+  account_type?: "school" | "individual";
+  auth_provider?: string;
   created_at: string;
 }
 

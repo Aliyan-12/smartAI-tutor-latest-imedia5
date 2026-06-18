@@ -30,6 +30,17 @@ class Settings(BaseSettings):
     jwt_algorithm: str = "HS256"
     jwt_expiration_minutes: int = 1440
 
+    # OAuth (Google) + session middleware for the Authlib handshake.
+    google_client_id: str = ""
+    google_client_secret: str = ""
+    # Backend base URL used to build the OAuth redirect_uri
+    # (e.g. http://localhost:8001 → /api/auth/oauth/google/callback).
+    oauth_redirect_base_url: str = "http://localhost:8001"
+    # Secret for Starlette SessionMiddleware (OAuth state). Falls back to the JWT secret.
+    session_secret: str = ""
+    # Frontend base URL — used in verification email links + OAuth success redirect.
+    frontend_base_url: str = "http://localhost:5173"
+
     backend_cors_origins: str = "http://localhost:5173,http://localhost:3000"
     backend_host: str = "0.0.0.0"
     backend_port: int = 8001

@@ -438,6 +438,50 @@ def make_session_tools(ctx: ToolContext) -> list:
         return await slide_action(ctx.db, ctx.appointment_id, mode="retreat")
 
     @tool
+    async def list_available_puzzles() -> dict:
+        """
+        List the interactive visual puzzles available for THIS lesson's subject and
+        key stage (e.g. fraction bars, number lines, label-the-diagram). Call this
+        before show_puzzle so you choose a real puzzle_id with valid params — never
+        invent a puzzle_id. Returns each puzzle's id, what it shows, and its params.
+        """
+        from app.services import puzzle_service
+        return {"puzzles": puzzle_service.list_available(ctx.subject, ctx.key_stage)}
+
+    @tool
+    async def show_puzzle(puzzle_id: str, params: Optional[dict] = None) -> dict:
+        """
+        Display an interactive visual puzzle on the student's screen to teach or check
+        a concept (Synthesis-style). Use for hands-on Maths/Science moments — e.g. naming
+        a fraction on a bar, reading a number line, labelling a diagram. Pick puzzle_id
+        from list_available_puzzles and pass its params (see each puzzle's `params`).
+        After showing it, ask the student to solve it and WAIT — their answer arrives as a
+        [PUZZLE RESULT] message; then praise + advance, or give a hint and try again.
+        Call this SILENTLY (never write the call as text).
+        """
+        from app.services import puzzle_service
+        payload = puzzle_service.build(puzzle_id, params or {})
+        if not payload.get("error"):
+            try:
+                await puzzle_service.save_puzzle_state(ctx.db, ctx.appointment_id, payload)
+            except Exception as e:  # noqa: BLE001
+                logger.warning("save_puzzle_state failed: %s", e)
+        return payload
+
+    @tool
+    async def clear_puzzle() -> dict:
+        """
+        Remove the current puzzle from the student's screen (e.g. once they've mastered
+        it and you're moving on to teaching/slides). Call silently.
+        """
+        from app.services import puzzle_service
+        try:
+            await puzzle_service.save_puzzle_state(ctx.db, ctx.appointment_id, None)
+        except Exception as e:  # noqa: BLE001
+            logger.warning("clear puzzle_state failed: %s", e)
+        return {"action": "clear_puzzle"}
+
+    @tool
     async def web_search(query: str, num_results: int = 5) -> dict:
         """
         Search the web for current information relevant to the student's question.
@@ -559,6 +603,9 @@ def make_session_tools(ctx: ToolContext) -> list:
         show_resource,
         advance_lesson_slide,
         retreat_lesson_slide,
+        list_available_puzzles,
+        show_puzzle,
+        clear_puzzle,
         web_search,
         deep_research,
     ]

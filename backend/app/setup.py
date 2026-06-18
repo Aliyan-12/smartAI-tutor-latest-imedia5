@@ -51,6 +51,64 @@ async def run_setup(fresh: bool = False):
 
     # Column migrations (idempotent — safe to re-run)
     _migrations = [
+        # ================================================================
+        # Auth overhaul — schools (multi-tenancy), email verification + OAuth
+        # identities, Casbin policy store, and new users columns.
+        # (create_all above already builds these for fresh DBs; the ALTERs
+        #  below upgrade an EXISTING users table.)
+        # ================================================================
+        """CREATE TABLE IF NOT EXISTS schools (
+            id SERIAL PRIMARY KEY,
+            name VARCHAR(255) NOT NULL,
+            slug VARCHAR(120) NOT NULL UNIQUE,
+            country VARCHAR(60),
+            account_type VARCHAR(20) NOT NULL DEFAULT 'school',
+            superadmin_user_id INTEGER,
+            is_default BOOLEAN NOT NULL DEFAULT FALSE,
+            created_at TIMESTAMP WITH TIME ZONE
+        )""",
+        "CREATE INDEX IF NOT EXISTS ix_schools_slug ON schools(slug)",
+        "CREATE INDEX IF NOT EXISTS ix_schools_is_default ON schools(is_default)",
+        """CREATE TABLE IF NOT EXISTS email_verification_tokens (
+            id SERIAL PRIMARY KEY,
+            user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            token VARCHAR(64) NOT NULL UNIQUE,
+            purpose VARCHAR(16) NOT NULL DEFAULT 'verify',
+            expires_at TIMESTAMP WITH TIME ZONE NOT NULL,
+            used BOOLEAN NOT NULL DEFAULT FALSE,
+            created_at TIMESTAMP WITH TIME ZONE
+        )""",
+        "CREATE INDEX IF NOT EXISTS ix_evt_user_id ON email_verification_tokens(user_id)",
+        "CREATE INDEX IF NOT EXISTS ix_evt_token ON email_verification_tokens(token)",
+        """CREATE TABLE IF NOT EXISTS oauth_identities (
+            id SERIAL PRIMARY KEY,
+            user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            provider VARCHAR(32) NOT NULL,
+            provider_user_id VARCHAR(255) NOT NULL,
+            email VARCHAR(255),
+            created_at TIMESTAMP WITH TIME ZONE,
+            CONSTRAINT uq_oauth_provider_user UNIQUE (provider, provider_user_id)
+        )""",
+        "CREATE INDEX IF NOT EXISTS ix_oauth_identities_user_id ON oauth_identities(user_id)",
+        # Casbin policy store (matches casbin-async-sqlalchemy-adapter default schema)
+        """CREATE TABLE IF NOT EXISTS casbin_rule (
+            id SERIAL PRIMARY KEY,
+            ptype VARCHAR(255),
+            v0 VARCHAR(255),
+            v1 VARCHAR(255),
+            v2 VARCHAR(255),
+            v3 VARCHAR(255),
+            v4 VARCHAR(255),
+            v5 VARCHAR(255)
+        )""",
+        # users: tenant + onboarding columns; relax password for OAuth-only users
+        "ALTER TABLE users ADD COLUMN IF NOT EXISTS school_id INTEGER REFERENCES schools(id) ON DELETE SET NULL",
+        "CREATE INDEX IF NOT EXISTS ix_users_school_id ON users(school_id)",
+        "ALTER TABLE users ADD COLUMN IF NOT EXISTS is_verified BOOLEAN NOT NULL DEFAULT FALSE",
+        "ALTER TABLE users ADD COLUMN IF NOT EXISTS onboarding_completed BOOLEAN NOT NULL DEFAULT FALSE",
+        "ALTER TABLE users ADD COLUMN IF NOT EXISTS auth_provider VARCHAR(20) NOT NULL DEFAULT 'password'",
+        "ALTER TABLE users ADD COLUMN IF NOT EXISTS account_type VARCHAR(20) NOT NULL DEFAULT 'individual'",
+        "ALTER TABLE users ALTER COLUMN password_hash DROP NOT NULL",
         "ALTER TABLE chats ADD COLUMN IF NOT EXISTS appointment_id INTEGER REFERENCES appointments(id)",
         "ALTER TABLE appointments ADD COLUMN IF NOT EXISTS paused_at TIMESTAMP WITH TIME ZONE",
         "ALTER TABLE appointments ADD COLUMN IF NOT EXISTS total_paused_seconds INTEGER DEFAULT 0",

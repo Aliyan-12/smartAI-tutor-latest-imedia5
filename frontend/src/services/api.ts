@@ -31,12 +31,23 @@ async function handleResponse<T>(response: Response): Promise<T> {
   return response.json();
 }
 
+export interface RegisterPayload {
+  account_type: "school" | "individual";
+  role?: "student" | "parent";
+  name: string;
+  email: string;
+  password: string;
+  school_name?: string;
+  country?: string;
+}
+
 export const authApi = {
-  async register(name: string, email: string, password: string) {
+  // Returns { status: "verification_sent", email, dev_verify_token? } — NOT a token.
+  async register(payload: RegisterPayload) {
     const res = await fetch(`${API_BASE}/auth/register`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ name, email, password }),
+      body: JSON.stringify(payload),
     });
     return handleResponse(res);
   },
@@ -50,11 +61,111 @@ export const authApi = {
     return handleResponse(res);
   },
 
+  async verifyEmail(token: string) {
+    const res = await fetch(`${API_BASE}/auth/verify-email`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ token }),
+    });
+    return handleResponse(res);
+  },
+
+  async resendVerification(email: string) {
+    const res = await fetch(`${API_BASE}/auth/resend-verification`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email }),
+    });
+    return handleResponse(res);
+  },
+
+  async forgotPassword(email: string) {
+    const res = await fetch(`${API_BASE}/auth/forgot-password`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email }),
+    });
+    return handleResponse(res);
+  },
+
+  async resetPassword(token: string, password: string) {
+    const res = await fetch(`${API_BASE}/auth/reset-password`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ token, password }),
+    });
+    return handleResponse(res);
+  },
+
+  googleLoginUrl() {
+    return `${API_BASE}/auth/oauth/google/login`;
+  },
+
   async getMe() {
     const res = await fetch(`${API_BASE}/auth/me`, {
       headers: authHeaders(),
     });
     return handleResponse(res);
+  },
+
+  onboarding: {
+    async profile(body: Record<string, unknown>) {
+      const res = await fetch(`${API_BASE}/auth/onboarding/profile`, {
+        method: "POST",
+        headers: authHeaders(),
+        body: JSON.stringify(body),
+      });
+      return handleResponse(res);
+    },
+    async preferences(body: Record<string, unknown>) {
+      const res = await fetch(`${API_BASE}/auth/onboarding/preferences`, {
+        method: "POST",
+        headers: authHeaders(),
+        body: JSON.stringify(body),
+      });
+      return handleResponse(res);
+    },
+    async complete() {
+      const res = await fetch(`${API_BASE}/auth/onboarding/complete`, {
+        method: "POST",
+        headers: authHeaders(),
+      });
+      return handleResponse(res);
+    },
+  },
+};
+
+export interface SchoolUser {
+  id: number; name: string; email: string; role: string;
+  is_active: boolean; is_verified: boolean; onboarding_completed: boolean; created_at: string;
+}
+export interface SchoolStats {
+  school: { id: number; name: string; slug: string; country: string | null; account_type: string; is_default: boolean };
+  teachers: number; students: number; parents: number; total: number;
+}
+
+export const schoolApi = {
+  async getMySchool(): Promise<SchoolStats> {
+    return handleResponse(await fetch(`${API_BASE}/school/me`, { headers: authHeaders() }));
+  },
+  async updateSchool(body: { name?: string; country?: string }) {
+    return handleResponse(await fetch(`${API_BASE}/school`, {
+      method: "PATCH", headers: authHeaders(), body: JSON.stringify(body),
+    }));
+  },
+  async listUsers(role?: string): Promise<{ users: SchoolUser[]; total: number }> {
+    const q = role ? `?role=${encodeURIComponent(role)}` : "";
+    return handleResponse(await fetch(`${API_BASE}/school/users${q}`, { headers: authHeaders() }));
+  },
+  async addUser(body: { name: string; email: string; password: string; role: string }) {
+    return handleResponse(await fetch(`${API_BASE}/school/users`, {
+      method: "POST", headers: authHeaders(), body: JSON.stringify(body),
+    }));
+  },
+  async setUserActive(userId: number, isActive: boolean) {
+    return handleResponse(await fetch(`${API_BASE}/school/users/${userId}/active?is_active=${isActive}`, {
+      method: "PATCH", headers: authHeaders(),
+    }));
   },
 };
 

@@ -138,32 +138,90 @@ async def get_user_subscriptions(db: AsyncSession, user_id: int) -> List[Subscri
 # ===========================================================================
 
 def send_email(to_address: str, subject: str, body: str) -> bool:
-    if settings.email_enabled:
-        try:
-            import smtplib
-            from email.mime.text import MIMEText
-            from email.mime.multipart import MIMEMultipart
-
-            msg = MIMEMultipart()
-            msg["From"] = settings.email_from_address
-            msg["To"] = to_address
-            msg["Subject"] = subject
-            msg.attach(MIMEText(body, "html"))
-
-            with smtplib.SMTP(settings.email_smtp_host, settings.email_smtp_port) as server:
-                server.starttls()
-                server.login(settings.email_smtp_user, settings.email_smtp_password)
-                server.send_message(msg)
-
-            logger.info(f"Email sent to {to_address}: {subject}")
-            return True
-        except Exception as e:
-            logger.error(f"Email send failed: {e}")
-            return False
-    else:
+    if not settings.email_enabled:
         logger.info(f"[DUMMY EMAIL] To: {to_address} | Subject: {subject}")
         logger.info(f"[DUMMY EMAIL] Body: {body[:200]}...")
         return True
+
+    import smtplib
+    from email.mime.text import MIMEText
+    from email.mime.multipart import MIMEMultipart
+
+    # Most providers (incl. Gmail) require the From to be the authenticated user;
+    # fall back to the SMTP user when the From is unset/placeholder.
+    from_addr = settings.email_from_address
+    if not from_addr or from_addr == "noreply@smartai.com":
+        from_addr = settings.email_smtp_user or from_addr
+
+    msg = MIMEMultipart()
+    msg["From"] = from_addr
+    msg["To"] = to_address
+    msg["Subject"] = subject
+    msg.attach(MIMEText(body, "html"))
+
+    host, port = settings.email_smtp_host, settings.email_smtp_port
+    try:
+        if port == 465:
+            # Implicit TLS
+            with smtplib.SMTP_SSL(host, port, timeout=20) as server:
+                if settings.email_smtp_user:
+                    server.login(settings.email_smtp_user, settings.email_smtp_password)
+                server.send_message(msg)
+        else:
+            # STARTTLS (587)
+            with smtplib.SMTP(host, port, timeout=20) as server:
+                server.ehlo()
+                server.starttls()
+                server.ehlo()
+                if settings.email_smtp_user:
+                    server.login(settings.email_smtp_user, settings.email_smtp_password)
+                server.send_message(msg)
+        logger.info(f"Email sent to {to_address}: {subject}")
+        return True
+    except Exception as e:
+        # Surface the real SMTP error (auth failure, bad app password, blocked port…)
+        logger.error(
+            "Email send to %s FAILED via %s:%s as %r — %s: %s",
+            to_address, host, port, settings.email_smtp_user, type(e).__name__, e,
+        )
+        return False
+
+
+# ── Auth emails (verification + password reset) ────────────────────────────────
+def _frontend_link(path: str, token: str) -> str:
+    return f"{settings.frontend_base_url.rstrip('/')}/{path}?token={token}"
+
+
+async def send_verification_email(to: str, name: str, token: str) -> None:
+    import asyncio
+    link = _frontend_link("verify-email", token)
+    if not settings.email_enabled:
+        logger.info("[email disabled] verify link for %s: %s", to, link)
+    subject = "Verify your AI Tutor 4 Schools account"
+    body = (
+        f"<p>Hi {name},</p>"
+        "<p>Welcome to <strong>AI Tutor 4 Schools</strong>! Please verify your email "
+        "to activate your account:</p>"
+        f'<p><a href="{link}" style="background:#1a73e8;color:#fff;padding:10px 18px;'
+        'border-radius:8px;text-decoration:none;font-weight:600">Verify my email</a></p>'
+        f'<p>Or paste this link:<br><a href="{link}">{link}</a></p>'
+        "<p style='color:#64748b;font-size:13px'>This link expires in 24 hours.</p>"
+    )
+    await asyncio.to_thread(send_email, to, subject, body)
+
+
+async def send_password_reset(to: str, name: str, token: str) -> None:
+    import asyncio
+    link = _frontend_link("reset-password", token)
+    if not settings.email_enabled:
+        logger.info("[email disabled] reset link for %s: %s", to, link)
+    subject = "Reset your AI Tutor 4 Schools password"
+    body = (
+        f"<p>Hi {name},</p><p>Reset your password using the link below:</p>"
+        f'<p><a href="{link}">{link}</a></p>'
+        "<p style='color:#64748b;font-size:13px'>This link expires in 24 hours.</p>"
+    )
+    await asyncio.to_thread(send_email, to, subject, body)
 
 
 def send_booking_confirmation(

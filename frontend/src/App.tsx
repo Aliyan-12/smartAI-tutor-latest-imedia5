@@ -21,20 +21,35 @@ import TeacherReportsPage from "./pages/TeacherReportsPage";
 import TeacherSettingsPage from "./pages/TeacherSettingsPage";
 import SessionReportPage from "./pages/SessionReportPage";
 import DashboardPage from "./pages/DashboardPage";
+import VerifyEmailPage from "./pages/VerifyEmailPage";
+import OnboardingPage from "./pages/OnboardingPage";
+import OAuthCallbackPage from "./pages/OAuthCallbackPage";
 import type { ReactNode } from "react";
+
+const Loading = () => (
+  <div className="auth-page">
+    <div style={{ color: "var(--text-secondary)" }}>Loading...</div>
+  </div>
+);
+
+// Auth only — does NOT enforce verification/onboarding (used by /onboarding so we
+// don't create a redirect loop).
+function RequireAuth({ children }: { children: ReactNode }) {
+  const { user, loading } = useAuth();
+  if (loading) return <Loading />;
+  if (!user) return <Navigate to="/login" replace />;
+  return <>{children}</>;
+}
 
 function ProtectedRoute({ children, allowedRoles }: { children: ReactNode; allowedRoles?: string[] }) {
   const { user, loading } = useAuth();
 
-  if (loading) {
-    return (
-      <div className="auth-page">
-        <div style={{ color: "var(--text-secondary)" }}>Loading...</div>
-      </div>
-    );
-  }
-
+  if (loading) return <Loading />;
   if (!user) return <Navigate to="/login" replace />;
+
+  // Gate the app behind email verification + onboarding completion.
+  if (user.is_verified === false) return <Navigate to="/verify-email" replace />;
+  if (user.onboarding_completed === false) return <Navigate to="/onboarding" replace />;
 
   if (allowedRoles && !allowedRoles.includes(user.role)) {
     return <Navigate to="/" replace />;
@@ -45,15 +60,7 @@ function ProtectedRoute({ children, allowedRoles }: { children: ReactNode; allow
 
 function PublicRoute({ children }: { children: ReactNode }) {
   const { user, loading } = useAuth();
-
-  if (loading) {
-    return (
-      <div className="auth-page">
-        <div style={{ color: "var(--text-secondary)" }}>Loading...</div>
-      </div>
-    );
-  }
-
+  if (loading) return <Loading />;
   return user ? <Navigate to="/" replace /> : <>{children}</>;
 }
 
@@ -61,9 +68,12 @@ function RoleRouter() {
   const { user } = useAuth();
 
   if (!user) return <Navigate to="/login" replace />;
+  if (user.is_verified === false) return <Navigate to="/verify-email" replace />;
+  if (user.onboarding_completed === false) return <Navigate to="/onboarding" replace />;
 
   switch (user.role) {
     case "admin":
+      // Each admin is a school admin — same dashboard, scoped to their school.
       return <Navigate to="/admin/dashboard" replace />;
     case "teacher":
       return <Navigate to="/teacher/dashboard" replace />;
@@ -204,6 +214,11 @@ export default function App() {
               </PublicRoute>
             }
           />
+          {/* Email verification + OAuth callback are reachable without a session. */}
+          <Route path="/verify-email" element={<VerifyEmailPage />} />
+          <Route path="/oauth/callback" element={<OAuthCallbackPage />} />
+          {/* Onboarding requires auth but not completed-onboarding (avoids a loop). */}
+          <Route path="/onboarding" element={<RequireAuth><OnboardingPage /></RequireAuth>} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </AuthProvider>

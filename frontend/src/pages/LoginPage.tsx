@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect, type FormEvent, type ReactNode } from "react";
 import { Link } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
+import { authApi } from "../services/api";
 
 const UKFlag = () => (
   <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 60 30" width="22" height="14" style={{borderRadius:2,flexShrink:0,display:"inline-block"}}>
@@ -33,6 +34,8 @@ export default function LoginPage() {
   const [error,    setError]    = useState("");
   const [loading,  setLoading]  = useState(false);
   const [showPw,   setShowPw]   = useState(false);
+  const [unverified, setUnverified] = useState(false);
+  const [resent,   setResent]   = useState(false);
 
   const containerRef     = useRef<HTMLDivElement>(null);
   const canvasRef        = useRef<HTMLCanvasElement>(null);
@@ -185,11 +188,26 @@ export default function LoginPage() {
   const handleSubmit = async (ev: FormEvent) => {
     ev.preventDefault();
     setError("");
+    setUnverified(false);
     setLoading(true);
     try   { await login(email, password); }
-    catch (err: unknown) { setError(err instanceof Error ? err.message : "Login failed"); }
+    catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : "Login failed";
+      if (msg === "email_unverified") {
+        setUnverified(true);
+        setError("Please verify your email before signing in.");
+      } else {
+        setError(msg);
+      }
+    }
     finally { setLoading(false); }
   };
+
+  const resendVerification = async () => {
+    try { await authApi.resendVerification(email); setResent(true); } catch { /* ignore */ }
+  };
+
+  const googleSignIn = () => { window.location.href = authApi.googleLoginUrl(); };
 
   return (
     <>
@@ -554,6 +572,13 @@ export default function LoginPage() {
                 <p>Sign in to your learning platform</p>
               </div>
 
+              <button type="button" onClick={googleSignIn}
+                style={{ width: "100%", display: "flex", alignItems: "center", justifyContent: "center", gap: 10, padding: 11, border: "1.5px solid #e2e8f0", borderRadius: 9, background: "#fff", cursor: "pointer", fontSize: 14, fontWeight: 600, color: "#1e293b", marginBottom: 14 }}>
+                <svg width="18" height="18" viewBox="0 0 48 48"><path fill="#FFC107" d="M43.6 20.5H42V20H24v8h11.3C33.7 32.4 29.3 35 24 35c-6.6 0-12-5.4-12-12s5.4-12 12-12c3.1 0 5.9 1.2 8 3.1l5.7-5.7C34.6 5.1 29.6 3 24 3 11.8 3 2 12.8 2 25s9.8 22 22 22 22-9.8 22-22c0-1.5-.2-2.7-.4-4.5z"/><path fill="#FF3D00" d="M6.3 14.7l6.6 4.8C14.7 16 19 13 24 13c3.1 0 5.9 1.2 8 3.1l5.7-5.7C34.6 5.1 29.6 3 24 3 16 3 9.1 7.6 6.3 14.7z"/><path fill="#4CAF50" d="M24 47c5.2 0 9.9-2 13.5-5.2l-6.2-5.3C29.2 38 26.7 39 24 39c-5.3 0-9.6-2.6-11.3-6.9l-6.6 5.1C9 43.3 15.9 47 24 47z"/><path fill="#1976D2" d="M43.6 20.5H42V20H24v8h11.3c-.8 2.3-2.3 4.3-4.1 5.5l6.2 5.3C39.9 36.5 46 31 46 25c0-1.5-.2-2.7-.4-4.5z"/></svg>
+                Continue with Google
+              </button>
+              <div className="lp-divider"><span>or sign in with email</span></div>
+
               <form onSubmit={handleSubmit}>
                 <div className="lp-field">
                   <label htmlFor="lp-email">Email address</label>
@@ -599,6 +624,12 @@ export default function LoginPage() {
                 </div>
 
                 {error && <div className="lp-error">{error}</div>}
+                {unverified && (
+                  <button type="button" onClick={resendVerification} disabled={resent}
+                    style={{ width: "100%", padding: 10, marginBottom: 10, borderRadius: 8, border: "1px solid #bbf7d0", background: resent ? "#dcfce7" : "#f0fdf4", color: "#166534", fontWeight: 600, fontSize: 13, cursor: "pointer" }}>
+                    {resent ? "Verification email sent ✓" : "Resend verification email"}
+                  </button>
+                )}
 
                 <button className="lp-submit" type="submit" disabled={loading}>
                   {loading ? "Signing in…" : "Sign In →"}

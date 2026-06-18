@@ -4,7 +4,7 @@
 
 SmartAI Tutor is a commercial AI-powered tutoring platform for UK GCSE students (Key Stages 1–5). It delivers structured AI lessons using Google Gemini, a RAG knowledge base built on pgvector, and real-time voice via a custom **STT → turn → Kokoro-TTS** pipeline over WebSocket (the old Gemini Live path has been removed). The platform is deployed at **dev.smartaitutor.online**.
 
-Curriculum + teaching content now come from an external **Resource Hub** (see the integration plan at the bottom of this file), not the legacy admin-uploaded knowledge base.
+Curriculum + teaching content come from an external **Resource Hub** (mirrored into `rh_*` tables), not the legacy admin-uploaded knowledge base. Auth, multi-tenant schools, and interactive visual puzzles were added in the **Major Upgrade** (see the section at the bottom of this file).
 
 ---
 
@@ -18,16 +18,19 @@ Curriculum + teaching content now come from an external **Resource Hub** (see th
 | AI — text | Google Gemini (LangChain, streamed over WebSocket) | — |
 | AI — voice | Custom STT (Gemini) → Kokoro TTS, over the chat/session WebSocket | — |
 | AI — embed | Gemini embedding-001 (768d vectors) | — |
+| Auth | JWT + Google OAuth (Authlib) + email verification; Casbin RBAC | — |
+| Puzzles | SVG + react-konva interactive visual puzzles | — |
 
 Vector search: pgvector HNSW cosine, top-5 chunks, min 0.3 similarity.
 
 ---
 
-## Four User Roles
+## User Roles
 
 | Role | Dashboard route | Notes |
 |------|-----------------|-------|
-| admin | `/admin/dashboard` | Full platform control |
+| superadmin | `/school/dashboard` | Owns a single school tenant; manages its teachers/students/parents |
+| admin | `/admin/dashboard` | Full platform control (cross-school) |
 | teacher | `/teacher/dashboard` | Manage content + monitor students |
 | student | `/dashboard` | Chat + AI lessons + sessions |
 | parent | `/parent/dashboard` | Book sessions + track children |
@@ -46,28 +49,32 @@ parent@smartai.com   / parent123
 
 ```
 backend/app/
-  core/           — Config, JWT security
+  core/           — Config, JWT + OAuth/verification security (security.py, tokens.py, casbin_model.conf)
   db/             — Database session, init
-  middleware/     — Auth guards, rate limiting
-  models/         — SQLAlchemy models (users, chats, documents, appointments, assignments, resource_hub)
-  routers/        — API endpoints (auth, chat, voice, admin, teacher, appointments, documents, curriculum)
+  middleware/     — Auth guards (require_role + Casbin require_permission), rate limiting
+  models/         — SQLAlchemy models (users, school, auth_tokens, chats, appointments, assignments, resource_hub)
+  routers/        — API endpoints (auth, school, chat, voice, admin, teacher, appointments, documents, curriculum)
   schemas/        — Pydantic request/response models
   services/
     chat_service.py           — Chat CRUD + RAG context building
     gemini_service.py         — Gemini streaming + RAG injection
     rag_service.py            — Gemini embeddings + pgvector cosine retrieval
-    session_agent_service.py  — Session AI (goal-specific lesson structure)
+    session_agent_service.py  — Session AI (goal-specific lesson structure, slides + puzzles)
     document_service.py       — PDF/DOCX/PPTX extraction + chunking
     voice_agent_service.py    — STT + Kokoro TTS
     resource_hub_client.py    — Async client for the external Resource Hub API
     resource_sync_service.py  — Jobs: mirror curriculum + vectorize resources
     curriculum_service.py     — Read API over the rh_* mirror
-    credit_service.py         — Credit deduction + subscriptions
+    casbin_service.py         — Casbin RBAC enforcer + policy seeding
+    oauth_service.py          — Authlib Google OAuth registry
+    school_service.py         — School (tenant) CRUD + default-school accessor
+    puzzle_service.py + puzzle_templates.py — visual-puzzle registry/build/solve
+    platform_service.py       — Credits, XP/streaks, email (verification/reset)
     user_service.py           — User CRUD
 
 frontend/src/
-  components/     — Sidebar, WelcomeScreen, ChatWindow, ChatInput, ResourceViewer, LottiePlayer, etc.
-  context/        — AuthContext (JWT state)
+  components/     — Sidebar, WelcomeScreen, ChatWindow, ChatInput, ResourceViewer, PuzzlePlayer, puzzles/*, LottiePlayer, etc.
+  context/        — AuthContext (JWT + verification/onboarding state, Google sign-in)
   hooks/          — useSessionChannel (chat/session WS pipeline), useVoiceCapture (mic VAD → user_audio), useVoice (single-shot "Read aloud" TTS), useChat (dashboard list/credits)
   pages/          — All page components (see Navigation Rules below)
   services/       — api.ts (all API endpoints, typed)
@@ -233,54 +240,32 @@ Always ask before running any `ssh`, `scp`, or remote command targeting that IP.
 
 ---
 
-## Resource Hub Integration — Plan
+## Major Upgrade — Auth + Multi-Tenant Schools + Visual Puzzles
 
-> **Status: APPROVED — implementing in phases.** Full plan: `~/.claude/plans/cryptic-orbiting-bentley.md`.
+> **Status: IMPLEMENTED.** Full plan: `~/.claude/plans/cryptic-orbiting-bentley.md`.
+> (The Resource Hub curriculum/slides integration is also live — documented in the RAG + session-slide sections above; it remains the curriculum/content source.)
 
-### What This Is
-The external **Resource Hub** (`https://hub.resourcefullearning.co.uk`) is the single source of truth for the whole curriculum tree **and** all teaching files (slides, worksheets, mark schemes, homework, videos, links):
+Three phases shipped on top of the base platform: a SaaS auth overhaul, school multi-tenancy, and a Synthesis-style interactive puzzle engine.
 
-```
-Key Stage → Year Group → Subject → Unit → Topic (optional) → Resource(s)
-```
+### Phase 1 — Auth: Google OAuth + email verification + Casbin RBAC
+- **Dual-mode signup** (`POST /api/auth/register` with `account_type`):
+  - `school` → creates a `School` + the registrant as its **superadmin** (new role).
+  - `individual` (student/parent) → attached to the default school **"Smart Tuition (United Kingdom & United Arab Emirates)"** (`is_default`, `account_type=individual_host`).
+- **Flow:** register → email verification (link emailed; in dev `EMAIL_ENABLED=false` so the link is logged + returned as `dev_verify_token`) → onboarding (profile + preferences) → login. Login blocks unverified users (`403 email_unverified`). **Google OAuth** via Authlib (`/api/auth/oauth/google/login` + `/callback`, gated to `503` until `GOOGLE_CLIENT_ID/SECRET` set); needs `SessionMiddleware` (added in `main.py`).
+- **Casbin RBAC** (`services/casbin_service.py` + `core/casbin_model.conf`, RBAC-with-domains, async SQLAlchemy adapter → `casbin_rule`). Casbin answers role→obj→act; **cross-school isolation is enforced at the service layer** (school_id filters). New dep `middleware/auth.require_permission(obj, act)`; the old `require_role(...)` stays. Policies seeded in `seed.py` / on startup.
+- **Models:** `models/school.py` (`School`), `models/auth_tokens.py` (`EmailVerificationToken`, `OAuthIdentity`); `User` gained `school_id`, `is_verified`, `onboarding_completed`, `auth_provider`, `account_type`, nullable `password_hash`, and the `superadmin` role. Emails go through `platform_service.send_verification_email/send_password_reset` (single email path; no separate email_service).
+- **Frontend:** `RegisterPage` mode selector (🏫 School / 👤 Individual) + Google button; `LoginPage` Google + unverified-resend; new `VerifyEmailPage`, `OnboardingPage`, `OAuthCallbackPage`; route guards in `App.tsx` (unverified→`/verify-email`, `!onboarding_completed`→`/onboarding`).
 
-The app mirrors this into local `rh_*` tables via two scheduled jobs and reads curriculum + content from the mirror everywhere (lesson setup, sessions, simple chat, profile, dashboard). The legacy `documents` KB is unwired (dormant, removed later).
+### Phase 2 — School multi-tenancy
+- `routers/school.py` (superadmin/admin-scoped): `GET /api/school/me` (stats), `PATCH /api/school`, `GET/POST /api/school/users`, `PATCH /api/school/users/{id}/active`. All reads/writes scoped to the caller's `school_id` → schools can't see each other's users. `services/school_service.py` holds the default-school accessor + CRUD.
+- Frontend `pages/SchoolDashboard.tsx` (superadmin landing at `/school/dashboard`): member stats, add/deactivate teachers/students/parents.
 
-### Resource Hub API
-Auth: `?api_key=<key>` **or** `Authorization: Bearer <key>` (key in `.env`, `RESOURCE_HUB_API_KEY`).
-- `GET /api/v1/curriculum/keystages` → `{"data":["KS1".."KS5"]}`
-- `GET /api/v1/curriculum/years?keyStage=KS2` → `{"data":["Year 3",...]}` (omit `keyStage` → grouped)
-- `GET /api/v1/curriculum/subjects?keyStage=&yearGroup=` → `{"data":[{"id":9,"name":"Maths"}]}`
-- `GET /api/v1/curriculum/units?subjectId=9` → `{"data":[{"id":65,"title":"UNIT 3: Shape","unitNumber":1}]}`
-- `GET /api/v1/curriculum/topics?unitId=65` → `{"data":[{"id":278,"title":"1. Naming 2D shapes"}]}`
-- `GET /api/v1/resources?keyStage=&yearGroup=&subjectId=&unitId=&topicId=&resourceType=&page=&limit=` → `{"data":[...],"total","page","limit","totalPages"}`
+### Phase 3 — Visual puzzle engine (Synthesis-style)
+- The AI never free-draws — it **selects a pre-authored template** + params. `services/puzzle_templates.py` (registry tagged by subject + key_stage) + `services/puzzle_service.py` (`build` validates/solves; `list_available`; persists to `LessonPlan.session_state["puzzle_state"]`).
+- New `session_tools.py` tools: `list_available_puzzles()`, `show_puzzle(puzzle_id, params)`, `clear_puzzle()`. `show_puzzle` returns `{action:"show_puzzle", ...}` → WS `{type:"tool", tool:"show_puzzle"}` (same pipeline as slides). The student's attempt returns via a new WS message `puzzle_result` → `session_agent_service._handle_puzzle_result` → the AI praises/advances or hints. System prompt has a **VISUAL PUZZLES** block.
+- Templates v1 (Maths + Science): SVG — `fraction_bar`, `number_line`, `shape_count`, `area_grid`; react-konva — `build_fraction`, `label_diagram`, `states_of_matter`, `food_chain_order`.
+- Frontend `components/PuzzlePlayer.tsx` + `components/puzzles/*` render by `render` key; `useSessionChannel.sendPuzzleResult(...)` mirrors `sendQuizResult`; `SessionPage` shows the puzzle in the Learn panel (overlays the slide while active).
 
-**Resource object:** `id`, `title`, `description`, `resourceType` (pdf|powerpoint|youtube|external_link|worksheet|…), `keyStage`, `yearGroup`, `subject` (name), `unitTitle`, `topicTitle`, `fileUrl`, `youtubeUrl`, `externalUrl`, `tags` (csv), `createdAt`. Resources link to curriculum **by name** (subject/unitTitle/topicTitle + keyStage + yearGroup), not by id.
-
-### Data model — `backend/app/models/resource_hub.py` (`rh_*` tables)
-`RHKeyStage`, `RHYearGroup`, `RHSubject`, `RHUnit`, `RHTopic`, `RHAvailability` ((KS,year)→subject/unit edges that power "different subjects per year group"), `RHResource` (metadata + `vectorize_status` + `raw_json`), and `RHDocument`/`RHDocumentChunk` (vector store; chunks carry `slide_index` for per-slide teaching, HNSW cosine index like `DocumentChunk`).
-
-### Jobs + scheduler
-- **Job 1 `sync_curriculum()`** — mirror keystages→years→subjects→units→topics; idempotent upsert by `hub_id`; prune deletions.
-- **Job 2 `sync_resources()`** — page `/resources`, upsert `RHResource`, resolve curriculum links by name; for file types with `fileUrl` (pdf/powerpoint/worksheet/docx/mark-scheme) → download → per-page/slide extract → chunk → `embed_batch` → `RHDocumentChunk`. youtube/external_link = metadata only (`skipped`).
-- APScheduler `AsyncIOScheduler` started in `main.py` lifespan; runs once on startup + on intervals (`curriculum_sync_hours`=12, `resource_sync_hours`=6). Admin manual trigger: `POST /api/curriculum/sync`.
-
-### Read API + retrieval
-- `routers/curriculum.py` + `curriculum_service.py`: GET keystages/years/subjects/units/topics/resources over the mirror. `lessons.py` curriculum endpoints + `lesson_service.get_topics_for_subject/get_subtopics` repointed to `rh_*`.
-- `rag_service.retrieve_hub_chunks(...)` searches `RHDocumentChunk ⋈ RHDocument ⋈ RHResource`, filterable by curriculum + resource type. Sessions filter tight; simple chat filters loose.
-
-### Session slide-teaching
-- Session start builds a **resource playlist** from the lesson's KS/year/subject/unit, filtered by goal→type map: homework→worksheets/homework; catch_up→slides/homework/worksheets; exam_prep→mark scheme/slides/links; learn_scratch→slides (others on request).
-- New `@tool`s in `session_tools.py`: `advance_lesson_slide()` / `retreat_lesson_slide()` / `show_resource(resource_hub_id)`. They update `LessonPlan.session_state` (`current_resource_id`, `current_slide_index`) and emit a WS `{type:"tool", tool:"show_resource", data:{...}}`. AI teaches the **current slide's content** (injected from `RHDocumentChunk` for that `slide_index`), advances on a correct answer, retreats when the student struggles.
-- Frontend `components/ResourceViewer.tsx` iframe renders the current resource (PDF via `fileUrl#page=N`, PPTX/DOC via Office/Google embed, youtube/links inline), driven by `show_resource` events from `useSessionChannel`.
-
-### Phases
-1. Schema + config/env + `resource_hub_client.py`
-2. Job 1 + scheduler + curriculum read API; repoint `lessons.py`/`lesson_service`
-3. Frontend curriculum swap (LessonSetupPage year-group, profile/dashboard subjects)
-4. Job 2 + per-slide vectorize + `retrieve_hub_chunks`; repoint session + simple-chat RAG
-5. Session slide viewer + advance/retreat/show_resource tools
-6. (later) remove dormant admin KB
-
-### Config / env (new)
-`RESOURCE_HUB_BASE_URL`, `RESOURCE_HUB_API_KEY`, `CURRICULUM_SYNC_HOURS`, `RESOURCE_SYNC_HOURS`, `RESOURCE_SYNC_ENABLED` — added to `config.py`, `.env`, `.env.example`, `docker-compose.yml`. Dep added: `apscheduler` (httpx/pypdf/python-pptx already present).
+### Config / env (new) + activation
+- `.env`/`config.py`/`docker-compose.yml`: `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `OAUTH_REDIRECT_BASE_URL`, `SESSION_SECRET`, `FRONTEND_BASE_URL`, `EMAIL_ENABLED`(+SMTP). Deps added: `Authlib`, `itsdangerous`, `casbin`, `casbin-async-sqlalchemy-adapter` (backend); `konva`, `react-konva` (frontend).
+- **After pulling these changes:** rebuild backend, then `docker compose exec backend python -m app.setup` (adds `users` columns + `schools`/token/`casbin_rule` tables) then `python -m app.seed` (default school + Casbin policies + backfills seed users verified/onboarded). Without `setup`, existing-DB logins 500 on the new columns.

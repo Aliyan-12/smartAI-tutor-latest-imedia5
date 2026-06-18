@@ -46,17 +46,51 @@ SEED_USERS = [
 ]
 
 
+async def _get_or_create_default_school(db):
+    """Ensure the default 'individual_host' school exists. Every individual
+    (parent/student) signup attaches to it."""
+    from sqlalchemy import select
+    from app.models.school import (
+        School, DEFAULT_SCHOOL_NAME, DEFAULT_SCHOOL_SLUG, INDIVIDUAL_HOST,
+    )
+
+    existing = await db.execute(
+        select(School).where(School.slug == DEFAULT_SCHOOL_SLUG)
+    )
+    school = existing.scalar_one_or_none()
+    if school:
+        return school
+    school = School(
+        name=DEFAULT_SCHOOL_NAME,
+        slug=DEFAULT_SCHOOL_SLUG,
+        country="United Kingdom & United Arab Emirates",
+        account_type=INDIVIDUAL_HOST,
+        is_default=True,
+    )
+    db.add(school)
+    await db.flush()
+    logger.info(f"Created default school: {school.name} (id={school.id})")
+    return school
+
+
 async def run_seed():
     from app.db.session import async_session_factory
     from app.services.user_service import get_user_by_email, create_user
     from app.models.parent_student import InviteCode
+    from app.models.user import ACCOUNT_SCHOOL, ACCOUNT_INDIVIDUAL
 
     async with async_session_factory() as db:
+        default_school = await _get_or_create_default_school(db)
+
         created_users = {}
         for user_data in SEED_USERS:
             existing = await get_user_by_email(db, user_data["email"])
             if existing:
                 logger.info(f"User already exists: {user_data['email']} (skipping)")
+                # Backfill tenant/onboarding fields for pre-existing seed users.
+                existing.school_id = existing.school_id or default_school.id
+                existing.is_verified = True
+                existing.onboarding_completed = True
                 created_users[user_data["role"]] = existing
                 continue
 
@@ -68,8 +102,19 @@ async def run_seed():
                 role=user_data["role"],
                 credits=user_data["credits"],
             )
+            # Seed accounts are pre-verified, onboarded, and attached to the
+            # default school. Admin is treated as a school account (platform owner).
+            user.school_id = default_school.id
+            user.is_verified = True
+            user.onboarding_completed = True
+            user.account_type = ACCOUNT_SCHOOL if user.role == "admin" else ACCOUNT_INDIVIDUAL
             created_users[user_data["role"]] = user
             logger.info(f"Created {user.role}: {user.email}")
+
+        # The platform admin owns the default school tenant.
+        admin = created_users.get("admin")
+        if admin and default_school.superadmin_user_id is None:
+            default_school.superadmin_user_id = admin.id
 
         # Link parent to student
         parent = created_users.get("parent")
@@ -112,6 +157,14 @@ async def run_seed():
                 logger.info(f"Created StudentProfile for {student.name}")
 
         await db.commit()
+
+    # Seed Casbin RBAC policies (role → object/action grants). Idempotent.
+    try:
+        from app.services.casbin_service import seed_default_policies
+        await seed_default_policies()
+        logger.info("Casbin default policies seeded")
+    except Exception as e:
+        logger.warning(f"Casbin policy seeding skipped: {e}")
 
     logger.info("Seed data inserted")
 

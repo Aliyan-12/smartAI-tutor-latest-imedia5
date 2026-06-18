@@ -6,7 +6,7 @@ import {
   useCallback,
   type ReactNode,
 } from "react";
-import { authApi } from "../services/api";
+import { authApi, type RegisterPayload } from "../services/api";
 import type { User, AuthResponse } from "../types";
 
 interface AuthState {
@@ -14,7 +14,13 @@ interface AuthState {
   token: string | null;
   loading: boolean;
   login: (email: string, password: string) => Promise<void>;
-  register: (name: string, email: string, password: string) => Promise<void>;
+  // Returns the register response (e.g. { status: "verification_sent", ... });
+  // registration no longer logs the user in — they must verify their email first.
+  register: (payload: RegisterPayload) => Promise<unknown>;
+  // Apply a token+user pair (used by email verification + OAuth callback).
+  applyAuth: (data: AuthResponse) => void;
+  setSessionToken: (token: string) => void;
+  refreshUser: () => Promise<void>;
   logout: () => void;
 }
 
@@ -27,7 +33,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   );
   const [loading, setLoading] = useState(true);
 
-  const handleAuth = useCallback((data: AuthResponse) => {
+  const applyAuth = useCallback((data: AuthResponse) => {
     localStorage.setItem("token", data.access_token);
     setToken(data.access_token);
     setUser(data.user);
@@ -36,22 +42,28 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const login = useCallback(
     async (email: string, password: string) => {
       const data = (await authApi.login(email, password)) as AuthResponse;
-      handleAuth(data);
+      applyAuth(data);
     },
-    [handleAuth]
+    [applyAuth]
   );
 
   const register = useCallback(
-    async (name: string, email: string, password: string) => {
-      const data = (await authApi.register(
-        name,
-        email,
-        password
-      )) as AuthResponse;
-      handleAuth(data);
+    async (payload: RegisterPayload) => {
+      return authApi.register(payload);
     },
-    [handleAuth]
+    []
   );
+
+  const refreshUser = useCallback(async () => {
+    const data = (await authApi.getMe()) as User;
+    setUser(data);
+  }, []);
+
+  // Store a bare JWT then hydrate the user from /me (OAuth callback path).
+  const setSessionToken = useCallback((t: string) => {
+    localStorage.setItem("token", t);
+    setToken(t);
+  }, []);
 
   const logout = useCallback(() => {
     localStorage.removeItem("token");
@@ -75,7 +87,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [token]);
 
   return (
-    <AuthContext.Provider value={{ user, token, loading, login, register, logout }}>
+    <AuthContext.Provider
+      value={{
+        user, token, loading,
+        login, register, applyAuth, setSessionToken, refreshUser, logout,
+      }}
+    >
       {children}
     </AuthContext.Provider>
   );

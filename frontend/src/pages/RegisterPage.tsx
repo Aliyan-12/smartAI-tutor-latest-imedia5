@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect, type FormEvent, type ReactNode } from "react";
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
+import { authApi } from "../services/api";
 
 const UKFlag = () => (
   <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 60 30" width="22" height="14" style={{borderRadius:2,flexShrink:0,display:"inline-block"}}>
@@ -28,6 +29,9 @@ const TRUST_BADGES: { icon: ReactNode; title: string; desc: string }[] = [
 
 export default function RegisterPage() {
   const { register } = useAuth();
+  const navigate = useNavigate();
+  const [accountType, setAccountType] = useState<"individual" | "school">("individual");
+  const [individualRole, setIndividualRole] = useState<"student" | "parent">("student");
   const [name,        setName]        = useState("");
   const [email,       setEmail]       = useState("");
   const [password,    setPassword]    = useState("");
@@ -186,10 +190,19 @@ export default function RegisterPage() {
     if (password !== confirm) { setError("Passwords do not match"); return; }
     setError("");
     setLoading(true);
-    try   { await register(name, email, password); }
-    catch (err: unknown) { setError(err instanceof Error ? err.message : "Registration failed"); }
-    finally { setLoading(false); }
+    try {
+      await register({
+        account_type: accountType,
+        role: accountType === "individual" ? individualRole : undefined,
+        name, email, password,
+      });
+      // Registration sends a verification email instead of logging in.
+      navigate(`/verify-email?email=${encodeURIComponent(email)}`);
+    }
+    catch (err: unknown) { setError(err instanceof Error ? err.message : "Registration failed"); setLoading(false); }
   };
+
+  const googleSignIn = () => { window.location.href = authApi.googleLoginUrl(); };
 
   return (
     <>
@@ -559,7 +572,53 @@ export default function RegisterPage() {
                 <p>Join your school's AI tutoring platform</p>
               </div>
 
+              {/* Account mode: Individual vs School (SaaS-style) */}
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginBottom: 14 }}>
+                {([
+                  { id: "individual", icon: "👤", title: "Individual", desc: "Student or parent" },
+                  { id: "school", icon: "🏫", title: "School", desc: "Set up an institution" },
+                ] as const).map((m) => (
+                  <button
+                    type="button" key={m.id} onClick={() => setAccountType(m.id)}
+                    style={{
+                      textAlign: "left", padding: "12px 14px", borderRadius: 12, cursor: "pointer",
+                      border: `1.5px solid ${accountType === m.id ? "#1a73e8" : "#e2e8f0"}`,
+                      background: accountType === m.id ? "rgba(26,115,232,0.06)" : "#fff",
+                    }}
+                  >
+                    <div style={{ fontSize: 20 }}>{m.icon}</div>
+                    <div style={{ fontWeight: 700, fontSize: 14, color: "#1e293b" }}>{m.title}</div>
+                    <div style={{ fontSize: 11, color: "#64748b" }}>{m.desc}</div>
+                  </button>
+                ))}
+              </div>
+
+              <button type="button" onClick={googleSignIn}
+                style={{ width: "100%", display: "flex", alignItems: "center", justifyContent: "center", gap: 10, padding: 11, border: "1.5px solid #e2e8f0", borderRadius: 9, background: "#fff", cursor: "pointer", fontSize: 14, fontWeight: 600, color: "#1e293b", marginBottom: 4 }}>
+                <svg width="18" height="18" viewBox="0 0 48 48"><path fill="#FFC107" d="M43.6 20.5H42V20H24v8h11.3C33.7 32.4 29.3 35 24 35c-6.6 0-12-5.4-12-12s5.4-12 12-12c3.1 0 5.9 1.2 8 3.1l5.7-5.7C34.6 5.1 29.6 3 24 3 11.8 3 2 12.8 2 25s9.8 22 22 22 22-9.8 22-22c0-1.5-.2-2.7-.4-4.5z"/><path fill="#FF3D00" d="M6.3 14.7l6.6 4.8C14.7 16 19 13 24 13c3.1 0 5.9 1.2 8 3.1l5.7-5.7C34.6 5.1 29.6 3 24 3 16 3 9.1 7.6 6.3 14.7z"/><path fill="#4CAF50" d="M24 47c5.2 0 9.9-2 13.5-5.2l-6.2-5.3C29.2 38 26.7 39 24 39c-5.3 0-9.6-2.6-11.3-6.9l-6.6 5.1C9 43.3 15.9 47 24 47z"/><path fill="#1976D2" d="M43.6 20.5H42V20H24v8h11.3c-.8 2.3-2.3 4.3-4.1 5.5l6.2 5.3C39.9 36.5 46 31 46 25c0-1.5-.2-2.7-.4-4.5z"/></svg>
+                Continue with Google
+              </button>
+              <div className="rp-divider"><span>or sign up with email</span></div>
+
               <form onSubmit={handleSubmit}>
+                {accountType === "school" && (
+                  <p style={{ fontSize: 12, color: "#64748b", margin: "0 0 12px", lineHeight: 1.5 }}>
+                    You'll set your school's name and location right after you verify your email.
+                  </p>
+                )}
+                {accountType === "individual" && (
+                  <div className="rp-field">
+                    <label>I am a</label>
+                    <div style={{ display: "flex", gap: 8 }}>
+                      {(["student", "parent"] as const).map((r) => (
+                        <button type="button" key={r} onClick={() => setIndividualRole(r)}
+                          style={{ flex: 1, padding: "10px", borderRadius: 8, cursor: "pointer", textTransform: "capitalize", fontWeight: 600, fontSize: 14, border: `1.5px solid ${individualRole === r ? "#1a73e8" : "#e2e8f0"}`, background: individualRole === r ? "#1a73e8" : "#fff", color: individualRole === r ? "#fff" : "#475569" }}>
+                          {r}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
                 <div className="rp-field">
                   <label htmlFor="rp-name">Full Name</label>
                   <div style={{position:"relative"}}>

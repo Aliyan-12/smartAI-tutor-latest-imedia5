@@ -5,12 +5,16 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.session import Base
 
-ROLE_ADMIN = "admin"
+ROLE_ADMIN = "admin"      # admin/owner of a single school tenant (school-scoped)
 ROLE_TEACHER = "teacher"
 ROLE_STUDENT = "student"
 ROLE_PARENT = "parent"
 
 VALID_ROLES = {ROLE_ADMIN, ROLE_TEACHER, ROLE_STUDENT, ROLE_PARENT}
+
+# account_type values (how the user signed up)
+ACCOUNT_SCHOOL = "school"
+ACCOUNT_INDIVIDUAL = "individual"
 
 DEFAULT_CREDITS = 100
 
@@ -21,13 +25,22 @@ class User(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     name: Mapped[str] = mapped_column(String(120), nullable=False)
     email: Mapped[str] = mapped_column(String(255), unique=True, nullable=False, index=True)
-    password_hash: Mapped[str] = mapped_column(String(255), nullable=False)
+    # Nullable: OAuth-only (e.g. Google) accounts have no local password.
+    password_hash: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
     role: Mapped[str] = mapped_column(String(16), nullable=False, default=ROLE_STUDENT, index=True)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     credits: Mapped[float] = mapped_column(Numeric(12, 2), default=DEFAULT_CREDITS)
     parent_id: Mapped[Optional[int]] = mapped_column(
         Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True
     )
+    # Tenant + onboarding state.
+    school_id: Mapped[Optional[int]] = mapped_column(
+        Integer, ForeignKey("schools.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    is_verified: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    onboarding_completed: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    auth_provider: Mapped[str] = mapped_column(String(20), default="password", nullable=False)
+    account_type: Mapped[str] = mapped_column(String(20), default=ACCOUNT_INDIVIDUAL, nullable=False)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
     )
@@ -43,6 +56,18 @@ class User(Base):
         primaryjoin="User.parent_id == User.id",
         foreign_keys="User.parent_id",
     )
+
+    # The tenant this user belongs to. Eager-loaded so school_name/country are
+    # always available (e.g. for the sidebar) without async lazy-load errors.
+    school = relationship("School", foreign_keys=[school_id], lazy="selectin")
+
+    @property
+    def school_name(self) -> Optional[str]:
+        return self.school.name if self.school else None
+
+    @property
+    def school_country(self) -> Optional[str]:
+        return self.school.country if self.school else None
 
     @property
     def is_admin(self) -> bool:
