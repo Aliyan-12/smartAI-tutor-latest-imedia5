@@ -28,6 +28,15 @@ def _clamp(v: Any, lo: int, hi: int, default: int) -> int:
     return max(lo, min(hi, n))
 
 
+def _get(p: dict, *keys: str, default: Any = None) -> Any:
+    """First present (non-None) value among the given key aliases — the model
+    doesn't always use the documented param name (e.g. 'parts' vs 'total_parts')."""
+    for k in keys:
+        if isinstance(p, dict) and p.get(k) is not None:
+            return p[k]
+    return default
+
+
 def list_available(subject: str, key_stage: str) -> List[dict]:
     """Template metadata the AI may choose from for this lesson."""
     return [
@@ -60,8 +69,8 @@ def build(puzzle_id: str, params: Optional[dict] = None) -> Dict[str, Any]:
 
 # ── Per-type builders ───────────────────────────────────────────────────────────
 def _b_fraction_bar(p: dict) -> dict:
-    total = _clamp(p.get("total_parts"), 2, 12, 4)
-    shaded = _clamp(p.get("shaded_parts"), 0, total, 1)
+    total = _clamp(_get(p, "total_parts", "parts", "denominator", "total"), 2, 12, 4)
+    shaded = _clamp(_get(p, "shaded_parts", "shaded", "numerator", "shaded_count"), 0, total, 1)
     return {
         "prompt": "What fraction of the bar is shaded? Write it as a fraction (e.g. 3/4).",
         "params": {"total": total, "shaded": shaded},
@@ -70,10 +79,10 @@ def _b_fraction_bar(p: dict) -> dict:
 
 
 def _b_number_line(p: dict) -> dict:
-    mn = _clamp(p.get("min"), -100, 1000, 0)
-    mx = _clamp(p.get("max"), mn + 1, 1000, max(mn + 10, 10))
-    step = _clamp(p.get("step"), 1, max(1, mx - mn), 1)
-    marker = _clamp(p.get("marker"), mn, mx, mn + step)
+    mn = _clamp(_get(p, "min", "start", "from"), -100, 1000, 0)
+    mx = _clamp(_get(p, "max", "end", "to"), mn + 1, 1000, max(mn + 10, 10))
+    step = _clamp(_get(p, "step", "interval"), 1, max(1, mx - mn), 1)
+    marker = _clamp(_get(p, "marker", "value", "position", "point", "target"), mn, mx, mn + step)
     return {
         "prompt": "What number is the arrow pointing to?",
         "params": {"min": mn, "max": mx, "step": step, "marker": marker},
@@ -82,10 +91,10 @@ def _b_number_line(p: dict) -> dict:
 
 
 def _b_shape_count(p: dict) -> dict:
-    tri = _clamp(p.get("triangles"), 0, 8, 3)
-    cir = _clamp(p.get("circles"), 0, 8, 2)
-    sq = _clamp(p.get("squares"), 0, 8, 2)
-    target = str(p.get("target_shape") or "triangle").lower()
+    tri = _clamp(_get(p, "triangles", "triangle"), 0, 8, 3)
+    cir = _clamp(_get(p, "circles", "circle"), 0, 8, 2)
+    sq = _clamp(_get(p, "squares", "square"), 0, 8, 2)
+    target = str(_get(p, "target_shape", "target", "shape") or "triangle").lower()
     if target not in ("triangle", "circle", "square"):
         target = "triangle"
     counts = {"triangle": tri, "circle": cir, "square": sq}
@@ -99,8 +108,8 @@ def _b_shape_count(p: dict) -> dict:
 
 
 def _b_area_grid(p: dict) -> dict:
-    w = _clamp(p.get("width"), 1, 12, 4)
-    h = _clamp(p.get("height"), 1, 12, 3)
+    w = _clamp(_get(p, "width", "w", "columns", "cols"), 1, 12, 4)
+    h = _clamp(_get(p, "height", "h", "rows"), 1, 12, 3)
     return {
         "prompt": f"This rectangle is {w} squares wide and {h} squares tall. What is its area?",
         "params": {"width": w, "height": h},
@@ -109,8 +118,8 @@ def _b_area_grid(p: dict) -> dict:
 
 
 def _b_build_fraction(p: dict) -> dict:
-    total = _clamp(p.get("total_parts"), 2, 12, 4)
-    target = _clamp(p.get("target_num"), 0, total, 1)
+    total = _clamp(_get(p, "total_parts", "parts", "denominator", "total"), 2, 12, 4)
+    target = _clamp(_get(p, "target_num", "target", "numerator", "shaded_parts", "shaded"), 0, total, 1)
     return {
         "prompt": f"Shade the bar to show the fraction {target}/{total}.",
         "params": {"total": total, "target_num": target},
@@ -119,7 +128,7 @@ def _b_build_fraction(p: dict) -> dict:
 
 
 def _b_label_diagram(p: dict) -> dict:
-    key = str(p.get("diagram") or "plant").lower()
+    key = str(_get(p, "diagram", "type", "image", "id") or "plant").lower()
     spec = DIAGRAMS.get(key) or next(iter(DIAGRAMS.values()))
     labels = [s["label"] for s in spec["slots"]]
     random.shuffle(labels)
@@ -135,7 +144,7 @@ def _b_label_diagram(p: dict) -> dict:
 
 
 def _b_states_of_matter(p: dict) -> dict:
-    key = str(p.get("set") or "everyday").lower()
+    key = str(_get(p, "set", "set_id", "id", "items") or "everyday").lower()
     spec = SORTING_SETS.get(key) or next(iter(SORTING_SETS.values()))
     items = [{"name": it["name"]} for it in spec["items"]]
     random.shuffle(items)
@@ -147,7 +156,7 @@ def _b_states_of_matter(p: dict) -> dict:
 
 
 def _b_food_chain_order(p: dict) -> dict:
-    key = str(p.get("chain") or "grassland").lower()
+    key = str(_get(p, "chain", "set", "id", "habitat") or "grassland").lower()
     spec = FOOD_CHAINS.get(key) or next(iter(FOOD_CHAINS.values()))
     shuffled = list(spec["order"])
     random.shuffle(shuffled)
