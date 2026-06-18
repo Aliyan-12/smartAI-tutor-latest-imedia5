@@ -25,7 +25,6 @@ export default function VerifyEmailPage() {
 
   const token = params.get("token");
   const email = params.get("email") || "";
-  const devToken = params.get("dev_token");
 
   // token present → verifying; else → "check your inbox"
   const [state, setState] = useState<"verifying" | "sent" | "error">(token ? "verifying" : "sent");
@@ -71,11 +70,6 @@ export default function VerifyEmailPage() {
               We've sent a verification link to{email ? <> <strong>{email}</strong></> : " your email"}.
               Click it to activate your account.
             </p>
-            {devToken && (
-              <button style={{ ...btn, background: "#7c3aed" }} onClick={() => navigate(`/verify-email?token=${devToken}`)}>
-                Verify now (dev)
-              </button>
-            )}
             <button style={{ ...btn, background: resent ? "#10b981" : "#1a73e8" }} onClick={resend} disabled={resent}>
               {resent ? "Verification email resent ✓" : "Resend email"}
             </button>

@@ -62,21 +62,28 @@ async def list_users(
     is_active: Optional[bool] = None,
     limit: int = 100,
     offset: int = 0,
+    school_id: Optional[int] = None,
 ) -> List[User]:
     query = select(User)
     if role:
         query = query.where(User.role == role)
     if is_active is not None:
         query = query.where(User.is_active == is_active)
+    if school_id is not None:
+        query = query.where(User.school_id == school_id)
     query = query.order_by(User.created_at.desc()).limit(limit).offset(offset)
     result = await db.execute(query)
     return list(result.scalars().all())
 
 
-async def count_users(db: AsyncSession, role: Optional[str] = None) -> int:
+async def count_users(
+    db: AsyncSession, role: Optional[str] = None, school_id: Optional[int] = None
+) -> int:
     query = select(func.count(User.id))
     if role:
         query = query.where(User.role == role)
+    if school_id is not None:
+        query = query.where(User.school_id == school_id)
     result = await db.execute(query)
     return result.scalar() or 0
 

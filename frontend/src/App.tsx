@@ -76,7 +76,8 @@ function RoleRouter() {
     case "admin":
       return <Navigate to="/admin/dashboard" replace />;
     case "superadmin":
-      return <Navigate to="/school/dashboard" replace />;
+      // School superadmins share the admin dashboard (scoped to their school).
+      return <Navigate to="/admin/dashboard" replace />;
     case "teacher":
       return <Navigate to="/teacher/dashboard" replace />;
     case "student":
@@ -101,9 +102,9 @@ export default function App() {
               </ProtectedRoute>
             }
           />
-          <Route path="/admin/dashboard" element={<ProtectedRoute allowedRoles={["admin"]}><AdminDashboard /></ProtectedRoute>} />
-          <Route path="/admin/users" element={<ProtectedRoute allowedRoles={["admin"]}><AdminDashboard /></ProtectedRoute>} />
-          <Route path="/admin/chats" element={<ProtectedRoute allowedRoles={["admin"]}><AdminDashboard /></ProtectedRoute>} />
+          <Route path="/admin/dashboard" element={<ProtectedRoute allowedRoles={["admin", "superadmin"]}><AdminDashboard /></ProtectedRoute>} />
+          <Route path="/admin/users" element={<ProtectedRoute allowedRoles={["admin", "superadmin"]}><AdminDashboard /></ProtectedRoute>} />
+          <Route path="/admin/chats" element={<ProtectedRoute allowedRoles={["admin", "superadmin"]}><AdminDashboard /></ProtectedRoute>} />
           <Route path="/teacher/dashboard" element={<ProtectedRoute allowedRoles={["admin", "teacher"]}><TeacherDashboard /></ProtectedRoute>} />
           <Route path="/teacher/students" element={<ProtectedRoute allowedRoles={["admin", "teacher"]}><TeacherDashboard /></ProtectedRoute>} />
           <Route path="/teacher/activity" element={<ProtectedRoute allowedRoles={["admin", "teacher"]}><TeacherDashboard /></ProtectedRoute>} />
@@ -118,7 +119,7 @@ export default function App() {
           <Route path="/parent/settings" element={<ProtectedRoute allowedRoles={["parent"]}><ParentSettingsPage /></ProtectedRoute>} />
           <Route path="/appointments" element={<ProtectedRoute allowedRoles={["admin", "teacher", "parent"]}><AppointmentsPage /></ProtectedRoute>} />
           <Route path="/appointments/new" element={<ProtectedRoute allowedRoles={["teacher", "parent"]}><BookSessionPage /></ProtectedRoute>} />
-          <Route path="/admin/assessments" element={<ProtectedRoute allowedRoles={["admin"]}><AdminDashboard /></ProtectedRoute>} />
+          <Route path="/admin/assessments" element={<ProtectedRoute allowedRoles={["admin", "superadmin"]}><AdminDashboard /></ProtectedRoute>} />
           <Route path="/dashboard" element={<Navigate to="/student/dashboard" replace />} />
           <Route
             path="/student/dashboard"

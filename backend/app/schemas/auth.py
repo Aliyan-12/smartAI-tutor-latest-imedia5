@@ -19,8 +19,6 @@ class RegisterRequest(BaseModel):
 class RegisterResponse(BaseModel):
     status: str  # "verification_sent"
     email: EmailStr
-    # Only populated when EMAIL_ENABLED is false (dev) so the flow stays testable.
-    dev_verify_token: Optional[str] = None
 
 
 class VerifyEmailRequest(BaseModel):

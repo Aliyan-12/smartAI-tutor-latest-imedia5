@@ -194,16 +194,15 @@ export default function RegisterPage() {
     setError("");
     setLoading(true);
     try {
-      const res = (await register({
+      await register({
         account_type: accountType,
         role: accountType === "individual" ? individualRole : undefined,
         name, email, password,
         school_name: accountType === "school" ? schoolName : undefined,
         country: accountType === "school" ? country : undefined,
-      })) as { dev_verify_token?: string };
+      });
       // Registration sends a verification email instead of logging in.
-      const dev = res?.dev_verify_token ? `&dev_token=${res.dev_verify_token}` : "";
-      navigate(`/verify-email?email=${encodeURIComponent(email)}${dev}`);
+      navigate(`/verify-email?email=${encodeURIComponent(email)}`);
     }
     catch (err: unknown) { setError(err instanceof Error ? err.message : "Registration failed"); setLoading(false); }
   };

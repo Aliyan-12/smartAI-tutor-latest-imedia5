@@ -65,11 +65,7 @@ async def register(payload: RegisterRequest, db: AsyncSession = Depends(get_db))
     await db.commit()
 
     await platform_service.send_verification_email(user.email, user.name, token)
-    return RegisterResponse(
-        status="verification_sent",
-        email=user.email,
-        dev_verify_token=token if not settings.email_enabled else None,
-    )
+    return RegisterResponse(status="verification_sent", email=user.email)
 
 
 @router.post("/verify-email", response_model=TokenResponse)
