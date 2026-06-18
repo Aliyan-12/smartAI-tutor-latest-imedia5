@@ -11,7 +11,7 @@ from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.session import get_db
-from app.middleware.auth import require_superadmin, require_permission
+from app.middleware.auth import require_admin, require_permission
 from app.models.user import User, ROLE_TEACHER, ROLE_STUDENT, ROLE_PARENT, DEFAULT_CREDITS
 from app.schemas.school import (
     SchoolStats, SchoolResponse, SchoolUpdate,
@@ -32,7 +32,7 @@ async def _require_school(current_user: User) -> int:
 
 @router.get("/me", response_model=SchoolStats)
 async def my_school(
-    current_user: User = Depends(require_superadmin),
+    current_user: User = Depends(require_admin),
     db: AsyncSession = Depends(get_db),
 ):
     school_id = await _require_school(current_user)
@@ -78,7 +78,7 @@ async def update_school(
 @router.get("/users", response_model=SchoolUsersList)
 async def list_users(
     role: str | None = None,
-    current_user: User = Depends(require_superadmin),
+    current_user: User = Depends(require_admin),
     db: AsyncSession = Depends(get_db),
 ):
     school_id = await _require_school(current_user)

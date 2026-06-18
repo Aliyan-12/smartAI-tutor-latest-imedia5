@@ -19,12 +19,9 @@ _MODEL_PATH = str(Path(__file__).resolve().parent.parent / "core" / "casbin_mode
 _enforcer: Optional[casbin.AsyncEnforcer] = None
 
 # Default role → (object, action) grants. dom "*" applies in any tenant.
+# Each admin is a school admin (school-scoped at the service layer).
 DEFAULT_POLICIES = [
-    ("role:admin", "*", "*", "*"),                 # platform admin: everything
-    ("role:superadmin", "*", "school", "manage"),  # school owner
-    ("role:superadmin", "*", "user", "manage"),
-    ("role:superadmin", "*", "content", "manage"),
-    ("role:superadmin", "*", "session", "read"),
+    ("role:admin", "*", "*", "*"),                 # school admin: everything in their school
     ("role:teacher", "*", "content", "manage"),
     ("role:teacher", "*", "student", "read"),
     ("role:teacher", "*", "assignment", "manage"),

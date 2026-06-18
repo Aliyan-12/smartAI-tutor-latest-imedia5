@@ -109,9 +109,6 @@ async def run_setup(fresh: bool = False):
         "ALTER TABLE users ADD COLUMN IF NOT EXISTS auth_provider VARCHAR(20) NOT NULL DEFAULT 'password'",
         "ALTER TABLE users ADD COLUMN IF NOT EXISTS account_type VARCHAR(20) NOT NULL DEFAULT 'individual'",
         "ALTER TABLE users ALTER COLUMN password_hash DROP NOT NULL",
-        # Existing accounts predate verification/onboarding — treat them as done.
-        "UPDATE users SET is_verified = TRUE WHERE is_verified = FALSE",
-        "UPDATE users SET onboarding_completed = TRUE WHERE onboarding_completed = FALSE",
         "ALTER TABLE chats ADD COLUMN IF NOT EXISTS appointment_id INTEGER REFERENCES appointments(id)",
         "ALTER TABLE appointments ADD COLUMN IF NOT EXISTS paused_at TIMESTAMP WITH TIME ZONE",
         "ALTER TABLE appointments ADD COLUMN IF NOT EXISTS total_paused_seconds INTEGER DEFAULT 0",

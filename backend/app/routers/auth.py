@@ -12,7 +12,7 @@ from app.db.session import get_db
 from app.middleware.auth import get_current_user
 from app.models.auth_tokens import PURPOSE_VERIFY, PURPOSE_RESET, OAuthIdentity
 from app.models.user import (
-    User, ROLE_STUDENT, ROLE_PARENT, ROLE_SUPERADMIN, DEFAULT_CREDITS,
+    User, ROLE_STUDENT, ROLE_PARENT, ROLE_ADMIN, DEFAULT_CREDITS,
     ACCOUNT_SCHOOL, ACCOUNT_INDIVIDUAL,
 )
 from app.schemas.auth import (
@@ -41,14 +41,16 @@ async def register(payload: RegisterRequest, db: AsyncSession = Depends(get_db))
         )
 
     if payload.account_type == "school":
-        if not payload.school_name:
-            raise HTTPException(status_code=422, detail="School name is required")
+        # School name + country are collected during onboarding, not at signup, so
+        # start with a placeholder the admin renames on their first run.
+        school_name = (payload.school_name or "").strip() or f"{payload.name}'s School"
         school = await school_service.create_school(
-            db, name=payload.school_name, country=payload.country, account_type="school",
+            db, name=school_name, country=payload.country, account_type="school",
         )
+        # A school's registrant is its ADMIN (school-scoped); no separate superadmin role.
         user = await create_user(
             db, name=payload.name, email=payload.email, password=payload.password,
-            role=ROLE_SUPERADMIN, credits=0, school_id=school.id,
+            role=ROLE_ADMIN, credits=0, school_id=school.id,
             account_type=ACCOUNT_SCHOOL, auth_provider="password",
         )
         school.superadmin_user_id = user.id
@@ -251,7 +253,7 @@ async def onboarding_profile(
         if child:
             child.parent_id = current_user.id
             code.used = True
-    elif current_user.role == ROLE_SUPERADMIN and current_user.school_id:
+    elif current_user.role == ROLE_ADMIN and current_user.school_id:
         school = await school_service.get_school(db, current_user.school_id)
         if school:
             if payload.school_name:

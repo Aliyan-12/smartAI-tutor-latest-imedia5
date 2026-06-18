@@ -213,19 +213,19 @@ export default function OnboardingPage() {
           </>
         )}
 
-        {role === "superadmin" && (
+        {role === "admin" && (
           <>
             <p style={{ color: "#64748b", margin: 0 }}>Set up your school.</p>
             <label style={label}>School name</label>
             <input style={input} value={schoolName} onChange={(e) => setSchoolName(e.target.value)} placeholder="Your school's name" />
-            <label style={label}>Country</label>
+            <label style={label}>Country / Location</label>
             <input style={input} value={country} onChange={(e) => setCountry(e.target.value)} placeholder="United Kingdom" />
             {error && <p style={{ color: "#dc2626", marginTop: 12 }}>{error}</p>}
-            <button style={btn} onClick={saveSchool} disabled={saving}>{saving ? "Saving…" : "Finish setup →"}</button>
+            <button style={btn} onClick={saveSchool} disabled={saving || !schoolName.trim()}>{saving ? "Saving…" : "Finish setup →"}</button>
           </>
         )}
 
-        {(role === "admin" || role === "teacher") && (
+        {role === "teacher" && (
           <>
             <p style={{ color: "#64748b" }}>You're all set.</p>
             <button style={btn} onClick={finish} disabled={saving}>{saving ? "…" : "Continue →"}</button>

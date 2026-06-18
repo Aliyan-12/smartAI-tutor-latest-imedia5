@@ -1,4 +1,4 @@
-export type UserRole = "superadmin" | "admin" | "teacher" | "student" | "parent";
+export type UserRole = "admin" | "teacher" | "student" | "parent";
 
 export interface User {
   id: number;
@@ -9,6 +9,8 @@ export interface User {
   credits: number;
   parent_id?: number | null;
   school_id?: number | null;
+  school_name?: string | null;
+  school_country?: string | null;
   is_verified?: boolean;
   onboarding_completed?: boolean;
   account_type?: "school" | "individual";

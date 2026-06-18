@@ -23,6 +23,8 @@ class UserResponse(BaseModel):
     credits: float
     parent_id: Optional[int] = None
     school_id: Optional[int] = None
+    school_name: Optional[str] = None
+    school_country: Optional[str] = None
     is_verified: bool = True
     onboarding_completed: bool = True
     account_type: str = "individual"

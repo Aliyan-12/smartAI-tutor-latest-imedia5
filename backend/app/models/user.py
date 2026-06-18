@@ -5,13 +5,12 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.session import Base
 
-ROLE_SUPERADMIN = "superadmin"  # owner/admin of a single school tenant
-ROLE_ADMIN = "admin"            # platform admin (cross-school)
+ROLE_ADMIN = "admin"      # admin/owner of a single school tenant (school-scoped)
 ROLE_TEACHER = "teacher"
 ROLE_STUDENT = "student"
 ROLE_PARENT = "parent"
 
-VALID_ROLES = {ROLE_SUPERADMIN, ROLE_ADMIN, ROLE_TEACHER, ROLE_STUDENT, ROLE_PARENT}
+VALID_ROLES = {ROLE_ADMIN, ROLE_TEACHER, ROLE_STUDENT, ROLE_PARENT}
 
 # account_type values (how the user signed up)
 ACCOUNT_SCHOOL = "school"
@@ -58,9 +57,17 @@ class User(Base):
         foreign_keys="User.parent_id",
     )
 
+    # The tenant this user belongs to. Eager-loaded so school_name/country are
+    # always available (e.g. for the sidebar) without async lazy-load errors.
+    school = relationship("School", foreign_keys=[school_id], lazy="selectin")
+
     @property
-    def is_superadmin(self) -> bool:
-        return self.role == ROLE_SUPERADMIN
+    def school_name(self) -> Optional[str]:
+        return self.school.name if self.school else None
+
+    @property
+    def school_country(self) -> Optional[str]:
+        return self.school.country if self.school else None
 
     @property
     def is_admin(self) -> bool:

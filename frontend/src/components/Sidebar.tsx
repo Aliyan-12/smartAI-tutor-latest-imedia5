@@ -509,11 +509,11 @@ export default function Sidebar({
           flexShrink: 0, overflow: "hidden",
           boxShadow: "0 1px 4px rgba(0,0,0,0.08)",
         }}>
-          <img src="/images/smarttuition-logo.png" style={{ width: 32, height: 32, objectFit: "contain" }} alt="Smart Tuition" />
+          <img src="/images/smarttuition-logo.png" style={{ width: 32, height: 32, objectFit: "contain" }} alt={user?.school_name ?? "School"} />
         </div>
         <div style={{ minWidth: 0 }}>
-          <div style={{ fontSize: 12, fontWeight: 700, color: "#0f172a", lineHeight: 1.2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>Smart Tuition</div>
-          <div style={{ fontSize: 10, color: "#64748b", lineHeight: 1.3, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>United Kingdom &amp; United Arab Emirates</div>
+          <div style={{ fontSize: 12, fontWeight: 700, color: "#0f172a", lineHeight: 1.2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{user?.school_name ?? "Smart Tuition"}</div>
+          <div style={{ fontSize: 10, color: "#64748b", lineHeight: 1.3, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{user?.school_country ?? "United Kingdom & United Arab Emirates"}</div>
         </div>
       </div>
     </div>

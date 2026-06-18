@@ -24,7 +24,6 @@ import DashboardPage from "./pages/DashboardPage";
 import VerifyEmailPage from "./pages/VerifyEmailPage";
 import OnboardingPage from "./pages/OnboardingPage";
 import OAuthCallbackPage from "./pages/OAuthCallbackPage";
-import SchoolDashboard from "./pages/SchoolDashboard";
 import type { ReactNode } from "react";
 
 const Loading = () => (
@@ -74,9 +73,7 @@ function RoleRouter() {
 
   switch (user.role) {
     case "admin":
-      return <Navigate to="/admin/dashboard" replace />;
-    case "superadmin":
-      // School superadmins share the admin dashboard (scoped to their school).
+      // Each admin is a school admin — same dashboard, scoped to their school.
       return <Navigate to="/admin/dashboard" replace />;
     case "teacher":
       return <Navigate to="/teacher/dashboard" replace />;
@@ -102,9 +99,9 @@ export default function App() {
               </ProtectedRoute>
             }
           />
-          <Route path="/admin/dashboard" element={<ProtectedRoute allowedRoles={["admin", "superadmin"]}><AdminDashboard /></ProtectedRoute>} />
-          <Route path="/admin/users" element={<ProtectedRoute allowedRoles={["admin", "superadmin"]}><AdminDashboard /></ProtectedRoute>} />
-          <Route path="/admin/chats" element={<ProtectedRoute allowedRoles={["admin", "superadmin"]}><AdminDashboard /></ProtectedRoute>} />
+          <Route path="/admin/dashboard" element={<ProtectedRoute allowedRoles={["admin"]}><AdminDashboard /></ProtectedRoute>} />
+          <Route path="/admin/users" element={<ProtectedRoute allowedRoles={["admin"]}><AdminDashboard /></ProtectedRoute>} />
+          <Route path="/admin/chats" element={<ProtectedRoute allowedRoles={["admin"]}><AdminDashboard /></ProtectedRoute>} />
           <Route path="/teacher/dashboard" element={<ProtectedRoute allowedRoles={["admin", "teacher"]}><TeacherDashboard /></ProtectedRoute>} />
           <Route path="/teacher/students" element={<ProtectedRoute allowedRoles={["admin", "teacher"]}><TeacherDashboard /></ProtectedRoute>} />
           <Route path="/teacher/activity" element={<ProtectedRoute allowedRoles={["admin", "teacher"]}><TeacherDashboard /></ProtectedRoute>} />
@@ -119,7 +116,7 @@ export default function App() {
           <Route path="/parent/settings" element={<ProtectedRoute allowedRoles={["parent"]}><ParentSettingsPage /></ProtectedRoute>} />
           <Route path="/appointments" element={<ProtectedRoute allowedRoles={["admin", "teacher", "parent"]}><AppointmentsPage /></ProtectedRoute>} />
           <Route path="/appointments/new" element={<ProtectedRoute allowedRoles={["teacher", "parent"]}><BookSessionPage /></ProtectedRoute>} />
-          <Route path="/admin/assessments" element={<ProtectedRoute allowedRoles={["admin", "superadmin"]}><AdminDashboard /></ProtectedRoute>} />
+          <Route path="/admin/assessments" element={<ProtectedRoute allowedRoles={["admin"]}><AdminDashboard /></ProtectedRoute>} />
           <Route path="/dashboard" element={<Navigate to="/student/dashboard" replace />} />
           <Route
             path="/student/dashboard"
@@ -222,14 +219,6 @@ export default function App() {
           <Route path="/oauth/callback" element={<OAuthCallbackPage />} />
           {/* Onboarding requires auth but not completed-onboarding (avoids a loop). */}
           <Route path="/onboarding" element={<RequireAuth><OnboardingPage /></RequireAuth>} />
-          <Route
-            path="/school/dashboard"
-            element={
-              <ProtectedRoute allowedRoles={["superadmin", "admin"]}>
-                <SchoolDashboard />
-              </ProtectedRoute>
-            }
-          />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </AuthProvider>

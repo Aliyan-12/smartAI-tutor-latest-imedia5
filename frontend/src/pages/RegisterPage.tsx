@@ -32,8 +32,6 @@ export default function RegisterPage() {
   const navigate = useNavigate();
   const [accountType, setAccountType] = useState<"individual" | "school">("individual");
   const [individualRole, setIndividualRole] = useState<"student" | "parent">("student");
-  const [schoolName,  setSchoolName]  = useState("");
-  const [country,     setCountry]     = useState("");
   const [name,        setName]        = useState("");
   const [email,       setEmail]       = useState("");
   const [password,    setPassword]    = useState("");
@@ -190,7 +188,6 @@ export default function RegisterPage() {
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
     if (password !== confirm) { setError("Passwords do not match"); return; }
-    if (accountType === "school" && !schoolName.trim()) { setError("Please enter your school's name"); return; }
     setError("");
     setLoading(true);
     try {
@@ -198,8 +195,6 @@ export default function RegisterPage() {
         account_type: accountType,
         role: accountType === "individual" ? individualRole : undefined,
         name, email, password,
-        school_name: accountType === "school" ? schoolName : undefined,
-        country: accountType === "school" ? country : undefined,
       });
       // Registration sends a verification email instead of logging in.
       navigate(`/verify-email?email=${encodeURIComponent(email)}`);
@@ -607,20 +602,9 @@ export default function RegisterPage() {
 
               <form onSubmit={handleSubmit}>
                 {accountType === "school" && (
-                  <>
-                    <div className="rp-field">
-                      <label htmlFor="rp-school">School Name</label>
-                      <input id="rp-school" type="text" value={schoolName}
-                        onChange={(e) => setSchoolName(e.target.value)}
-                        placeholder="e.g. Springfield Academy" required />
-                    </div>
-                    <div className="rp-field">
-                      <label htmlFor="rp-country">Country</label>
-                      <input id="rp-country" type="text" value={country}
-                        onChange={(e) => setCountry(e.target.value)}
-                        placeholder="United Kingdom" />
-                    </div>
-                  </>
+                  <p style={{ fontSize: 12, color: "#64748b", margin: "0 0 12px", lineHeight: 1.5 }}>
+                    You'll set your school's name and location right after you verify your email.
+                  </p>
                 )}
                 {accountType === "individual" && (
                   <div className="rp-field">

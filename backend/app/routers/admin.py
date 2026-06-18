@@ -5,8 +5,8 @@ from sqlalchemy import select, func, desc
 from sqlalchemy.orm import selectinload
 
 from app.db.session import get_db
-from app.middleware.auth import require_superadmin
-from app.models.user import User, ROLE_SUPERADMIN, ROLE_STUDENT
+from app.middleware.auth import require_admin
+from app.models.user import User, ROLE_STUDENT
 from app.models.chat import Chat, Message
 from app.models.subscription import CreditTransaction
 from app.schemas.user import (
@@ -22,20 +22,20 @@ from app.services.platform_service import add_credits, get_transactions
 router = APIRouter(prefix="/api/admin", tags=["admin"])
 
 
-# A platform admin sees everything (school_id=None); a school superadmin is
-# scoped to their own school so this dashboard doubles as the school dashboard.
+# Every admin is the admin of ONE school (tenant) and only ever sees/manages that
+# school's data — there is no cross-school platform admin.
 def _scope(caller: User) -> Optional[int]:
-    return caller.school_id if caller.role == ROLE_SUPERADMIN else None
+    return caller.school_id
 
 
 def _guard_school(caller: User, user: User) -> None:
-    if caller.role == ROLE_SUPERADMIN and user.school_id != caller.school_id:
+    if user.school_id != caller.school_id:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
 
 
 @router.get("/dashboard")
 async def admin_dashboard(
-    caller: User = Depends(require_superadmin),
+    caller: User = Depends(require_admin),
     db: AsyncSession = Depends(get_db),
 ):
     sid = _scope(caller)
@@ -66,7 +66,7 @@ async def get_all_users(
     is_active: Optional[bool] = Query(None),
     limit: int = Query(100, ge=1, le=500),
     offset: int = Query(0, ge=0),
-    caller: User = Depends(require_superadmin),
+    caller: User = Depends(require_admin),
     db: AsyncSession = Depends(get_db),
 ):
     users = await list_users(db, role=role, is_active=is_active, limit=limit, offset=offset, school_id=_scope(caller))
@@ -76,21 +76,21 @@ async def get_all_users(
 @router.post("/users", response_model=UserResponse, status_code=status.HTTP_201_CREATED)
 async def create_any_user(
     payload: AdminUserCreate,
-    caller: User = Depends(require_superadmin),
+    caller: User = Depends(require_admin),
     db: AsyncSession = Depends(get_db),
 ):
     existing = await get_user_by_email(db, payload.email)
     if existing:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Email already registered")
 
-    # Admin/superadmin-created accounts are pre-verified (no email loop needed) and
-    # belong to the creator's school. Students still complete onboarding on first login.
+    # Admin-created accounts are pre-verified (no email loop needed) and belong to
+    # the admin's school. Students still complete onboarding on first login.
     is_student = payload.role == ROLE_STUDENT
     user = await create_user(
         db, payload.name, payload.email, payload.password,
         role=payload.role, credits=payload.credits,
         school_id=caller.school_id,
-        account_type="school" if caller.role == ROLE_SUPERADMIN else "individual",
+        account_type="school",
         is_verified=True,
         onboarding_completed=not is_student,
     )
@@ -101,7 +101,7 @@ async def create_any_user(
 @router.get("/users/{user_id}", response_model=UserResponse)
 async def get_user_detail(
     user_id: int,
-    caller: User = Depends(require_superadmin),
+    caller: User = Depends(require_admin),
     db: AsyncSession = Depends(get_db),
 ):
     user = await get_user_by_id(db, user_id)
@@ -115,7 +115,7 @@ async def get_user_detail(
 async def update_any_user(
     user_id: int,
     payload: AdminUserUpdate,
-    caller: User = Depends(require_superadmin),
+    caller: User = Depends(require_admin),
     db: AsyncSession = Depends(get_db),
 ):
     user = await get_user_by_id(db, user_id)
@@ -136,7 +136,7 @@ async def update_any_user(
 @router.delete("/users/{user_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_user(
     user_id: int,
-    caller: User = Depends(require_superadmin),
+    caller: User = Depends(require_admin),
     db: AsyncSession = Depends(get_db),
 ):
     user = await get_user_by_id(db, user_id)
@@ -153,7 +153,7 @@ async def delete_user(
 async def adjust_credits(
     user_id: int,
     payload: CreditAdjust,
-    caller: User = Depends(require_superadmin),
+    caller: User = Depends(require_admin),
     db: AsyncSession = Depends(get_db),
 ):
     user = await get_user_by_id(db, user_id)
@@ -168,7 +168,7 @@ async def adjust_credits(
 @router.get("/users/{user_id}/transactions", response_model=List[CreditTransactionResponse])
 async def get_user_transactions(
     user_id: int,
-    caller: User = Depends(require_superadmin),
+    caller: User = Depends(require_admin),
     db: AsyncSession = Depends(get_db),
 ):
     transactions = await get_transactions(db, user_id)
@@ -178,7 +178,7 @@ async def get_user_transactions(
 @router.get("/users/{user_id}/chats", response_model=List[ChatListItem])
 async def get_user_chats(
     user_id: int,
-    caller: User = Depends(require_superadmin),
+    caller: User = Depends(require_admin),
     db: AsyncSession = Depends(get_db),
 ):
     result = await db.execute(
@@ -191,7 +191,7 @@ async def get_user_chats(
 @router.get("/chats")
 async def list_all_chats(
     limit: int = Query(100, ge=1, le=500),
-    caller: User = Depends(require_superadmin),
+    caller: User = Depends(require_admin),
     db: AsyncSession = Depends(get_db),
 ):
     result = await db.execute(
@@ -216,7 +216,7 @@ async def list_all_chats(
 @router.get("/chats/{session_id}", response_model=ChatResponse)
 async def view_any_chat(
     session_id: str,
-    caller: User = Depends(require_superadmin),
+    caller: User = Depends(require_admin),
     db: AsyncSession = Depends(get_db),
 ):
     result = await db.execute(
@@ -231,7 +231,7 @@ async def view_any_chat(
 @router.post("/users/{student_id}/generate-invite")
 async def generate_invite_code(
     student_id: int,
-    caller: User = Depends(require_superadmin),
+    caller: User = Depends(require_admin),
     db: AsyncSession = Depends(get_db),
 ):
     from app.models.parent_student import InviteCode
@@ -254,7 +254,7 @@ async def generate_invite_code(
 async def link_student_to_parent(
     parent_id: int,
     student_id: int = Query(...),
-    caller: User = Depends(require_superadmin),
+    caller: User = Depends(require_admin),
     db: AsyncSession = Depends(get_db),
 ):
     from app.models.user import ROLE_PARENT, ROLE_STUDENT
