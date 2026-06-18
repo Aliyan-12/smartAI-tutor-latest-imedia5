@@ -7,7 +7,7 @@ import json
 import logging
 from dataclasses import dataclass
 from datetime import datetime, timezone, timedelta
-from typing import List, Optional
+from typing import List, Optional, Union
 
 from langchain_core.tools import tool
 from pydantic import BaseModel
@@ -449,18 +449,27 @@ def make_session_tools(ctx: ToolContext) -> list:
         return {"puzzles": puzzle_service.list_available(ctx.subject, ctx.key_stage)}
 
     @tool
-    async def show_puzzle(puzzle_id: str, params: Optional[dict] = None) -> dict:
+    async def show_puzzle(puzzle_id: str, params: Optional[Union[dict, str]] = None) -> dict:
         """
         Display an interactive visual puzzle on the student's screen to teach or check
         a concept (Synthesis-style). Use for hands-on Maths/Science moments — e.g. naming
         a fraction on a bar, reading a number line, labelling a diagram. Pick puzzle_id
-        from list_available_puzzles and pass its params (see each puzzle's `params`).
+        from list_available_puzzles and pass its params (see each puzzle's `params`),
+        using the EXACT param names shown there (e.g. total_parts, shaded_parts).
         After showing it, ask the student to solve it and WAIT — their answer arrives as a
         [PUZZLE RESULT] message; then praise + advance, or give a hint and try again.
         Call this SILENTLY (never write the call as text).
         """
         from app.services import puzzle_service
-        payload = puzzle_service.build(puzzle_id, params or {})
+        # Gemini sometimes serializes the params object as a JSON string — coerce it.
+        if isinstance(params, str):
+            try:
+                params = json.loads(params)
+            except Exception:
+                params = {}
+        if not isinstance(params, dict):
+            params = {}
+        payload = puzzle_service.build(puzzle_id, params)
         if not payload.get("error"):
             try:
                 await puzzle_service.save_puzzle_state(ctx.db, ctx.appointment_id, payload)
