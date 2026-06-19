@@ -963,7 +963,7 @@ RULE 1 — READ USER INTENT, NOT LITERAL TEXT:
 
 RULE 2 — STEP TYPE:
    - During RECAP or TEACH steps: PURE TEACHING only. Do NOT ask check questions. Teach clearly, then move on.
-   - During PRACTICE steps: Ask ONE focused question per response, wait for their answer before continuing.
+   - During PRACTICE steps: PREFER a visual puzzle when one fits the concept you just taught — call list_available_puzzles then show_puzzle, and wait for the [PUZZLE RESULT] (see VISUAL PUZZLES below). ONLY if no puzzle fits, ask ONE focused typed question per response and wait for the answer.
 
    ── WHEN QUIZ STATUS = QUIZ LOCKED and you are in a PRACTICE step ──
    - End each practice response with ONE short, direct question.
@@ -1026,11 +1026,14 @@ TEACHING SLIDES — TEACH FROM THE ON-SCREEN RESOURCES (IMPORTANT):
 - TEACH LIKE A WARM HUMAN TUTOR, not a narrator. Use the slide as your backbone — cover its points — but bring it to life with your own casual real-world examples and simple analogies a child relates to ("It's a bit like…"), add a sentence or two of your own so it truly lands (don't read it word-for-word), and weave the student's answers back in. Stay on THIS slide's concept.
 - Call these tools SILENTLY (never write the call as text, never say "loading the next slide"). The viewer updates automatically.
 
-VISUAL PUZZLES — TEACH HANDS-ON (Maths/Science):
-- For concepts that land better when SEEN and DONE (fractions, number lines, area, counting, labelling diagrams, sorting states of matter, food chains), put an INTERACTIVE puzzle on the student's screen instead of only describing it.
-- FLOW: (1) call list_available_puzzles to see what fits this subject/key stage, (2) call show_puzzle(puzzle_id, params) SILENTLY, (3) in your words, tell the student what to do, then STOP and wait. Their attempt comes back as a [PUZZLE RESULT] message.
+VISUAL PUZZLES — PRACTISE HANDS-ON (Maths/Science), PROACTIVELY:
+- This is your DEFAULT way to practise. Teach the concept first (use the slides), THEN when it's time to practise, LEAD with a puzzle — you do NOT wait for the student to ask. Say e.g. "Let's try one together — look at your screen," then show it.
+- AT EACH PRACTICE MOMENT decide: (1) call list_available_puzzles, (2) IF a puzzle fits the exact concept you just taught (for this subject + key_stage), call show_puzzle(puzzle_id, params) SILENTLY, tell the student what to do, then STOP and wait — their attempt returns as a [PUZZLE RESULT]. (3) IF nothing fits that concept, FALL BACK to a normal typed practice question (as you do now). Never invent a puzzle_id.
+- RHYTHM per concept: teach (slides) → ONE puzzle to practise → on success move to the next concept. Only use a typed question when the concept has no matching puzzle.
+- AGE-APPROPRIATE: scale the numbers/difficulty to the student's key stage AND year group — small numbers and simple fractions for KS1/early-primary years, larger values and harder concepts for older years. Only use puzzles list_available_puzzles offers for this subject + key stage.
 - On a CORRECT result: brief praise, then continue (next concept, or clear_puzzle and teach on). On INCORRECT: ONE hint tied to what's on screen, invite another try on the same puzzle — don't reveal the answer.
-- Choose puzzles that match the current concept and the student's level; keep params simple and age-appropriate. Don't spam puzzles — one focused puzzle per concept, then move on.
+- Don't spam — one focused puzzle per concept, then move on. If the student explicitly asks for a puzzle, show one immediately.
+- VALID IDs ONLY: pick puzzle_id strictly from what list_available_puzzles returns. NEVER tell the student to "look at" / "check" the puzzle UNLESS show_puzzle returned successfully (i.e. it did NOT return an 'error' field). If show_puzzle returns an error, do NOT mention a puzzle at all — just ask a normal typed question.
 - Never write the tool call as text and never read out raw params; the puzzle just appears on screen.
 
 END-OF-SESSION REPORT:
@@ -1523,10 +1526,24 @@ async def _run_turn(send, chat_id, user_id, *, saved_user_text, ai_content,
                 from app.tools.session_tools import ToolContext
                 appt = await get_appointment(db, appt_id)
                 if appt:
+                    # Year group (for age-appropriate puzzle difficulty): from the
+                    # booking description, falling back to the student's profile.
+                    _yg = None
+                    try:
+                        from app.services.session_resource_service import _parse_description
+                        _yg = _parse_description(getattr(appt, "description", "") or "").get("year_group")
+                    except Exception:
+                        _yg = None
+                    if not _yg:
+                        try:
+                            _prof = await _load_student_profile(db, user_id)
+                            _yg = getattr(_prof, "year_group", None) if _prof else None
+                        except Exception:
+                            _yg = None
                     tool_context = ToolContext(
                         db=db, student_id=user_id, appointment_id=appt_id,
                         subject=appt.subject, key_stage=appt.key_stage,
-                        chat_session_id=chat.session_id,
+                        year_group=_yg, chat_session_id=chat.session_id,
                     )
             except Exception:
                 logger.warning("ToolContext build failed for appt %s", appt_id)
@@ -1585,9 +1602,16 @@ async def _run_turn(send, chat_id, user_id, *, saved_user_text, ai_content,
             if stripped.startswith("[TOOL_RESULT:") and stripped.endswith("]"):
                 try:
                     tr = json.loads(stripped[len("[TOOL_RESULT:"):-1])
-                    await send({"type": "tool", "tool": tr.get("tool", ""), "data": tr.get("data", {})})
-                except Exception:
-                    pass
+                    _tool = tr.get("tool", "")
+                    _data = tr.get("data", {}) or {}
+                    if _tool in ("show_puzzle", "clear_puzzle"):
+                        logger.info(
+                            "WS → tool=%s render=%s id=%s error=%s",
+                            _tool, _data.get("render"), _data.get("puzzle_id"), _data.get("error"),
+                        )
+                    await send({"type": "tool", "tool": _tool, "data": _data})
+                except Exception as _tr_err:
+                    logger.warning("Failed to forward TOOL_RESULT: %s", _tr_err)
                 continue
             full.append(token)
             for sentence in segmenter.feed(token):

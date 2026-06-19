@@ -23,6 +23,7 @@ class ToolContext:
     appointment_id: int
     subject: str
     key_stage: str
+    year_group: Optional[str] = None
     chat_session_id: Optional[str] = None
     # Turn-scoped guard: at most ONE slide move (advance/retreat/show) per reply,
     # so the AI can't race several slides ahead in a single turn. Reset each turn
@@ -443,10 +444,16 @@ def make_session_tools(ctx: ToolContext) -> list:
         List the interactive visual puzzles available for THIS lesson's subject and
         key stage (e.g. fraction bars, number lines, label-the-diagram). Call this
         before show_puzzle so you choose a real puzzle_id with valid params — never
-        invent a puzzle_id. Returns each puzzle's id, what it shows, and its params.
+        invent a puzzle_id. Returns each puzzle's id, what it shows, and its params,
+        plus the student's key_stage + year_group so you scale the numbers to their age.
         """
         from app.services import puzzle_service
-        return {"puzzles": puzzle_service.list_available(ctx.subject, ctx.key_stage)}
+        return {
+            "subject": ctx.subject,
+            "key_stage": ctx.key_stage,
+            "year_group": ctx.year_group,
+            "puzzles": puzzle_service.list_available(ctx.subject, ctx.key_stage),
+        }
 
     @tool
     async def show_puzzle(puzzle_id: str, params: Optional[Union[dict, str]] = None) -> dict:
@@ -469,12 +476,43 @@ def make_session_tools(ctx: ToolContext) -> list:
                 params = {}
         if not isinstance(params, dict):
             params = {}
-        payload = puzzle_service.build(puzzle_id, params)
-        if not payload.get("error"):
-            try:
-                await puzzle_service.save_puzzle_state(ctx.db, ctx.appointment_id, payload)
-            except Exception as e:  # noqa: BLE001
-                logger.warning("save_puzzle_state failed: %s", e)
+
+        # Map the id the model gave to a REAL available template (it sometimes
+        # invents ids or uses a render name). If nothing fits, tell the model
+        # plainly so it doesn't pretend a puzzle is on screen.
+        resolved = puzzle_service.resolve_id(puzzle_id, ctx.subject, ctx.key_stage)
+        avail = [p["puzzle_id"] for p in puzzle_service.list_available(ctx.subject, ctx.key_stage)]
+        if not resolved:
+            logger.warning(
+                "show_puzzle: NO match for id=%r (subject=%s, key_stage=%s). Available=%s",
+                puzzle_id, ctx.subject, ctx.key_stage, avail,
+            )
+            return {
+                "action": "show_puzzle",
+                "error": "no_matching_puzzle",
+                "message": (
+                    f"There is no puzzle '{puzzle_id}' for {ctx.subject} {ctx.key_stage}. "
+                    "Do NOT tell the student to look at a puzzle. "
+                    f"Available puzzle_ids: {avail}. Either call show_puzzle again with one of "
+                    "these, or just ask a normal typed practice question instead."
+                ),
+                "available": avail,
+            }
+
+        payload = puzzle_service.build(resolved, params)
+        if payload.get("error"):
+            logger.warning("show_puzzle: build error for id=%s: %s", resolved, payload.get("error"))
+            return {"action": "show_puzzle", "error": payload.get("error"), "available": avail,
+                    "message": "Could not build that puzzle — ask a typed question instead."}
+
+        try:
+            await puzzle_service.save_puzzle_state(ctx.db, ctx.appointment_id, payload)
+        except Exception as e:  # noqa: BLE001
+            logger.warning("save_puzzle_state failed: %s", e)
+        logger.info(
+            "show_puzzle: rendering id=%s render=%s (asked=%r) prompt=%r",
+            payload.get("puzzle_id"), payload.get("render"), puzzle_id, payload.get("prompt"),
+        )
         return payload
 
     @tool

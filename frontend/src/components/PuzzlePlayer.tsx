@@ -2,9 +2,19 @@ import { useState } from "react";
 import type { PuzzlePayload } from "./puzzles/types";
 import { pBtn, pBtnGhost, Feedback } from "./puzzles/ui";
 import FractionBar from "./puzzles/FractionBar";
+import PieFraction from "./puzzles/PieFraction";
 import NumberLine from "./puzzles/NumberLine";
+import PlaceValue from "./puzzles/PlaceValue";
+import ArrayGrid from "./puzzles/ArrayGrid";
 import ShapeCount from "./puzzles/ShapeCount";
 import AreaGrid from "./puzzles/AreaGrid";
+import Clock from "./puzzles/Clock";
+import AngleViz from "./puzzles/AngleViz";
+import CoordinateGrid from "./puzzles/CoordinateGrid";
+import BarChart from "./puzzles/BarChart";
+import BalanceScales from "./puzzles/BalanceScales";
+import ParticleState from "./puzzles/ParticleState";
+import FormulaTriangle from "./puzzles/FormulaTriangle";
 import BuildFraction from "./puzzles/BuildFraction";
 import LabelDiagram from "./puzzles/LabelDiagram";
 import StatesOfMatter from "./puzzles/StatesOfMatter";
@@ -12,7 +22,10 @@ import FoodChainOrder from "./puzzles/FoodChainOrder";
 
 // SVG "display" puzzles draw only; PuzzlePlayer collects + checks the answer.
 const DISPLAY: Record<string, React.ComponentType<{ params: Record<string, unknown> }>> = {
-  fraction_bar: FractionBar, number_line: NumberLine, shape_count: ShapeCount, area_grid: AreaGrid,
+  fraction_bar: FractionBar, pie_fraction: PieFraction, number_line: NumberLine,
+  place_value: PlaceValue, array_grid: ArrayGrid, shape_count: ShapeCount, area_grid: AreaGrid,
+  clock: Clock, angle: AngleViz, coordinate_grid: CoordinateGrid, bar_chart: BarChart,
+  balance_scales: BalanceScales, particle_state: ParticleState, formula_triangle: FormulaTriangle,
 };
 // Konva "interactive" puzzles self-evaluate and call onSolved.
 const INTERACTIVE: Record<string, React.ComponentType<{ payload: PuzzlePayload; onSolved: (a: unknown, c: boolean) => void; disabled?: boolean }>> = {
@@ -23,6 +36,7 @@ const inputStyle: React.CSSProperties = {
   width: 64, padding: "8px 10px", border: "1.5px solid #e2e8f0", borderRadius: 8,
   fontSize: 18, fontWeight: 700, textAlign: "center", fontFamily: "inherit",
 };
+const norm = (s: string) => s.trim().toLowerCase().replace(/[()\s]/g, "");
 
 export default function PuzzlePlayer({
   payload, onSolved,
@@ -30,10 +44,10 @@ export default function PuzzlePlayer({
   const Display = DISPLAY[payload.render];
   const Interactive = INTERACTIVE[payload.render];
 
-  // local answer state for DISPLAY puzzles
   const [intVal, setIntVal] = useState("");
   const [num, setNum] = useState("");
   const [den, setDen] = useState("");
+  const [textVal, setTextVal] = useState("");
   const [correct, setCorrect] = useState<boolean | null>(null);
   const locked = correct === true;
 
@@ -47,6 +61,17 @@ export default function PuzzlePlayer({
     const ok = num.trim() !== "" && den.trim() !== "" && d !== 0 && n * sol.denominator === d * sol.numerator;
     setCorrect(ok); onSolved(`${num}/${den}`, ok);
   };
+  const checkText = () => {
+    const ok = textVal.trim() !== "" && norm(textVal) === norm(String(payload.solution));
+    setCorrect(ok); onSolved(textVal, ok);
+  };
+  const chooseOption = (opt: string) => {
+    if (locked) return;
+    const ok = opt === payload.solution;
+    setCorrect(ok); onSolved(opt, ok);
+  };
+
+  const options = (payload.params.options as string[]) || [];
 
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%", background: "#fff" }}>
@@ -61,12 +86,14 @@ export default function PuzzlePlayer({
         {Display && (
           <>
             <Display params={payload.params} />
+
             {payload.answer_type === "integer" && (
               <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 10 }}>
                 <input style={inputStyle} value={intVal} onChange={(e) => { setIntVal(e.target.value); setCorrect(null); }} placeholder="?" inputMode="numeric" disabled={locked} />
                 <button style={pBtn} onClick={checkInteger} disabled={locked}>Check</button>
               </div>
             )}
+
             {payload.answer_type === "fraction" && (
               <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 10 }}>
                 <div style={{ display: "flex", flexDirection: "column", alignItems: "center" }}>
@@ -80,6 +107,25 @@ export default function PuzzlePlayer({
                 </div>
               </div>
             )}
+
+            {payload.answer_type === "text" && (
+              <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 10 }}>
+                <input style={{ ...inputStyle, width: 120, fontSize: 16 }} value={textVal} onChange={(e) => { setTextVal(e.target.value); setCorrect(null); }} placeholder="Type your answer" disabled={locked} />
+                <button style={pBtn} onClick={checkText} disabled={locked}>Check</button>
+              </div>
+            )}
+
+            {payload.answer_type === "choice" && (
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 8, justifyContent: "center" }}>
+                {options.map((opt) => (
+                  <button key={opt} onClick={() => chooseOption(opt)} disabled={locked}
+                    style={{ ...pBtnGhost, textTransform: "capitalize", padding: "10px 16px", cursor: locked ? "default" : "pointer" }}>
+                    {opt}
+                  </button>
+                ))}
+              </div>
+            )}
+
             <Feedback correct={correct} />
           </>
         )}
@@ -87,7 +133,10 @@ export default function PuzzlePlayer({
         {Interactive && <Interactive payload={payload} onSolved={onSolved} />}
 
         {!Display && !Interactive && (
-          <p style={{ color: "#94a3b8", fontSize: 13 }}>This puzzle type isn't supported yet.</p>
+          <p style={{ color: "#94a3b8", fontSize: 13, textAlign: "center" }}>
+            This puzzle type ("{payload.render || "unknown"}") isn't available in this build.
+            <br />Try refreshing the page.
+          </p>
         )}
       </div>
     </div>
