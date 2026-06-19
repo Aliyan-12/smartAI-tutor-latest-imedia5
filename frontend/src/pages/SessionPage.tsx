@@ -233,6 +233,7 @@ export default function SessionPage() {
     appointmentId: apptId,
     ttsEnabled,
     onTool: (tool, data) => {
+      if (import.meta.env.DEV) console.debug("[session tool]", tool, data);
       if (tool === "generate_quiz") {
         setQuizOffer({
           topic: (data.topic as string) || "",
@@ -241,10 +242,15 @@ export default function SessionPage() {
           questions: data.questions as QuizOffer["questions"],
         });
       } else if (tool === "show_puzzle") {
-        if (!data.error) {
+        if (data.error) {
+          console.warn("[show_puzzle] backend returned error — not rendering:", data.error, data.message);
+        } else if (!data.render) {
+          console.warn("[show_puzzle] missing render key — got:", data);
+        } else {
           setCurrentPuzzle(data as unknown as PuzzlePayload);
           setLearnTab("learn");
-          if (voiceActive) setMobilePanelView("learn");
+          // A puzzle needs the Learn panel — surface it (mobile shows one panel).
+          setMobilePanelView("learn");
         }
       } else if (tool === "clear_puzzle") {
         setCurrentPuzzle(null);

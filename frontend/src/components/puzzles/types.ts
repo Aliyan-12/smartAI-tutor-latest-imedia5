@@ -3,7 +3,7 @@ export interface PuzzlePayload {
   render: string;
   title: string;
   prompt: string;
-  answer_type: "fraction" | "integer" | "choice" | "drag";
+  answer_type: "fraction" | "integer" | "choice" | "drag" | "text";
   params: Record<string, unknown>;
   solution: unknown;
 }

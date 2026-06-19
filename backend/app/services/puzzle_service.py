@@ -37,6 +37,34 @@ def _get(p: dict, *keys: str, default: Any = None) -> Any:
     return default
 
 
+def resolve_id(puzzle_id: str, subject: str, key_stage: str) -> Optional[str]:
+    """Map a (possibly imperfect) puzzle_id the AI gave to a real, available
+    template id for this subject/key stage. Returns None if nothing reasonable
+    matches (so the caller can fall back to a typed question)."""
+    pid = (puzzle_id or "").strip().lower().replace("-", "_").replace(" ", "_")
+    if not pid:
+        return None
+    avail = [t["id"] for t in templates_for(subject, key_stage)]
+    if pid in avail:
+        return pid
+    # render-key match (e.g. AI passed the render name)
+    for t in TEMPLATES_BY_ID.values():
+        if t["render"] == pid and t["id"] in avail:
+            return t["id"]
+    # substring either way
+    for tid in avail:
+        if pid in tid or tid in pid:
+            return tid
+    # token overlap (e.g. "fractions_pie" → "pie_fraction")
+    toks = set(pid.split("_"))
+    best, best_score = None, 0
+    for tid in avail:
+        score = len(toks & set(tid.split("_")))
+        if score > best_score:
+            best, best_score = tid, score
+    return best if best_score > 0 else None
+
+
 def list_available(subject: str, key_stage: str) -> List[dict]:
     """Template metadata the AI may choose from for this lesson."""
     return [
@@ -156,22 +184,188 @@ def _b_states_of_matter(p: dict) -> dict:
 
 
 def _b_food_chain_order(p: dict) -> dict:
-    key = str(_get(p, "chain", "set", "id", "habitat") or "grassland").lower()
+    key = str(_get(p, "chain", "seq", "sequence", "set", "id", "habitat") or "grassland").lower()
     spec = FOOD_CHAINS.get(key) or next(iter(FOOD_CHAINS.values()))
     shuffled = list(spec["order"])
     random.shuffle(shuffled)
+    is_chain = key in ("grassland", "pond", "ocean")
+    hint = " — start with the producer." if is_chain else " — start with the first stage."
     return {
-        "prompt": spec["title"] + " — start with the producer.",
+        "prompt": spec["title"] + hint,
         "params": {"items": shuffled},
         "solution": {"order": spec["order"]},
     }
 
 
+def _b_pie_fraction(p: dict) -> dict:
+    total = _clamp(_get(p, "total_parts", "parts", "slices", "denominator", "total"), 2, 12, 4)
+    shaded = _clamp(_get(p, "shaded_parts", "shaded", "numerator"), 0, total, 1)
+    return {
+        "prompt": "What fraction of the circle is shaded? Write it as a fraction (e.g. 3/4).",
+        "params": {"total": total, "shaded": shaded},
+        "solution": {"numerator": shaded, "denominator": total},
+    }
+
+
+def _b_place_value(p: dict) -> dict:
+    h = _clamp(_get(p, "hundreds", "h"), 0, 9, 1)
+    t = _clamp(_get(p, "tens", "t"), 0, 9, 3)
+    o = _clamp(_get(p, "ones", "o", "units"), 0, 9, 4)
+    value = h * 100 + t * 10 + o
+    return {
+        "prompt": "What number do these base-ten blocks show?",
+        "params": {"hundreds": h, "tens": t, "ones": o},
+        "solution": value,
+    }
+
+
+def _b_array_grid(p: dict) -> dict:
+    rows = _clamp(_get(p, "rows", "r"), 1, 10, 3)
+    cols = _clamp(_get(p, "cols", "columns", "c"), 1, 10, 4)
+    return {
+        "prompt": f"How many dots are there altogether? ({rows} rows of {cols})",
+        "params": {"rows": rows, "cols": cols},
+        "solution": rows * cols,
+    }
+
+
+def _b_clock(p: dict) -> dict:
+    hour = _clamp(_get(p, "hour", "hours", "h"), 1, 12, 3)
+    minute = _clamp(_get(p, "minute", "minutes", "m"), 0, 59, 30)
+    return {
+        "prompt": "What time is shown on the clock? Write it as h:mm (e.g. 3:30).",
+        "params": {"hour": hour, "minute": minute},
+        "solution": f"{hour}:{minute:02d}",
+    }
+
+
+def _b_angle(p: dict) -> dict:
+    deg = _clamp(_get(p, "degrees", "angle", "deg"), 10, 330, 45)
+    if deg < 90:
+        kind = "acute"
+    elif deg == 90:
+        kind = "right"
+    elif deg < 180:
+        kind = "obtuse"
+    elif deg == 180:
+        kind = "straight"
+    else:
+        kind = "reflex"
+    return {
+        "prompt": "What type of angle is this?",
+        "params": {"degrees": deg, "options": ["acute", "right", "obtuse", "reflex"]},
+        "solution": kind,
+    }
+
+
+def _b_coordinate_grid(p: dict) -> dict:
+    size = _clamp(_get(p, "size", "max", "grid"), 5, 10, 6)
+    x = _clamp(_get(p, "x", "x_coord"), 0, size, 3)
+    y = _clamp(_get(p, "y", "y_coord"), 0, size, 2)
+    return {
+        "prompt": "What are the coordinates of the plotted point? Write them as x,y.",
+        "params": {"x": x, "y": y, "size": size},
+        "solution": f"{x},{y}",
+    }
+
+
+def _b_bar_chart(p: dict) -> dict:
+    raw = _get(p, "bars", "data", "values")
+    bars: list = []
+    if isinstance(raw, list):
+        for b in raw:
+            if isinstance(b, dict) and "label" in b:
+                bars.append({"label": str(b["label"]), "value": _clamp(b.get("value"), 0, 100, 0)})
+    if not bars:
+        bars = [{"label": "Mon", "value": 4}, {"label": "Tue", "value": 7},
+                {"label": "Wed", "value": 3}, {"label": "Thu", "value": 6}]
+    ask = str(_get(p, "ask", "read", "label") or bars[0]["label"])
+    match = next((b for b in bars if b["label"].lower() == ask.lower()), bars[0])
+    return {
+        "prompt": f"Read the bar chart: what is the value for '{match['label']}'?",
+        "params": {"bars": bars, "ask": match["label"]},
+        "solution": match["value"],
+    }
+
+
+def _b_balance_scales(p: dict) -> dict:
+    op = str(_get(p, "op", "operation") or "add").lower()
+    a = _clamp(_get(p, "a", "coefficient", "addend"), 1, 20, 3)
+    if op in ("mul", "multiply", "times", "*"):
+        x = _clamp(_get(p, "x", "solution"), 1, 12, 4)
+        b = a * x
+        prompt = f"The scales balance. If {a} × x = {b}, what is x?"
+        left = f"{a}·x"
+    else:
+        op = "add"
+        x = _clamp(_get(p, "x", "solution"), 0, 20, 5)
+        b = x + a
+        prompt = f"The scales balance. If x + {a} = {b}, what is x?"
+        left = f"x + {a}"
+    return {
+        "prompt": prompt,
+        "params": {"op": op, "a": a, "b": b, "left": left},
+        "solution": x,
+    }
+
+
+def _b_particle_state(p: dict) -> dict:
+    state = str(_get(p, "state", "answer", "type") or "solid").lower()
+    if state not in ("solid", "liquid", "gas"):
+        state = "solid"
+    return {
+        "prompt": "Which state of matter do these particles show?",
+        "params": {"state": state, "options": ["solid", "liquid", "gas"]},
+        "solution": state,
+    }
+
+
+def _b_formula_triangle(p: dict) -> dict:
+    def node(key: str, dlabel: str) -> dict:
+        n = _get(p, key)
+        if not isinstance(n, dict):
+            n = {}
+        label = str(n.get("label") or dlabel)
+        v = n.get("value")
+        try:
+            v = int(v) if v is not None and v != "" else None
+        except (TypeError, ValueError):
+            v = None
+        return {"label": label, "value": v}
+
+    top, left, right = node("top", "distance"), node("left", "speed"), node("right", "time")
+    if top["value"] is None and left["value"] is not None and right["value"] is not None:
+        unknown, sol = "top", left["value"] * right["value"]
+    elif left["value"] is None and top["value"] is not None and right["value"] not in (None, 0):
+        unknown, sol = "left", top["value"] // right["value"]
+    elif right["value"] is None and top["value"] is not None and left["value"] not in (None, 0):
+        unknown, sol = "right", top["value"] // left["value"]
+    else:
+        # fallback to a clean worked example: distance = speed(4) × time(3)
+        left["value"], right["value"], top["value"] = 4, 3, None
+        unknown, sol = "top", 12
+    return {
+        "prompt": f"Use the triangle: {top['label']} = {left['label']} × {right['label']}. What is the missing value?",
+        "params": {"top": top, "left": left, "right": right, "unknown": unknown},
+        "solution": sol,
+    }
+
+
 _BUILDERS = {
     "fraction_bar": _b_fraction_bar,
+    "pie_fraction": _b_pie_fraction,
+    "particle_state": _b_particle_state,
+    "formula_triangle": _b_formula_triangle,
     "number_line": _b_number_line,
+    "place_value": _b_place_value,
+    "array_grid": _b_array_grid,
     "shape_count": _b_shape_count,
     "area_grid": _b_area_grid,
+    "clock": _b_clock,
+    "angle": _b_angle,
+    "coordinate_grid": _b_coordinate_grid,
+    "bar_chart": _b_bar_chart,
+    "balance_scales": _b_balance_scales,
     "build_fraction": _b_build_fraction,
     "label_diagram": _b_label_diagram,
     "states_of_matter": _b_states_of_matter,
