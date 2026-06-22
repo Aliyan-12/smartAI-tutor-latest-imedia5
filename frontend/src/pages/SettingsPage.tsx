@@ -124,7 +124,9 @@ export default function SettingsPage() {
   const saveProfile = async () => {
     setSaving(true);
     try {
-      await settingsApi.updateProfile({ name, year_group: yearGroup, key_stage: keyStage });
+      // Key Stage + Year Group are set at onboarding and are NOT editable here
+      // (the dropdowns are locked) — only the name is updated from this form.
+      await settingsApi.updateProfile({ name });
       showToast("Profile saved!");
     } catch { showToast("Failed to save profile."); }
     finally { setSaving(false); }
@@ -439,28 +441,45 @@ export default function SettingsPage() {
                 <div className="sett-avatar">{(name || user?.name || "?").charAt(0).toUpperCase()}</div>
                 <label style={{ fontSize: 13, fontWeight: 600, color: "#374151", display: "block", marginBottom: 4 }}>Full Name</label>
                 <input className="sett-input" value={name} onChange={(e) => setName(e.target.value)} placeholder="Your full name" />
-                <label style={{ fontSize: 13, fontWeight: 600, color: "#374151", display: "block", marginBottom: 4 }}>Key Stage</label>
-                <select className="sett-select" value={keyStage} onChange={(e) => handleKeyStageChange(e.target.value)} style={{ width: "100%", marginBottom: 16 }}>
-                  <option value="">Select your key stage...</option>
+                <label style={{ fontSize: 13, fontWeight: 600, color: "#374151", display: "block", marginBottom: 4 }}>
+                  Key Stage <span style={{ fontWeight: 400, color: "#94a3b8" }}>🔒</span>
+                </label>
+                <select
+                  className="sett-select"
+                  value={keyStage}
+                  onChange={(e) => handleKeyStageChange(e.target.value)}
+                  disabled
+                  title="Set during onboarding — can't be changed here"
+                  style={{ width: "100%", marginBottom: 16, background: "#f8fafc", cursor: "not-allowed", color: "#475569" }}
+                >
+                  <option value="">Set during onboarding</option>
                   {hubKeyStages.map((ks) => (
                     <option key={ks} value={ks}>{KS_LABELS[ks] ?? ks}</option>
                   ))}
                 </select>
-                <label style={{ fontSize: 13, fontWeight: 600, color: "#374151", display: "block", marginBottom: 4 }}>Year Group</label>
+                <label style={{ fontSize: 13, fontWeight: 600, color: "#374151", display: "block", marginBottom: 4 }}>
+                  Year Group <span style={{ fontWeight: 400, color: "#94a3b8" }}>🔒</span>
+                </label>
                 <select
                   className="sett-select"
                   value={yearGroup}
                   onChange={(e) => setYearGroup(e.target.value)}
-                  disabled={!keyStage}
-                  style={{ width: "100%", marginBottom: 4, opacity: keyStage ? 1 : 0.5 }}
+                  disabled
+                  title="Set during onboarding — can't be changed here"
+                  style={{ width: "100%", marginBottom: 4, background: "#f8fafc", cursor: "not-allowed", color: "#475569" }}
                 >
-                  <option value="">{keyStage ? "Select your year group..." : "Choose a key stage first"}</option>
+                  <option value="">Set during onboarding</option>
+                  {/* Always include the saved value so it shows even before the year list loads. */}
+                  {yearGroup && !hubYears.includes(yearGroup) && (
+                    <option value={yearGroup}>{yearGroup}</option>
+                  )}
                   {hubYears.map((y) => (
                     <option key={y} value={y}>{y}</option>
                   ))}
                 </select>
                 <p style={{ fontSize: 12, color: "#64748b", marginTop: 4, marginBottom: 20 }}>
-                  Your key stage and year group come from the curriculum and personalise your lessons.
+                  🔒 Your key stage and year group are set when you join and can't be changed here —
+                  they update automatically as you progress through the school year.
                 </p>
                 <button className="sett-save-btn" onClick={saveProfile} disabled={saving}>
                   <Save size={14} style={{ marginRight: 6, verticalAlign: "middle" }} />

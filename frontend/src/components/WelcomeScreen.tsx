@@ -1232,7 +1232,11 @@ export default function WelcomeScreen({ onPromptClick, onStatsLoaded }: Props) {
                     style={{ background: "#1a73e8" }}
                     onClick={() =>
                       navigate("/lesson/setup", {
-                        state: { subject: pendingAssignments[0].homework.subject },
+                        state: {
+                          subject: pendingAssignments[0].homework.subject,
+                          topic: pendingAssignments[0].homework.topic,
+                          goal: "homework",
+                        },
                       })
                     }
                   >
@@ -1265,7 +1269,11 @@ export default function WelcomeScreen({ onPromptClick, onStatsLoaded }: Props) {
                     style={{ background: "#7c3aed" }}
                     onClick={() =>
                       navigate("/lesson/setup", {
-                        state: { subject: daily_plan.weak_spots[0].subject },
+                        state: {
+                          subject: daily_plan.weak_spots[0].subject,
+                          topic: daily_plan.weak_spots[0].topic,
+                          goal: "revision",
+                        },
                       })
                     }
                   >

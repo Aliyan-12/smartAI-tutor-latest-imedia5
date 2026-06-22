@@ -8,7 +8,7 @@ import {
 } from "lucide-react";
 import Sidebar from "../components/Sidebar";
 import { useAuth } from "../context/AuthContext";
-import { gamificationApi, assignmentsApi, appointmentsApi, curriculumApi } from "../services/api";
+import { gamificationApi, assignmentsApi, appointmentsApi, curriculumApi, settingsApi } from "../services/api";
 import type { HubSubject } from "../services/api";
 import type { StudentProfile, MyAssignment } from "../types";
 
@@ -272,6 +272,10 @@ export default function LessonSetupPage() {
   const [isDragging, setIsDragging] = useState(false);
   const topicDropdownRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  // Topic to auto-select once its units load (from a dashboard "Recommended" click).
+  const pendingTopicRef = useRef<string | null>(
+    locationState.topic ?? searchParams.get("topic") ?? null
+  );
 
   // ── Curriculum data state (Resource Hub mirror) ──────────────────────────
   const [hubSubjects, setHubSubjects] = useState<HubSubject[]>([]);
@@ -340,8 +344,20 @@ export default function LessonSetupPage() {
     }
     curriculumApi.getUnits(subjectId, keyStage, yearGroup || undefined)
       .then((data) => {
-        setKbUnits((data.units ?? []).map((u) => ({ id: u.id, title: u.title, unit_name: u.title, has_resources: u.has_resources })));
-        setSelectedTopics([]);
+        const units = (data.units ?? []).map((u) => ({ id: u.id, title: u.title, unit_name: u.title, has_resources: u.has_resources }));
+        setKbUnits(units);
+        // Auto-select a topic passed from the dashboard "Recommended" click (once).
+        const pending = pendingTopicRef.current;
+        if (pending) {
+          const norm = (x: string) => x.trim().toLowerCase();
+          const match =
+            units.find((u) => norm(u.unit_name) === norm(pending) || norm(u.title) === norm(pending)) ??
+            units.find((u) => norm(u.title).includes(norm(pending)) || norm(pending).includes(norm(u.title)));
+          setSelectedTopics(match ? [match.unit_name] : []);
+          pendingTopicRef.current = null;
+        } else {
+          setSelectedTopics([]);
+        }
       })
       .catch(() => setKbUnits([]));
   }, [subjectId, keyStage, yearGroup]);
@@ -373,6 +389,24 @@ export default function LessonSetupPage() {
         }
       })
       .catch(() => setProfile(null));
+  }, []);
+
+  // Key Stage + Year Group are the student's own (set in Settings → Profile). They
+  // are pre-selected here and LOCKED — the two dropdowns are disabled on this page,
+  // so the student can only change them from Settings → Profile.
+  useEffect(() => {
+    settingsApi.getLearningPreferences()
+      .then((data) => {
+        const prefs = data as { key_stage?: string | null; year_group?: string | null };
+        if (prefs.key_stage) {
+          setKeyStage(prefs.key_stage);
+          setStudentKeyStage(prefs.key_stage);
+          const available = getAvailableDurations(prefs.key_stage);
+          setDuration((d) => (available.includes(d) ? d : available.includes(40) ? 40 : available[0]));
+        }
+        if (prefs.year_group) setYearGroup(prefs.year_group);
+      })
+      .catch(() => {});
   }, []);
 
   // Fetch pending assignments for "From your teacher" panel
@@ -741,16 +775,20 @@ export default function LessonSetupPage() {
 
                 {/* Key Stage · Year Group · Subject · Topic — single row */}
                 <div className="lsp-step1-row" style={{ display: "flex", gap: 12, alignItems: "flex-start" }}>
-                  {/* Key Stage */}
+                  {/* Key Stage — locked (set in Settings → Profile) */}
                   <div style={{ flex: 1, minWidth: 110 }}>
-                    <label style={s.label}>Key Stage</label>
+                    <label style={s.label} title="Set in Settings → Profile">
+                      Key Stage <span style={{ fontWeight: 400, color: "#94a3b8" }}>🔒</span>
+                    </label>
                     <div style={s.selectWrap}>
                       <select
-                        style={s.select as React.CSSProperties}
+                        style={{ ...s.select as React.CSSProperties, background: "#f8fafc", cursor: "not-allowed", color: "#475569" }}
                         value={keyStage}
                         onChange={(e) => handleKeyStageChange(e.target.value)}
+                        disabled
+                        title="Set in Settings → Profile"
                       >
-                        <option value="">Select key stage...</option>
+                        <option value="">Set in your profile</option>
                         {kbStages.map((ks) => (
                           <option key={ks} value={ks}>{ks}</option>
                         ))}
@@ -759,17 +797,25 @@ export default function LessonSetupPage() {
                     </div>
                   </div>
 
-                  {/* Year Group */}
+                  {/* Year Group — locked (set in Settings → Profile) */}
                   <div style={{ flex: 1, minWidth: 110 }}>
-                    <label style={s.label}>Year Group</label>
+                    <label style={s.label} title="Set in Settings → Profile">
+                      Year Group <span style={{ fontWeight: 400, color: "#94a3b8" }}>🔒</span>
+                    </label>
                     <div style={s.selectWrap}>
                       <select
-                        style={{ ...s.select as React.CSSProperties, opacity: keyStage ? 1 : 0.5 }}
+                        style={{ ...s.select as React.CSSProperties, background: "#f8fafc", cursor: "not-allowed", color: "#475569" }}
                         value={yearGroup}
                         onChange={(e) => handleYearGroupChange(e.target.value)}
-                        disabled={!keyStage}
+                        disabled
+                        title="Set in Settings → Profile"
                       >
-                        <option value="">{keyStage ? "Select year group..." : "Choose key stage first"}</option>
+                        <option value="">Set in your profile</option>
+                        {/* Always include the locked value so it shows even before the
+                            year list has finished loading. */}
+                        {yearGroup && !hubYears.includes(yearGroup) && (
+                          <option value={yearGroup}>{yearGroup}</option>
+                        )}
                         {hubYears.map((y) => (
                           <option key={y} value={y}>{y}</option>
                         ))}

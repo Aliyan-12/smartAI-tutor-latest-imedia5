@@ -48,14 +48,18 @@ async def update_profile(
     current_user: User = Depends(require_student),
     db: AsyncSession = Depends(get_db),
 ):
-    """Student: update their display name, year group, and/or key stage."""
+    """Student: update their display name only.
+
+    Key Stage + Year Group are set once during onboarding and are NOT editable from
+    settings (the UI dropdowns are locked). They will later be advanced automatically
+    by school-term management — so we deliberately ignore those fields here even if a
+    request includes them.
+    """
     data = await platform_service.update_profile(
         db,
         user_id=current_user.id,
         student_id=current_user.id,
         name=payload.name,
-        year_group=payload.year_group,
-        key_stage=payload.key_stage,
     )
     await db.commit()
     return ProfileResponse(**data)
