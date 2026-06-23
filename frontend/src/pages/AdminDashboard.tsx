@@ -7,7 +7,7 @@ import { useAuth } from "../context/AuthContext";
 import type { User, DashboardStats } from "../types";
 
 // Administrator-only: school admins awaiting approval, with approve/reject actions.
-function PendingApprovalsView({ onChanged }: { onChanged: () => void }) {
+function PendingApprovalsView({ onChanged, fullPage }: { onChanged: () => void; fullPage?: boolean }) {
   const [pending, setPending] = useState<User[]>([]);
   const [busyId, setBusyId] = useState<number | null>(null);
 
@@ -25,7 +25,15 @@ function PendingApprovalsView({ onChanged }: { onChanged: () => void }) {
     } catch { /* ignore */ } finally { setBusyId(null); }
   };
 
-  if (pending.length === 0) return null;
+  if (pending.length === 0) {
+    if (!fullPage) return null;
+    return (
+      <div style={{ background: "#fff", border: "1px solid #e2e8f0", borderRadius: 12, padding: 28, textAlign: "center", color: "#64748b" }}>
+        <div style={{ fontSize: 36, marginBottom: 8 }}>✅</div>
+        No school accounts are awaiting approval right now.
+      </div>
+    );
+  }
   return (
     <div style={{ marginBottom: 20, border: "1px solid #fde68a", background: "#fffbeb", borderRadius: 12, padding: 18 }}>
       <h3 style={{ margin: "0 0 12px", color: "#92400e", fontSize: 15, fontWeight: 800 }}>
@@ -304,6 +312,8 @@ export default function AdminDashboard() {
 
   const currentView = location.pathname === "/admin/users"
     ? "users"
+    : location.pathname === "/admin/approvals"
+    ? "approvals"
     : location.pathname === "/admin/chats"
     ? "chats"
     : "dashboard";
@@ -325,6 +335,10 @@ export default function AdminDashboard() {
     loadData();
   }, [loadData]);
 
+  // Defensive: a school admin must never see platform administrators in the list,
+  // even if a response somehow includes one.
+  const visibleUsers = isAdministrator ? users : users.filter((u) => u.role !== "administrator");
+
   return (
     <div className="app-layout">
       <Sidebar />
@@ -332,7 +346,9 @@ export default function AdminDashboard() {
         <div className="dashboard-content">
           <div className="dashboard-page-header">
             <h1>
-              {currentView === "users" ? "User Management" : currentView === "chats" ? "All Chats" : "Admin Dashboard"}
+              {currentView === "users" ? "Active Users"
+                : currentView === "approvals" ? "Pending Approvals"
+                : currentView === "chats" ? "All Chats" : "Admin Dashboard"}
             </h1>
           </div>
 
@@ -340,17 +356,20 @@ export default function AdminDashboard() {
 
           {currentView === "dashboard" && (
             <>
-              {isAdministrator && <PendingApprovalsView onChanged={loadData} />}
               <DashboardView stats={stats} />
-              <UsersView users={users} roleFilter={roleFilter} setRoleFilter={setRoleFilter} onReload={loadData} />
+              <UsersView users={visibleUsers} roleFilter={roleFilter} setRoleFilter={setRoleFilter} onReload={loadData} />
             </>
           )}
 
           {currentView === "users" && (
-            <>
-              {isAdministrator && <PendingApprovalsView onChanged={loadData} />}
-              <UsersView users={users} roleFilter={roleFilter} setRoleFilter={setRoleFilter} onReload={loadData} />
-            </>
+            <UsersView users={visibleUsers} roleFilter={roleFilter} setRoleFilter={setRoleFilter} onReload={loadData} />
+          )}
+
+          {/* Pending approvals — administrators only (route is guarded too). */}
+          {currentView === "approvals" && (
+            isAdministrator
+              ? <PendingApprovalsView onChanged={loadData} fullPage />
+              : <div className="dashboard-error">Not authorised.</div>
           )}
 
           {currentView === "chats" && (

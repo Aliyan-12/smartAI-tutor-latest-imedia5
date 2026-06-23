@@ -104,6 +104,7 @@ export default function App() {
           />
           <Route path="/admin/dashboard" element={<ProtectedRoute allowedRoles={["admin", "administrator"]}><AdminDashboard /></ProtectedRoute>} />
           <Route path="/admin/users" element={<ProtectedRoute allowedRoles={["admin", "administrator"]}><AdminDashboard /></ProtectedRoute>} />
+          <Route path="/admin/approvals" element={<ProtectedRoute allowedRoles={["administrator"]}><AdminDashboard /></ProtectedRoute>} />
           <Route path="/admin/chats" element={<ProtectedRoute allowedRoles={["admin", "administrator"]}><AdminDashboard /></ProtectedRoute>} />
           <Route path="/teacher/dashboard" element={<ProtectedRoute allowedRoles={["admin", "teacher"]}><TeacherDashboard /></ProtectedRoute>} />
           <Route path="/teacher/students" element={<ProtectedRoute allowedRoles={["admin", "teacher"]}><TeacherDashboard /></ProtectedRoute>} />

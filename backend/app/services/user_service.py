@@ -98,6 +98,34 @@ async def count_users(
     return result.scalar() or 0
 
 
+async def delete_user_cascade(db: AsyncSession, user_id: int) -> None:
+    """Delete a user and every row that references them, in FK-dependency order.
+
+    Use this instead of `db.delete(user)`: several FKs (appointments, chats,
+    documents, subscriptions, credit_transactions) have NO `ON DELETE CASCADE`, so a
+    plain delete raises a ForeignKeyViolation. Runs inside the caller's transaction —
+    the caller commits.
+    """
+    from sqlalchemy import text
+    p = {"u": user_id}
+    appt = "SELECT id FROM appointments WHERE student_id=:u OR teacher_id=:u OR booked_by=:u"
+    statements = [
+        f"DELETE FROM messages WHERE chat_id IN (SELECT id FROM chats WHERE user_id=:u OR appointment_id IN ({appt}))",
+        f"DELETE FROM chats WHERE user_id=:u OR appointment_id IN ({appt})",
+        f"DELETE FROM assessments WHERE student_id=:u OR appointment_id IN ({appt})",
+        f"DELETE FROM lesson_plans WHERE student_id=:u OR created_by=:u OR appointment_id IN ({appt})",
+        "DELETE FROM appointments WHERE student_id=:u OR teacher_id=:u OR booked_by=:u",
+        "DELETE FROM documents WHERE uploaded_by=:u",
+        "DELETE FROM subscriptions WHERE user_id=:u",
+        "DELETE FROM credit_transactions WHERE user_id=:u",
+        # users delete cascades student_profiles, topic_mastery, invite_codes,
+        # homework/homework_assignments, email_verification_tokens, oauth_identities.
+        "DELETE FROM users WHERE id=:u",
+    ]
+    for sql in statements:
+        await db.execute(text(sql), p)
+
+
 async def update_user(db: AsyncSession, user: User, **fields) -> User:
     for key, value in fields.items():
         if value is not None and hasattr(user, key):

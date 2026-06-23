@@ -20,6 +20,7 @@ from app.schemas.subscription import CreditTransactionResponse
 from app.services import platform_service
 from app.services.user_service import (
     create_user, get_user_by_id, get_user_by_email, list_users, count_users, update_user,
+    delete_user_cascade,
 )
 from app.services.platform_service import add_credits, get_transactions
 
@@ -156,8 +157,9 @@ async def delete_user(
     _guard_school(caller, user)
     if user.id == caller.id:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Cannot delete yourself")
-    await db.delete(user)
-    await db.flush()
+    # Cascade-delete: several FKs (appointments, chats, …) have no ON DELETE CASCADE.
+    await delete_user_cascade(db, user.id)
+    await db.commit()
 
 
 @router.post("/users/{user_id}/credits", response_model=CreditTransactionResponse)
@@ -318,23 +320,40 @@ async def approve_user(
     return UserResponse.model_validate(user)
 
 
-@router.post("/users/{user_id}/reject", response_model=UserResponse)
+@router.post("/users/{user_id}/reject")
 async def reject_user(
     user_id: int,
     caller: User = Depends(require_administrator),
     db: AsyncSession = Depends(get_db),
 ):
+    """Reject a school admin: email them, then DELETE the account (and the empty
+    school they registered) so the email is free to sign up again."""
     user = await get_user_by_id(db, user_id)
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
-    user.approval_status = APPROVAL_REJECTED
-    await db.commit()
-    await db.refresh(user)
+    email, name, school_id = user.email, user.name, user.school_id
+
+    # Email first — we won't have the address after deletion.
     try:
-        await platform_service.send_school_rejected(user.email, user.name)
+        await platform_service.send_school_rejected(email, name)
     except Exception:  # noqa: BLE001
         pass
-    return UserResponse.model_validate(user)
+
+    await delete_user_cascade(db, user.id)
+
+    # Remove the (now ownerless) non-default school they registered, if it's empty.
+    if school_id:
+        from app.models.school import School
+        school = (await db.execute(select(School).where(School.id == school_id))).scalar_one_or_none()
+        if school and not school.is_default:
+            remaining = (await db.execute(
+                select(func.count(User.id)).where(User.school_id == school_id)
+            )).scalar() or 0
+            if remaining == 0:
+                await db.delete(school)
+
+    await db.commit()
+    return {"status": "rejected_and_deleted", "email": email}
 
 
 @router.get("/schools")

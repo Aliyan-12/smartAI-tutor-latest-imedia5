@@ -9,7 +9,7 @@ import {
   Menu, X,
 } from "lucide-react";
 import { useAuth } from "../context/AuthContext";
-import { chatApi } from "../services/api";
+import { chatApi, adminApi } from "../services/api";
 import type { ChatListItem, Appointment } from "../types";
 
 interface Props {
@@ -409,6 +409,8 @@ export default function Sidebar({
   const [mobileOpen, setMobileOpen] = useState(false);
   const [openDropdown, setOpenDropdown] = useState<string | null>(null);
   const [internalChats, setInternalChats] = useState<ChatListItem[]>(chatList);
+  const [activeUsersCount, setActiveUsersCount] = useState<number | null>(null);
+  const [pendingCount, setPendingCount] = useState<number | null>(null);
 
   const loadInternalChats = () => {
     if (user?.role === "student") {
@@ -429,6 +431,21 @@ export default function Sidebar({
   useEffect(() => {
     loadInternalChats();
     if (onLoadChats) onLoadChats();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user?.role, location.pathname]);
+
+  // Admin/administrator sidebar count badges (active users + pending approvals).
+  // Re-fetched on navigation so they refresh after approve/reject + add/remove.
+  useEffect(() => {
+    if (user?.role !== "admin" && user?.role !== "administrator") return;
+    adminApi.getDashboard()
+      .then((d) => setActiveUsersCount((d as { total_users?: number })?.total_users ?? null))
+      .catch(() => {});
+    if (user?.role === "administrator") {
+      adminApi.getPendingApprovals()
+        .then((d) => setPendingCount(Array.isArray(d) ? d.length : null))
+        .catch(() => {});
+    }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user?.role, location.pathname]);
 
@@ -944,12 +961,51 @@ export default function Sidebar({
           >
             <LayoutDashboard size={16} /><span>Dashboard</span>
           </button>
+          {/* Users dropdown — Active users (+ Pending approvals for administrators) */}
           <button
-            className={`sb-nav-item${isActive("/admin/users") ? " active" : ""}`}
-            onClick={() => go("/admin/users")}
+            className={`sb-nav-item${(isActive("/admin/users") || isActive("/admin/approvals")) ? " active" : ""}`}
+            onClick={() => toggleDropdown("users")}
+            style={{ justifyContent: "space-between" }}
           >
-            <Users size={16} /><span>Users</span>
+            <span style={{ display: "flex", alignItems: "center", gap: 10 }}>
+              <Users size={16} /><span>Users</span>
+            </span>
+            <span style={{ fontSize: 10, color: "#64748b", transition: "transform 0.2s", transform: openDropdown === "users" ? "rotate(180deg)" : "none" }}>▼</span>
           </button>
+          {openDropdown === "users" && (
+            <div style={{ paddingLeft: 12, display: "flex", flexDirection: "column", gap: 1 }}>
+              <button
+                className={`sb-nav-item${isActive("/admin/users") ? " active" : ""}`}
+                style={{ fontSize: 12, paddingTop: 6, paddingBottom: 6, justifyContent: "space-between" }}
+                onClick={() => go("/admin/users")}
+              >
+                <span style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                  <Users size={13} /><span>Active Users</span>
+                </span>
+                {activeUsersCount != null && (
+                  <span style={{ fontSize: 10, fontWeight: 800, minWidth: 18, textAlign: "center", padding: "1px 6px", borderRadius: 999, background: "#e2e8f0", color: "#475569" }}>
+                    {activeUsersCount}
+                  </span>
+                )}
+              </button>
+              {user?.role === "administrator" && (
+                <button
+                  className={`sb-nav-item${isActive("/admin/approvals") ? " active" : ""}`}
+                  style={{ fontSize: 12, paddingTop: 6, paddingBottom: 6, justifyContent: "space-between" }}
+                  onClick={() => go("/admin/approvals")}
+                >
+                  <span style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                    <span style={{ fontSize: 13 }}>⏳</span><span>Pending Approvals</span>
+                  </span>
+                  {pendingCount != null && pendingCount > 0 && (
+                    <span style={{ fontSize: 10, fontWeight: 800, minWidth: 18, textAlign: "center", padding: "1px 6px", borderRadius: 999, background: "#fef3c7", color: "#b45309" }}>
+                      {pendingCount}
+                    </span>
+                  )}
+                </button>
+              )}
+            </div>
+          )}
           <button
             className={`sb-nav-item${isActive("/admin/assessments") ? " active" : ""}`}
             onClick={() => go("/admin/assessments")}
