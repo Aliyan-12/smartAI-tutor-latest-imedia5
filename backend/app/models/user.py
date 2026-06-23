@@ -5,16 +5,23 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.session import Base
 
+ROLE_ADMINISTRATOR = "administrator"  # platform-wide super role (sees all schools/users)
 ROLE_ADMIN = "admin"      # admin/owner of a single school tenant (school-scoped)
 ROLE_TEACHER = "teacher"
 ROLE_STUDENT = "student"
 ROLE_PARENT = "parent"
 
-VALID_ROLES = {ROLE_ADMIN, ROLE_TEACHER, ROLE_STUDENT, ROLE_PARENT}
+VALID_ROLES = {ROLE_ADMINISTRATOR, ROLE_ADMIN, ROLE_TEACHER, ROLE_STUDENT, ROLE_PARENT}
 
 # account_type values (how the user signed up)
 ACCOUNT_SCHOOL = "school"
 ACCOUNT_INDIVIDUAL = "individual"
+
+# approval_status — school admins must be approved by an administrator before they
+# can sign in. Everyone else defaults to "approved".
+APPROVAL_APPROVED = "approved"
+APPROVAL_PENDING = "pending"
+APPROVAL_REJECTED = "rejected"
 
 DEFAULT_CREDITS = 100
 
@@ -41,6 +48,9 @@ class User(Base):
     onboarding_completed: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     auth_provider: Mapped[str] = mapped_column(String(20), default="password", nullable=False)
     account_type: Mapped[str] = mapped_column(String(20), default=ACCOUNT_INDIVIDUAL, nullable=False)
+    # School admins start "pending" until an administrator approves them; all other
+    # accounts are "approved" by default.
+    approval_status: Mapped[str] = mapped_column(String(20), default=APPROVAL_APPROVED, nullable=False)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
     )
@@ -68,6 +78,10 @@ class User(Base):
     @property
     def school_country(self) -> Optional[str]:
         return self.school.country if self.school else None
+
+    @property
+    def is_administrator(self) -> bool:
+        return self.role == ROLE_ADMINISTRATOR
 
     @property
     def is_admin(self) -> bool:

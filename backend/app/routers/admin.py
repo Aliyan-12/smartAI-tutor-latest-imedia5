@@ -5,8 +5,11 @@ from sqlalchemy import select, func, desc
 from sqlalchemy.orm import selectinload
 
 from app.db.session import get_db
-from app.middleware.auth import require_admin
-from app.models.user import User, ROLE_STUDENT
+from app.middleware.auth import require_admin, require_administrator
+from app.models.user import (
+    User, ROLE_STUDENT, ROLE_TEACHER, ROLE_PARENT, ROLE_ADMIN, ROLE_ADMINISTRATOR,
+    APPROVAL_APPROVED, APPROVAL_PENDING, APPROVAL_REJECTED,
+)
 from app.models.chat import Chat, Message
 from app.models.subscription import CreditTransaction
 from app.schemas.user import (
@@ -14,6 +17,7 @@ from app.schemas.user import (
 )
 from app.schemas.chat import ChatResponse, ChatListItem
 from app.schemas.subscription import CreditTransactionResponse
+from app.services import platform_service
 from app.services.user_service import (
     create_user, get_user_by_id, get_user_by_email, list_users, count_users, update_user,
 )
@@ -22,13 +26,15 @@ from app.services.platform_service import add_credits, get_transactions
 router = APIRouter(prefix="/api/admin", tags=["admin"])
 
 
-# Every admin is the admin of ONE school (tenant) and only ever sees/manages that
-# school's data — there is no cross-school platform admin.
+# A school admin only ever sees/manages their own school's data. The platform
+# ADMINISTRATOR is unscoped — they see and manage every school and every user.
 def _scope(caller: User) -> Optional[int]:
-    return caller.school_id
+    return None if caller.role == ROLE_ADMINISTRATOR else caller.school_id
 
 
 def _guard_school(caller: User, user: User) -> None:
+    if caller.role == ROLE_ADMINISTRATOR:
+        return
     if user.school_id != caller.school_id:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
 
@@ -39,7 +45,9 @@ async def admin_dashboard(
     db: AsyncSession = Depends(get_db),
 ):
     sid = _scope(caller)
-    total_users = await count_users(db, school_id=sid)
+    # School admins never see (or count) the platform administrator(s).
+    excl = caller.role != ROLE_ADMINISTRATOR
+    total_users = await count_users(db, school_id=sid, exclude_administrators=excl)
     total_students = await count_users(db, role="student", school_id=sid)
     total_teachers = await count_users(db, role="teacher", school_id=sid)
 
@@ -69,7 +77,10 @@ async def get_all_users(
     caller: User = Depends(require_admin),
     db: AsyncSession = Depends(get_db),
 ):
-    users = await list_users(db, role=role, is_active=is_active, limit=limit, offset=offset, school_id=_scope(caller))
+    users = await list_users(
+        db, role=role, is_active=is_active, limit=limit, offset=offset,
+        school_id=_scope(caller), exclude_administrators=caller.role != ROLE_ADMINISTRATOR,
+    )
     return [UserResponse.model_validate(u) for u in users]
 
 
@@ -273,3 +284,87 @@ async def link_student_to_parent(
     await db.flush()
 
     return {"message": f"Linked {student.name} to {parent.name}"}
+
+
+# ── Administrator-only: school-admin approvals + cross-school views ──────────────
+@router.get("/pending-approvals", response_model=List[UserResponse])
+async def pending_approvals(
+    caller: User = Depends(require_administrator),
+    db: AsyncSession = Depends(get_db),
+):
+    """School admins awaiting approval (administrator reviews these)."""
+    res = await db.execute(
+        select(User).where(User.approval_status == APPROVAL_PENDING).order_by(desc(User.created_at))
+    )
+    return [UserResponse.model_validate(u) for u in res.scalars().all()]
+
+
+@router.post("/users/{user_id}/approve", response_model=UserResponse)
+async def approve_user(
+    user_id: int,
+    caller: User = Depends(require_administrator),
+    db: AsyncSession = Depends(get_db),
+):
+    user = await get_user_by_id(db, user_id)
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    user.approval_status = APPROVAL_APPROVED
+    await db.commit()
+    await db.refresh(user)
+    try:
+        await platform_service.send_school_approved(user.email, user.name)
+    except Exception:  # noqa: BLE001
+        pass
+    return UserResponse.model_validate(user)
+
+
+@router.post("/users/{user_id}/reject", response_model=UserResponse)
+async def reject_user(
+    user_id: int,
+    caller: User = Depends(require_administrator),
+    db: AsyncSession = Depends(get_db),
+):
+    user = await get_user_by_id(db, user_id)
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    user.approval_status = APPROVAL_REJECTED
+    await db.commit()
+    await db.refresh(user)
+    try:
+        await platform_service.send_school_rejected(user.email, user.name)
+    except Exception:  # noqa: BLE001
+        pass
+    return UserResponse.model_validate(user)
+
+
+@router.get("/schools")
+async def list_all_schools(
+    caller: User = Depends(require_administrator),
+    db: AsyncSession = Depends(get_db),
+):
+    """Every school + its admin + member counts (administrator only)."""
+    from app.models.school import School
+
+    schools = (await db.execute(select(School).order_by(School.id))).scalars().all()
+    out = []
+    for s in schools:
+        admin = await get_user_by_id(db, s.superadmin_user_id) if s.superadmin_user_id else None
+        students = (await db.execute(
+            select(func.count(User.id)).where(User.school_id == s.id, User.role == ROLE_STUDENT)
+        )).scalar() or 0
+        teachers = (await db.execute(
+            select(func.count(User.id)).where(User.school_id == s.id, User.role == ROLE_TEACHER)
+        )).scalar() or 0
+        parents = (await db.execute(
+            select(func.count(User.id)).where(User.school_id == s.id, User.role == ROLE_PARENT)
+        )).scalar() or 0
+        out.append({
+            "id": s.id, "name": s.name, "country": s.country,
+            "is_default": s.is_default, "account_type": s.account_type,
+            "admin": {
+                "id": admin.id, "name": admin.name, "email": admin.email,
+                "approval_status": admin.approval_status,
+            } if admin else None,
+            "students": students, "teachers": teachers, "parents": parents,
+        })
+    return out

@@ -1,4 +1,4 @@
-export type UserRole = "admin" | "teacher" | "student" | "parent";
+export type UserRole = "administrator" | "admin" | "teacher" | "student" | "parent";
 
 export interface User {
   id: number;
@@ -15,6 +15,7 @@ export interface User {
   onboarding_completed?: boolean;
   account_type?: "school" | "individual";
   auth_provider?: string;
+  approval_status?: "approved" | "pending" | "rejected";
   created_at: string;
 }
 

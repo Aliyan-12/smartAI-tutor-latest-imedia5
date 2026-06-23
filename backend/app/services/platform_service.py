@@ -224,6 +224,32 @@ async def send_password_reset(to: str, name: str, token: str) -> None:
     await asyncio.to_thread(send_email, to, subject, body)
 
 
+async def send_school_approved(to: str, name: str) -> None:
+    import asyncio
+    login_url = f"{settings.frontend_base_url.rstrip('/')}/login"
+    subject = "Your AI Tutor 4 Schools account is approved 🎉"
+    body = (
+        f"<p>Hi {name},</p>"
+        "<p>Good news — your school account has been <strong>approved</strong> by an "
+        "administrator. You can now sign in and start setting up your school.</p>"
+        f'<p><a href="{login_url}" style="background:#1a73e8;color:#fff;padding:10px 18px;'
+        'border-radius:8px;text-decoration:none;font-weight:600">Sign in</a></p>'
+    )
+    await asyncio.to_thread(send_email, to, subject, body)
+
+
+async def send_school_rejected(to: str, name: str) -> None:
+    import asyncio
+    subject = "Update on your AI Tutor 4 Schools account"
+    body = (
+        f"<p>Hi {name},</p>"
+        "<p>Thank you for registering. After review, your school account was "
+        "<strong>not approved</strong> at this time. If you think this is a mistake, "
+        "please reply to this email or contact support.</p>"
+    )
+    await asyncio.to_thread(send_email, to, subject, body)
+
+
 def send_booking_confirmation(
     student_email: str,
     student_name: str,

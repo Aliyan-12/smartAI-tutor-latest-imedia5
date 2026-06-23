@@ -247,6 +247,24 @@ export const adminApi = {
     return handleResponse(res);
   },
 
+  // ── Administrator-only: school-admin approvals + all schools ──
+  async getPendingApprovals() {
+    const res = await fetch(`${API_BASE}/admin/pending-approvals`, { headers: authHeaders() });
+    return handleResponse(res);
+  },
+  async approveUser(userId: number) {
+    const res = await fetch(`${API_BASE}/admin/users/${userId}/approve`, { method: "POST", headers: authHeaders() });
+    return handleResponse(res);
+  },
+  async rejectUser(userId: number) {
+    const res = await fetch(`${API_BASE}/admin/users/${userId}/reject`, { method: "POST", headers: authHeaders() });
+    return handleResponse(res);
+  },
+  async getAllSchools() {
+    const res = await fetch(`${API_BASE}/admin/schools`, { headers: authHeaders() });
+    return handleResponse(res);
+  },
+
   async getUsers(params?: { role?: string; is_active?: boolean }) {
     const query = new URLSearchParams();
     if (params?.role) query.set("role", params.role);

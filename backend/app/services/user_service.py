@@ -2,7 +2,7 @@ from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 from typing import Optional, List
 
-from app.models.user import User, ROLE_STUDENT
+from app.models.user import User, ROLE_STUDENT, ROLE_ADMINISTRATOR
 from app.core.security import hash_password, verify_password
 
 
@@ -28,6 +28,7 @@ async def create_user(
     auth_provider: str = "password",
     is_verified: bool = False,
     onboarding_completed: bool = False,
+    approval_status: str = "approved",
 ) -> User:
     user = User(
         name=name,
@@ -41,6 +42,7 @@ async def create_user(
         auth_provider=auth_provider,
         is_verified=is_verified,
         onboarding_completed=onboarding_completed,
+        approval_status=approval_status,
     )
     db.add(user)
     await db.flush()
@@ -63,6 +65,7 @@ async def list_users(
     limit: int = 100,
     offset: int = 0,
     school_id: Optional[int] = None,
+    exclude_administrators: bool = False,
 ) -> List[User]:
     query = select(User)
     if role:
@@ -71,19 +74,26 @@ async def list_users(
         query = query.where(User.is_active == is_active)
     if school_id is not None:
         query = query.where(User.school_id == school_id)
+    if exclude_administrators:
+        query = query.where(User.role != ROLE_ADMINISTRATOR)
     query = query.order_by(User.created_at.desc()).limit(limit).offset(offset)
     result = await db.execute(query)
     return list(result.scalars().all())
 
 
 async def count_users(
-    db: AsyncSession, role: Optional[str] = None, school_id: Optional[int] = None
+    db: AsyncSession,
+    role: Optional[str] = None,
+    school_id: Optional[int] = None,
+    exclude_administrators: bool = False,
 ) -> int:
     query = select(func.count(User.id))
     if role:
         query = query.where(User.role == role)
     if school_id is not None:
         query = query.where(User.school_id == school_id)
+    if exclude_administrators:
+        query = query.where(User.role != ROLE_ADMINISTRATOR)
     result = await db.execute(query)
     return result.scalar() or 0
 

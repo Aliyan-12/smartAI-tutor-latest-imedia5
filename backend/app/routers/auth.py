@@ -13,11 +13,11 @@ from app.middleware.auth import get_current_user
 from app.models.auth_tokens import PURPOSE_VERIFY, PURPOSE_RESET, OAuthIdentity
 from app.models.user import (
     User, ROLE_STUDENT, ROLE_PARENT, ROLE_ADMIN, DEFAULT_CREDITS,
-    ACCOUNT_SCHOOL, ACCOUNT_INDIVIDUAL,
+    ACCOUNT_SCHOOL, ACCOUNT_INDIVIDUAL, APPROVAL_PENDING, APPROVAL_REJECTED,
 )
 from app.schemas.auth import (
-    RegisterRequest, RegisterResponse, VerifyEmailRequest, ResendVerificationRequest,
-    ForgotPasswordRequest, ResetPasswordRequest,
+    RegisterRequest, RegisterResponse, VerifyEmailRequest, VerifyEmailResponse,
+    ResendVerificationRequest, ForgotPasswordRequest, ResetPasswordRequest,
     OnboardingProfileRequest, OnboardingPreferencesRequest,
 )
 from app.schemas.user import UserLogin, UserResponse, TokenResponse
@@ -47,11 +47,14 @@ async def register(payload: RegisterRequest, db: AsyncSession = Depends(get_db))
         school = await school_service.create_school(
             db, name=school_name, country=payload.country, account_type="school",
         )
-        # A school's registrant is its ADMIN (school-scoped); no separate superadmin role.
+        # A school's registrant is its ADMIN (school-scoped). They verify their email
+        # like everyone else, but ALSO need an administrator to approve them before
+        # they can sign in — so they start as approval_status="pending".
         user = await create_user(
             db, name=payload.name, email=payload.email, password=payload.password,
             role=ROLE_ADMIN, credits=0, school_id=school.id,
             account_type=ACCOUNT_SCHOOL, auth_provider="password",
+            approval_status=APPROVAL_PENDING,
         )
         school.superadmin_user_id = user.id
     else:
@@ -70,7 +73,7 @@ async def register(payload: RegisterRequest, db: AsyncSession = Depends(get_db))
     return RegisterResponse(status="verification_sent", email=user.email)
 
 
-@router.post("/verify-email", response_model=TokenResponse)
+@router.post("/verify-email", response_model=VerifyEmailResponse)
 async def verify_email(payload: VerifyEmailRequest, db: AsyncSession = Depends(get_db)):
     user_id = await consume_token(db, payload.token, PURPOSE_VERIFY)
     if not user_id:
@@ -81,8 +84,22 @@ async def verify_email(payload: VerifyEmailRequest, db: AsyncSession = Depends(g
     user.is_verified = True
     await db.commit()
     await db.refresh(user)
+
+    # A school admin awaiting approval is NOT logged in yet — show the pending message.
+    if user.approval_status == APPROVAL_PENDING:
+        return VerifyEmailResponse(
+            status="pending_approval",
+            user=UserResponse.model_validate(user),
+            message=(
+                "Your email is verified. Your school account will be reviewed by an "
+                "administrator — we'll email you once it's approved."
+            ),
+        )
+
     token = create_access_token({"sub": str(user.id), "role": user.role})
-    return TokenResponse(access_token=token, user=UserResponse.model_validate(user))
+    return VerifyEmailResponse(
+        status="verified", access_token=token, user=UserResponse.model_validate(user),
+    )
 
 
 @router.post("/resend-verification")
@@ -108,6 +125,10 @@ async def login(payload: UserLogin, db: AsyncSession = Depends(get_db)):
     if not user.is_verified:
         # Frontend detects this code to offer "resend verification".
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="email_unverified")
+    if user.approval_status == APPROVAL_PENDING:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="account_pending_approval")
+    if user.approval_status == APPROVAL_REJECTED:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="account_rejected")
 
     token = create_access_token({"sub": str(user.id), "role": user.role})
     return TokenResponse(access_token=token, user=UserResponse.model_validate(user))

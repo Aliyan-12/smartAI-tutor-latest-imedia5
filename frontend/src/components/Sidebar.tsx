@@ -512,8 +512,12 @@ export default function Sidebar({
           <img src="/images/smarttuition-logo.png" style={{ width: 32, height: 32, objectFit: "contain" }} alt={user?.school_name ?? "School"} />
         </div>
         <div style={{ minWidth: 0 }}>
-          <div style={{ fontSize: 12, fontWeight: 700, color: "#0f172a", lineHeight: 1.2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{user?.school_name ?? "Smart Tuition"}</div>
-          <div style={{ fontSize: 10, color: "#64748b", lineHeight: 1.3, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{user?.school_country ?? "United Kingdom & United Arab Emirates"}</div>
+          <div style={{ fontSize: 12, fontWeight: 700, color: "#0f172a", lineHeight: 1.2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+            {user?.role === "administrator" ? "All Schools" : (user?.school_name ?? "Smart Tuition")}
+          </div>
+          <div style={{ fontSize: 10, color: "#64748b", lineHeight: 1.3, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+            {user?.role === "administrator" ? "Platform Administrator" : (user?.school_country ?? "United Kingdom & United Arab Emirates")}
+          </div>
         </div>
       </div>
     </div>
@@ -925,9 +929,9 @@ export default function Sidebar({
   }
 
   /* ═══════════════════════════════════════
-     ADMIN
+     ADMIN  (and platform ADMINISTRATOR — same nav, unscoped)
   ═══════════════════════════════════════ */
-  if (user?.role === "admin") {
+  if (user?.role === "admin" || user?.role === "administrator") {
     return (
       <Wrapper>
         <BrandHeader />

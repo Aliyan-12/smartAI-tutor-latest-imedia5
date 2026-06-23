@@ -3,7 +3,57 @@ import { useLocation } from "react-router-dom";
 import { Users, MessageSquare, BookOpen, Plus, Trash2, Edit3, Coins, Key, Link2 } from "lucide-react";
 import { adminApi } from "../services/api";
 import Sidebar from "../components/Sidebar";
+import { useAuth } from "../context/AuthContext";
 import type { User, DashboardStats } from "../types";
+
+// Administrator-only: school admins awaiting approval, with approve/reject actions.
+function PendingApprovalsView({ onChanged }: { onChanged: () => void }) {
+  const [pending, setPending] = useState<User[]>([]);
+  const [busyId, setBusyId] = useState<number | null>(null);
+
+  const load = useCallback(async () => {
+    try { setPending((await adminApi.getPendingApprovals()) as User[]); } catch { /* ignore */ }
+  }, []);
+  useEffect(() => { load(); }, [load]);
+
+  const act = async (id: number, kind: "approve" | "reject") => {
+    setBusyId(id);
+    try {
+      if (kind === "approve") await adminApi.approveUser(id); else await adminApi.rejectUser(id);
+      await load();
+      onChanged();
+    } catch { /* ignore */ } finally { setBusyId(null); }
+  };
+
+  if (pending.length === 0) return null;
+  return (
+    <div style={{ marginBottom: 20, border: "1px solid #fde68a", background: "#fffbeb", borderRadius: 12, padding: 18 }}>
+      <h3 style={{ margin: "0 0 12px", color: "#92400e", fontSize: 15, fontWeight: 800 }}>
+        ⏳ School accounts awaiting approval ({pending.length})
+      </h3>
+      <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+        {pending.map((u) => (
+          <div key={u.id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 12px", background: "#fff", border: "1px solid #e2e8f0", borderRadius: 10, flexWrap: "wrap" }}>
+            <div style={{ flex: 1, minWidth: 160 }}>
+              <div style={{ fontWeight: 700, color: "#0f172a" }}>
+                {u.name}{u.school_name ? <span style={{ color: "#64748b", fontWeight: 400 }}> · {u.school_name}</span> : null}
+              </div>
+              <div style={{ fontSize: 12, color: "#64748b" }}>{u.email}</div>
+            </div>
+            <button onClick={() => act(u.id, "approve")} disabled={busyId === u.id}
+              style={{ padding: "7px 14px", background: "#10b981", color: "#fff", border: "none", borderRadius: 8, fontWeight: 700, fontSize: 13, cursor: "pointer" }}>
+              Approve
+            </button>
+            <button onClick={() => act(u.id, "reject")} disabled={busyId === u.id}
+              style={{ padding: "7px 14px", background: "#fff", color: "#b91c1c", border: "1px solid #fecaca", borderRadius: 8, fontWeight: 700, fontSize: 13, cursor: "pointer" }}>
+              Reject
+            </button>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
 
 function DashboardView({ stats }: { stats: DashboardStats | null }) {
   if (!stats) return null;
@@ -245,6 +295,8 @@ function UsersView({
 
 export default function AdminDashboard() {
   const location = useLocation();
+  const { user } = useAuth();
+  const isAdministrator = user?.role === "administrator";
   const [stats, setStats] = useState<DashboardStats | null>(null);
   const [users, setUsers] = useState<User[]>([]);
   const [roleFilter, setRoleFilter] = useState<string>("");
@@ -288,13 +340,17 @@ export default function AdminDashboard() {
 
           {currentView === "dashboard" && (
             <>
+              {isAdministrator && <PendingApprovalsView onChanged={loadData} />}
               <DashboardView stats={stats} />
               <UsersView users={users} roleFilter={roleFilter} setRoleFilter={setRoleFilter} onReload={loadData} />
             </>
           )}
 
           {currentView === "users" && (
-            <UsersView users={users} roleFilter={roleFilter} setRoleFilter={setRoleFilter} onReload={loadData} />
+            <>
+              {isAdministrator && <PendingApprovalsView onChanged={loadData} />}
+              <UsersView users={users} roleFilter={roleFilter} setRoleFilter={setRoleFilter} onReload={loadData} />
+            </>
           )}
 
           {currentView === "chats" && (

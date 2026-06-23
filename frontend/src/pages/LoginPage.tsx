@@ -196,6 +196,10 @@ export default function LoginPage() {
       if (msg === "email_unverified") {
         setUnverified(true);
         setError("Please verify your email before signing in.");
+      } else if (msg === "account_pending_approval") {
+        setError("Your school account is awaiting administrator approval. We'll email you once it's approved.");
+      } else if (msg === "account_rejected") {
+        setError("Your school account was not approved. Please contact support if you think this is a mistake.");
       } else {
         setError(msg);
       }

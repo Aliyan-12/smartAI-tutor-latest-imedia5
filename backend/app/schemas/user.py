@@ -29,6 +29,7 @@ class UserResponse(BaseModel):
     onboarding_completed: bool = True
     account_type: str = "individual"
     auth_provider: str = "password"
+    approval_status: str = "approved"
     created_at: datetime
 
     model_config = {"from_attributes": True}

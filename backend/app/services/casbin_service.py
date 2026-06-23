@@ -21,6 +21,7 @@ _enforcer: Optional[casbin.AsyncEnforcer] = None
 # Default role → (object, action) grants. dom "*" applies in any tenant.
 # Each admin is a school admin (school-scoped at the service layer).
 DEFAULT_POLICIES = [
+    ("role:administrator", "*", "*", "*"),         # platform super admin: everything, every school
     ("role:admin", "*", "*", "*"),                 # school admin: everything in their school
     ("role:teacher", "*", "content", "manage"),
     ("role:teacher", "*", "student", "read"),

@@ -16,6 +16,13 @@ logger = logging.getLogger("seed")
 
 SEED_USERS = [
     {
+        "name": "Platform Administrator",
+        "email": "administrator@smartai.com",
+        "password": "administrator123",
+        "role": "administrator",
+        "credits": 0,
+    },
+    {
         "name": "Admin User",
         "email": "admin@smartai.com",
         "password": "admin123",
@@ -91,6 +98,7 @@ async def run_seed():
                 existing.school_id = existing.school_id or default_school.id
                 existing.is_verified = True
                 existing.onboarding_completed = True
+                existing.approval_status = "approved"
                 created_users[user_data["role"]] = existing
                 continue
 
@@ -102,12 +110,13 @@ async def run_seed():
                 role=user_data["role"],
                 credits=user_data["credits"],
             )
-            # Seed accounts are pre-verified, onboarded, and attached to the
-            # default school. Admin is treated as a school account (platform owner).
+            # Seed accounts are pre-verified, onboarded, approved, and attached to the
+            # default school. Admin + administrator are treated as school accounts.
             user.school_id = default_school.id
             user.is_verified = True
             user.onboarding_completed = True
-            user.account_type = ACCOUNT_SCHOOL if user.role == "admin" else ACCOUNT_INDIVIDUAL
+            user.approval_status = "approved"
+            user.account_type = ACCOUNT_SCHOOL if user.role in ("admin", "administrator") else ACCOUNT_INDIVIDUAL
             created_users[user_data["role"]] = user
             logger.info(f"Created {user.role}: {user.email}")
 
@@ -175,6 +184,7 @@ def main():
     asyncio.run(run_seed())
     logger.info("")
     logger.info("Default credentials:")
+    logger.info("  Administrator: administrator@smartai.com / administrator123")
     logger.info("  Admin:   admin@smartai.com   / admin123")
     logger.info("  Teacher: teacher@smartai.com / teacher123")
     logger.info("  Student: student@smartai.com / student123")

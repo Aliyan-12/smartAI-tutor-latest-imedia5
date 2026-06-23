@@ -2,6 +2,8 @@ from typing import Optional, List, Literal
 
 from pydantic import BaseModel, EmailStr, Field
 
+from app.schemas.user import UserResponse
+
 
 class RegisterRequest(BaseModel):
     account_type: Literal["school", "individual"] = "individual"
@@ -23,6 +25,16 @@ class RegisterResponse(BaseModel):
 
 class VerifyEmailRequest(BaseModel):
     token: str
+
+
+class VerifyEmailResponse(BaseModel):
+    # "verified" → logged in (access_token + user present);
+    # "pending_approval" → email confirmed but a school admin still awaits approval.
+    status: str
+    access_token: Optional[str] = None
+    token_type: str = "bearer"
+    user: Optional[UserResponse] = None
+    message: Optional[str] = None
 
 
 class ResendVerificationRequest(BaseModel):
