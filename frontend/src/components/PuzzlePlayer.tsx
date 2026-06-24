@@ -49,7 +49,17 @@ export default function PuzzlePlayer({
   const [den, setDen] = useState("");
   const [textVal, setTextVal] = useState("");
   const [correct, setCorrect] = useState<boolean | null>(null);
+  // Bumping this remounts the interactive (konva) child, fully resetting its
+  // internal state. Display (SVG) puzzles reset via the setters below.
+  const [interactiveKey, setInteractiveKey] = useState(0);
   const locked = correct === true;
+
+  // Always-available reset: clears this puzzle's answer so the student can redo it
+  // (works even after a correct/locked answer).
+  const reset = () => {
+    setIntVal(""); setNum(""); setDen(""); setTextVal(""); setCorrect(null);
+    setInteractiveKey((k) => k + 1);
+  };
 
   const checkInteger = () => {
     const ok = intVal.trim() !== "" && Number(intVal) === Number(payload.solution);
@@ -78,6 +88,15 @@ export default function PuzzlePlayer({
       <div style={{ padding: "10px 14px", borderBottom: "1px solid #e2e8f0", flexShrink: 0, display: "flex", alignItems: "center", gap: 10 }}>
         <span style={{ fontSize: 11, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.04em", color: "#7c3aed", background: "rgba(124,58,237,0.1)", padding: "3px 8px", borderRadius: 6 }}>Puzzle</span>
         <span style={{ fontSize: 13, fontWeight: 600, color: "#0f172a" }}>{payload.title}</span>
+        <button
+          onClick={reset}
+          title="Reset this puzzle"
+          style={{
+            marginLeft: "auto", fontSize: 12, fontWeight: 600, color: "#475569",
+            background: "#f1f5f9", border: "1px solid #e2e8f0", borderRadius: 6,
+            padding: "4px 10px", cursor: "pointer",
+          }}
+        >↺ Reset</button>
       </div>
 
       <div style={{ flex: 1, minHeight: 0, overflow: "auto", padding: 20, display: "flex", flexDirection: "column", alignItems: "center", gap: 14 }}>
@@ -130,7 +149,7 @@ export default function PuzzlePlayer({
           </>
         )}
 
-        {Interactive && <Interactive payload={payload} onSolved={onSolved} />}
+        {Interactive && <Interactive key={interactiveKey} payload={payload} onSolved={onSolved} />}
 
         {!Display && !Interactive && (
           <p style={{ color: "#94a3b8", fontSize: 13, textAlign: "center" }}>

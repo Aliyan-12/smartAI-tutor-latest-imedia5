@@ -505,13 +505,20 @@ def make_session_tools(ctx: ToolContext) -> list:
             return {"action": "show_puzzle", "error": payload.get("error"), "available": avail,
                     "message": "Could not build that puzzle — ask a typed question instead."}
 
+        # Persist as the authoritative on-screen puzzle and stamp a fresh instance_id
+        # so the frontend remounts a clean puzzle (no leftover solved/locked state from
+        # the previous one). The model only treats the puzzle as "shown" when this
+        # succeeds — confirmed back to it next turn via the LESSON INTERACTIVE STATE anchor.
         try:
-            await puzzle_service.save_puzzle_state(ctx.db, ctx.appointment_id, payload)
+            instance_id = await puzzle_service.set_puzzle_shown(ctx.db, ctx.appointment_id, payload)
+            payload["instance_id"] = instance_id
         except Exception as e:  # noqa: BLE001
-            logger.warning("save_puzzle_state failed: %s", e)
+            logger.warning("set_puzzle_shown failed: %s", e)
+        payload["rendered"] = True
         logger.info(
-            "show_puzzle: rendering id=%s render=%s (asked=%r) prompt=%r",
-            payload.get("puzzle_id"), payload.get("render"), puzzle_id, payload.get("prompt"),
+            "show_puzzle: rendering id=%s render=%s instance=%s (asked=%r) prompt=%r",
+            payload.get("puzzle_id"), payload.get("render"), payload.get("instance_id"),
+            puzzle_id, payload.get("prompt"),
         )
         return payload
 
@@ -523,7 +530,7 @@ def make_session_tools(ctx: ToolContext) -> list:
         """
         from app.services import puzzle_service
         try:
-            await puzzle_service.save_puzzle_state(ctx.db, ctx.appointment_id, None)
+            await puzzle_service.clear_puzzle_state(ctx.db, ctx.appointment_id)
         except Exception as e:  # noqa: BLE001
             logger.warning("clear puzzle_state failed: %s", e)
         return {"action": "clear_puzzle"}
