@@ -279,6 +279,7 @@ export default function LessonSetupPage() {
 
   // ── Curriculum data state (Resource Hub mirror) ──────────────────────────
   const [hubSubjects, setHubSubjects] = useState<HubSubject[]>([]);
+  const [subjectsLoading, setSubjectsLoading] = useState(false);
   const [hubYears, setHubYears] = useState<string[]>([]);
   const [kbStages, setKbStages] = useState<string[]>([]);   // key stages
   const [kbUnits, setKbUnits] = useState<Array<{ id: number; title: string; unit_name: string; has_resources: boolean }>>([]);
@@ -319,10 +320,14 @@ export default function LessonSetupPage() {
 
   // 3. Subjects only once BOTH key stage AND year group are chosen (strict cascade).
   useEffect(() => {
-    if (!keyStage || !yearGroup) { setHubSubjects([]); return; }
+    if (!keyStage || !yearGroup) { setHubSubjects([]); setSubjectsLoading(false); return; }
+    let active = true;
+    setSubjectsLoading(true);
     curriculumApi.getSubjects(keyStage, yearGroup)
-      .then((data) => setHubSubjects(data.subjects ?? []))
-      .catch(() => setHubSubjects([]));
+      .then((data) => { if (active) setHubSubjects(data.subjects ?? []); })
+      .catch(() => { if (active) setHubSubjects([]); })
+      .finally(() => { if (active) setSubjectsLoading(false); });
+    return () => { active = false; };
   }, [keyStage, yearGroup]);
 
   // 4. Derive subjectId from the chosen subject name (covers prefilled modes too).
@@ -829,12 +834,20 @@ export default function LessonSetupPage() {
                     <label style={s.label}>Subject</label>
                     <div style={s.selectWrap}>
                       <select
-                        style={{ ...s.select as React.CSSProperties, opacity: yearGroup ? 1 : 0.5 }}
+                        style={{ ...s.select as React.CSSProperties, opacity: (yearGroup && hubSubjects.length > 0) ? 1 : 0.5 }}
                         value={subject}
                         onChange={(e) => handleSubjectChange(e.target.value)}
-                        disabled={!yearGroup}
+                        disabled={!yearGroup || subjectsLoading || hubSubjects.length === 0}
                       >
-                        <option value="">{yearGroup ? "Select subject..." : "Choose year group first"}</option>
+                        <option value="">
+                          {!yearGroup
+                            ? "Choose year group first"
+                            : subjectsLoading
+                              ? "Loading subjects…"
+                              : hubSubjects.length === 0
+                                ? "No subjects for this year group"
+                                : "Select subject..."}
+                        </option>
                         {hubSubjects.map((sub) => (
                           <option key={sub.id} value={sub.name}>{getSubjectEmoji(sub.name)} {sub.name}</option>
                         ))}

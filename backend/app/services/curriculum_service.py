@@ -79,32 +79,22 @@ async def get_years(db: AsyncSession, key_stage: Optional[str] = None) -> List[s
 async def get_subjects(
     db: AsyncSession, key_stage: Optional[str] = None, year_group: Optional[str] = None
 ) -> List[Dict[str, Any]]:
-    """Subjects for a (key_stage, year_group), falling back to the full catalogue."""
-    if key_stage and year_group:
-        q = (
-            select(RHSubject)
-            .join(RHAvailability, RHAvailability.subject_hub_id == RHSubject.hub_id)
-            .where(
-                RHAvailability.key_stage == key_stage,
-                RHAvailability.year_group == year_group,
-            )
-            .distinct()
-            .order_by(RHSubject.name)
-        )
-        rows = (await db.execute(q)).scalars().all()
-        if rows:
-            return [{"id": s.hub_id, "name": s.name} for s in rows]
-    elif key_stage:
+    """Subjects available for a (key_stage[, year_group]) per the hub's availability
+    edges. When a key stage is given there is NO fallback to the full catalogue — an
+    empty result means the hub genuinely has no subjects there (e.g. KS4/KS5 year
+    groups with no content), and we must not invent options the hub doesn't have.
+    Only the unfiltered call returns the whole catalogue."""
+    if key_stage:
         q = (
             select(RHSubject)
             .join(RHAvailability, RHAvailability.subject_hub_id == RHSubject.hub_id)
             .where(RHAvailability.key_stage == key_stage)
-            .distinct()
-            .order_by(RHSubject.name)
         )
+        if year_group:
+            q = q.where(RHAvailability.year_group == year_group)
+        q = q.distinct().order_by(RHSubject.name)
         rows = (await db.execute(q)).scalars().all()
-        if rows:
-            return [{"id": s.hub_id, "name": s.name} for s in rows]
+        return [{"id": s.hub_id, "name": s.name} for s in rows]
 
     rows = (await db.execute(select(RHSubject).order_by(RHSubject.name))).scalars().all()
     return [{"id": s.hub_id, "name": s.name} for s in rows]
@@ -119,8 +109,10 @@ async def get_units(
     A subject (e.g. "Science") spans every year group, so the unfiltered list
     mixes units from KS1–KS5. The (key_stage[, year_group]) → unit availability
     edges built by the curriculum sync let us return only the units that belong
-    to the chosen key stage / year. Falls back to the full subject list when no
-    edges exist for that scope (e.g. a year the hub hasn't unit-tagged yet).
+    to the chosen key stage / year. When a key stage is given there is NO fallback
+    to the subject's full unit list — returning every year's units is exactly what
+    made the picker look "tripled" (each year group has its own UNIT 1/2/3…). An
+    empty result means the hub has no units for that (key stage[, year]).
     Always returned in ascending unit order.
     """
     rows: List[RHUnit] = []
@@ -136,8 +128,8 @@ async def get_units(
         if year_group:
             q = q.where(RHAvailability.year_group == year_group)
         rows = (await db.execute(q.distinct())).scalars().all()
-
-    if not rows:
+    else:
+        # Unfiltered call only (no key stage) → the subject's whole unit catalogue.
         rows = (await db.execute(
             select(RHUnit).where(RHUnit.subject_hub_id == subject_id)
         )).scalars().all()

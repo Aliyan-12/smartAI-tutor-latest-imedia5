@@ -80,9 +80,13 @@ async def sync_curriculum() -> Dict[str, Any]:
             for ks in keystages:
                 for y in years_by_ks[ks]:
                     subs = await hub.get_subjects(ks, y)
-                    if not subs:  # hub not year-tagged yet → fall back to ks-level / global
-                        subs = await hub.get_subjects(ks) or global_subs
-                    for s in subs:
+                    # NO fallback here. If the hub lists no subjects for this exact
+                    # (key stage, year), there is genuinely nothing available there —
+                    # falling back to the ks-level / global catalogue fabricated
+                    # phantom edges (e.g. KS4/KS5 year groups that the hub has no
+                    # subjects for) which then showed subjects with no units/resources.
+                    # Trust the hub's (ks, year) answer verbatim.
+                    for s in (subs or []):
                         sid = s.get("id")
                         if sid is None:
                             continue
