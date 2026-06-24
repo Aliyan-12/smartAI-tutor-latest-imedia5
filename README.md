@@ -1,6 +1,6 @@
 # SmartAI Tutor
 
-AI-powered tutoring platform for UK GCSE curriculum (KS1-KS5) with text chat, real-time voice conversation, and RAG-based knowledge retrieval.
+AI-powered tutoring platform for UK GCSE curriculum (KS1–KS5) with structured AI lessons, text chat, real-time voice conversation, **interactive visual puzzles**, and RAG-based knowledge retrieval. Multi-tenant for schools, with Google OAuth + email-verified accounts and Casbin RBAC.
 
 ## Prerequisites
 
@@ -102,9 +102,13 @@ npm run dev
 
 | Role | Email | Password |
 |---------|--------------------------|-------------|
+| Administrator | administrator@smartai.com | administrator123 |
 | Admin | admin@smartai.com | admin123 |
 | Teacher | teacher@smartai.com | teacher123 |
 | Student | student@smartai.com | student123 |
+| Parent | parent@smartai.com | parent123 |
+
+> Seed users are created verified/onboarded/approved. New School-mode signups must verify their email **and** be approved by the administrator before they can log in.
 
 ## Project Structure
 
@@ -159,10 +163,12 @@ The Docker setup uses `pgvector/pgvector:pg16` image which includes pgvector pre
 
 ## Key Features
 
-- **RAG Knowledge Base**: Upload curriculum documents, auto-chunk and embed with Gemini, retrieve via pgvector HNSW index
-- **UK GCSE Curriculum**: Documents tagged by Key Stage, Subject, Exam Board, Tier, and Unit
+- **Structured AI Lessons + Lesson State Engine**: goal/duration-specific lesson plans; every session turn carries an authoritative, live **LESSON STATE** anchor (real-time server-computed clock, current phase/step + what's-next, student learning status, and the on-screen puzzle) injected at maximum recency so the AI never loses track or hallucinates tool state in long sessions. The AI teaches **slide-by-slide** from Resource Hub content (slide tools are gated on whether the lesson actually has resources)
+- **Interactive Visual Puzzles** (Synthesis-style): the AI selects a pre-authored template (Maths + Science, KS1–KS5) and shows it via `show_puzzle`; rendered as SVG + react-konva manipulatives. Authoritative puzzle state (per-show `instance_id`, solved/attempted tracking) makes "show → solve → next puzzle → reset" reliable
+- **Auth & Multi-tenant Schools**: dual-mode signup (School / Individual), **Google OAuth** (Authlib) + email verification, multi-step onboarding, **Casbin** RBAC; a platform **administrator** approves school-admin signups, each **admin** is scoped to their own school
+- **RAG Knowledge Base**: curriculum + teaching files come from the external **Resource Hub** (mirrored into `rh_*` tables), vectorized per-slide and retrieved via pgvector HNSW index
 - **Real-time Voice**: custom STT (Gemini) → turn → Kokoro TTS over the chat/session WebSocket, with client-side mic VAD
-- **Multi-role**: Admin (full control), Teacher (manage content + monitor students), Student (chat + voice)
+- **Multi-role**: Administrator (all schools), Admin (own school), Teacher (manage content + monitor students), Student (lessons + chat + voice + puzzles), Parent (book + track children)
 - **Credit System**: Per-message billing with subscription plans
 - **Streaming**: one WebSocket per chat/session — turns stream as sentence segments with bundled TTS audio
 

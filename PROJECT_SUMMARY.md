@@ -1,7 +1,7 @@
 # SmartAI Tutor — Project Summary
 
-> **Last updated:** 2026-06-08
-> **Recent changes:** **Resource Hub integration** — curriculum (KS → Year → Subject → Unit → Topic) + all teaching files now come from the external Resource Hub, mirrored into local `rh_*` tables by two scheduled jobs (APScheduler); file resources (slides/worksheets/mark schemes) are vectorized **per-slide** and the session AI teaches **slide-by-slide** with an on-screen viewer (`advance_lesson_slide`/`retreat_lesson_slide`/`show_resource` tools). Legacy admin KB unwired · Both chat and session run over **one WebSocket each** (`/api/chat/ws`, `/api/sessions/ws`) with segment-bundled Kokoro TTS · **Gemini Live removed** — voice is a custom STT → turn → TTS loop on the same socket · Services consolidated · **Two-LLM split** (`get_llm` session vs `get_chat_llm` chat)
+> **Last updated:** 2026-06-24
+> **Recent changes:** **Lesson State Engine + reliable Visual Puzzles** — every AI session turn now carries an authoritative, maximum-recency **LESSON STATE** anchor (real-time server-computed clock, current phase/step + what's-next, student learning status, and the on-screen interactive puzzle) so the model never loses track or hallucinates tool state across long sessions; the slide tools are gated on whether the lesson actually has resources. The **visual puzzle engine** is now reliable end-to-end (authoritative puzzle state with a per-show `instance_id`, never-dropped solve events, full remount + Reset). Earlier in this cycle: the **Major Upgrade** — Authlib **Google OAuth** + email verification + **Casbin** RBAC, multi-tenant **schools** with a platform **administrator** role, and the Synthesis-style **visual puzzles** engine (full plan in `CLAUDE.md`). Prior: **Resource Hub integration** (curriculum + slide-by-slide teaching) · one WebSocket each (`/api/chat/ws`, `/api/sessions/ws`) with segment-bundled Kokoro TTS · custom STT→turn→TTS voice · **Two-LLM split** (`get_llm` session vs `get_chat_llm` chat)
 
 SmartAI Tutor is an AI-powered tutoring platform built for UK GCSE curriculum (Key Stages 1-5). It provides personalized learning through text chat and real-time voice conversation, grounded in actual course materials via a Retrieval-Augmented Generation (RAG) system. Curriculum and teaching content come from the external **Resource Hub** (`hub.resourcefullearning.co.uk`) — the single source of truth for the whole curriculum tree (Key Stage → Year Group → Subject → Unit → Topic) and every teaching file (slides, worksheets, mark schemes, homework, videos, links). Two scheduled jobs mirror the hub into local `rh_*` tables; file-based resources are downloaded and vectorized **per slide/page**. When students ask questions (or the AI teaches a slide), the system retrieves the relevant hub chunks via pgvector similarity search and injects them into the Gemini prompt, producing accurate, curriculum-aligned answers. (The legacy admin-uploaded knowledge base is unwired/dormant.)
 
@@ -74,9 +74,10 @@ Curriculum comes from the **Resource Hub** and is mirrored into `rh_*` tables fo
 
 | Role | Access |
 |---------|--------|
-| Admin | Full control: manage all users, view all chats, adjust credits, manage knowledge base, dashboard stats |
+| Administrator | **Platform-wide** control across ALL schools: sees/manages every admin/teacher/student/parent, approves or rejects school-admin signups (email on each), all admin views **unscoped**. Seeded user `administrator@smartai.com` |
+| Admin (school tenant) | Same dashboard as administrator but **scoped to their own school**'s users/sessions; never sees the administrator or other schools' users. Created via School-mode signup (requires email verification + administrator approval) |
 | Teacher | Upload documents, create/manage students, view student chat histories, book sessions, session reports, activity feed, generate invite codes |
-| Student | Chat with AI tutor (text + voice), join sessions, take quizzes, view progress/gamification, assignments |
+| Student | Chat with AI tutor (text + voice), join sessions, take quizzes, **solve interactive visual puzzles**, view progress/gamification, assignments |
 | Parent | Link to children via invite code, book sessions, view child progress/reports/chat history, session notifications |
 
 ---
@@ -91,7 +92,8 @@ Curriculum comes from the **Resource Hub** and is mirrored into `rh_*` tables fo
 | Schemas | `user.py`, `chat.py`, `documents.py`, `subscription.py`, `appointment.py`, `lesson.py`, `assessment.py`, `gamification.py`, `settings.py`, `assignment.py` | Pydantic request/response validation |
 | Services | `gemini_service.py` (LangChain streaming, tool loop, MCQ), `llm_service.py` (`get_llm` session + `get_chat_llm` chat singletons), `rag_service.py` (embedding + pgvector retrieval incl. `retrieve_hub_chunks`), `resource_hub_client.py` (**async hub API client**), `resource_sync_service.py` (**Job 1 curriculum + Job 2 resource vectorize**), `curriculum_service.py` (**read API over the `rh_*` mirror**), `session_resource_service.py` (**slide playlist + advance/retreat navigation**), `document_service.py` (extract incl. per-slide `extract_pages`), `chat_service.py` (incl. simple-chat WS pipeline), `voice_agent_service.py` (Kokoro TTS + Gemini STT), `session_agent_service.py` (session prompts + segment/filler + WS turn loop), `lesson_service.py`, `platform_service.py` (credits/email/gamification/settings/scraper — merged), `appointment_service.py`, `assessment_service.py`, `assignment_service.py`, `user_service.py` | Business logic |
 | Jobs | `jobs/scheduler.py` (**APScheduler `AsyncIOScheduler` — runs the two sync jobs on startup + intervals**) | Background scheduling |
-| Tools | `session_tools.py` (full session tool suite: quiz, homework, mastery, lesson-phase, evaluate, report, **show_resource / advance_lesson_slide / retreat_lesson_slide**, web/deep search), `chat_tools.py` (simple-chat subset: web/deep search) | LangChain `@tool` closures + `ToolContext` |
+| Tools | `session_tools.py` (full session tool suite: quiz, homework, mastery, lesson-phase, evaluate, report, **show_resource / advance_lesson_slide / retreat_lesson_slide**, **list_available_puzzles / show_puzzle / clear_puzzle**, web/deep search), `chat_tools.py` (simple-chat subset: web/deep search) | LangChain `@tool` closures + `ToolContext` |
+| Puzzles | `puzzle_templates.py` (template registry by subject + key stage), `puzzle_service.py` (build/solve + authoritative `puzzle_state`: `set_puzzle_shown`/`record_puzzle_attempt`/`get_puzzle_state`/`clear_puzzle_state`), `casbin_service.py` (RBAC), `school_service.py` (tenant CRUD), `oauth_service.py` (Authlib Google) | Visual-puzzle engine + auth/multi-tenant |
 | Routers | `auth.py`, `chat.py`, `voice.py`, `documents.py`, `curriculum.py` (**Resource Hub read API + admin sync**), `admin.py`, `teacher.py`, `parent.py`, `appointments.py`, `sessions.py`, `lessons.py`, `assessments.py`, `assignments.py`, `gamification.py`, `settings.py`, `subscription.py`, `health.py` | REST + WebSocket endpoints |
 | Middleware | `auth.py`, `rate_limit.py` | JWT guard, role-based access, rate limiting |
 | Scripts | `setup.py` (DB setup + **explicit `rh_*` table DDL/migrations**), `seed.py`, `seed_voice_fillers.py` | DB setup/seed; pre-generate the Kokoro **neutral-bridge** filler clips (`python -m app.seed_voice_fillers`) |
@@ -128,7 +130,7 @@ Curriculum comes from the **Resource Hub** and is mirrored into `rh_*` tables fo
 | Hooks | `useSessionChannel.ts` (chat/session WS client + ordered segment player), `useVoiceCapture.ts` (mic RMS-VAD → `user_audio`), `useVoice.ts` (single-shot "Read aloud" TTS), `useChat.ts` (dashboard list/credits) | Real-time pipeline + helpers |
 | Services | `api.ts` | API client for all backend router groups (`sessionWsUrl`/`chatWsUrl` helpers) |
 | Pages | See full list below | Role-based pages |
-| Components | `Sidebar`, `ChatWindow`, `ChatInput`, `WelcomeScreen`, `StudentDashboard`, `StudentProgress`, `LessonSetupWizard`, `LessonSlide`, `PostSessionScreen`, `AssessmentMode` | Reusable UI |
+| Components | `Sidebar`, `ChatWindow`, `ChatInput`, `WelcomeScreen`, `ResourceViewer` (slide viewer), `PuzzlePlayer` + `puzzles/*` (SVG + react-konva puzzles), `StudentDashboard`, `StudentProgress`, `LessonSetupWizard`, `PostSessionScreen`, `AssessmentMode` | Reusable UI |
 
 ### Pages
 
@@ -343,7 +345,8 @@ Curriculum comes from the **Resource Hub** and is mirrored into `rh_*` tables fo
 | TTS | Kokoro-82M (`af_sky`, local CPU, `kokoro` + `soundfile`); per-sentence segments; pre-warmed in lifespan |
 | Vector Index | pgvector HNSW (M=16, ef=64, cosine similarity) — over `document_chunks` (legacy) + `rh_document_chunks` (Resource Hub) |
 | Curriculum source | External **Resource Hub** API mirrored into `rh_*` tables by APScheduler jobs (`httpx` client; curriculum every 12 h, resources every 6 h) |
-| Auth | JWT (python-jose) + bcrypt (passlib) |
+| Auth | JWT (python-jose) + bcrypt (passlib), **Authlib** Google OAuth (+ Starlette `SessionMiddleware`), email verification via DB tokens, **Casbin** RBAC (RBAC-with-domains, `casbin-async-sqlalchemy-adapter` → `casbin_rule`) |
+| Visual puzzles | Pre-authored templates → **SVG** (display) + **react-konva** (drag/interactive) manipulatives; AI selects a template via `show_puzzle`/`list_available_puzzles` (never free-draws); per-show `instance_id` drives a clean frontend remount |
 | Document parsing | pypdf, python-docx, python-pptx |
 | Web scraping | BeautifulSoup4 (in `platform_service`) |
 | Email | Dummy SMTP (dev), HTML templates (in `platform_service`) |
@@ -460,7 +463,8 @@ Both run as backend-orchestrated WebSocket turns (`chat_service.run_chat_ws` / `
 | Student | /dashboard | /dashboard |
 | Teacher | /teacher/dashboard | /teacher/dashboard |
 | Parent | /parent/dashboard | /parent/dashboard |
-| Admin | /admin/dashboard | /admin/dashboard |
+| Admin (school) | /admin/dashboard | /admin/dashboard (scoped to own school) |
+| Administrator | /admin/dashboard | /admin/dashboard (unscoped + /admin/approvals) |
 
 ---
 
@@ -468,6 +472,7 @@ Both run as backend-orchestrated WebSocket turns (`chat_service.run_chat_ws` / `
 
 | Role | Email | Password |
 |---------|--------------------------|-------------|
+| Administrator | administrator@smartai.com | administrator123 |
 | Admin | admin@smartai.com | admin123 |
 | Teacher | teacher@smartai.com | teacher123 |
 | Student | student@smartai.com | student123 |
@@ -484,6 +489,37 @@ Both run as backend-orchestrated WebSocket turns (`chat_service.run_chat_ws` / `
 | Backend (FastAPI/uvicorn) | 8001 | http://localhost:8001 |
 | PostgreSQL | 5432 | localhost:5432 |
 | API Docs (Swagger) | 8001 | http://localhost:8001/docs |
+
+---
+
+## Recent Changes (2026-06-24) — Lesson State Engine + Reliable Visual Puzzles
+
+The headline of this cycle: the session AI now teaches against a single **authoritative, live lesson state** injected every turn, and the **visual puzzle** flow was made reliable end-to-end. (This builds on the **Major Upgrade** — auth/OAuth/Casbin, multi-tenant schools, the administrator role, and the first puzzle templates — whose full plan lives in `CLAUDE.md`.)
+
+### Lesson State Engine — per-turn authoritative anchor (`session_agent_service.py`)
+The root problem: across a long session the model drifts from the system-prompt rules ("lost in the middle"), so it forgot to call tools, hallucinated a puzzle that wasn't there, or lost the clock/phase. Fix (backed by research on *system reminders at maximum recency* + server-side state injection):
+- **`build_lesson_state_anchor(db, appt_id, student_id, pstate)`** appends a compact `LESSON STATE — LIVE & AUTHORITATIVE` block to **every** turn's model input (including puzzle/quiz turns, regardless of `anchor_slides`), placed at maximum recency and explicitly marked "trust THIS over the chat history". It carries:
+  - ⏱ **Real-time lesson clock** — `_compute_lesson_clock(appointment)` computes elapsed/remaining server-side from `session_started_at` minus paused time (now the **single source** the system prompt uses too, not just the frontend timer).
+  - 📍 **Current phase/step + what's next** — `_phase_and_next(...)` prefers the booked `LessonPlan.plan_blocks` (Step N/M + `ai_instruction` + next step), falling back to the generic time-based 5-phase structure.
+  - 📊 **Student learning status** — strong / needs-work topics from `TopicMastery`.
+  - 🧩 **On-screen puzzle** — `_puzzle_state_lines(pstate)` (none / showing / solved / attempted-wrong) with the exact rule for each case.
+- **Slide tools gated on resource availability** — `build_session_system_prompt` computes `has_slides` (`build_playlist`) and swaps the `TEACHING SLIDES` block: when the lesson has **no** resources the model is told *do NOT call advance_lesson_slide / retreat_lesson_slide / show_resource* and to teach from knowledge + puzzles instead. (The per-turn slide anchor was already gated; this closes the static-prompt gap, so the model only drives slides when slides exist.)
+
+### Visual Puzzle Engine — made reliable (`puzzle_service.py`, `session_tools.py`, frontend)
+- **Authoritative puzzle state** in `LessonPlan.session_state["puzzle_state"]`: `set_puzzle_shown` (stamps a per-show `instance_id` nonce, `status="showing"`), `record_puzzle_attempt` (`showing → solved | attempted_wrong`), `get_puzzle_state`, `clear_puzzle_state`. `show_puzzle` now returns `instance_id` + `rendered: true`; the model is told (system prompt **and** the anchor) to **only** refer to a puzzle once `show_puzzle` returned without error.
+- **Solve events are never dropped** — `run_session_ws` queues a `puzzle_result`/`quiz_result` that arrives while a turn is still streaming and drains it via the task's done-callback (was silently `continue`-dropped); the client `useSessionChannel` buffers a solve sent while busy and flushes it when the turn ends. `_handle_puzzle_result` records the attempt to durable state before replying.
+- **New puzzle renders cleanly + Reset works** — `<PuzzlePlayer>` is keyed by `instance_id`, so a fresh `show_puzzle` fully **remounts** instead of inheriting the previous puzzle's solved/locked state; an always-enabled **↺ Reset** clears the answer (and remounts the react-konva child via a key). `components/PuzzlePlayer.tsx` + `components/puzzles/*` (SVG display + react-konva interactive).
+
+Net effect: "generate a puzzle" reliably calls the tool; the AI only says "look at the puzzle" once it's actually on screen; a new puzzle replaces the old one in the same panel; solves aren't missed; and Reset works even after a correct answer.
+
+### Major Upgrade context (auth + multi-tenant + administrator) — see `CLAUDE.md` for the full plan
+- **Auth**: dual-mode signup (School / Individual), Authlib **Google OAuth**, **email verification** (DB tokens; `platform_service` sends all email), multi-step onboarding, **Casbin** RBAC (`casbin_rule`, RBAC-with-domains; cross-school isolation enforced at the service layer).
+- **Multi-tenant schools**: `School` entity, default school *"Smart Tuition (United Kingdom & United Arab Emirates)"*; school-admin signups require email verification **then administrator approval** (approve → email; reject → email + the account is deleted so the email frees up).
+- **Administrator role** (platform-wide, unscoped): same admin dashboard but sees every school's users + a **Users ▸ Pending Approvals** dropdown (with live count badges); a regular school **admin** sees only their own school's users and never the administrator. `delete_user_cascade` fixes FK-violation user deletes (appointments/chats/etc.).
+- **Puzzle templates v1**: Maths + Science across KS1–KS5 (fraction bars, number lines, place value, area/array grids, clocks, angles, coordinates, bar charts, balance scales; label-the-diagram, sort/states-of-matter, food-chain ordering, particle state, formula triangle), tagged by subject + key stage and scaled by the student's year group.
+
+### Config / deps
+Backend: `Authlib`, `itsdangerous`, `casbin`, `casbin-async-sqlalchemy-adapter`; env `GOOGLE_CLIENT_ID/SECRET`, `OAUTH_REDIRECT_BASE_URL`, `SESSION_SECRET`, `FRONTEND_BASE_URL`, `EMAIL_ENABLED` (+SMTP). Frontend: `konva`, `react-konva`. After pulling: rebuild backend → `python -m app.setup` (adds `users` columns + `schools`/token/`casbin_rule` tables + `approval_status`) → `python -m app.seed` (default school + Casbin policies + the `administrator@smartai.com` seed user).
 
 ---
 
