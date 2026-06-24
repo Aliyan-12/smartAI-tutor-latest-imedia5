@@ -267,6 +267,35 @@ def _get_current_step(elapsed_minutes: int, steps: list[dict]) -> int:
     return len(steps)
 
 
+def _compute_lesson_clock(appointment) -> tuple[int, int, int]:
+    """Authoritative real-time lesson clock → (elapsed, remaining, duration) minutes.
+
+    Computed server-side from session_started_at minus paused time, so it stays
+    correct regardless of what the client reports. Single source of truth used by
+    both the system prompt and the per-turn LESSON STATE anchor.
+    """
+    import datetime as _dt
+    duration_minutes = appointment.duration_minutes or 60
+    elapsed_minutes = 0
+    remaining_minutes = duration_minutes
+    if appointment.session_started_at:
+        now_utc = _dt.datetime.now(_dt.timezone.utc)
+        started = appointment.session_started_at
+        if started.tzinfo is None:
+            started = started.replace(tzinfo=_dt.timezone.utc)
+        # Subtract all paused time (incl. an open pause) to get active learning time.
+        total_paused = appointment.total_paused_seconds or 0
+        if appointment.paused_at:
+            paused_at_ts = appointment.paused_at
+            if paused_at_ts.tzinfo is None:
+                paused_at_ts = paused_at_ts.replace(tzinfo=_dt.timezone.utc)
+            total_paused += int((now_utc - paused_at_ts).total_seconds())
+        raw_elapsed = (now_utc - started).total_seconds()
+        elapsed_minutes = max(0, int((raw_elapsed - total_paused) / 60))
+        remaining_minutes = max(0, duration_minutes - elapsed_minutes)
+    return elapsed_minutes, remaining_minutes, duration_minutes
+
+
 LEARN_MODE_INSTRUCTIONS: dict[str, str] = {
     "slides": (
         "SLIDES TEACHING MODE: Present information like a structured presentation. "
@@ -499,28 +528,9 @@ async def build_session_system_prompt(
     else:
         scheduled_str = "Not specified"
 
-    duration_minutes: int = appointment.duration_minutes or 60
-
-    # Calculate elapsed / remaining time so we can gate quiz offers accurately
-    elapsed_minutes = 0
-    remaining_minutes = duration_minutes
-    if appointment.session_started_at:
-        now_utc = _dt.datetime.now(_dt.timezone.utc)
-        started = appointment.session_started_at
-        if started.tzinfo is None:
-            started = started.replace(tzinfo=_dt.timezone.utc)
-
-        # Subtract all paused time from elapsed to get active learning time
-        total_paused = appointment.total_paused_seconds or 0
-        if appointment.paused_at:
-            paused_at_ts = appointment.paused_at
-            if paused_at_ts.tzinfo is None:
-                paused_at_ts = paused_at_ts.replace(tzinfo=_dt.timezone.utc)
-            total_paused += int((now_utc - paused_at_ts).total_seconds())
-
-        raw_elapsed = (now_utc - started).total_seconds()
-        elapsed_minutes = max(0, int((raw_elapsed - total_paused) / 60))
-        remaining_minutes = max(0, duration_minutes - elapsed_minutes)
+    # Authoritative real-time lesson clock (server-side: session_started_at minus
+    # paused time). Same source the per-turn LESSON STATE anchor uses.
+    elapsed_minutes, remaining_minutes, duration_minutes = _compute_lesson_clock(appointment)
 
     # Load student profile
     profile = await _load_student_profile(db, student_id)
@@ -868,6 +878,34 @@ ALWAYS use this content as your PRIMARY teaching source when it is present.
 - If KB content covers the topic partially, supplement with your knowledge but say so
 - If no KB content is present for a message, use your general curriculum knowledge"""
 
+    # Gate the slide-teaching instructions on whether this lesson actually has
+    # resources, so the model is never told slides exist (or to call the slide tools)
+    # when there are none. Mirrors the puzzle anchor's state-driven approach.
+    has_slides = False
+    try:
+        from app.services.session_resource_service import build_playlist
+        has_slides = bool(await build_playlist(db, appointment))
+    except Exception:
+        logger.warning("has_slides check failed for appt %s", appointment_id, exc_info=True)
+        has_slides = False
+
+    if has_slides:
+        slides_block = """TEACHING SLIDES — TEACH FROM THE ON-SCREEN RESOURCES (IMPORTANT):
+- This lesson has real teaching slides shown on the student's screen. You MUST teach STRICTLY in slide order (slide 1, then 2, then 3…), one slide per concept, never out of order.
+- The CURRENT slide is ALWAYS shown to you each turn in an "ON-SCREEN SLIDE N of M" block, and the student is already looking at it. Teach THAT slide's content this turn — never teach ahead of the slide on screen.
+- FIRST TEACHING TURN: slide 1 is already on screen. Introduce the lesson using that slide's content. Do NOT call advance_lesson_slide on the first turn (that would skip slide 1). Do not narrate two slides in one turn.
+- ONE SLIDE PER TURN (teaching is sequential). Cover the current slide, ask at most one short check question tied to THAT slide, and wait. Never race forward several slides in a single reply.
+- MOVING ON: only when the student has engaged with the current slide (answered its question, or clearly signalled "got it / next / ok"), call advance_lesson_slide() ONCE *first*, then teach the new slide_content it returns. Each forward step = exactly one slide.
+- GOING BACK: if the student is confused or answers wrong, call retreat_lesson_slide() ONCE *first*, then re-teach that earlier slide_content more simply before advancing again.
+- JUMPING: use show_resource ONLY when the student explicitly asks to see a specific slide ("show me the touch slide") — it may skip directly to that slide. Never use it to race forward during normal teaching.
+- Each slide tool returns "slide_content" — the exact text on the slide now showing. ALWAYS base that turn's explanation on that exact slide_content and nothing further ahead.
+- TEACH LIKE A WARM HUMAN TUTOR, not a narrator. Use the slide as your backbone — cover its points — but bring it to life with your own casual real-world examples and simple analogies a child relates to ("It's a bit like…"), add a sentence or two of your own so it truly lands (don't read it word-for-word), and weave the student's answers back in. Stay on THIS slide's concept.
+- Call these tools SILENTLY (never write the call as text, never say "loading the next slide"). The viewer updates automatically."""
+    else:
+        slides_block = """TEACHING SLIDES — NONE FOR THIS LESSON:
+- This lesson has NO teaching slides/resources on the student's screen. Do NOT call advance_lesson_slide, retreat_lesson_slide, or show_resource — there is nothing to display and those calls will just return an error.
+- Teach directly from your own expert knowledge plus any [KNOWLEDGE BASE CONTEXT] provided, and use VISUAL PUZZLES (below) for hands-on practice."""
+
     prompt = f"""You are a live AI tutor conducting a real-time tutoring session on SmartAI Tutor.
 
 SESSION CONTEXT:
@@ -1014,19 +1052,10 @@ QUIZ RULES — FOLLOW EXACTLY:
 - After the quiz tool is called, the student will see the quiz in their interface. Continue naturally.
 - NEVER apologise. If you made an error earlier, just correct course and continue.
 
-TEACHING SLIDES — TEACH FROM THE ON-SCREEN RESOURCES (IMPORTANT):
-- This lesson has real teaching slides shown on the student's screen. You MUST teach STRICTLY in slide order (slide 1, then 2, then 3…), one slide per concept, never out of order.
-- The CURRENT slide is ALWAYS shown to you each turn in an "ON-SCREEN SLIDE N of M" block, and the student is already looking at it. Teach THAT slide's content this turn — never teach ahead of the slide on screen.
-- FIRST TEACHING TURN: slide 1 is already on screen. Introduce the lesson using that slide's content. Do NOT call advance_lesson_slide on the first turn (that would skip slide 1). Do not narrate two slides in one turn.
-- ONE SLIDE PER TURN (teaching is sequential). Cover the current slide, ask at most one short check question tied to THAT slide, and wait. Never race forward several slides in a single reply.
-- MOVING ON: only when the student has engaged with the current slide (answered its question, or clearly signalled "got it / next / ok"), call advance_lesson_slide() ONCE *first*, then teach the new slide_content it returns. Each forward step = exactly one slide.
-- GOING BACK: if the student is confused or answers wrong, call retreat_lesson_slide() ONCE *first*, then re-teach that earlier slide_content more simply before advancing again.
-- JUMPING: use show_resource ONLY when the student explicitly asks to see a specific slide ("show me the touch slide") — it may skip directly to that slide. Never use it to race forward during normal teaching.
-- Each slide tool returns "slide_content" — the exact text on the slide now showing. ALWAYS base that turn's explanation on that exact slide_content and nothing further ahead.
-- TEACH LIKE A WARM HUMAN TUTOR, not a narrator. Use the slide as your backbone — cover its points — but bring it to life with your own casual real-world examples and simple analogies a child relates to ("It's a bit like…"), add a sentence or two of your own so it truly lands (don't read it word-for-word), and weave the student's answers back in. Stay on THIS slide's concept.
-- Call these tools SILENTLY (never write the call as text, never say "loading the next slide"). The viewer updates automatically.
+{slides_block}
 
 VISUAL PUZZLES — PRACTISE HANDS-ON (Maths/Science), PROACTIVELY:
+- SOURCE OF TRUTH: a "LESSON INTERACTIVE STATE" block is appended to every student message telling you EXACTLY what puzzle (if any) is on screen. Always obey it: if it says none is showing, you MUST call show_puzzle yourself before referring to any puzzle; if it says one is showing/solved, act on THAT — never contradict it from memory of the chat.
 - This is your DEFAULT way to practise. Teach the concept first (use the slides), THEN when it's time to practise, LEAD with a puzzle — you do NOT wait for the student to ask. Say e.g. "Let's try one together — look at your screen," then show it.
 - AT EACH PRACTICE MOMENT decide: (1) call list_available_puzzles, (2) IF a puzzle fits the exact concept you just taught (for this subject + key_stage), call show_puzzle(puzzle_id, params) SILENTLY, tell the student what to do, then STOP and wait — their attempt returns as a [PUZZLE RESULT]. (3) IF nothing fits that concept, FALL BACK to a normal typed practice question (as you do now). Never invent a puzzle_id.
 - RHYTHM per concept: teach (slides) → ONE puzzle to practise → on success move to the next concept. Only use a typed question when the concept has no matching puzzle.
@@ -1470,6 +1499,146 @@ def _build_quiz_ctx(topic: str, score: float, strong: list, weak: list) -> str:
     )
 
 
+def _appt_id_from_chat(chat) -> Optional[int]:
+    """Resolve the appointment id a session chat belongs to (column or [session:N] title)."""
+    appt_id = getattr(chat, "appointment_id", None)
+    if not appt_id and getattr(chat, "title", None):
+        m = _re.match(r"\[session:(\d+)\]", chat.title)
+        if m:
+            appt_id = int(m.group(1))
+    return appt_id
+
+
+async def _resolve_appt_id(db: AsyncSession, chat_id: int) -> Optional[int]:
+    chat = await chat_service.get_chat_by_id(db, chat_id)
+    return _appt_id_from_chat(chat) if chat else None
+
+
+def _puzzle_state_lines(pstate: Optional[dict]) -> str:
+    """The interactive-puzzle portion of the LESSON STATE anchor: exactly what puzzle
+    (if any) is on the student's screen right now and what to do about it."""
+    status = (pstate or {}).get("status")
+    if not pstate or status in (None, "cleared"):
+        return (
+            "🧩 Puzzle: NONE on screen right now.\n"
+            "• If it's a practice moment (or the student asks for a puzzle), YOU must call "
+            "list_available_puzzles then show_puzzle — don't expect one to already be there.\n"
+            "• NEVER tell the student to look at / label / solve / 'see' a puzzle unless YOU "
+            "just called show_puzzle successfully (no 'error'). Otherwise there's nothing to look at."
+        )
+    pid = pstate.get("puzzle_id", "puzzle")
+    prompt = pstate.get("prompt", "")
+    ans = pstate.get("last_answer")
+    if status == "showing":
+        return (
+            f"🧩 Puzzle: ON SCREEN now → id='{pid}', asking: \"{prompt}\". Awaiting the student's "
+            "attempt (arrives as a [PUZZLE RESULT]). Do NOT show another puzzle, move on, or "
+            "re-describe it — just invite them to solve it, then wait."
+        )
+    if status == "solved":
+        return (
+            f"🧩 Puzzle: id='{pid}' was just SOLVED CORRECTLY (answer: {ans}). To set ANOTHER, call "
+            "show_puzzle again (it REPLACES this one). To return to slides, call clear_puzzle. "
+            "Don't refer to a NEW puzzle until show_puzzle has actually run."
+        )
+    # attempted_wrong
+    return (
+        f"🧩 Puzzle: id='{pid}' was attempted but INCORRECT (answer: {ans}). It is STILL on screen — "
+        "give ONE short hint tied to the visual and invite them to try the SAME puzzle again. "
+        "Don't reveal the answer or show a new puzzle yet."
+    )
+
+
+async def _phase_and_next(db: AsyncSession, appt_id: int, elapsed: int, duration: int) -> tuple[str, str]:
+    """Current phase/step line + a 'what's next' line. Prefers the booked plan_blocks,
+    falls back to the generic time-based 5-phase structure."""
+    lp = None
+    try:
+        from app.models.lesson_plan import LessonPlan as _LP
+        lp = (await db.execute(select(_LP).where(_LP.appointment_id == appt_id))).scalar_one_or_none()
+    except Exception:
+        lp = None
+    if lp and lp.plan_blocks:
+        steps = lp.plan_blocks.get("steps", [])
+        if steps:
+            cur = _get_current_step(elapsed, steps)  # 1-based
+            cstep = steps[cur - 1]
+            phase_line = (
+                f"📍 Step {cur}/{len(steps)} — {cstep.get('title', '')} "
+                f"[{cstep.get('type', 'teach')}]: {cstep.get('ai_instruction', '')}".strip()
+            )
+            if cur < len(steps):
+                nxt = steps[cur]
+                next_line = (
+                    f"➡ Next: Step {cur + 1} — {nxt.get('title', '')}. "
+                    "Move on once this step's task is done."
+                )
+            else:
+                next_line = (
+                    "➡ Next: this is the final step — once done, deepen practice or revisit weak "
+                    "areas. Never end the session yourself (the student clicks End Lesson)."
+                )
+            return phase_line, next_line
+    info = _get_lesson_phase(elapsed, duration)
+    return (
+        f"📍 Phase: {info['phase']} — {info['instruction']}",
+        "➡ Next: progress to the following phase once this one's goal is met.",
+    )
+
+
+async def build_lesson_state_anchor(
+    db: AsyncSession, appt_id: int, student_id: int, pstate: Optional[dict]
+) -> str:
+    """A compact, single-purpose live snapshot of the whole lesson, injected at maximum
+    recency on EVERY turn so the model never loses track as the context grows:
+      • real-time lesson clock (elapsed/remaining, server-computed)
+      • current phase/step + what's next for the student
+      • the student's learning status (strong / needs-work topics)
+      • the interactive puzzle on screen (if any)
+    The model is told to trust THIS over anything it inferred from the chat history.
+    """
+    head = "━━━ LESSON STATE — LIVE & AUTHORITATIVE (trust THIS over the chat history) ━━━"
+    tail = "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    lines: list[str] = [head]
+
+    appointment = None
+    try:
+        appointment = await _load_appointment(db, appt_id)
+    except Exception:
+        appointment = None
+
+    if appointment is not None:
+        elapsed, remaining, duration = _compute_lesson_clock(appointment)
+        lines.append(
+            f"⏱ Time: ~{elapsed} min elapsed · ~{remaining} min remaining (of {duration} min) — "
+            "pace the plan to fit the time left."
+        )
+        try:
+            phase_line, next_line = await _phase_and_next(db, appt_id, elapsed, duration)
+            lines.append(phase_line)
+            if next_line:
+                lines.append(next_line)
+        except Exception:
+            logger.warning("phase/next anchor failed for appt %s", appt_id, exc_info=True)
+        try:
+            mastery_rows = await _load_topic_mastery(
+                db, student_id, appointment.subject or "", appointment.key_stage or ""
+            )
+            weak = [m.topic for m in mastery_rows if m.mastery_level in ("not_started", "learning")]
+            strong = [m.topic for m in mastery_rows if m.mastery_level in ("proficient", "mastered")]
+            lines.append(
+                f"📊 Student status: strong — {', '.join(strong) if strong else 'none yet'}; "
+                f"needs work — {', '.join(weak) if weak else 'none yet'}. "
+                "Bias practice toward the 'needs work' areas."
+            )
+        except Exception:
+            pass
+
+    lines.append(_puzzle_state_lines(pstate))
+    lines.append(tail)
+    return "\n".join(lines)
+
+
 async def _run_turn(send, chat_id, user_id, *, saved_user_text, ai_content,
                     image_b64=None, image_mime="image/jpeg", tts=True,
                     anchor_slides=True):
@@ -1506,11 +1675,7 @@ async def _run_turn(send, chat_id, user_id, *, saved_user_text, ai_content,
         history, rag_chunks = await chat_service.build_context(db, chat_id, user_query=saved_user_text or ai_content)
         await db.commit()
 
-        appt_id = getattr(chat, "appointment_id", None)
-        if not appt_id and chat.title:
-            m = _re.match(r"\[session:(\d+)\]", chat.title)
-            if m:
-                appt_id = int(m.group(1))
+        appt_id = _appt_id_from_chat(chat)
 
         session_system_prompt = None
         tool_context = None
@@ -1586,6 +1751,23 @@ async def _run_turn(send, chat_id, user_id, *, saved_user_text, ai_content,
                         "• Only use show_resource when the student explicitly asks to jump to a specific slide.\n"
                         "Keep what you say in sync with the slide on screen."
                     )
+
+            # ── LESSON STATE anchor (ALWAYS — incl. puzzle/quiz turns) ────────────
+            # Single live source of truth (clock + phase/next + learning status +
+            # on-screen puzzle), injected at maximum recency so the model stops
+            # inferring lesson state from a long history. Applies even when
+            # anchor_slides is False.
+            if tool_context is not None:
+                try:
+                    from app.services import puzzle_service as _pzs
+                    _pstate = await _pzs.get_puzzle_state(db, appt_id)
+                except Exception:
+                    _pstate = None
+                try:
+                    _anchor = await build_lesson_state_anchor(db, appt_id, user_id, _pstate)
+                    ai_content = f"{ai_content}\n\n{_anchor}"
+                except Exception:
+                    logger.warning("Lesson-state anchor build failed for appt %s", appt_id, exc_info=True)
 
         hist_slice = history[:-1] if saved_user_text is not None else history
 
@@ -1690,6 +1872,19 @@ def _build_puzzle_ctx(puzzle_id: str, prompt: str, answer, correct: bool) -> str
 
 
 async def _handle_puzzle_result(send, chat_id, user_id, data):
+    # Record the attempt into authoritative lesson state FIRST, so both this turn's
+    # anchor and every later turn reflect it — the model never misses a solve.
+    try:
+        from app.services import puzzle_service
+        async with async_session_factory() as _db:
+            _appt_id = await _resolve_appt_id(_db, chat_id)
+            if _appt_id:
+                await puzzle_service.record_puzzle_attempt(
+                    _db, _appt_id, data.get("answer", ""), bool(data.get("correct")),
+                )
+                await _db.commit()
+    except Exception:
+        logger.warning("record_puzzle_attempt failed", exc_info=True)
     ctx = _build_puzzle_ctx(
         data.get("puzzle_id", "puzzle"), data.get("prompt", ""),
         data.get("answer", ""), bool(data.get("correct")),
@@ -1808,6 +2003,27 @@ async def run_session_ws(websocket: WebSocket) -> None:
             "puzzle_result": _handle_puzzle_result,
             "user_audio": _handle_user_audio,
         }
+
+        # One interactive result (puzzle/quiz solve) can arrive while a turn is still
+        # streaming. Don't drop it — queue the latest and run it the instant the
+        # in-flight turn finishes, so the model never misses a student's solve.
+        pending_event: Optional[tuple] = None
+
+        def _spawn_turn(m: str, d: dict) -> asyncio.Task:
+            nonlocal current_turn
+            current_turn = asyncio.create_task(
+                _guard_turn(send, _handlers[m](send, chat_id, user_id, d))
+            )
+            current_turn.add_done_callback(_on_turn_done)
+            return current_turn
+
+        def _on_turn_done(_task: asyncio.Task) -> None:
+            nonlocal pending_event
+            if pending_event is not None and websocket.client_state == WebSocketState.CONNECTED:
+                m, d = pending_event
+                pending_event = None
+                _spawn_turn(m, d)
+
         while True:
             try:
                 data = await websocket.receive_json()
@@ -1819,14 +2035,17 @@ async def run_session_ws(websocket: WebSocket) -> None:
             if mtype == "ping":
                 await send({"type": "pong"})
             elif mtype == "stop":
+                pending_event = None
                 if current_turn and not current_turn.done():
                     current_turn.cancel()
             elif mtype in _handlers:
                 if current_turn and not current_turn.done():
+                    # A turn is streaming. Queue interactive results so they aren't
+                    # lost; ignore rapid duplicate messages (the client guards those).
+                    if mtype in ("puzzle_result", "quiz_result"):
+                        pending_event = (mtype, data)
                     continue
-                current_turn = asyncio.create_task(
-                    _guard_turn(send, _handlers[mtype](send, chat_id, user_id, data))
-                )
+                _spawn_turn(mtype, data)
     except WebSocketDisconnect:
         pass
     except Exception as e:  # noqa: BLE001

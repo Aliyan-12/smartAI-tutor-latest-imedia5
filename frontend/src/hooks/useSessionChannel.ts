@@ -75,6 +75,9 @@ export function useSessionChannel(opts: SessionChannelOpts) {
   const fillerAudioRef = useRef<HTMLAudioElement | null>(null);
   const revealTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const pendingCommitRef = useRef<{ message_id: number | null; full_text: string } | null>(null);
+  // A puzzle the student solved while a turn was still streaming — sent the moment
+  // we're free, so their solve is never silently dropped.
+  const pendingPuzzleRef = useRef<{ puzzleId: string; prompt: string; answer: unknown; correct: boolean } | null>(null);
   const watchdogRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const msgHandlerRef = useRef<(d: any) => void>(() => {});
 
@@ -417,7 +420,12 @@ export function useSessionChannel(opts: SessionChannelOpts) {
   const sendPuzzleResult = useCallback((
     puzzleId: string, prompt: string, answer: unknown, correct: boolean,
   ) => {
-    if (busyAt.current) return;
+    if (busyAt.current) {
+      // A turn is mid-flight — buffer the solve and flush it when the turn ends
+      // (see the effect below). Keep the latest only.
+      pendingPuzzleRef.current = { puzzleId, prompt, answer, correct };
+      return;
+    }
     const ok = _send({
       type: "puzzle_result",
       puzzle_id: puzzleId, prompt, answer: String(answer), correct,
@@ -434,6 +442,15 @@ export function useSessionChannel(opts: SessionChannelOpts) {
     setStatus("waiting");
     armWatchdog();
   }, []);
+
+  // Flush a buffered puzzle solve once the in-flight turn finishes.
+  useEffect(() => {
+    if (!busy && pendingPuzzleRef.current) {
+      const p = pendingPuzzleRef.current;
+      pendingPuzzleRef.current = null;
+      sendPuzzleResult(p.puzzleId, p.prompt, p.answer, p.correct);
+    }
+  }, [busy, sendPuzzleResult]);
 
   /**
    * Send a recorded utterance for the custom voice loop.

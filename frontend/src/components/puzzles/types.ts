@@ -6,6 +6,11 @@ export interface PuzzlePayload {
   answer_type: "fraction" | "integer" | "choice" | "drag" | "text";
   params: Record<string, unknown>;
   solution: unknown;
+  /** Unique per show_puzzle call — used as a React key so each fresh puzzle fully
+   *  remounts (no leftover solved/locked state from the previous one). */
+  instance_id?: string;
+  /** Backend confirms the puzzle was built + persisted to lesson state. */
+  rendered?: boolean;
 }
 
 /** Interactive (konva) puzzles evaluate themselves and report via onSolved. */

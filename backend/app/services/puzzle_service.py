@@ -8,6 +8,8 @@ same way slide_state is, so it survives across turns.
 """
 import logging
 import random
+import uuid
+from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
 from sqlalchemy import select
@@ -373,23 +375,90 @@ _BUILDERS = {
 }
 
 
-# ── Persistence (LessonPlan.session_state["puzzle_state"]) ───────────────────────
-async def save_puzzle_state(db: AsyncSession, appointment_id: int, payload: Optional[dict]) -> None:
+# ── Authoritative interactive state (LessonPlan.session_state["puzzle_state"]) ────
+# This is the single source of truth for "what puzzle is on the student's screen
+# and what has happened to it". It is injected into the model's input every turn
+# (see session_agent_service._puzzle_state_anchor) so the model never has to guess
+# from chat history whether a puzzle is showing / solved — which is what made it
+# hallucinate ("label the puzzle" when none existed) or skip calling show_puzzle.
+
+async def _load_plan(db: AsyncSession, appointment_id: int):
     from app.models.lesson_plan import LessonPlan
-    plan = (await db.execute(
+    return (await db.execute(
         select(LessonPlan).where(LessonPlan.appointment_id == appointment_id)
     )).scalar_one_or_none()
+
+
+async def set_puzzle_shown(db: AsyncSession, appointment_id: int, payload: dict) -> str:
+    """Record that a NEW puzzle is now on screen. Returns an instance_id (nonce) the
+    frontend keys on so each fresh puzzle fully remounts (no stale solved/locked state)."""
+    plan = await _load_plan(db, appointment_id)
+    if plan is None:
+        return ""
+    state = dict(plan.session_state) if plan.session_state else {}
+    instance_id = uuid.uuid4().hex[:12]
+    # Solution stays client-side only (returned in the tool payload); we keep just
+    # enough here to describe the on-screen puzzle to the model each turn.
+    state["puzzle_state"] = {
+        "puzzle_id": payload.get("puzzle_id"),
+        "render": payload.get("render"),
+        "prompt": payload.get("prompt"),
+        "instance_id": instance_id,
+        "status": "showing",
+        "attempts": 0,
+        "last_answer": None,
+        "last_correct": None,
+        "shown_at": datetime.now(timezone.utc).isoformat(),
+    }
+    plan.session_state = state
+    await db.flush()
+    return instance_id
+
+
+async def record_puzzle_attempt(
+    db: AsyncSession, appointment_id: int, answer: Any, correct: bool
+) -> None:
+    """Record the student's attempt against the on-screen puzzle so the next turn's
+    anchor reflects it (solved / still-wrong). No-op if nothing is on screen."""
+    plan = await _load_plan(db, appointment_id)
     if plan is None:
         return
     state = dict(plan.session_state) if plan.session_state else {}
-    if payload is None:
-        state.pop("puzzle_state", None)
-    else:
-        # Don't persist the solution server-side beyond what the client needs.
-        state["puzzle_state"] = {
-            "puzzle_id": payload.get("puzzle_id"),
-            "render": payload.get("render"),
-            "prompt": payload.get("prompt"),
-        }
+    ps = dict(state.get("puzzle_state") or {})
+    if not ps:
+        return
+    ps["attempts"] = int(ps.get("attempts", 0)) + 1
+    ps["status"] = "solved" if correct else "attempted_wrong"
+    ps["last_answer"] = str(answer)
+    ps["last_correct"] = bool(correct)
+    ps["answered_at"] = datetime.now(timezone.utc).isoformat()
+    state["puzzle_state"] = ps
     plan.session_state = state
     await db.flush()
+
+
+async def clear_puzzle_state(db: AsyncSession, appointment_id: int) -> None:
+    """Remove the on-screen puzzle from authoritative state."""
+    plan = await _load_plan(db, appointment_id)
+    if plan is None:
+        return
+    state = dict(plan.session_state) if plan.session_state else {}
+    state.pop("puzzle_state", None)
+    plan.session_state = state
+    await db.flush()
+
+
+async def get_puzzle_state(db: AsyncSession, appointment_id: int) -> Optional[dict]:
+    """Current on-screen puzzle record, or None if nothing is showing."""
+    plan = await _load_plan(db, appointment_id)
+    if plan is None or not plan.session_state:
+        return None
+    return plan.session_state.get("puzzle_state")
+
+
+async def save_puzzle_state(db: AsyncSession, appointment_id: int, payload: Optional[dict]) -> None:
+    """Back-compat shim: payload=None clears, a payload records a fresh show."""
+    if payload is None:
+        await clear_puzzle_state(db, appointment_id)
+    else:
+        await set_puzzle_shown(db, appointment_id, payload)

@@ -601,11 +601,11 @@ export default function RegisterPage() {
               <div className="rp-divider"><span>or sign up with email</span></div>
 
               <form onSubmit={handleSubmit}>
-                {accountType === "school" && (
+                {/* {accountType === "school" && (
                   <p style={{ fontSize: 12, color: "#64748b", margin: "0 0 12px", lineHeight: 1.5 }}>
                     You'll set your school's name and location right after you verify your email.
                   </p>
-                )}
+                )} */}
                 {accountType === "individual" && (
                   <div className="rp-field">
                     <label>I am a</label>
