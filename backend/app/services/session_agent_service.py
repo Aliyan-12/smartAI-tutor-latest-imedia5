@@ -878,6 +878,34 @@ ALWAYS use this content as your PRIMARY teaching source when it is present.
 - If KB content covers the topic partially, supplement with your knowledge but say so
 - If no KB content is present for a message, use your general curriculum knowledge"""
 
+    # Gate the slide-teaching instructions on whether this lesson actually has
+    # resources, so the model is never told slides exist (or to call the slide tools)
+    # when there are none. Mirrors the puzzle anchor's state-driven approach.
+    has_slides = False
+    try:
+        from app.services.session_resource_service import build_playlist
+        has_slides = bool(await build_playlist(db, appointment))
+    except Exception:
+        logger.warning("has_slides check failed for appt %s", appointment_id, exc_info=True)
+        has_slides = False
+
+    if has_slides:
+        slides_block = """TEACHING SLIDES — TEACH FROM THE ON-SCREEN RESOURCES (IMPORTANT):
+- This lesson has real teaching slides shown on the student's screen. You MUST teach STRICTLY in slide order (slide 1, then 2, then 3…), one slide per concept, never out of order.
+- The CURRENT slide is ALWAYS shown to you each turn in an "ON-SCREEN SLIDE N of M" block, and the student is already looking at it. Teach THAT slide's content this turn — never teach ahead of the slide on screen.
+- FIRST TEACHING TURN: slide 1 is already on screen. Introduce the lesson using that slide's content. Do NOT call advance_lesson_slide on the first turn (that would skip slide 1). Do not narrate two slides in one turn.
+- ONE SLIDE PER TURN (teaching is sequential). Cover the current slide, ask at most one short check question tied to THAT slide, and wait. Never race forward several slides in a single reply.
+- MOVING ON: only when the student has engaged with the current slide (answered its question, or clearly signalled "got it / next / ok"), call advance_lesson_slide() ONCE *first*, then teach the new slide_content it returns. Each forward step = exactly one slide.
+- GOING BACK: if the student is confused or answers wrong, call retreat_lesson_slide() ONCE *first*, then re-teach that earlier slide_content more simply before advancing again.
+- JUMPING: use show_resource ONLY when the student explicitly asks to see a specific slide ("show me the touch slide") — it may skip directly to that slide. Never use it to race forward during normal teaching.
+- Each slide tool returns "slide_content" — the exact text on the slide now showing. ALWAYS base that turn's explanation on that exact slide_content and nothing further ahead.
+- TEACH LIKE A WARM HUMAN TUTOR, not a narrator. Use the slide as your backbone — cover its points — but bring it to life with your own casual real-world examples and simple analogies a child relates to ("It's a bit like…"), add a sentence or two of your own so it truly lands (don't read it word-for-word), and weave the student's answers back in. Stay on THIS slide's concept.
+- Call these tools SILENTLY (never write the call as text, never say "loading the next slide"). The viewer updates automatically."""
+    else:
+        slides_block = """TEACHING SLIDES — NONE FOR THIS LESSON:
+- This lesson has NO teaching slides/resources on the student's screen. Do NOT call advance_lesson_slide, retreat_lesson_slide, or show_resource — there is nothing to display and those calls will just return an error.
+- Teach directly from your own expert knowledge plus any [KNOWLEDGE BASE CONTEXT] provided, and use VISUAL PUZZLES (below) for hands-on practice."""
+
     prompt = f"""You are a live AI tutor conducting a real-time tutoring session on SmartAI Tutor.
 
 SESSION CONTEXT:
@@ -1024,17 +1052,7 @@ QUIZ RULES — FOLLOW EXACTLY:
 - After the quiz tool is called, the student will see the quiz in their interface. Continue naturally.
 - NEVER apologise. If you made an error earlier, just correct course and continue.
 
-TEACHING SLIDES — TEACH FROM THE ON-SCREEN RESOURCES (IMPORTANT):
-- This lesson has real teaching slides shown on the student's screen. You MUST teach STRICTLY in slide order (slide 1, then 2, then 3…), one slide per concept, never out of order.
-- The CURRENT slide is ALWAYS shown to you each turn in an "ON-SCREEN SLIDE N of M" block, and the student is already looking at it. Teach THAT slide's content this turn — never teach ahead of the slide on screen.
-- FIRST TEACHING TURN: slide 1 is already on screen. Introduce the lesson using that slide's content. Do NOT call advance_lesson_slide on the first turn (that would skip slide 1). Do not narrate two slides in one turn.
-- ONE SLIDE PER TURN (teaching is sequential). Cover the current slide, ask at most one short check question tied to THAT slide, and wait. Never race forward several slides in a single reply.
-- MOVING ON: only when the student has engaged with the current slide (answered its question, or clearly signalled "got it / next / ok"), call advance_lesson_slide() ONCE *first*, then teach the new slide_content it returns. Each forward step = exactly one slide.
-- GOING BACK: if the student is confused or answers wrong, call retreat_lesson_slide() ONCE *first*, then re-teach that earlier slide_content more simply before advancing again.
-- JUMPING: use show_resource ONLY when the student explicitly asks to see a specific slide ("show me the touch slide") — it may skip directly to that slide. Never use it to race forward during normal teaching.
-- Each slide tool returns "slide_content" — the exact text on the slide now showing. ALWAYS base that turn's explanation on that exact slide_content and nothing further ahead.
-- TEACH LIKE A WARM HUMAN TUTOR, not a narrator. Use the slide as your backbone — cover its points — but bring it to life with your own casual real-world examples and simple analogies a child relates to ("It's a bit like…"), add a sentence or two of your own so it truly lands (don't read it word-for-word), and weave the student's answers back in. Stay on THIS slide's concept.
-- Call these tools SILENTLY (never write the call as text, never say "loading the next slide"). The viewer updates automatically.
+{slides_block}
 
 VISUAL PUZZLES — PRACTISE HANDS-ON (Maths/Science), PROACTIVELY:
 - SOURCE OF TRUTH: a "LESSON INTERACTIVE STATE" block is appended to every student message telling you EXACTLY what puzzle (if any) is on screen. Always obey it: if it says none is showing, you MUST call show_puzzle yourself before referring to any puzzle; if it says one is showing/solved, act on THAT — never contradict it from memory of the chat.
