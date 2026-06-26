@@ -2196,8 +2196,11 @@ async def _handle_lesson_timeout(send, chat_id, user_id, data):
 async def _handle_student_idle(send, chat_id, user_id, data):
     """AI_REACTIVE: the student has gone quiet. Stage 1 = a short check-in; stage 2 =
     announce + RELIABLY pause the lesson (clock freezes until they message back)."""
+    from app.schemas.session_events import EVENT_STUDENT_IDLE
     stage = int(data.get("stage", 1) or 1)
     if stage >= 2:
+        # Show + persist the idle event pill (in sequence, before the AI's message).
+        await _emit_event(send, chat_id, EVENT_STUDENT_IDLE, "💤 Still inactive — pausing the lesson.")
         ai = (
             "[INACTIVITY] The student has been inactive for several minutes. Say ONE short, "
             "warm sentence that you'll pause the lesson here and they can resume any time by "
@@ -2208,6 +2211,7 @@ async def _handle_student_idle(send, chat_id, user_id, data):
         # Reliably pause server-side (freezes the clock) + reflect on the client.
         await _handle_lesson_pause(send, chat_id, user_id, {"reason": "inactivity"})
     else:
+        await _emit_event(send, chat_id, EVENT_STUDENT_IDLE, "💤 No activity for ~5 min — checking in.")
         ai = (
             "[INACTIVITY] The student has gone quiet (~5 min). Say ONE short, friendly check-in "
             "(e.g. 'Still there? We can pick up whenever you're ready.') — nothing else."

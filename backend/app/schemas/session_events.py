@@ -121,6 +121,7 @@ def parse_inbound(raw: Any) -> BaseModel:
 # Chat-rendered event kinds (drive the centered system pills in the chat window).
 EVENT_PUZZLE_SOLVED = "puzzle.solved"
 EVENT_PUZZLE_TRIED = "puzzle.tried"
+EVENT_STUDENT_IDLE = "student.idle"
 EVENT_LESSON_PAUSED = "lesson.paused"
 EVENT_LESSON_RESUMED = "lesson.resumed"
 EVENT_LESSON_TIMEOUT = "lesson.timeout"
