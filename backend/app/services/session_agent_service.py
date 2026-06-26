@@ -10,6 +10,7 @@ import logging
 import os
 import random
 import re as _re
+import time
 from pathlib import Path
 from typing import Optional
 from uuid import uuid4
@@ -1431,6 +1432,9 @@ def get_neutral_filler() -> Optional[dict]:
 # ===========================================================================
 
 _TURN_TIMEOUT_S = 150
+_WATCHDOG_TICK_S = 20   # how often the per-session watchdog checks the lesson clock
+_IDLE_CHECK_S = 300     # 5 min of student silence → a short "are you still there?" check-in
+_IDLE_PAUSE_S = 420     # 7 min total (2 min after the check-in) → announce + auto-pause
 _active_ws: dict = {}
 
 _RESEARCH_PREFIX = (
@@ -1587,7 +1591,8 @@ async def _phase_and_next(db: AsyncSession, appt_id: int, elapsed: int, duration
 
 
 async def build_lesson_state_anchor(
-    db: AsyncSession, appt_id: int, student_id: int, pstate: Optional[dict]
+    db: AsyncSession, appt_id: int, student_id: int, pstate: Optional[dict],
+    available_actions: Optional[str] = None,
 ) -> str:
     """A compact, single-purpose live snapshot of the whole lesson, injected at maximum
     recency on EVERY turn so the model never loses track as the context grows:
@@ -1595,6 +1600,7 @@ async def build_lesson_state_anchor(
       • current phase/step + what's next for the student
       • the student's learning status (strong / needs-work topics)
       • the interactive puzzle on screen (if any)
+      • the tools actually available THIS turn (so binding + prompt agree)
     The model is told to trust THIS over anything it inferred from the chat history.
     """
     head = "━━━ LESSON STATE — LIVE & AUTHORITATIVE (trust THIS over the chat history) ━━━"
@@ -1635,13 +1641,109 @@ async def build_lesson_state_anchor(
             pass
 
     lines.append(_puzzle_state_lines(pstate))
+    if available_actions:
+        lines.append(
+            f"🛠 AVAILABLE ACTIONS THIS TURN: {available_actions}. "
+            "Only call tools listed here; if an action isn't listed, it isn't available right now."
+        )
     lines.append(tail)
     return "\n".join(lines)
 
 
+# ── Per-turn tool-group selection (drives registry.make_tools) ────────────────
+_ACTION_LABELS = {
+    "teaching": "show/advance/retreat slides",
+    "puzzles": "show/clear visual puzzles",
+    "assessment": "set a quiz",
+    "mastery": "check/update mastery + evaluate answers",
+    "platform": "set homework, load a resource, advance the lesson step, pause/resume",
+    "lifecycle": "END the lesson + write the report",
+    "research": "web/deep search",
+}
+
+
+def _is_quiz_phase(appointment) -> bool:
+    """Has enough of the session elapsed (or little time left) to allow a quiz?
+    Mirrors the QUIZ STATUS gate in build_session_system_prompt."""
+    elapsed, remaining, duration = _compute_lesson_clock(appointment)
+    if duration <= 25:
+        after, rem = 13, 5
+    elif duration <= 45:
+        after, rem = 28, 8
+    elif duration <= 65:
+        after, rem = 40, 18
+    else:
+        after, rem = 57, 20
+    return elapsed >= after or remaining <= rem
+
+
+def select_tool_groups(
+    *, event_kind: str = "user_message", intent_text: Optional[str] = None,
+    has_slides: bool = False, end_allowed: bool = False, quiz_phase: bool = False,
+) -> set:
+    """Bind only a SMALL, intent-relevant set of tool groups this turn (web-backed
+    anti-hallucination: fewer tools per call). Driven by what the student just did /
+    asked — the event kind, keyword intent in their message, the quiz-timing gate, and
+    whether the lesson has slides / is allowed to end. The default teaching/answering
+    turn binds just the slide tools (or puzzles when there are no slides)."""
+    text = (intent_text or "").lower()
+
+    def _has(*kw: str) -> bool:
+        return any(k in text for k in kw)
+
+    g: set = set()
+
+    # Lifecycle only when ending is genuinely on the table.
+    if end_allowed or event_kind in ("lesson_end_request", "lesson_timeout"):
+        g.add("lifecycle")
+
+    # Event-driven intent (no user text on these turns).
+    if event_kind == "puzzle_result":
+        g.add("puzzles")
+    elif event_kind == "quiz_result":
+        g.add("assessment")
+
+    # Time-gated quizzing — let the AI quiz when the session is far enough along.
+    if quiz_phase:
+        g.add("assessment")
+
+    # Keyword intent from the student's actual words.
+    if _has("quiz", "test me", "test ", "exam", "assess my", "how am i doing"):
+        g.add("assessment")
+    if _has("puzzle", "practice", "let's try", "try one", "interactive", "drag", "game", "hands-on"):
+        g.add("puzzles")
+    if _has("homework", "assignment", "set me work", "to do at home", "revise later", "practice at home"):
+        g.add("platform")
+    if _has("show me", "slide", "resource", "diagram", "worksheet", "picture", "see the", "go to"):
+        g.add("platform")  # load_resource
+        if has_slides:
+            g.add("teaching")
+    if _has("search", "look up", "google", "latest", "news", "current", "research", "find out", "internet", "real world"):
+        g.add("research")
+    if _has("pause", "take a break", "brain break", "rest for", "stretch"):
+        g.add("platform")  # pause_lesson
+
+    # Default teaching/answering turn (no strong intent) → keep it minimal.
+    if not (g - {"lifecycle"}):
+        if has_slides:
+            g.add("teaching")
+        else:
+            g.add("puzzles")  # no slides → hands-on practice is the natural default
+
+    # Mastery is cheap + useful whenever practising or assessing.
+    if g & {"puzzles", "assessment"}:
+        g.add("mastery")
+    return g
+
+
+def _describe_actions(groups: set) -> str:
+    order = ["teaching", "puzzles", "assessment", "mastery", "platform", "lifecycle", "research"]
+    return "; ".join(_ACTION_LABELS[g] for g in order if g in groups and g in _ACTION_LABELS)
+
+
 async def _run_turn(send, chat_id, user_id, *, saved_user_text, ai_content,
                     image_b64=None, image_mime="image/jpeg", tts=True,
-                    anchor_slides=True):
+                    anchor_slides=True, event_kind="user_message"):
     """Run one assistant turn: save-once, stream + segment, emit turn_end with the DB id.
 
     anchor_slides: when True (normal teaching turns), pin the turn to the on-screen
@@ -1679,6 +1781,7 @@ async def _run_turn(send, chat_id, user_id, *, saved_user_text, ai_content,
 
         session_system_prompt = None
         tool_context = None
+        tool_groups_for_turn = None  # None → full session set (back-compat / non-appt)
         if appt_id:
             try:
                 session_system_prompt = await build_session_system_prompt(
@@ -1713,50 +1816,49 @@ async def _run_turn(send, chat_id, user_id, *, saved_user_text, ai_content,
             except Exception:
                 logger.warning("ToolContext build failed for appt %s", appt_id)
 
-            # ── Slide-driven teaching anchor ──────────────────────────────────
-            # The model drifts away from calling the slide tools across a long
-            # session, which freezes the viewer and lets it teach off-slide. So on
-            # every teaching turn we (1) emit show_resource for the CURRENT slide so
-            # the viewer is always in sync (never blank/stuck), and (2) inject that
-            # slide's text + a fresh, salient progression directive into the model's
-            # input so it teaches the slide on screen and steps forward one slide at
-            # a time. This is far more reliable than the static system-prompt rule.
-            if anchor_slides and tool_context is not None:
+            # ── Load the current slide ONCE ──────────────────────────────────
+            # Drives both the slide-teaching anchor AND whether the slide tools are
+            # offered this turn (no slides → don't bind/advertise them at all).
+            current_slide = None
+            if tool_context is not None:
                 try:
                     from app.services import session_resource_service as _srs
                     current_slide = await _srs.get_current_slide(db, appt_id)
                 except Exception:
                     current_slide = None
-                    logger.warning("Slide anchor load failed for appt %s", appt_id)
-                if current_slide:
-                    # Sync the viewer immediately (strip the slide text — the client
-                    # doesn't need it and the AI teaches it in its own words).
-                    viewer_payload = {k: v for k, v in current_slide.items() if k != "slide_content"}
-                    await send({"type": "tool", "tool": "show_resource", "data": viewer_payload})
-                    _sc = (current_slide.get("slide_content") or "").strip()
-                    _n = current_slide.get("slide_index", 1)
-                    _tot = current_slide.get("page_count", 1)
-                    ai_content = (
-                        f"{ai_content}\n\n"
-                        f"━━━ ON-SCREEN SLIDE {_n} of {_tot} (showing on the student's screen right now) ━━━\n"
-                        f"{_sc or '(no extracted text on this slide — teach the concept it depicts)'}\n"
-                        "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
-                        "SLIDE-DRIVEN TEACHING — apply EVERY turn, not only when the student asks:\n"
-                        "• Teach using THIS slide as your backbone — cover its content in your own warm "
-                        "words, then ask ONE short question about it. Never teach ahead of the slide on screen.\n"
-                        "• When the student has engaged with this slide (answered it, or said \"ok / got it / "
-                        "next / yes\"), call advance_lesson_slide ONCE *before* teaching, then teach the next "
-                        "slide it returns. Teaching always moves ONE slide forward per reply, in order.\n"
-                        "• If the student is confused or answers wrong, call retreat_lesson_slide ONCE and re-teach.\n"
-                        "• Only use show_resource when the student explicitly asks to jump to a specific slide.\n"
-                        "Keep what you say in sync with the slide on screen."
-                    )
+                    logger.warning("Slide load failed for appt %s", appt_id)
+            has_slides = current_slide is not None
 
-            # ── LESSON STATE anchor (ALWAYS — incl. puzzle/quiz turns) ────────────
+            # ── Slide-driven teaching anchor (normal teaching turns only) ─────────
+            # On every teaching turn (1) sync the viewer to the CURRENT slide and
+            # (2) inject the slide text + a salient progression directive, so the AI
+            # teaches slide-by-slide reliably. Skipped on puzzle/quiz/lifecycle turns.
+            if anchor_slides and current_slide:
+                viewer_payload = {k: v for k, v in current_slide.items() if k != "slide_content"}
+                await send({"type": "tool", "tool": "show_resource", "data": viewer_payload})
+                _sc = (current_slide.get("slide_content") or "").strip()
+                _n = current_slide.get("slide_index", 1)
+                _tot = current_slide.get("page_count", 1)
+                ai_content = (
+                    f"{ai_content}\n\n"
+                    f"━━━ ON-SCREEN SLIDE {_n} of {_tot} (showing on the student's screen right now) ━━━\n"
+                    f"{_sc or '(no extracted text on this slide — teach the concept it depicts)'}\n"
+                    "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+                    "SLIDE-DRIVEN TEACHING — apply EVERY turn, not only when the student asks:\n"
+                    "• Teach using THIS slide as your backbone — cover its content in your own warm "
+                    "words, then ask ONE short question about it. Never teach ahead of the slide on screen.\n"
+                    "• When the student has engaged with this slide (answered it, or said \"ok / got it / "
+                    "next / yes\"), call advance_lesson_slide ONCE *before* teaching, then teach the next "
+                    "slide it returns. Teaching always moves ONE slide forward per reply, in order.\n"
+                    "• If the student is confused or answers wrong, call retreat_lesson_slide ONCE and re-teach.\n"
+                    "• Only use show_resource when the student explicitly asks to jump to a specific slide.\n"
+                    "Keep what you say in sync with the slide on screen."
+                )
+
+            # ── LESSON STATE anchor + per-turn tool selection (ALWAYS) ────────────
             # Single live source of truth (clock + phase/next + learning status +
-            # on-screen puzzle), injected at maximum recency so the model stops
-            # inferring lesson state from a long history. Applies even when
-            # anchor_slides is False.
+            # on-screen puzzle + available actions), injected at maximum recency.
+            # Also computes which tool GROUPS to bind this turn (anti-hallucination).
             if tool_context is not None:
                 try:
                     from app.services import puzzle_service as _pzs
@@ -1764,7 +1866,24 @@ async def _run_turn(send, chat_id, user_id, *, saved_user_text, ai_content,
                 except Exception:
                     _pstate = None
                 try:
-                    _anchor = await build_lesson_state_anchor(db, appt_id, user_id, _pstate)
+                    from app.services import session_state_service as _sss
+                    _end_allowed = await _sss.is_end_allowed(db, appt_id)
+                except Exception:
+                    _end_allowed = False
+                try:
+                    _appt_phase = await _load_appointment(db, appt_id)
+                    _quiz_phase = _is_quiz_phase(_appt_phase) if _appt_phase else False
+                except Exception:
+                    _quiz_phase = False
+                tool_groups_for_turn = select_tool_groups(
+                    event_kind=event_kind, intent_text=saved_user_text,
+                    has_slides=has_slides, end_allowed=_end_allowed, quiz_phase=_quiz_phase,
+                )
+                try:
+                    _anchor = await build_lesson_state_anchor(
+                        db, appt_id, user_id, _pstate,
+                        available_actions=_describe_actions(tool_groups_for_turn),
+                    )
                     ai_content = f"{ai_content}\n\n{_anchor}"
                 except Exception:
                     logger.warning("Lesson-state anchor build failed for appt %s", appt_id, exc_info=True)
@@ -1778,6 +1897,7 @@ async def _run_turn(send, chat_id, user_id, *, saved_user_text, ai_content,
             hist_slice, ai_content, rag_chunks=rag_chunks,
             system_prompt_override=session_system_prompt, tool_context=tool_context,
             image_data=image_b64, image_mime=image_mime,
+            tool_groups=tool_groups_for_turn,
         ):
             token = _coerce_str(raw)
             stripped = token.strip()
@@ -1792,6 +1912,11 @@ async def _run_turn(send, chat_id, user_id, *, saved_user_text, ai_content,
                             _tool, _data.get("render"), _data.get("puzzle_id"), _data.get("error"),
                         )
                     await send({"type": "tool", "tool": _tool, "data": _data})
+                    # end_lesson succeeded → persist the event + tell the client to open the report.
+                    if _tool == "end_lesson" and _data.get("ended"):
+                        from app.schemas.session_events import lesson_ended_frame, EVENT_LESSON_ENDED
+                        await _emit_event(send, chat_id, EVENT_LESSON_ENDED, "🏁 Lesson ended — opening your report.")
+                        await send(lesson_ended_frame(appointment_id=appt_id))
                 except Exception as _tr_err:
                     logger.warning("Failed to forward TOOL_RESULT: %s", _tr_err)
                 continue
@@ -1832,11 +1957,73 @@ async def _run_turn(send, chat_id, user_id, *, saved_user_text, ai_content,
     await send({"type": "turn_end", "message_id": message_id, "full_text": clean})
 
 
+async def _emit_event(send, chat_id, kind: str, text: str) -> None:
+    """Send a chat-rendered event to the client AND persist it as a role='event'
+    message so it survives a refresh / reopen. Uses its own DB session and never
+    blocks or breaks the turn. (build_context filters role='event' out of the LLM
+    history, so these are display-only.)"""
+    from app.schemas.session_events import event_frame
+    logger.info("EVENT out kind=%s chat=%s text=%r", kind, chat_id, text)
+    try:
+        await send(event_frame(kind, text))
+    except Exception:
+        pass
+    try:
+        async with async_session_factory() as db:
+            await chat_service.add_message(db, chat_id, "event", text)
+            await db.commit()
+    except Exception:
+        logger.warning("save event message failed", exc_info=True)
+
+
+async def _force_end_and_report(send, chat_id) -> None:
+    """Ensure the lesson is terminated + the report card generated, even if the AI
+    didn't call end_lesson. Idempotent — no-op if already ended."""
+    from app.services import appointment_service
+    from app.schemas.session_events import lesson_ended_frame, EVENT_LESSON_ENDED
+    try:
+        async with async_session_factory() as db:
+            appt_id = await _resolve_appt_id(db, chat_id)
+            if not appt_id:
+                return
+            appt = await appointment_service.get_appointment(db, appt_id)
+            if appt and appt.status in ("started", "paused"):
+                await appointment_service.update_status(db, appt, "terminated")
+                await db.commit()
+                logger.info("force-end → terminated appt=%s", appt_id)
+                await _emit_event(send, chat_id, EVENT_LESSON_ENDED, "🏁 Lesson ended — opening your report.")
+                await send(lesson_ended_frame(appointment_id=appt_id))
+    except Exception as e:  # noqa: BLE001
+        logger.warning("force_end failed: %s", e)
+
+
+async def _resume_if_paused(send, chat_id) -> None:
+    """When the student returns (sends a message), resume a lesson that was auto-paused
+    for inactivity so the clock starts again. No-op if not paused."""
+    from app.services import appointment_service
+    from app.schemas.session_events import EVENT_LESSON_RESUMED
+    try:
+        async with async_session_factory() as db:
+            appt_id = await _resolve_appt_id(db, chat_id)
+            if not appt_id:
+                return
+            appt = await appointment_service.get_appointment(db, appt_id)
+            if appt and appt.status == "paused":
+                await appointment_service.update_status(db, appt, "started")
+                await db.commit()
+                logger.info("auto-resumed on student return appt=%s", appt_id)
+                await send({"type": "tool", "tool": "resume_lesson", "data": {}})
+                await _emit_event(send, chat_id, EVENT_LESSON_RESUMED, "▶ Lesson resumed.")
+    except Exception as e:  # noqa: BLE001
+        logger.warning("resume_if_paused failed: %s", e)
+
+
 async def _handle_user_message(send, chat_id, user_id, data):
     text = (data.get("text") or "").strip()
     image_b64 = data.get("image_b64")
     if not text and not image_b64:
         return
+    await _resume_if_paused(send, chat_id)  # student is back → unfreeze the clock
     research = bool(data.get("research"))
     saved = text if text else "(shared an image)"
     if research and text:
@@ -1849,12 +2036,14 @@ async def _handle_user_message(send, chat_id, user_id, data):
 
 
 async def _handle_quiz_result(send, chat_id, user_id, data):
+    topic = data.get("topic", "the quiz")
+    score = float(data.get("score", 0) or 0)
+    await _emit_event(send, chat_id, "quiz.completed", f"📊 Quiz: {round(score)}% on {topic}")
     quiz_ctx = _build_quiz_ctx(
-        data.get("topic", "the quiz"), float(data.get("score", 0) or 0),
-        data.get("strong", []) or [], data.get("weak", []) or [],
+        topic, score, data.get("strong", []) or [], data.get("weak", []) or [],
     )
     await _run_turn(send, chat_id, user_id, saved_user_text=None, ai_content=quiz_ctx,
-                    tts=bool(data.get("tts", True)), anchor_slides=False)
+                    tts=bool(data.get("tts", True)), anchor_slides=False, event_kind="quiz_result")
 
 
 def _build_puzzle_ctx(puzzle_id: str, prompt: str, answer, correct: bool) -> str:
@@ -1872,25 +2061,32 @@ def _build_puzzle_ctx(puzzle_id: str, prompt: str, answer, correct: bool) -> str
 
 
 async def _handle_puzzle_result(send, chat_id, user_id, data):
-    # Record the attempt into authoritative lesson state FIRST, so both this turn's
-    # anchor and every later turn reflect it — the model never misses a solve.
+    correct = bool(data.get("correct"))
+    prompt = data.get("prompt", "")
+    from app.schemas.session_events import EVENT_PUZZLE_SOLVED, EVENT_PUZZLE_TRIED
+    await _emit_event(
+        send, chat_id,
+        EVENT_PUZZLE_SOLVED if correct else EVENT_PUZZLE_TRIED,
+        f"🧩 Puzzle {'solved ✓' if correct else 'attempted'}" + (f" — {prompt}" if prompt else ""),
+    )
+    # Record the attempt into authoritative lesson state, so both this turn's anchor
+    # and every later turn reflect it — the model never misses a solve.
     try:
         from app.services import puzzle_service
         async with async_session_factory() as _db:
             _appt_id = await _resolve_appt_id(_db, chat_id)
             if _appt_id:
                 await puzzle_service.record_puzzle_attempt(
-                    _db, _appt_id, data.get("answer", ""), bool(data.get("correct")),
+                    _db, _appt_id, data.get("answer", ""), correct,
                 )
                 await _db.commit()
     except Exception:
         logger.warning("record_puzzle_attempt failed", exc_info=True)
     ctx = _build_puzzle_ctx(
-        data.get("puzzle_id", "puzzle"), data.get("prompt", ""),
-        data.get("answer", ""), bool(data.get("correct")),
+        data.get("puzzle_id", "puzzle"), prompt, data.get("answer", ""), correct,
     )
     await _run_turn(send, chat_id, user_id, saved_user_text=None, ai_content=ctx,
-                    tts=bool(data.get("tts", True)), anchor_slides=False)
+                    tts=bool(data.get("tts", True)), anchor_slides=False, event_kind="puzzle_result")
 
 
 async def _handle_user_audio(send, chat_id, user_id, data):
@@ -1923,8 +2119,129 @@ async def _handle_user_audio(send, chat_id, user_id, data):
         await send({"type": "turn_end", "message_id": None, "full_text": ""})
         return
     await send({"type": "user_transcript", "text": transcript})
+    await _resume_if_paused(send, chat_id)  # student is back → unfreeze the clock
     await _run_turn(send, chat_id, user_id, saved_user_text=transcript, ai_content=transcript,
                     tts=bool(data.get("tts", True)))
+
+
+# ── Lifecycle event handlers ─────────────────────────────────────────────────
+async def _handle_lesson_pause(send, chat_id, user_id, data):
+    """SIDE_EFFECT: freeze the lesson clock + persist a chat event (no AI turn)."""
+    from app.services import appointment_service
+    from app.schemas.session_events import EVENT_LESSON_PAUSED
+    async with async_session_factory() as db:
+        appt_id = await _resolve_appt_id(db, chat_id)
+        if appt_id:
+            appt = await appointment_service.get_appointment(db, appt_id)
+            if appt and appt.status == "started":
+                await appointment_service.update_status(db, appt, "paused")
+                await db.commit()
+                logger.info("lesson_pause: appt=%s → paused", appt_id)
+    await send({"type": "tool", "tool": "pause_lesson", "data": {}})  # client reflects paused UI
+    await _emit_event(send, chat_id, EVENT_LESSON_PAUSED, "⏸ Lesson paused.")
+
+
+async def _handle_lesson_resume(send, chat_id, user_id, data):
+    """SIDE_EFFECT: unfreeze the lesson clock + persist a chat event (no AI turn)."""
+    from app.services import appointment_service
+    from app.schemas.session_events import EVENT_LESSON_RESUMED
+    async with async_session_factory() as db:
+        appt_id = await _resolve_appt_id(db, chat_id)
+        if appt_id:
+            appt = await appointment_service.get_appointment(db, appt_id)
+            if appt and appt.status == "paused":
+                await appointment_service.update_status(db, appt, "started")
+                await db.commit()
+                logger.info("lesson_resume: appt=%s → started", appt_id)
+    await send({"type": "tool", "tool": "resume_lesson", "data": {}})  # client reflects resumed UI
+    await _emit_event(send, chat_id, EVENT_LESSON_RESUMED, "▶ Lesson resumed.")
+
+
+async def _handle_lesson_end_request(send, chat_id, user_id, data):
+    """AI_REACTIVE: the student clicked End. Allow ending, let the AI give a short
+    encouraging recap + call end_lesson, then a server fallback guarantees the exit."""
+    from app.services import session_state_service, appointment_service
+    appt_id = None
+    async with async_session_factory() as db:
+        appt_id = await _resolve_appt_id(db, chat_id)
+        if appt_id:
+            await session_state_service.set_end_allowed(db, appt_id, True)
+            await db.commit()
+    logger.info("lesson_end_request: appt=%s end_allowed=True", appt_id)
+    ai = (
+        "[END REQUESTED] The student clicked End Lesson. In 2-3 sentences: warmly note "
+        "you could keep going (name the very next thing you'd cover), give a short recap "
+        "of what they did well today, then call the end_lesson tool. Keep it brief and kind."
+    )
+    await _run_turn(send, chat_id, user_id, saved_user_text=None, ai_content=ai,
+                    tts=bool(data.get("tts", True)), anchor_slides=False, event_kind="lesson_end_request")
+    # Fallback so the student is NEVER trapped: if the AI didn't end it, end it now.
+    await _force_end_and_report(send, chat_id)
+
+
+async def _handle_lesson_timeout(send, chat_id, user_id, data):
+    """AI_REACTIVE: time is up (watchdog set end_allowed + sent notices). The AI gives
+    a short summary + goodbye and calls end_lesson; a server fallback guarantees the
+    session ends and the report shows."""
+    ai = (
+        "[LESSON TIMEOUT] The session time is up. Give a short, warm closing summary "
+        "(2-3 sentences) of what the student learned and did well today, say a brief "
+        "goodbye, then call the end_lesson tool. Do NOT start new material."
+    )
+    await _run_turn(send, chat_id, user_id, saved_user_text=None, ai_content=ai,
+                    tts=bool(data.get("tts", True)), anchor_slides=False, event_kind="lesson_timeout")
+    await _force_end_and_report(send, chat_id)
+
+
+async def _handle_student_idle(send, chat_id, user_id, data):
+    """AI_REACTIVE: the student has gone quiet. Stage 1 = a short check-in; stage 2 =
+    announce + RELIABLY pause the lesson (clock freezes until they message back)."""
+    stage = int(data.get("stage", 1) or 1)
+    if stage >= 2:
+        ai = (
+            "[INACTIVITY] The student has been inactive for several minutes. Say ONE short, "
+            "warm sentence that you'll pause the lesson here and they can resume any time by "
+            "sending a message — then stop. Do not teach."
+        )
+        await _run_turn(send, chat_id, user_id, saved_user_text=None, ai_content=ai,
+                        tts=bool(data.get("tts", True)), anchor_slides=False, event_kind="student_idle")
+        # Reliably pause server-side (freezes the clock) + reflect on the client.
+        await _handle_lesson_pause(send, chat_id, user_id, {"reason": "inactivity"})
+    else:
+        ai = (
+            "[INACTIVITY] The student has gone quiet (~5 min). Say ONE short, friendly check-in "
+            "(e.g. 'Still there? We can pick up whenever you're ready.') — nothing else."
+        )
+        await _run_turn(send, chat_id, user_id, saved_user_text=None, ai_content=ai,
+                        tts=bool(data.get("tts", True)), anchor_slides=False, event_kind="student_idle")
+
+
+# ── Event bucket registry ────────────────────────────────────────────────────
+# AI_REACTIVE → runs an AI turn (queued if one is in flight); SIDE_EFFECT → quick
+# state mutation, no LLM; TELEMETRY (ping/stop) is handled inline in the loop.
+_AI_HANDLERS = {
+    "user_message": _handle_user_message,
+    "user_audio": _handle_user_audio,
+    "puzzle_result": _handle_puzzle_result,
+    "quiz_result": _handle_quiz_result,
+    "lesson_end_request": _handle_lesson_end_request,
+    "lesson_timeout": _handle_lesson_timeout,
+    "student_idle": _handle_student_idle,
+}
+_SIDE_HANDLERS = {
+    "lesson_pause": _handle_lesson_pause,
+    "lesson_resume": _handle_lesson_resume,
+}
+# AI-reactive events that may be queued (latest wins) when a turn is already running.
+_QUEUEABLE = {"puzzle_result", "quiz_result", "lesson_end_request", "student_idle"}
+
+
+async def _guard_side(send, chat_id, user_id, mtype, data):
+    """Run a side-effect handler safely (a failure must never crash the loop)."""
+    try:
+        await _SIDE_HANDLERS[mtype](send, chat_id, user_id, data)
+    except Exception as e:  # noqa: BLE001
+        logger.warning("Side-effect %s failed: %s", mtype, e, exc_info=True)
 
 
 async def _guard_turn(send, coro):
@@ -1971,6 +2288,11 @@ async def run_session_ws(websocket: WebSocket) -> None:
             pass
     _active_ws[user_id] = websocket
     current_turn: Optional[asyncio.Task] = None
+    watchdog_task: Optional[asyncio.Task] = None
+    connected_at = time.monotonic()
+    timeout_fired = False
+    last_activity = time.monotonic()  # last genuine student action (for idle detection)
+    idle_stage = 0                    # 0=active · 1=checked-in · 2=auto-paused
 
     async def send(d: dict) -> None:
         try:
@@ -1993,26 +2315,37 @@ async def run_session_ws(websocket: WebSocket) -> None:
                 return
             chat_id = chat.id
             chat_session_id = chat.session_id
+            if appt_id is None:
+                appt_id = _appt_id_from_chat(chat)
+            # If a previous connection auto-paused on an unexpected close, resume now
+            # (the student is back). User-initiated pauses don't set the flag, so they
+            # correctly stay paused.
+            if appt_id is not None:
+                try:
+                    from app.services import session_state_service as _sssr
+                    if await _sssr.get_flag(db, appt_id, "auto_paused", False):
+                        _ra = await _load_appointment(db, appt_id)
+                        if _ra and _ra.status == "paused":
+                            from app.services import appointment_service as _apsvcr
+                            await _apsvcr.update_status(db, _ra, "started")
+                        await _sssr.set_flag(db, appt_id, "auto_paused", False)
+                        await db.commit()
+                        logger.info("WS ready → auto-resumed (prior auto-pause) appt=%s", appt_id)
+                except Exception as _are:
+                    logger.warning("auto-resume on ready failed appt=%s: %s", appt_id, _are)
 
         await send({"type": "ready", "session_id": chat_session_id})
         logger.info("Session WS ready: user=%s chat=%s appt=%s", user_id, chat_id, appt_id)
 
-        _handlers = {
-            "user_message": _handle_user_message,
-            "quiz_result": _handle_quiz_result,
-            "puzzle_result": _handle_puzzle_result,
-            "user_audio": _handle_user_audio,
-        }
-
-        # One interactive result (puzzle/quiz solve) can arrive while a turn is still
+        # One interactive result (solve / end-request) can arrive while a turn is still
         # streaming. Don't drop it — queue the latest and run it the instant the
-        # in-flight turn finishes, so the model never misses a student's solve.
+        # in-flight turn finishes, so the model never misses a student's action.
         pending_event: Optional[tuple] = None
 
         def _spawn_turn(m: str, d: dict) -> asyncio.Task:
             nonlocal current_turn
             current_turn = asyncio.create_task(
-                _guard_turn(send, _handlers[m](send, chat_id, user_id, d))
+                _guard_turn(send, _AI_HANDLERS[m](send, chat_id, user_id, d))
             )
             current_turn.add_done_callback(_on_turn_done)
             return current_turn
@@ -2024,6 +2357,74 @@ async def run_session_ws(websocket: WebSocket) -> None:
                 pending_event = None
                 _spawn_turn(m, d)
 
+        def _dispatch(m: str, d: dict) -> None:
+            """Route an event to its bucket. AI_REACTIVE → a turn (queued if busy);
+            SIDE_EFFECT → a quick background task; TELEMETRY handled by the loop."""
+            nonlocal pending_event, last_activity, idle_stage
+            # A genuine student action resets the idle clock + restarts the idle cycle.
+            if m in ("user_message", "user_audio", "puzzle_result", "quiz_result"):
+                last_activity = time.monotonic()
+                idle_stage = 0
+            if m in _AI_HANDLERS:
+                logger.info("EVENT in kind=%s bucket=AI_REACTIVE appt=%s user=%s", m, appt_id, user_id)
+                if current_turn and not current_turn.done():
+                    if m in _QUEUEABLE:
+                        pending_event = (m, d)
+                    return
+                _spawn_turn(m, d)
+            elif m in _SIDE_HANDLERS:
+                logger.info("EVENT in kind=%s bucket=SIDE_EFFECT appt=%s user=%s", m, appt_id, user_id)
+                asyncio.create_task(_guard_side(send, chat_id, user_id, m, d))
+
+        # ── per-session watchdog: soft `lesson.timeout` when the clock runs out ──
+        async def _watchdog() -> None:
+            nonlocal timeout_fired, idle_stage
+            from app.services import session_state_service as _sss
+            from app.schemas.session_events import lesson_timeout_frame, EVENT_LESSON_TIMEOUT
+            while True:
+                await asyncio.sleep(_WATCHDOG_TICK_S)
+                if appt_id is None or timeout_fired:
+                    continue
+                try:
+                    fired_now = False
+                    async with async_session_factory() as wdb:
+                        appt = await _load_appointment(wdb, appt_id)
+                        if not appt or appt.status != "started":
+                            continue  # paused / ended → no time-up or idle accrual
+                        _, remaining, _dur = _compute_lesson_clock(appt)
+                        idle_secs = time.monotonic() - last_activity
+                        logger.debug("watchdog tick appt=%s remaining=%smin idle=%.0fs stage=%s",
+                                     appt_id, remaining, idle_secs, idle_stage)
+                        if remaining <= 0:
+                            timeout_fired = True
+                            fired_now = True
+                            await _sss.set_end_allowed(wdb, appt_id, True)
+                            await wdb.commit()
+                    # ── time-up (takes precedence over idle) ──
+                    if fired_now:
+                        logger.info("watchdog fired appt=%s → lesson.timeout", appt_id)
+                        await send(lesson_timeout_frame())
+                        await _emit_event(send, chat_id, EVENT_LESSON_TIMEOUT, "⏰ Time's up — let's wrap up.")
+                        _dispatch("lesson_timeout", {"tts": True})
+                        continue
+                    # ── idle staleness (don't fire while the AI is still responding) ──
+                    if current_turn and not current_turn.done():
+                        continue
+                    if idle_stage == 0 and idle_secs >= _IDLE_CHECK_S:
+                        idle_stage = 1
+                        logger.info("watchdog: student idle %.0fs → check-in appt=%s", idle_secs, appt_id)
+                        _dispatch("student_idle", {"tts": True, "stage": 1})
+                    elif idle_stage == 1 and idle_secs >= _IDLE_PAUSE_S:
+                        idle_stage = 2
+                        logger.info("watchdog: student idle %.0fs → auto-pause appt=%s", idle_secs, appt_id)
+                        _dispatch("student_idle", {"tts": True, "stage": 2})
+                except Exception as e:  # noqa: BLE001
+                    logger.warning("watchdog error appt=%s: %s", appt_id, e)
+
+        if appt_id is not None:
+            watchdog_task = asyncio.create_task(_watchdog())
+
+        from app.schemas.session_events import parse_inbound
         while True:
             try:
                 data = await websocket.receive_json()
@@ -2031,28 +2432,49 @@ async def run_session_ws(websocket: WebSocket) -> None:
                 break
             except Exception:
                 break
-            mtype = data.get("type")
+            mtype = parse_inbound(data).type   # validates shape; tolerates unknown
             if mtype == "ping":
                 await send({"type": "pong"})
             elif mtype == "stop":
                 pending_event = None
                 if current_turn and not current_turn.done():
                     current_turn.cancel()
-            elif mtype in _handlers:
-                if current_turn and not current_turn.done():
-                    # A turn is streaming. Queue interactive results so they aren't
-                    # lost; ignore rapid duplicate messages (the client guards those).
-                    if mtype in ("puzzle_result", "quiz_result"):
-                        pending_event = (mtype, data)
-                    continue
-                _spawn_turn(mtype, data)
+            elif mtype in _AI_HANDLERS or mtype in _SIDE_HANDLERS:
+                _dispatch(mtype, data)
+            else:
+                logger.info("EVENT in kind=%s bucket=IGNORED appt=%s", mtype, appt_id)
     except WebSocketDisconnect:
         pass
     except Exception as e:  # noqa: BLE001
         logger.error("Session WS error: %s", e, exc_info=True)
     finally:
+        # Critical: stop the per-connection watchdog so it can't leak / send to a dead
+        # socket after the student leaves.
+        if watchdog_task and not watchdog_task.done():
+            watchdog_task.cancel()
         if current_turn and not current_turn.done():
             current_turn.cancel()
+        logger.info("WS lifetime=%.1fs appt=%s user=%s",
+                    time.monotonic() - connected_at, appt_id, user_id)
+        # Must-do on close: if the lesson is still running (dropped tab / network), auto-
+        # pause it so it never stays "started" forever, and flag it `auto_paused` so a
+        # reconnect auto-resumes (a transient blip must not strand an active student).
+        # Guarded by "still the active connection" so an immediate reconnect that already
+        # replaced us doesn't pause the new session. A clean pause/end already moved the
+        # status, so this no-ops in those cases.
+        if appt_id is not None and _active_ws.get(user_id) is websocket:
+            try:
+                async with async_session_factory() as pdb:
+                    from app.services import appointment_service as _apsvc
+                    from app.services import session_state_service as _sss2
+                    appt = await _load_appointment(pdb, appt_id)
+                    if appt and appt.status == "started":
+                        await _apsvc.update_status(pdb, appt, "paused")
+                        await _sss2.set_flag(pdb, appt_id, "auto_paused", True)
+                        await pdb.commit()
+                        logger.info("WS closed → auto-paused appt=%s", appt_id)
+            except Exception as e:  # noqa: BLE001
+                logger.warning("auto-pause on close failed appt=%s: %s", appt_id, e)
         if _active_ws.get(user_id) is websocket:
             del _active_ws[user_id]
         try:

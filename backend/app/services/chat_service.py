@@ -119,7 +119,12 @@ async def build_context(
     user_query: Optional[str] = None,
 ) -> Tuple[List[dict], List[RetrievedChunk]]:
     messages = await get_chat_history(db, chat_id)
-    recent = messages[-MAX_CONTEXT_MESSAGES:] if len(messages) > MAX_CONTEXT_MESSAGES else messages
+    # Only real conversation turns go to the LLM. Persisted lifecycle/interactive
+    # events (role="event"/"quiz_result") are display-only — they'd otherwise become
+    # stray AIMessages and pollute the model's context. Filter BEFORE truncating so
+    # we keep MAX real turns.
+    convo = [m for m in messages if m.role in ("user", "assistant")]
+    recent = convo[-MAX_CONTEXT_MESSAGES:] if len(convo) > MAX_CONTEXT_MESSAGES else convo
     history = [{"role": msg.role, "content": msg.content} for msg in recent]
 
     rag_chunks: List[RetrievedChunk] = []

@@ -181,6 +181,27 @@ Before joining, student sees a 2-column briefing screen:
 - Right: AI Session Briefing panel (hook, what you'll learn, key ideas, key terms, session tip) — fetched via `appointmentsApi.getBriefing()`
 State variables: `sessionBriefing`, `briefingLoading`
 
+### Event-Driven Session WebSocket (`run_session_ws` in `session_agent_service.py`)
+The session WS is a typed **event** channel, not just chat. Inbound frames are validated by a Pydantic **discriminated union** (`schemas/session_events.py`, tagged on `type`, unknown → logged + ignored, never crashes). Every event is routed by an `EVENT_SPECS`-style registry into one of three **buckets** (all logged `EVENT in kind=… bucket=…`):
+- **AI_REACTIVE** → runs an AI turn via `_run_turn` (`user_message`, `user_audio`, `puzzle_result`, `quiz_result`, `lesson_end_request`, `lesson_timeout`, `student_idle`). One in-flight turn; a result arriving mid-turn is queued (`_QUEUEABLE`) and drained on completion — never dropped.
+- **SIDE_EFFECT** → quick state mutation, no LLM (`lesson_pause`/`lesson_resume` → `appointment_service.update_status`).
+- **TELEMETRY** → `ping`/`stop` handled inline.
+
+Outbound: existing `segment`/`tool`/`turn_end` plus a generic `{type:"event",kind,text}` (renders a centered **`role:"event"`** pill in `ChatWindow`) and `lesson_timeout` / `lesson_ended` notices. Frontend: `useSessionChannel.sendEvent(type,data,triggersReply)` + `onEnded`; any component emits via the **mitt bus** `lib/sessionBus.ts` → `SessionPage` forwards to the WS.
+
+**Lifecycle (all logged):** `connected_at` stamped on accept → `WS lifetime=…` on close. A per-connection **watchdog** (`asyncio` task, ~20s tick, cancelled in `finally`) checks `_compute_lesson_clock` AND student-idle time. On close, if the appointment is still `started` it **auto-pauses** (flagged `auto_paused` so a reconnect auto-resumes; guarded by "still the active connection" so a replacing reconnect doesn't pause the new session).
+
+**Idle detection (watchdog):** `last_activity` is reset on any real student event (message/audio/puzzle/quiz). After **`_IDLE_CHECK_S`=300s** (5 min) of silence → `student_idle` stage 1 (AI sends a short "still there?"). After **`_IDLE_PAUSE_S`=420s** (7 min) → stage 2 (AI announces it's pausing, then the server **reliably pauses** via `_handle_lesson_pause`, freezing the clock). When the student sends a message again, `_resume_if_paused` resumes it. Idle never accrues while paused or while the AI is mid-turn.
+
+**End semantics:** AI may end **only** when `end_allowed` is set — i.e. after `lesson.timeout` or a student **End** click. On **time-up** the AI gives a short summary + goodbye and calls `end_lesson`; a **server fallback** (`_force_end_and_report`) guarantees termination + the report card. `lesson_end_request` does the same (encouraging recap → end). The `end_lesson` tool is hard-guarded by `session_state_service.is_end_allowed` → returns `end_not_allowed` mid-lesson.
+
+### Agentic Tools — split + per-turn filtering
+Three tool files: **`session_tools.py`** = in-lesson view only (slides + puzzles), **`platform_tools.py`** = platform/lifecycle/data (`generate_quiz`, mastery, `evaluate_answer`, `advance_lesson_phase`, `create_assignment`, `load_resource`, `pause_lesson`/`resume_lesson`, `end_lesson` (guarded), `generate_session_report`, web/deep search), **`chat_tools.py`** = `/chat` subset. `tools/registry.py` `make_tools(ctx, groups)` assembles by group: `teaching · puzzles · assessment · mastery · platform · lifecycle · research` (logs `TOOLS bound groups=…`).
+
+`_run_turn` computes a **small, intent-driven** group set via `select_tool_groups(event_kind, intent_text, has_slides, end_allowed, quiz_phase)` — driven by the student's keyword intent + the event kind + the quiz-timing gate. A plain teaching turn binds just `teaching` (or `puzzles` when there are no slides); `assessment` only on quiz intent / quiz phase; `lifecycle` (end/report) only when `end_allowed`; etc. (was ~14 tools every turn → now a handful). Passed to `gemini_service.stream_response_async(..., tool_groups=…)`; the LESSON STATE anchor advertises "AVAILABLE ACTIONS THIS TURN" so binding + prompt agree (anti-hallucination, per LangChain dynamic-tool-subsetting guidance).
+
+**Event persistence:** interactive/lifecycle events (puzzle/quiz/pause/resume/timeout/ended) are saved as **`role:"event"`** chat messages via `_emit_event` (echo + DB persist) so they survive a refresh/reopen; `chat_service.build_context` filters `role="event"` out of the LLM history (it would otherwise become a stray `AIMessage`). The WS **stays open during pause** (a `lesson_pause` event, not a socket close), so lifecycle events always reach the backend. Full plan: `~/.claude/plans/cryptic-orbiting-bentley.md`.
+
 ---
 
 ## Navigation Rules (important — don't break these)
