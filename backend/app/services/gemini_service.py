@@ -380,6 +380,7 @@ async def stream_response_async(
     image_data: Optional[str] = None,
     image_mime: str = "image/jpeg",
     tool_set: str = "session",  # "session" = full session tools, "chat" = /chat subset
+    tool_groups=None,  # Optional[set[str]] — per-turn group filter for the session set
 ) -> AsyncGenerator[str, None]:
     """
     True async streaming generator backed by LangChain astream().
@@ -402,8 +403,11 @@ async def stream_response_async(
             from app.tools.chat_tools import make_chat_tools
             tools = make_chat_tools(tool_context)
         else:
-            from app.tools.session_tools import make_session_tools
-            tools = make_session_tools(tool_context)
+            # Per-turn filtered session tools (registry). Defaults to the full set
+            # for back-compat when the caller doesn't pass tool_groups.
+            from app.tools.registry import make_tools, ALL_SESSION_GROUPS
+            groups = tool_groups if tool_groups is not None else ALL_SESSION_GROUPS
+            tools = make_tools(tool_context, groups)
     else:
         tools = []
 

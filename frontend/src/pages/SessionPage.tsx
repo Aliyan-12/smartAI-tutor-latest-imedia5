@@ -8,6 +8,7 @@ import ChatInput from "../components/ChatInput";
 import ResourceViewer, { type ResourceSlide } from "../components/ResourceViewer";
 import PuzzlePlayer from "../components/PuzzlePlayer";
 import type { PuzzlePayload } from "../components/puzzles/types";
+import { sessionBus, type SessionBusEvent } from "../lib/sessionBus";
 import AssessmentMode from "../components/AssessmentMode";
 import PostSessionScreen from "../components/PostSessionScreen";
 import { useVoice } from "../hooks/useVoice";
@@ -254,6 +255,21 @@ export default function SessionPage() {
         }
       } else if (tool === "clear_puzzle") {
         setCurrentPuzzle(null);
+      } else if (tool === "pause_lesson") {
+        // Server paused the lesson (e.g. inactivity auto-pause) — reflect it. Idempotent.
+        if (!isPaused) {
+          if (voiceActive) setVoiceActive(false);
+          if (timerRef.current) clearInterval(timerRef.current);
+          setPausedAt(Date.now());
+          setIsPaused(true);
+        }
+      } else if (tool === "resume_lesson") {
+        if (isPaused) {
+          const dur = pausedAt ? Date.now() - pausedAt : 0;
+          setTotalPausedMs((p) => p + dur);
+          setPausedAt(null);
+          setIsPaused(false);
+        }
       } else if (SLIDE_TOOLS.includes(tool)) {
         // The AI moved/showed a teaching resource — render it in the "learn" panel.
         if (data.resource_hub_id) {
@@ -283,8 +299,16 @@ export default function SessionPage() {
     },
     onCredits: () => {},
     onReady: (sid) => { sessionIdRef.current = sid; setSessionId(sid); void reloadHistory(); },
+    onEnded: () => {
+      // Server finalised the lesson (end_lesson / end-request fallback) → show report.
+      if (timerRef.current) clearInterval(timerRef.current);
+      setSessionState("ended");
+    },
   });
   hydrateRef.current = channel.hydrate;
+  // Stable ref so the session event-bus subscription doesn't re-bind each render.
+  const sendEventRef = useRef(channel.sendEvent);
+  sendEventRef.current = channel.sendEvent;
   const { messages, liveText, fillerText, busy, status: liveStatus } = channel;
   const messagesLenRef = useRef(0);
   messagesLenRef.current = messages.length;
@@ -309,17 +333,17 @@ export default function SessionPage() {
     ? "processing"
     : "listening";
 
-  // Open the session WebSocket while active; close it on pause; reopen on resume;
-  // close permanently when the lesson ends. Chat is independent of the timer.
+  // Keep the session WebSocket OPEN for the whole active lesson — including while
+  // paused — so lifecycle events (lesson_pause/resume, end-request) actually reach the
+  // backend and persist. Pausing is now a status/clock change (a lesson_pause event +
+  // the local timer freeze), not a socket close. Close permanently only when ended.
   useEffect(() => {
-    if (sessionState === "active" && !isPaused) {
+    if (sessionState === "active") {
       channel.resume(sessionIdRef.current);
-    } else if (sessionState === "active" && isPaused) {
-      channel.pause();
     } else if (sessionState === "ended") {
       channel.disconnect();
     }
-  }, [sessionState, isPaused]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [sessionState]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleJoin = async (overrideCode?: string) => {
     if (!appointmentId) return;
@@ -445,11 +469,10 @@ export default function SessionPage() {
       const remaining = Math.max(0, Math.floor((end - now) / 1000));
       setTimeRemaining(remaining);
       if (remaining <= 0) {
+        // SOFT time-up: stop the local countdown, but DON'T terminate here. The
+        // server watchdog owns time-up — it fires lesson.timeout, the AI gives a
+        // closing summary and may end_lesson; we navigate on `lesson_ended` (onEnded).
         if (timerRef.current) clearInterval(timerRef.current);
-        // Await status update before showing PostSessionScreen — avoids report 400s
-        appointmentsApi.updateStatus(apptId, "terminated")
-          .catch(() => {})
-          .finally(() => setSessionState("ended"));
       }
     };
 
@@ -495,6 +518,17 @@ export default function SessionPage() {
     return () => window.removeEventListener("tool_result", handler);
   }, []);
 
+  // Session event bus → forward any component's emitted event to the WS (→ the AI).
+  // Bound once (via sendEventRef) so it survives re-renders.
+  useEffect(() => {
+    const handler = (e: SessionBusEvent) => {
+      const triggersReply = e.type === "lesson_end_request" || e.type === "student_idle";
+      sendEventRef.current(e.type, e.data, triggersReply);
+    };
+    sessionBus.on("session", handler);
+    return () => sessionBus.off("session", handler);
+  }, []);
+
   useEffect(() => {
     const check = () => {
       setIsMobile(window.innerWidth < 1024);
@@ -507,30 +541,44 @@ export default function SessionPage() {
 
   const handlePause = async () => {
     if (isPaused) {
-      // Resume — credit all time since local pausedAt into totalPausedMs
+      // Resume — credit all time since local pausedAt into totalPausedMs.
       const now = Date.now();
       const localPauseDuration = pausedAt ? now - pausedAt : 0;
       setTotalPausedMs((p) => p + localPauseDuration);
       setPausedAt(null);
       setIsPaused(false);
-      await appointmentsApi.updateStatus(apptId, "started").catch(() => {});
+      // Event drives the backend status change (+ persists a chat event). REST is a
+      // fallback only when the socket is down.
+      if (channel.connected) channel.sendEvent("lesson_resume");
+      else await appointmentsApi.updateStatus(apptId, "started").catch(() => {});
     } else {
-      // Pause — stop the voice loop if active
       if (voiceActive) setVoiceActive(false);
       if (timerRef.current) clearInterval(timerRef.current);
       setPausedAt(Date.now());
       setIsPaused(true);
-      await appointmentsApi.updateStatus(apptId, "paused").catch(() => {});
+      if (channel.connected) channel.sendEvent("lesson_pause");
+      else await appointmentsApi.updateStatus(apptId, "paused").catch(() => {});
     }
   };
 
   const handleEndSession = async () => {
-    setEnding(true);
-    if (timerRef.current) clearInterval(timerRef.current);
-    await appointmentsApi.updateStatus(apptId, "terminated").catch(() => {});
     setShowEndConfirm(false);
-    setEnding(false);
-    setSessionState("ended");
+    // Event-driven end: when the socket is live, send lesson_end_request so the AI
+    // gives a short encouraging recap and ends (the server guarantees the exit via
+    // fallback); we navigate to the report when `lesson_ended` arrives (onEnded). The
+    // WS now stays open during pause, so this also works from a paused state. Only fall
+    // back to a direct REST end when there's no socket at all.
+    if (channel.connected) {
+      setEnding(true);
+      channel.sendEvent("lesson_end_request", {}, true);
+      setEnding(false);
+    } else {
+      setEnding(true);
+      if (timerRef.current) clearInterval(timerRef.current);
+      await appointmentsApi.updateStatus(apptId, "terminated").catch(() => {});
+      setEnding(false);
+      setSessionState("ended");
+    }
   };
 
   const handleStartPractice = async () => {

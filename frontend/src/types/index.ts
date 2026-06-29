@@ -28,7 +28,7 @@ export interface AuthResponse {
 export interface ChatMessage {
   id: number;
   chat_id: number;
-  role: "user" | "assistant" | "system" | "quiz_result";
+  role: "user" | "assistant" | "system" | "quiz_result" | "event";
   content: string;
   timestamp: string;
   imageUrl?: string;   // attached image preview (data URL) for the live session

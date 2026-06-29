@@ -214,6 +214,23 @@ export default function ChatWindow({
           );
         }
 
+        if (msg.role === "event") {
+          // Lifecycle / interactive event pill (puzzle solved, paused, time's up, ended)
+          return (
+            <div key={msg.id} className="chat-msg-animate" style={{ display: "flex", justifyContent: "center", padding: "6px 12px" }}>
+              <div style={{
+                background: "rgba(124,58,237,0.08)",
+                border: "1px solid rgba(124,58,237,0.25)",
+                borderRadius: 20, padding: "5px 14px",
+                fontSize: 12, fontWeight: 600, color: "#6d28d9",
+                textAlign: "center", maxWidth: "85%", lineHeight: 1.5,
+              }}>
+                {msg.content}
+              </div>
+            </div>
+          );
+        }
+
         if (msg.role === "quiz_result") {
           return (
             <div key={msg.id} className="chat-msg-animate" style={{ display: "flex", justifyContent: "center", padding: "6px 12px" }}>

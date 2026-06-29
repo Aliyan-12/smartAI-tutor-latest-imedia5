@@ -34,6 +34,8 @@ export interface SessionChannelOpts {
   onCredits?: (value: number) => void;
   onUserTranscript?: (text: string) => void;
   onReady?: (sessionId: string) => void;
+  /** The lesson ended server-side (end_lesson tool or end-request fallback) → navigate to the report. */
+  onEnded?: (data: Record<string, unknown>) => void;
 }
 
 const HEARTBEAT_MS = 25_000;
@@ -266,6 +268,19 @@ export function useSessionChannel(opts: SessionChannelOpts) {
       case "tool":
         optsRef.current.onTool?.(d.tool, d.data || {});
         break;
+      case "event":
+        // Lifecycle / interactive event → render a centered pill in the chat.
+        setMessages((prev) => [...prev, {
+          id: -Date.now(), chat_id: 0, role: "event" as const,
+          content: d.text || "", timestamp: new Date().toISOString(),
+        }]);
+        break;
+      case "lesson_timeout":
+        // Soft notice — the paired `event` frame already renders the pill.
+        break;
+      case "lesson_ended":
+        optsRef.current.onEnded?.(d.data || {});
+        break;
       case "credits":
         if (typeof d.value === "number") optsRef.current.onCredits?.(d.value);
         break;
@@ -406,11 +421,8 @@ export function useSessionChannel(opts: SessionChannelOpts) {
     const ok = _send({ type: "quiz_result", topic, score, strong, weak, tts: ttsEnabledRef.current });
     if (!ok) return;
     busyAt.current = true;
-    setMessages((prev) => [...prev, {
-      id: -Date.now(), chat_id: 0, role: "quiz_result" as const,
-      content: `Quiz completed: ${Math.round(score)}% on "${topic}"`,
-      timestamp: new Date().toISOString(),
-    }]);
+    // The server echoes + persists the "📊 Quiz …" event bubble (role:"event"),
+    // so we don't add an optimistic one here (avoids a duplicate that vanishes on refresh).
     setBusy(true);
     setStatus("waiting");
     armWatchdog();
@@ -433,11 +445,8 @@ export function useSessionChannel(opts: SessionChannelOpts) {
     });
     if (!ok) return;
     busyAt.current = true;
-    setMessages((prev) => [...prev, {
-      id: -Date.now(), chat_id: 0, role: "quiz_result" as const,
-      content: `Puzzle ${correct ? "solved ✓" : "attempted"}: ${prompt}`,
-      timestamp: new Date().toISOString(),
-    }]);
+    // The server echoes + persists the "🧩 Puzzle …" event bubble (role:"event"),
+    // so we don't add an optimistic one here.
     setBusy(true);
     setStatus("waiting");
     armWatchdog();
@@ -451,6 +460,24 @@ export function useSessionChannel(opts: SessionChannelOpts) {
       sendPuzzleResult(p.puzzleId, p.prompt, p.answer, p.correct);
     }
   }, [busy, sendPuzzleResult]);
+
+  /**
+   * Generic typed event → server (lesson_pause / lesson_resume / lesson_end_request /
+   * student_idle …). `triggersReply` marks the turn busy because the AI will respond
+   * (e.g. the end-request closing summary).
+   */
+  const sendEvent = useCallback((
+    type: string, data?: Record<string, unknown>, triggersReply = false,
+  ) => {
+    const ok = _send({ type, tts: ttsEnabledRef.current, ...(data || {}) });
+    if (!ok) { setError("Not connected — reconnecting…"); return; }
+    if (triggersReply) {
+      busyAt.current = true;
+      setBusy(true);
+      setStatus("waiting");
+      armWatchdog();
+    }
+  }, []);
 
   /**
    * Send a recorded utterance for the custom voice loop.
@@ -478,7 +505,7 @@ export function useSessionChannel(opts: SessionChannelOpts) {
   return {
     connected, status, messages, liveText, fillerText, busy, error,
     connect, disconnect, pause, resume,
-    sendMessage, sendQuizResult, sendPuzzleResult, sendAudio, stopTurn,
+    sendMessage, sendQuizResult, sendPuzzleResult, sendAudio, sendEvent, stopTurn,
     hydrate, setMessages, clearError,
   };
 }
