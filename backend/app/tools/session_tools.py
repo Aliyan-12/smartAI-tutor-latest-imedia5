@@ -40,6 +40,18 @@ class ToolContext:
     slide_moved: bool = False
 
 
+async def _clear_puzzle_on_slide(ctx: "ToolContext") -> None:
+    """Slides and puzzles are mutually-exclusive views of the Learn panel — moving to a
+    slide takes any on-screen puzzle off, so drop it from authoritative puzzle_state too.
+    Keeps the per-turn LESSON STATE anchor honest (no 'puzzle still showing' after a slide
+    move) and matches the frontend, which clears the puzzle overlay on any slide tool."""
+    from app.services import puzzle_service
+    try:
+        await puzzle_service.clear_puzzle_state(ctx.db, ctx.appointment_id)
+    except Exception as e:  # noqa: BLE001
+        logger.warning("clear puzzle_state on slide move failed: %s", e)
+
+
 def session_tool_groups(ctx: ToolContext) -> dict:
     """Build the in-lesson view tools, grouped by capability for the registry."""
 
@@ -59,10 +71,12 @@ def session_tool_groups(ctx: ToolContext) -> dict:
         # call. It still counts as this turn's slide move, so a stray sequential
         # advance/retreat afterwards is suppressed.
         ctx.slide_moved = True
-        return await slide_action(
+        result = await slide_action(
             ctx.db, ctx.appointment_id, mode="show",
             resource_hub_id=resource_hub_id, slide_index=slide_index,
         )
+        await _clear_puzzle_on_slide(ctx)
+        return result
 
     @tool
     async def advance_lesson_slide() -> dict:
@@ -84,7 +98,9 @@ def session_tool_groups(ctx: ToolContext) -> dict:
             )
             return payload
         ctx.slide_moved = True
-        return await slide_action(ctx.db, ctx.appointment_id, mode="advance")
+        result = await slide_action(ctx.db, ctx.appointment_id, mode="advance")
+        await _clear_puzzle_on_slide(ctx)
+        return result
 
     @tool
     async def retreat_lesson_slide() -> dict:
@@ -103,7 +119,9 @@ def session_tool_groups(ctx: ToolContext) -> dict:
             )
             return payload
         ctx.slide_moved = True
-        return await slide_action(ctx.db, ctx.appointment_id, mode="retreat")
+        result = await slide_action(ctx.db, ctx.appointment_id, mode="retreat")
+        await _clear_puzzle_on_slide(ctx)
+        return result
 
     @tool
     async def list_available_puzzles() -> dict:

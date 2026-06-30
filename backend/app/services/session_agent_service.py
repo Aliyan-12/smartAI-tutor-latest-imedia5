@@ -901,6 +901,7 @@ ALWAYS use this content as your PRIMARY teaching source when it is present.
 - JUMPING: use show_resource ONLY when the student explicitly asks to see a specific slide ("show me the touch slide") — it may skip directly to that slide. Never use it to race forward during normal teaching.
 - Each slide tool returns "slide_content" — the exact text on the slide now showing. ALWAYS base that turn's explanation on that exact slide_content and nothing further ahead.
 - TEACH LIKE A WARM HUMAN TUTOR, not a narrator. Use the slide as your backbone — cover its points — but bring it to life with your own casual real-world examples and simple analogies a child relates to ("It's a bit like…"), add a sentence or two of your own so it truly lands (don't read it word-for-word), and weave the student's answers back in. Stay on THIS slide's concept.
+- IF THE SLIDES DON'T MATCH THE TOPIC: if the on-screen slides are clearly about a different topic than the one you're booked to teach (e.g. the deck covers the five senses but the lesson is "The Human Body / organs"), do NOT keep forcing them. Once, briefly, switch approach — stop calling the slide tools and teach from your own expert knowledge, leading with a VISUAL PUZZLE (prefer an image puzzle, see below) for hands-on practice. Don't apologise repeatedly about the slides; just teach the right thing.
 - Call these tools SILENTLY (never write the call as text, never say "loading the next slide"). The viewer updates automatically."""
     else:
         slides_block = """TEACHING SLIDES — NONE FOR THIS LESSON:
@@ -1029,6 +1030,12 @@ Contractions always ("you've", "let's", "it's"). No headers. No bullet lists unl
 Celebrate correctly but briefly: "Exactly." / "Perfect." / "Spot on." — one word is often enough.
 Correct gently: "Not quite — it's actually..." / "Close — the key thing is..."
 NEVER say "Great question!" — just answer the question.
+
+PROFESSIONAL CONDUCT — stay composed and in control:
+- You are the expert running this lesson. Be calm, confident and concise — never flustered, never gushing.
+- Do NOT grovel or over-apologise. If the student points out a mistake (wrong slide, off-topic content), acknowledge it in AT MOST a short half-sentence ("Good catch —") then immediately fix it and move on. NEVER write "I am so sorry", "I got ahead of myself", "my apologies", or stack multiple apologies in a row.
+- Never repeat the same apology or self-correction twice. Fix it once, silently, and continue teaching.
+- Don't narrate your own mechanics ("let me change the slide for you", "let me get the slides caught up"). Just do it with the tool and teach.
 
 RULE 4 — SILENCE AND DISENGAGEMENT:
 If the student's message is blank, very short (".", "...", "hmm", "hello?"), random characters, or clearly looks like noise or accidental input:
@@ -1613,6 +1620,25 @@ async def build_lesson_state_anchor(
         except Exception:
             pass
 
+        # The EXACT puzzle_ids valid for this lesson + the label-diagram keys, so the
+        # model picks a real one instead of guessing (it was defaulting to 'label_diagram'
+        # / the plant). Image puzzles (identify_image / match_image) show real topic images.
+        try:
+            from app.services import puzzle_service as _pzs2
+            from app.services.puzzle_templates import DIAGRAMS as _DIAGS
+            _ids = [p["puzzle_id"] for p in _pzs2.list_available(
+                appointment.subject or "", appointment.key_stage or "")]
+            if _ids:
+                lines.append(
+                    "🧩 Valid puzzle_ids this lesson: " + ", ".join(_ids) + ". "
+                    "label_diagram keys: " + ", ".join(_DIAGS) + ". "
+                    "Pick the id that fits the concept — for naming real things (organs, "
+                    "animals, plants, places) PREFER identify_image / match_image (real "
+                    "images). Never invent an id or default to the plant."
+                )
+        except Exception:
+            pass
+
     lines.append(_puzzle_state_lines(pstate))
     if available_actions:
         lines.append(
@@ -1653,12 +1679,19 @@ def _is_quiz_phase(appointment) -> bool:
 def select_tool_groups(
     *, event_kind: str = "user_message", intent_text: Optional[str] = None,
     has_slides: bool = False, end_allowed: bool = False, quiz_phase: bool = False,
+    closing_stage: bool = False,
 ) -> set:
-    """Bind only a SMALL, intent-relevant set of tool groups this turn (web-backed
-    anti-hallucination: fewer tools per call). Driven by what the student just did /
-    asked — the event kind, keyword intent in their message, the quiz-timing gate, and
-    whether the lesson has slides / is allowed to end. The default teaching/answering
-    turn binds just the slide tools (or puzzles when there are no slides)."""
+    """Choose the tool groups to bind THIS turn — STATE-DRIVEN first, then query-driven.
+
+    1) STATE (where the lesson is right now) sets the base groups the current stage
+       needs: the core slide+puzzle view is always on; quiz tools once the session has
+       reached its quiz window; lifecycle (end + report) once the lesson is closing or
+       ending is allowed. This is what stops the model reaching for a tool the stage
+       requires (e.g. generate_session_report at wrap-up) only to find it unbound.
+    2) QUERY (what the student just asked) ADDS extra groups on top from keyword intent.
+
+    Kept deliberately small per turn (anti-hallucination), but never so small that the
+    stage's own tools are missing."""
     text = (intent_text or "").lower()
 
     def _has(*kw: str) -> bool:
@@ -1666,25 +1699,32 @@ def select_tool_groups(
 
     g: set = set()
 
-    # Lifecycle only when ending is genuinely on the table.
-    if end_allowed or event_kind in ("lesson_end_request", "lesson_timeout"):
+    # ── 1) STATE-DRIVEN base — the tools THIS lesson stage requires ──────────────
+    # Core in-lesson view: slides + puzzles are the primary interactive surface, so the
+    # model can ALWAYS switch between them (and never wants show_puzzle while it's
+    # unbound → silent no-op → "look at the puzzle" hallucination).
+    g.add("puzzles")
+    if has_slides:
+        g.add("teaching")
+    # Quiz window reached (state) → quiz tools ready.
+    if quiz_phase or event_kind == "quiz_result":
+        g.add("assessment")
+    # Lesson is closing / ending is on the table (state) → end + report bound, so a
+    # wrap-up turn ("ok, time's up, let's finish") always has generate_session_report
+    # and end_lesson available. end_lesson stays hard-guarded by is_end_allowed, so
+    # binding it early can NOT actually end the lesson before its time.
+    if end_allowed or closing_stage or event_kind in ("lesson_end_request", "lesson_timeout"):
         g.add("lifecycle")
 
-    # Event-driven intent (no user text on these turns).
-    if event_kind == "puzzle_result":
-        g.add("puzzles")
-    elif event_kind == "quiz_result":
-        g.add("assessment")
-
-    # Time-gated quizzing — let the AI quiz when the session is far enough along.
-    if quiz_phase:
-        g.add("assessment")
-
-    # Keyword intent from the student's actual words.
+    # ── 2) QUERY-DRIVEN add-ons — the student's keyword intent ───────────────────
     if _has("quiz", "test me", "test ", "exam", "assess my", "how am i doing"):
         g.add("assessment")
     if _has("puzzle", "practice", "let's try", "try one", "interactive", "drag", "game", "hands-on"):
         g.add("puzzles")
+    if _has("end the lesson", "end lesson", "end today", "end now", "end here", "let's end",
+            "lets end", "finish the lesson", "finish up", "wrap up", "we're done", "we are done",
+            "that's all", "thats all", "stop here", "time's up", "time up", "i'm done", "im done"):
+        g.add("lifecycle")
     if _has("homework", "assignment", "set me work", "to do at home", "revise later", "practice at home"):
         g.add("platform")
     if _has("show me", "slide", "resource", "diagram", "worksheet", "picture", "see the", "go to"):
@@ -1695,13 +1735,6 @@ def select_tool_groups(
         g.add("research")
     if _has("pause", "take a break", "brain break", "rest for", "stretch"):
         g.add("platform")  # pause_lesson
-
-    # Default teaching/answering turn (no strong intent) → keep it minimal.
-    if not (g - {"lifecycle"}):
-        if has_slides:
-            g.add("teaching")
-        else:
-            g.add("puzzles")  # no slides → hands-on practice is the natural default
 
     # Mastery is cheap + useful whenever practising or assessing.
     if g & {"puzzles", "assessment"}:
@@ -1867,10 +1900,20 @@ async def _run_turn(send, chat_id, user_id, *, saved_user_text, ai_content,
                     _appt_phase = await _load_appointment(db, appt_id)
                     _quiz_phase = _is_quiz_phase(_appt_phase) if _appt_phase else False
                 except Exception:
+                    _appt_phase = None
                     _quiz_phase = False
+                # Closing stage = lesson clock is in its final stretch (last ~15%, min 3
+                # min). At this stage bind lifecycle so a wrap-up turn has the report/end
+                # tools ready — the demonstrated "generate_session_report not bound" gap.
+                try:
+                    _elapsed, _remaining, _dur = _compute_lesson_clock(_appt_phase) if _appt_phase else (0, 0, 0)
+                    _closing = bool(_appt_phase) and _remaining <= max(3, round(_dur * 0.15))
+                except Exception:
+                    _closing = False
                 tool_groups_for_turn = select_tool_groups(
                     event_kind=event_kind, intent_text=saved_user_text,
                     has_slides=has_slides, end_allowed=_end_allowed, quiz_phase=_quiz_phase,
+                    closing_stage=_closing,
                 )
                 try:
                     _anchor = await build_lesson_state_anchor(

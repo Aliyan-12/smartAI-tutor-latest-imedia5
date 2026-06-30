@@ -604,7 +604,10 @@ async def sync_topic_images(force: bool = False, limit: Optional[int] = None,
                     "unit_hub_id": t.unit_hub_id, "subject_name": subject_name,
                     "key_stage": ks, "year_group": yr, **res,
                 })
-                counts[res["status"]] = counts.get(res["status"], 0) + 1
+                # resolve_image() returns status 'ok'/'none'/'error'; the progress dict
+                # tracks the resolved ('ok') rows under the key 'resolved'.
+                _ck = "resolved" if res["status"] == "ok" else res["status"]
+                counts[_ck] = counts.get(_ck, 0) + 1
                 await asyncio.sleep(0.1)  # be polite to the Wikipedia API
                 if len(batch) >= batch_size:
                     await _upsert_topic_images(batch)

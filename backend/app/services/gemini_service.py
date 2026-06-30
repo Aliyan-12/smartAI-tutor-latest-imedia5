@@ -531,7 +531,26 @@ async def stream_response_async(
             tool_name = tc["name"]
             tool_fn = tool_map.get(tool_name)
             if tool_fn is None:
-                logger.warning(f"Tool '{tool_name}' not found in tool_map")
+                # The model asked for a tool that isn't bound this turn. Feed the failure
+                # BACK to it (instead of silently dropping the call) so it can recover and
+                # does NOT narrate the action as done — that silent drop is exactly what
+                # made it say "look at the puzzle" when no show_puzzle ran.
+                logger.warning(f"Tool '{tool_name}' not found in tool_map (not bound this turn)")
+                tool_messages.append(
+                    ToolMessage(
+                        content=_json.dumps({
+                            "error": "tool_unavailable",
+                            "message": (
+                                f"The tool '{tool_name}' is not available this turn, so nothing "
+                                "happened on the student's screen. Do NOT tell the student you did "
+                                "this (no 'look at the puzzle/slide'). Continue with a normal typed "
+                                "response, or call one of the tools that ARE available."
+                            ),
+                        }),
+                        tool_call_id=tc["id"],
+                        name=tool_name,
+                    )
+                )
                 continue
             try:
                 result = await tool_fn.ainvoke(tc["args"])

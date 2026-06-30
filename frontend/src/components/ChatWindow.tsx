@@ -5,6 +5,43 @@ import type { ChatMessage } from "../types";
 
 const AI_LOGO = "/images/aitutor 4 schools-robo.png";
 
+// Claude-style collapsible "thinking" dropdown: a subtle toggle that expands the one-line
+// steps (tool labels + brief thoughts). Defined at MODULE scope (not inside ChatWindow) so
+// the per-second session-timer re-render never gives it a new identity — that remount was
+// what made the strip flicker every second. No avatar/logo, expanded while live, collapsed
+// once committed.
+function ThinkingStrip({ steps, live = false }: { steps: string[]; live?: boolean }) {
+  const [open, setOpen] = useState(live);
+  if ((!steps || steps.length === 0) && !live) return null;
+  const summary = live
+    ? "Thinking…"
+    : `Thought for ${steps.length} step${steps.length === 1 ? "" : "s"}`;
+  return (
+    <div className="thinking-wrap">
+      <button type="button" className="thinking-toggle" onClick={() => setOpen((o) => !o)}>
+        {live ? <span className="thinking-spin" /> : <span className="thinking-bulb">💭</span>}
+        <span className="thinking-summary">{summary}</span>
+        <ChevronDown size={13} className={`thinking-chev ${open ? "open" : ""}`} />
+      </button>
+      {open && (
+        <div className="thinking-body">
+          {steps?.map((s, i) => (
+            <div key={i} className="thinking-step">
+              <span className="thinking-check">✓</span>
+              <span className="thinking-text">{s}</span>
+            </div>
+          ))}
+          {live && steps.length === 0 && (
+            <div className="thinking-step">
+              <span className="thinking-text thinking-live">Working on it…</span>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 interface Props {
   messages: ChatMessage[];
   streaming: boolean;
@@ -82,34 +119,6 @@ export default function ChatWindow({
     </div>
   );
 
-  // Claude-style "thinking" strip: a faded vertical list of one-line steps showing what
-  // the tutor did (tool labels + brief thought lines). `live` adds a trailing spinner
-  // while the turn is still running.
-  const ThinkingStrip = ({ steps, live }: { steps: string[]; live?: boolean }) => {
-    if ((!steps || steps.length === 0) && !live) return null;
-    return (
-      <div className="message assistant chat-msg-animate" style={{ alignItems: "flex-start" }}>
-        <AiAvatar />
-        <div className="message-content" style={{ paddingTop: 2 }}>
-          <div className="thinking-strip">
-            {steps?.map((s, i) => (
-              <div key={i} className="thinking-step">
-                <span className="thinking-check">✓</span>
-                <span className="thinking-text">{s}</span>
-              </div>
-            ))}
-            {live && (
-              <div className="thinking-step">
-                <span className="thinking-spin" />
-                <span className="thinking-text thinking-live">Thinking…</span>
-              </div>
-            )}
-          </div>
-        </div>
-      </div>
-    );
-  };
-
   return (
     <div ref={containerRef} style={{ display: "contents" }}>
       <style>{`
@@ -169,40 +178,40 @@ export default function ChatWindow({
         .ai-free-text p:last-child { margin-bottom: 0; }
 
         @keyframes thinkSpin { to { transform: rotate(360deg); } }
-        @keyframes thinkFade { from { opacity: 0; transform: translateY(3px); } to { opacity: 1; transform: translateY(0); } }
-        .thinking-strip {
-          display: flex;
-          flex-direction: column;
-          gap: 5px;
-          padding: 2px 0;
+        @keyframes thinkBody { from { opacity: 0; transform: translateY(-2px); } to { opacity: 1; transform: translateY(0); } }
+        .thinking-wrap { margin: 2px 0 8px 0; max-width: 88%; }
+        .thinking-toggle {
+          display: inline-flex; align-items: center; gap: 7px;
+          background: transparent; border: none; cursor: pointer;
+          padding: 4px 8px; border-radius: 9px;
+          color: var(--text-muted, #64748b);
+          font-size: 0.82rem; font-weight: 600; font-family: inherit;
+          transition: background 0.15s ease;
         }
-        .thinking-step {
-          display: flex;
-          align-items: center;
-          gap: 8px;
-          animation: thinkFade 0.25s ease;
+        .thinking-toggle:hover { background: rgba(124,58,237,0.08); color: #6d28d9; }
+        .thinking-bulb { font-size: 13px; line-height: 1; }
+        .thinking-summary { letter-spacing: 0.01em; }
+        .thinking-chev { opacity: 0.7; transition: transform 0.18s ease; }
+        .thinking-chev.open { transform: rotate(180deg); }
+        .thinking-body {
+          margin: 5px 0 0 12px;
+          padding: 8px 0 8px 14px;
+          border-left: 2px solid rgba(124,58,237,0.22);
+          display: flex; flex-direction: column; gap: 7px;
+          animation: thinkBody 0.18s ease;
         }
+        .thinking-step { display: flex; align-items: center; gap: 8px; }
         .thinking-check {
-          flex-shrink: 0;
-          width: 15px;
-          font-size: 11px;
-          font-weight: 800;
-          color: #16a34a;
-          text-align: center;
+          flex-shrink: 0; width: 15px;
+          font-size: 11px; font-weight: 800; color: #16a34a; text-align: center;
         }
         .thinking-spin {
-          flex-shrink: 0;
-          width: 12px; height: 12px;
+          flex-shrink: 0; width: 12px; height: 12px;
           border-radius: 50%;
-          border: 2px solid rgba(124,58,237,0.25);
-          border-top-color: #7c3aed;
+          border: 2px solid rgba(124,58,237,0.25); border-top-color: #7c3aed;
           animation: thinkSpin 0.7s linear infinite;
         }
-        .thinking-text {
-          font-size: 0.86rem;
-          color: var(--text-muted, #64748b);
-          line-height: 1.4;
-        }
+        .thinking-text { font-size: 0.85rem; color: var(--text-muted, #64748b); line-height: 1.4; }
         .thinking-live { font-style: italic; color: #7c3aed; }
       `}</style>
 

@@ -273,6 +273,11 @@ export default function SessionPage() {
       } else if (SLIDE_TOOLS.includes(tool)) {
         // The AI moved/showed a teaching resource — render it in the "learn" panel.
         if (data.resource_hub_id) {
+          // Slides and puzzles are mutually-exclusive views: a puzzle overlays the
+          // slide while active, so moving to a slide must take the puzzle DOWN —
+          // otherwise the slide change is invisible behind a stuck puzzle (the
+          // "slides won't show when a puzzle is up" switching bug).
+          setCurrentPuzzle(null);
           setCurrentResource({
             resourceHubId: data.resource_hub_id as number,
             title: (data.title as string) || "",
