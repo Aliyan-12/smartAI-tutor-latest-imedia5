@@ -954,6 +954,12 @@ QUIZ STATUS: {quiz_timing_note}
 TEACHING STYLE — FOLLOW THESE STRICTLY:
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
+RULE A — YOU ARE AN AGENTIC TUTOR, NOT A CHATBOT — ACT ON THE LESSON STATE:
+- A "LESSON STATE" block is appended to EVERY student message. It is live and authoritative. It contains a "⚡ DO NOW" line — that is your TOP PRIORITY this turn. Perform it by calling the right tool (advance_lesson_slide / generate_quiz / show_puzzle / generate_session_report + end_lesson), then teach around it.
+- Drive the lesson off the STATE, not off whether the student asked. If time says move on, MOVE ON. If the quiz window is open, SET THE QUIZ. If a slide's point is done, ADVANCE THE SLIDE. If time's up, RECAP → report → end. Don't wait to be told.
+- Only call tools listed under "AVAILABLE ACTIONS THIS TURN". If you need one that isn't listed, do the teaching alternative instead — never pretend an action happened.
+- Lead with a short natural line about what you're doing ("Let's try a quick puzzle on this —"), then call the tool. The action shows up for the student; don't read out the tool name or its parameters.
+
 RULE 0 — RESPONSE LENGTH IS PROPORTIONAL TO STUDENT INPUT (most important rule):
 HARD LIMITS (always enforced):
   • Maximum 5 sentences per teaching turn (not counting worked examples)
@@ -1573,11 +1579,14 @@ async def _phase_and_next(db: AsyncSession, appt_id: int, elapsed: int, duration
 async def build_lesson_state_anchor(
     db: AsyncSession, appt_id: int, student_id: int, pstate: Optional[dict],
     available_actions: Optional[str] = None,
+    *, has_slides: bool = False, quiz_phase: bool = False,
+    closing_stage: bool = False, end_allowed: bool = False,
 ) -> str:
     """A compact, single-purpose live snapshot of the whole lesson, injected at maximum
     recency on EVERY turn so the model never loses track as the context grows:
       • real-time lesson clock (elapsed/remaining, server-computed)
       • current phase/step + what's next for the student
+      • ONE imperative "act on the clock" directive (advance / quiz / wrap up / end)
       • the student's learning status (strong / needs-work topics)
       • the interactive puzzle on screen (if any)
       • the tools actually available THIS turn (so binding + prompt agree)
@@ -1606,6 +1615,31 @@ async def build_lesson_state_anchor(
                 lines.append(next_line)
         except Exception:
             logger.warning("phase/next anchor failed for appt %s", appt_id, exc_info=True)
+
+        # ⚡ ONE imperative, state-driven action for THIS turn — the model kept waiting to
+        # be asked instead of acting on the clock (forgetting to advance slides, set the
+        # quiz, or wrap up when the time called for it). Driven by lesson STATE, not by
+        # anything the student said. Most-urgent first.
+        if end_allowed:
+            lines.append(
+                "⚡ DO NOW: time is up — give a short 2–3 sentence recap of what they learned, "
+                "then call generate_session_report and end_lesson. Do NOT start new teaching."
+            )
+        elif closing_stage:
+            lines.append(
+                "⚡ DO NOW: the lesson is in its final minutes — start wrapping up with a quick "
+                "recap and ONE last piece of practice. Don't open a brand-new topic."
+            )
+        elif quiz_phase:
+            lines.append(
+                "⚡ DO NOW: the quiz window is OPEN — unless you've already quizzed this session, "
+                "finish the current point and call generate_quiz yourself (don't wait to be asked)."
+            )
+        elif has_slides:
+            lines.append(
+                "⚡ DO NOW: keep the slides in sync — once the student has engaged with the slide "
+                "on screen (answered / 'ok' / 'next'), call advance_lesson_slide before teaching on."
+            )
         try:
             mastery_rows = await _load_topic_mastery(
                 db, student_id, appointment.subject or "", appointment.key_stage or ""
@@ -1919,6 +1953,8 @@ async def _run_turn(send, chat_id, user_id, *, saved_user_text, ai_content,
                     _anchor = await build_lesson_state_anchor(
                         db, appt_id, user_id, _pstate,
                         available_actions=_describe_actions(tool_groups_for_turn),
+                        has_slides=has_slides, quiz_phase=_quiz_phase,
+                        closing_stage=_closing, end_allowed=_end_allowed,
                     )
                     ai_content = f"{ai_content}\n\n{_anchor}"
                 except Exception:

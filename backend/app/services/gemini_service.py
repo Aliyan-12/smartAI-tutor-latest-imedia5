@@ -523,6 +523,12 @@ async def stream_response_async(
         # text is what the student sees → "execute tool, then respond".
         if round_text.strip():
             preamble_text = round_text
+            # Surface that "about to do X" line as a THINKING step (not response text),
+            # so the agentic loop is visible — intent → tool → response — without risking
+            # a duplicate answer bubble (the post-tool round carries the real reply).
+            _pre = _condense_thought(round_text)
+            if _pre:
+                yield f"\n[THINK:{_pre}]\n"
 
         tool_map = {t.name: t for t in tools}
         tool_messages = []
