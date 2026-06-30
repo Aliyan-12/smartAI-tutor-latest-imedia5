@@ -1060,6 +1060,7 @@ VISUAL PUZZLES — PRACTISE HANDS-ON (Maths/Science), PROACTIVELY:
 - This is your DEFAULT way to practise. Teach the concept first (use the slides), THEN when it's time to practise, LEAD with a puzzle — you do NOT wait for the student to ask. Say e.g. "Let's try one together — look at your screen," then show it.
 - AT EACH PRACTICE MOMENT decide: (1) call list_available_puzzles, (2) IF a puzzle fits the exact concept you just taught (for this subject + key_stage), call show_puzzle(puzzle_id, params) SILENTLY, tell the student what to do, then STOP and wait — their attempt returns as a [PUZZLE RESULT]. (3) IF nothing fits that concept, FALL BACK to a normal typed practice question (as you do now). Never invent a puzzle_id.
 - RHYTHM per concept: teach (slides) → ONE puzzle to practise → on success move to the next concept. Only use a typed question when the concept has no matching puzzle.
+- CHOOSE BY CATEGORY: list_available_puzzles tags each puzzle with a category (labelling, matching, recognition, sorting, sequencing, counting, fractions, number, geometry, data, algebra). Pick the category that fits the concept. For recognition/vocabulary (naming a structure, organ, shape, place, etc.) PREFER the image puzzles — 'identify_image' (show a real image, name it) or 'match_image' (match real images to names); they pull genuine images of THIS lesson's topic. If show_puzzle returns 'no_catalog_images', that topic has no images yet — just ask a typed question instead.
 - AGE-APPROPRIATE: scale the numbers/difficulty to the student's key stage AND year group — small numbers and simple fractions for KS1/early-primary years, larger values and harder concepts for older years. Only use puzzles list_available_puzzles offers for this subject + key stage.
 - On a CORRECT result: brief praise, then continue (next concept, or clear_puzzle and teach on). On INCORRECT: ONE hint tied to what's on screen, invite another try on the same puzzle — don't reveal the answer.
 - Don't spam — one focused puzzle per concept, then move on. If the student explicitly asks for a puzzle, show one immediately.
@@ -1283,6 +1284,8 @@ Be age-appropriate for {key_stage}. Return ONLY valid JSON, no markdown."""
 # Bound concurrent Kokoro inferences across all sessions (avoid CPU oversubscription).
 _TTS_MAX_CONCURRENCY = int(os.getenv("TTS_MAX_CONCURRENCY", "4"))
 _tts_semaphore = asyncio.Semaphore(_TTS_MAX_CONCURRENCY)
+# Strong refs to in-flight background TTS tasks so they aren't GC'd mid-synthesis.
+_bg_tts_tasks: set = set()
 
 _MAX_SEGMENT_CHARS = 240
 _MIN_TTS_CHARS = 3
@@ -1356,75 +1359,45 @@ def _wav_duration_ms(wav: bytes) -> int:
         return 0
 
 
-async def build_segment(text: str, seq: int, tts: bool) -> dict:
-    """{type:"segment"} payload: display text (markdown/newlines preserved for the
-    live stream) + optional bundled audio (TTS runs on the stripped text)."""
-    display = strip_display_markers(text)          # keep newlines/spacing for markdown
-    tts_src = display.strip()                       # Kokoro gets clean text only
+async def _tts_segment(send, seq: int, text: str, turn_id: str) -> None:
+    """Synthesise ONE segment's Kokoro audio OFF the critical path and ship it as a
+    separate `segment_audio` frame. The text segment was already sent, so a slow or
+    failed clip never delays the on-screen reveal. ALWAYS emits exactly one frame per
+    seq (a null clip when the text is too short or Kokoro fails) so the client's in-order
+    audio queue never stalls waiting for a seq that will never come. Tagged with turn_id
+    so the client drops audio left over from a previous turn (seq restarts each turn)."""
+    tts_src = strip_display_markers(text).strip()       # Kokoro gets clean text only
     audio_b64 = None
-    duration_ms = None
-    if tts and len(tts_src) >= _MIN_TTS_CHARS:
+    duration_ms = 0
+    if len(tts_src) >= _MIN_TTS_CHARS:
         try:
             from app.services.voice_agent_service import text_to_speech
             async with _tts_semaphore:
                 wav, _mime = await asyncio.to_thread(text_to_speech, tts_src)
             audio_b64 = base64.b64encode(wav).decode("ascii")
             duration_ms = _wav_duration_ms(wav)
-        except Exception as e:  # noqa: BLE001 - a failed clip must not break the turn
+            logger.debug("SEGMENT audio seq=%s ms=%s", seq, duration_ms)
+        except Exception as e:  # noqa: BLE001 - a failed/late clip must never break the turn
             logger.warning("Segment TTS failed (seq=%s): %s", seq, e)
-    return {"type": "segment", "seq": seq, "text": display, "audio_b64": audio_b64, "duration_ms": duration_ms}
-
-
-# ===========================================================================
-# Filler phrases  (merged from filler_service)
-# ===========================================================================
-
-_manifest_cache: Optional[dict] = None
-
-
-def voices_dir() -> Path:
-    """uploads/voices/ — sibling of settings.upload_dir, matches the seeder."""
-    return Path(settings.upload_dir).resolve().parent / "voices"
-
-
-def get_manifest(force_reload: bool = False) -> dict:
-    """Load (and cache) uploads/voices/manifest.json produced by the seeder."""
-    global _manifest_cache
-    if _manifest_cache is not None and not force_reload:
-        return _manifest_cache
-    path = voices_dir() / "manifest.json"
-    if not path.exists():
-        logger.warning("Filler manifest not found at %s — run: python -m app.seed_voice_fillers", path)
-        _manifest_cache = {"categories": {}, "count": 0}
-    else:
-        try:
-            _manifest_cache = json.loads(path.read_text(encoding="utf-8"))
-        except Exception as e:  # noqa: BLE001
-            logger.error("Failed to read filler manifest: %s", e)
-            _manifest_cache = {"categories": {}, "count": 0}
-    return _manifest_cache
-
-
-def _random_phrase(category: str) -> Optional[dict]:
-    bucket = get_manifest().get("categories", {}).get(category)
-    if not bucket or not bucket.get("phrases"):
-        return None
-    return random.choice(bucket["phrases"])
-
-
-def get_neutral_filler() -> Optional[dict]:
-    """A short NEUTRAL bridge ("Okay.", "Right.") + its audio, played the instant the
-    student sends — covers the <1s before the model's first sentence (the real reaction)."""
-    phrase = _random_phrase("neutral")
-    if not phrase:
-        return None
-    audio_b64 = None
     try:
-        wav = (voices_dir() / phrase["file"]).read_bytes()
-        audio_b64 = base64.b64encode(wav).decode("ascii")
-    except Exception as e:  # noqa: BLE001
-        logger.warning("Neutral filler clip read failed (%s): %s", phrase.get("file"), e)
-    return {"text": phrase["text"], "audio_b64": audio_b64}
+        await send({"type": "segment_audio", "seq": seq, "turn_id": turn_id,
+                    "audio_b64": audio_b64, "duration_ms": duration_ms})
+    except Exception:
+        pass
+
+
+async def stream_segment(send, seq: int, sentence: str, *, tts: bool, turn_id: str) -> None:
+    """Send a segment's display TEXT immediately (GPT-style fast streaming), then — if
+    TTS is on — synthesise its audio in the BACKGROUND and ship it as a later
+    `segment_audio` frame (one per seq, possibly null). Text never waits on Kokoro.
+    Shared by the session and /chat turn pipelines."""
+    display = strip_display_markers(sentence)           # keep newlines/spacing for markdown
+    await send({"type": "segment", "seq": seq, "turn_id": turn_id, "text": display})
+    logger.debug("SEGMENT text seq=%s len=%s", seq, len(display))
+    if tts:
+        t = asyncio.create_task(_tts_segment(send, seq, display, turn_id))
+        _bg_tts_tasks.add(t)
+        t.add_done_callback(_bg_tts_tasks.discard)
 
 
 # ===========================================================================
@@ -1750,12 +1723,12 @@ async def _run_turn(send, chat_id, user_id, *, saved_user_text, ai_content,
     slide — show the current slide and inject its content + a fresh slide-progression
     directive so the AI teaches slide-by-slide reliably. Off for quiz-feedback turns.
     """
-    await send({"type": "turn_start", "turn_id": uuid4().hex})
+    turn_id = uuid4().hex
+    await send({"type": "turn_start", "turn_id": turn_id})
 
-    if tts:
-        nf = await asyncio.to_thread(get_neutral_filler)
-        if nf and nf.get("audio_b64"):
-            await send({"type": "filler", "text": nf["text"], "audio_b64": nf["audio_b64"]})
+    # Steps shown in the "thinking" strip this turn (tool labels + brief thought lines).
+    # Persisted as a role="thinking" message at the end so they survive a refresh.
+    thinking_steps: list = []
 
     if image_b64 and image_mime and not image_mime.startswith("image/"):
         doc_text = await asyncio.to_thread(_extract_doc_text, image_b64, image_mime)
@@ -1808,10 +1781,30 @@ async def _run_turn(send, chat_id, user_id, *, saved_user_text, ai_content,
                             _yg = getattr(_prof, "year_group", None) if _prof else None
                         except Exception:
                             _yg = None
+                    # Lesson unit/topic → scope catalog-image puzzles to the actual topic.
+                    _unit_title = None
+                    _topic_title = None
+                    try:
+                        from app.services.session_resource_service import _parse_description as _pd
+                        _topics = _pd(getattr(appt, "description", "") or "").get("topics") or []
+                        _unit_title = _topics[0] if _topics else None
+                    except Exception:
+                        pass
+                    try:
+                        from app.models.lesson_plan import LessonPlan as _LP3
+                        _lp = (await db.execute(
+                            select(_LP3).where(_LP3.appointment_id == appt_id)
+                        )).scalar_one_or_none()
+                        if _lp:
+                            _topic_title = getattr(_lp, "subtopic", None) or getattr(_lp, "unit_name", None) or _topic_title
+                            _unit_title = _unit_title or getattr(_lp, "unit_name", None)
+                    except Exception:
+                        pass
                     tool_context = ToolContext(
                         db=db, student_id=user_id, appointment_id=appt_id,
                         subject=appt.subject, key_stage=appt.key_stage,
                         year_group=_yg, chat_session_id=chat.session_id,
+                        unit_title=_unit_title, topic_title=_topic_title,
                     )
             except Exception:
                 logger.warning("ToolContext build failed for appt %s", appt_id)
@@ -1901,6 +1894,10 @@ async def _run_turn(send, chat_id, user_id, *, saved_user_text, ai_content,
         ):
             token = _coerce_str(raw)
             stripped = token.strip()
+            # Brief reasoning summary → thinking strip (never shown as answer text).
+            if stripped.startswith("[THINK:") and stripped.endswith("]"):
+                await _emit_thinking(send, thinking_steps, stripped[len("[THINK:"):-1])
+                continue
             if stripped.startswith("[TOOL_RESULT:") and stripped.endswith("]"):
                 try:
                     tr = json.loads(stripped[len("[TOOL_RESULT:"):-1])
@@ -1912,6 +1909,10 @@ async def _run_turn(send, chat_id, user_id, *, saved_user_text, ai_content,
                             _tool, _data.get("render"), _data.get("puzzle_id"), _data.get("error"),
                         )
                     await send({"type": "tool", "tool": _tool, "data": _data})
+                    # Friendly one-line "thinking" step for the tool just run.
+                    _label = _THINKING_LABELS.get(_tool)
+                    if _label:
+                        await _emit_thinking(send, thinking_steps, _label)
                     # end_lesson succeeded → persist the event + tell the client to open the report.
                     if _tool == "end_lesson" and _data.get("ended"):
                         from app.schemas.session_events import lesson_ended_frame, EVENT_LESSON_ENDED
@@ -1922,12 +1923,12 @@ async def _run_turn(send, chat_id, user_id, *, saved_user_text, ai_content,
                 continue
             full.append(token)
             for sentence in segmenter.feed(token):
-                await send(await build_segment(sentence, seq, tts))
+                await stream_segment(send, seq, sentence, tts=tts, turn_id=turn_id)
                 seq += 1
 
         remainder = segmenter.flush()
         if remainder:
-            await send(await build_segment(remainder, seq, tts))
+            await stream_segment(send, seq, remainder, tts=tts, turn_id=turn_id)
             seq += 1
 
         complete = "".join(full)
@@ -1936,6 +1937,12 @@ async def _run_turn(send, chat_id, user_id, *, saved_user_text, ai_content,
             await send({"type": "error", "message": "The tutor couldn't generate a reply — please try again.", "recoverable": True})
             await send({"type": "turn_end", "message_id": None, "full_text": ""})
             return
+
+        # Persist the thinking steps FIRST (lower id → renders just above the answer),
+        # mirroring how role="event" pills persist. build_context keeps only user/assistant,
+        # so this never leaks into the LLM history.
+        if thinking_steps:
+            await chat_service.add_message(db, chat_id, "thinking", "\n".join(thinking_steps))
 
         msg = await chat_service.add_message(db, chat_id, "assistant", clean)
         message_id = msg.id
@@ -1955,6 +1962,42 @@ async def _run_turn(send, chat_id, user_id, *, saved_user_text, ai_content,
         await db.commit()
 
     await send({"type": "turn_end", "message_id": message_id, "full_text": clean})
+
+
+# Friendly one-line labels shown in the "thinking" strip when a tool runs — plain
+# language, no technical detail. Internal lookups (list_available_puzzles) and tools
+# already surfaced as event pills (pause/resume/end_lesson) are intentionally omitted.
+_THINKING_LABELS: dict = {
+    "show_puzzle": "🧩 Setting up a puzzle",
+    "clear_puzzle": "🧩 Clearing the puzzle",
+    "generate_quiz": "📝 Putting together a quick quiz",
+    "evaluate_answer": "✓ Checking your answer",
+    "get_student_mastery": "📊 Reviewing your progress",
+    "update_topic_mastery": "📊 Updating your progress",
+    "advance_lesson_slide": "➡️ Moving to the next slide",
+    "retreat_lesson_slide": "⬅️ Going back a slide",
+    "show_resource": "📑 Opening the slide",
+    "load_resource": "📑 Finding the right resource",
+    "advance_lesson_phase": "📍 Moving to the next part of the lesson",
+    "create_assignment": "📋 Setting some homework",
+    "generate_session_report": "📄 Writing your lesson report",
+    "web_search": "🔎 Searching the web",
+    "deep_research": "🔎 Researching that in depth",
+}
+
+
+async def _emit_thinking(send, steps: list, text: str) -> None:
+    """Send ONE live thinking-strip step and accumulate it for end-of-turn persistence.
+    Best-effort: a failed send never breaks the turn."""
+    text = (text or "").strip()
+    if not text:
+        return
+    steps.append(text)
+    logger.info("THINKING step=%r", text)
+    try:
+        await send({"type": "thinking", "text": text})
+    except Exception:
+        pass
 
 
 async def _emit_event(send, chat_id, kind: str, text: str) -> None:

@@ -30,6 +30,10 @@ class ToolContext:
     key_stage: str
     year_group: Optional[str] = None
     chat_session_id: Optional[str] = None
+    # Lesson unit/topic — used to scope catalog-image puzzles (match/identify) to the
+    # actual topic being taught.
+    unit_title: Optional[str] = None
+    topic_title: Optional[str] = None
     # Turn-scoped guard: at most ONE slide move (advance/retreat/show) per reply,
     # so the AI can't race several slides ahead in a single turn. Reset each turn
     # because a fresh ToolContext is built per turn in _run_turn.
@@ -105,9 +109,13 @@ def session_tool_groups(ctx: ToolContext) -> dict:
     async def list_available_puzzles() -> dict:
         """
         List the interactive visual puzzles available for THIS lesson's subject and
-        key stage (e.g. fraction bars, number lines, label-the-diagram). Call this
-        before show_puzzle so you choose a real puzzle_id with valid params — never
-        invent a puzzle_id. Returns each puzzle's id, what it shows, and its params,
+        key stage, each tagged with a CATEGORY (labelling, matching, recognition,
+        sorting, sequencing, counting, fractions, number, geometry, data, algebra).
+        Includes image puzzles that show REAL topic images: 'identify_image' (show an
+        image, name it) and 'match_image' (match images to names) — prefer these for
+        recognition/vocabulary practice on the lesson's topic. Call this before
+        show_puzzle so you choose a real puzzle_id with valid params — never invent a
+        puzzle_id. Returns each puzzle's id, category, what it shows, and its params,
         plus the student's key_stage + year_group so you scale the numbers to their age.
         """
         from app.services import puzzle_service
@@ -162,11 +170,31 @@ def session_tool_groups(ctx: ToolContext) -> dict:
                 "available": avail,
             }
 
+        # Image puzzles (match/identify) pull REAL topic images from the cached catalog,
+        # scoped to this lesson's subject/key stage/topic. Inject them as params.
+        if resolved in ("identify_image", "match_image"):
+            try:
+                from app.services import topic_image_service
+                catalog = await topic_image_service.get_for(
+                    ctx.db, subject=ctx.subject, key_stage=ctx.key_stage,
+                    year_group=ctx.year_group, topic_title=ctx.topic_title, limit=12,
+                )
+            except Exception as e:  # noqa: BLE001
+                logger.warning("topic-image catalog lookup failed: %s", e)
+                catalog = []
+            params = {**(params or {}), "_catalog": catalog}
+
         payload = puzzle_service.build(resolved, params)
         if payload.get("error"):
             logger.warning("show_puzzle: build error for id=%s: %s", resolved, payload.get("error"))
-            return {"action": "show_puzzle", "error": payload.get("error"), "available": avail,
-                    "message": "Could not build that puzzle — ask a typed question instead."}
+            _msg = (
+                "There aren't enough topic images for an image puzzle here — ask a typed "
+                "question or pick a different puzzle_id instead."
+                if payload.get("error") == "no_catalog_images"
+                else "Could not build that puzzle — ask a typed question instead."
+            )
+            return {"action": "show_puzzle", "error": payload.get("error"),
+                    "available": avail, "message": _msg}
 
         # Persist as the authoritative on-screen puzzle and stamp a fresh instance_id
         # so the frontend remounts a clean puzzle (no leftover solved/locked state from

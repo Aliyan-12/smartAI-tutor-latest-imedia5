@@ -200,6 +200,28 @@ def _should_suppress(content: str) -> bool:
     return False
 
 
+def _condense_thought(text: str) -> str:
+    """Reduce a streamed reasoning summary to ONE short, student-friendly line for the
+    thinking strip — first meaningful sentence, markdown stripped, truncated. Returns ""
+    when there's nothing worth showing."""
+    if not text:
+        return ""
+    import re as _re2
+    t = text.strip()
+    # Drop markdown emphasis/headers/bullets the summary sometimes carries.
+    t = _re2.sub(r"[*_`#>]+", "", t)
+    t = _re2.sub(r"\s+", " ", t).strip()
+    if not t:
+        return ""
+    # First sentence (or first line) only.
+    m = _re2.search(r"[.!?]", t)
+    line = t[: m.end()] if m else t
+    line = line.strip().rstrip(".").strip()
+    if len(line) > 120:
+        line = line[:117].rstrip() + "…"
+    return line
+
+
 def _friendly_error(exc: Exception) -> str:
     msg = str(exc).lower()
     if "quota" in msg or "resource_exhausted" in msg or "429" in msg:
@@ -432,16 +454,29 @@ async def stream_response_async(
     for _round in range(4):   # max 4 tool-call rounds
         full_response = None
         round_parts: List[str] = []   # buffer THIS round's visible text
+        thought_buf = ""              # THIS round's reasoning (thought summary), if any
 
         try:
             async for chunk in llm.astream(messages):
-                # chunk.content can be a list of parts (Gemini multi-part) or a plain string
+                # chunk.content can be a list of parts (Gemini multi-part) or a plain string.
+                # With thought summaries on, some parts are reasoning ("thought") — those go
+                # to the thinking strip, never to the visible answer.
                 content = chunk.content
                 if isinstance(content, list):
-                    content = "".join(
-                        part.get("text", "") if isinstance(part, dict) else str(part)
-                        for part in content
-                    )
+                    visible_bits: List[str] = []
+                    for part in content:
+                        if isinstance(part, dict):
+                            if part.get("thought"):
+                                thought_buf += part.get("text", "") or ""
+                            else:
+                                visible_bits.append(part.get("text", "") or "")
+                        else:
+                            visible_bits.append(str(part))
+                    content = "".join(visible_bits)
+                # Some integration versions stash the reasoning summary here instead.
+                _rk = getattr(chunk, "additional_kwargs", None)
+                if isinstance(_rk, dict) and _rk.get("reasoning_content"):
+                    thought_buf += str(_rk["reasoning_content"])
                 if content:
                     if _should_suppress(content):
                         logger.debug(f"Suppressed internal token: {content[:80]!r}")
@@ -458,6 +493,12 @@ async def stream_response_async(
             logger.error(f"LangChain astream error (round {_round}): {e}")
             yield f"[Error: {_friendly_error(e)}]"
             return
+
+        # Surface a short one-line "thinking" summary for this round (best-effort) BEFORE
+        # the round's visible text / tool results, so the UI shows it as a leading step.
+        _think = _condense_thought(thought_buf)
+        if _think:
+            yield f"\n[THINK:{_think}]\n"
 
         round_text = "".join(round_parts)
         tool_calls = getattr(full_response, "tool_calls", None) if full_response is not None else None

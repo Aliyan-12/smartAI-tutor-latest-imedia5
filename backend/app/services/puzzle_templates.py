@@ -332,7 +332,42 @@ TEMPLATES: List[dict] = [
         "description": "A formula triangle (top = left × right, e.g. distance = speed × time) with two values given — student computes the missing one.",
         "params_doc": "top {label, value}, left {label, value}, right {label, value}; set exactly ONE of the three values to null (the unknown). Relation: top = left × right.",
     },
+    # ── Image-driven (catalog-backed) — work for ANY subject/topic that has cached
+    #    images (subjects=[] is a wildcard). The frontend pulls real curriculum-topic
+    #    images from the topic-image catalog at build time, so these illustrate most
+    #    topics across every key stage. ──
+    {
+        "id": "identify_image", "render": "identify_image", "kind": "image",
+        "subjects": [], "key_stages": [],
+        "answer_type": "choice", "title": "What is this?",
+        "description": "Shows a real image of a topic; the student picks (or types) its correct name from the unit's topics. Great for recognition/vocabulary across any subject.",
+        "params_doc": "no params needed — the image + options come from the lesson's topic-image catalog. Optionally topic='exact topic title' to feature a specific topic.",
+    },
+    {
+        "id": "match_image", "render": "match_image", "kind": "image",
+        "subjects": [], "key_stages": [],
+        "answer_type": "match", "title": "Match the images",
+        "description": "Shows several real topic images and their names jumbled; the student matches each image to its label. Works for any subject with enough cached topic images.",
+        "params_doc": "no params needed — images + labels come from the lesson's topic-image catalog.",
+    },
 ]
+
+# Category for each puzzle (drives the UI chip + lets the model pick by kind).
+_CATEGORY_BY_ID: Dict[str, str] = {
+    "fraction_bar": "fractions", "pie_fraction": "fractions", "build_fraction": "fractions",
+    "number_line": "number", "place_value": "number", "array_grid": "number", "clock_read": "number",
+    "shape_count": "counting",
+    "area_grid": "geometry", "angle_classify": "geometry", "coordinate_read": "geometry",
+    "bar_chart": "data",
+    "balance_solve": "algebra", "formula_triangle": "algebra",
+    "label_diagram": "labelling",
+    "sort_categories": "sorting", "states_of_matter": "sorting",
+    "sequence_order": "sequencing", "food_chain_order": "sequencing",
+    "particle_state": "recognition", "identify_image": "recognition",
+    "match_image": "matching",
+}
+for _t in TEMPLATES:
+    _t["category"] = _CATEGORY_BY_ID.get(_t["id"], "practice")
 
 TEMPLATES_BY_ID: Dict[str, dict] = {t["id"]: t for t in TEMPLATES}
 
@@ -342,7 +377,8 @@ def templates_for(subject: str, key_stage: str) -> List[dict]:
     ks = (key_stage or "").upper()
     out = []
     for t in TEMPLATES:
-        if subj and not any(s in subj for s in t["subjects"]):
+        # An empty subjects list = wildcard (image puzzles work for any subject).
+        if subj and t["subjects"] and not any(s in subj for s in t["subjects"]):
             continue
         if ks and t["key_stages"] and ks not in t["key_stages"]:
             continue

@@ -68,10 +68,11 @@ def resolve_id(puzzle_id: str, subject: str, key_stage: str) -> Optional[str]:
 
 
 def list_available(subject: str, key_stage: str) -> List[dict]:
-    """Template metadata the AI may choose from for this lesson."""
+    """Template metadata the AI may choose from for this lesson, grouped by category."""
     return [
         {
             "puzzle_id": t["id"], "title": t["title"], "render": t["render"],
+            "category": t.get("category", "practice"),
             "description": t["description"], "params": t["params_doc"],
             "key_stages": t["key_stages"],
         }
@@ -87,11 +88,15 @@ def build(puzzle_id: str, params: Optional[dict] = None) -> Dict[str, Any]:
     p = params or {}
     builder = _BUILDERS[t["render"]]
     payload = builder(p)
+    if payload.get("error"):
+        payload.setdefault("action", "show_puzzle")
+        return payload
     payload.update({
         "puzzle_id": puzzle_id,
         "render": t["render"],
         "title": t["title"],
         "answer_type": t["answer_type"],
+        "category": t.get("category", "practice"),
         "action": "show_puzzle",
     })
     return payload
@@ -353,7 +358,59 @@ def _b_formula_triangle(p: dict) -> dict:
     }
 
 
+def _catalog_items(p: dict) -> List[dict]:
+    """De-duplicated catalog rows with a real image, injected by the show_puzzle tool as
+    params['_catalog'] (each {topic_title, image_url, thumb_url})."""
+    rows = p.get("_catalog") or []
+    seen, out = set(), []
+    for c in rows:
+        url = c.get("thumb_url") or c.get("image_url")
+        title = (c.get("topic_title") or "").strip()
+        key = title.lower()
+        if not url or not title or key in seen:
+            continue
+        seen.add(key)
+        out.append({"name": title, "image": url})
+    return out
+
+
+def _b_identify_image(p: dict) -> dict:
+    """Show ONE real topic image; student picks its name from sibling topics. The first
+    catalog row is the lesson's target topic (get_for sorts it first)."""
+    items = _catalog_items(p)
+    if len(items) < 2:
+        return {"error": "no_catalog_images"}
+    target = items[0]
+    distractors = [c["name"] for c in items[1:]][:3]
+    options = [target["name"]] + distractors
+    random.shuffle(options)
+    return {
+        "prompt": "Look at the image — what is it?",
+        "params": {"image": target["image"], "options": options},
+        "solution": target["name"],
+    }
+
+
+def _b_match_image(p: dict) -> dict:
+    """Match several real topic images to their names (image id → label)."""
+    items = _catalog_items(p)[:5]
+    if len(items) < 3:
+        return {"error": "no_catalog_images"}
+    images = [{"id": i, "image": c["image"]} for i, c in enumerate(items)]
+    solution = {str(i): items[i]["name"] for i in range(len(items))}
+    labels = [c["name"] for c in items]
+    random.shuffle(images)
+    random.shuffle(labels)
+    return {
+        "prompt": "Match each image to its name.",
+        "params": {"images": images, "labels": labels},
+        "solution": solution,
+    }
+
+
 _BUILDERS = {
+    "identify_image": _b_identify_image,
+    "match_image": _b_match_image,
     "fraction_bar": _b_fraction_bar,
     "pie_fraction": _b_pie_fraction,
     "particle_state": _b_particle_state,

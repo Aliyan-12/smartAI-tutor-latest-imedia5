@@ -173,14 +173,14 @@ async def _run_chat_turn(send, chat_id: int, user_id: int, *, saved_user_text,
                          ai_content, image_b64=None, image_mime="image/jpeg",
                          research=False, tts=True):
     """One simple-chat turn: save user msg, stream + segment reply, save once, turn_end."""
-    from app.services import session_agent_service as _sa  # shared segment/filler/turn helpers (lazy → no cycle)
+    from app.services import session_agent_service as _sa  # shared segment/thinking/turn helpers (lazy → no cycle)
 
-    await send({"type": "turn_start", "turn_id": uuid4().hex})
+    turn_id = uuid4().hex
+    await send({"type": "turn_start", "turn_id": turn_id})
 
-    if tts:
-        nf = await asyncio.to_thread(_sa.get_neutral_filler)
-        if nf and nf.get("audio_b64"):
-            await send({"type": "filler", "text": nf["text"], "audio_b64": nf["audio_b64"]})
+    # Steps for the "thinking" strip (tool labels + brief thought lines), persisted as a
+    # role="thinking" message so they survive a refresh (mirrors the session pipeline).
+    thinking_steps: list = []
 
     # Attached PDF/DOCX/PPTX → extract text + inject; images stay for Gemini vision.
     if image_b64 and image_mime and not image_mime.startswith("image/"):
@@ -244,21 +244,29 @@ async def _run_chat_turn(send, chat_id: int, user_id: int, *, saved_user_text,
         ):
             token = _sa._coerce_str(raw)
             stripped = token.strip()
+            # Brief reasoning summary → thinking strip (never shown as answer text).
+            if stripped.startswith("[THINK:") and stripped.endswith("]"):
+                await _sa._emit_thinking(send, thinking_steps, stripped[len("[THINK:"):-1])
+                continue
             # Tool-result tokens → structured `tool` events; never spoken/shown.
             if stripped.startswith("[TOOL_RESULT:") and stripped.endswith("]"):
                 try:
                     tr = _json2.loads(stripped[len("[TOOL_RESULT:"):-1])
-                    await send({"type": "tool", "tool": tr.get("tool", ""), "data": tr.get("data", {})})
+                    _tool = tr.get("tool", "")
+                    await send({"type": "tool", "tool": _tool, "data": tr.get("data", {})})
+                    _label = _sa._THINKING_LABELS.get(_tool)
+                    if _label:
+                        await _sa._emit_thinking(send, thinking_steps, _label)
                 except Exception:
                     pass
                 continue
             full.append(token)
             for sentence in segmenter.feed(token):
-                await send(await _sa.build_segment(sentence, seq, tts))
+                await _sa.stream_segment(send, seq, sentence, tts=tts, turn_id=turn_id)
                 seq += 1
         remainder = segmenter.flush()
         if remainder:
-            await send(await _sa.build_segment(remainder, seq, tts))
+            await _sa.stream_segment(send, seq, remainder, tts=tts, turn_id=turn_id)
             seq += 1
 
         complete = "".join(full)
@@ -267,6 +275,9 @@ async def _run_chat_turn(send, chat_id: int, user_id: int, *, saved_user_text,
             await send({"type": "error", "message": "Couldn't generate a reply — please try again.", "recoverable": True})
             await send({"type": "turn_end", "message_id": None, "full_text": ""})
             return
+
+        if thinking_steps:
+            await add_message(db, chat_id, "thinking", "\n".join(thinking_steps))
 
         msg = await add_message(db, chat_id, "assistant", clean)
         message_id = msg.id

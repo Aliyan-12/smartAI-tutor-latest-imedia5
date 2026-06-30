@@ -27,7 +27,7 @@ from app.core.config import settings
 from app.db.session import async_session_factory
 from app.models.resource_hub import (
     RHKeyStage, RHYearGroup, RHSubject, RHUnit, RHTopic, RHAvailability,
-    RHResource, RHDocument, RHDocumentChunk, NON_FILE_RESOURCE_TYPES,
+    RHResource, RHDocument, RHDocumentChunk, RHTopicImage, NON_FILE_RESOURCE_TYPES,
 )
 from app.services import document_service
 from app.services.rag_service import embed_batch
@@ -43,6 +43,7 @@ def _utcnow() -> datetime:
 _sync_state: Dict[str, Dict[str, Any]] = {
     "curriculum": {"running": False, "last_run": None, "last_error": None, "counts": {}},
     "resources": {"running": False, "last_run": None, "last_error": None, "counts": {}},
+    "topic_images": {"running": False, "last_run": None, "last_error": None, "counts": {}},
 }
 
 
@@ -211,6 +212,14 @@ async def sync_curriculum() -> Dict[str, Any]:
         state["last_error"] = None
         state["counts"] = counts
         logger.info("Curriculum sync complete: %s", counts)
+        # Chain the topic-image catalog refresh now that the topic list is current.
+        # Non-blocking + idempotent (only fills in NEW topics), so it runs after EVERY
+        # successful curriculum sync — startup, scheduled interval, or manual trigger.
+        try:
+            asyncio.create_task(sync_topic_images())
+            logger.info("TOPIC_IMAGE sync chained after successful curriculum sync.")
+        except RuntimeError:
+            logger.debug("No running event loop — skipping chained topic-image sync.")
     except Exception as exc:  # noqa: BLE001 — job must never crash the scheduler
         state["last_error"] = str(exc)
         logger.exception("Curriculum sync failed: %s", exc)
@@ -496,6 +505,128 @@ async def sync_resources() -> Dict[str, Any]:
     except Exception as exc:  # noqa: BLE001
         state["last_error"] = str(exc)
         logger.exception("Resource sync failed: %s", exc)
+    finally:
+        state["running"] = False
+        state["last_run"] = _utcnow().isoformat()
+    return state
+
+
+# ===========================================================================
+# Job 3 — topic-image catalog (representative image per curriculum topic)
+# ===========================================================================
+
+async def _upsert_topic_images(rows: List[dict]) -> None:
+    """Persist a batch of resolved topic-image rows (own session + commit) so progress
+    survives an interrupt and a re-run resumes where it left off."""
+    if not rows:
+        return
+    async with async_session_factory() as db:
+        ids = [r["topic_hub_id"] for r in rows]
+        existing = {ti.topic_hub_id: ti for ti in (await db.execute(
+            select(RHTopicImage).where(RHTopicImage.topic_hub_id.in_(ids))
+        )).scalars()}
+        for r in rows:
+            row = existing.get(r["topic_hub_id"])
+            if row is None:
+                row = RHTopicImage(topic_hub_id=r["topic_hub_id"])
+                db.add(row)
+            row.topic_title = r["topic_title"]
+            row.unit_hub_id = r["unit_hub_id"]
+            row.subject_name = r["subject_name"]
+            row.key_stage = r["key_stage"]
+            row.year_group = r["year_group"]
+            row.image_url = r["image_url"]
+            row.thumb_url = r["thumb_url"]
+            row.source = r["source"]
+            row.attribution = r["attribution"]
+            row.license = r["license"]
+            row.status = r["status"]
+            row.synced_at = _utcnow()
+        await db.commit()
+
+
+async def sync_topic_images(force: bool = False, limit: Optional[int] = None,
+                            batch_size: int = 20, on_progress=None) -> Dict[str, Any]:
+    """Resolve a representative image for every curriculum topic (Wikipedia lead image)
+    and cache it in RHTopicImage. Idempotent: topics already resolved (status='ok') are
+    skipped unless force=True. Rate-limited and resilient — a topic with no confident
+    image is recorded status='none', and results are committed in BATCHES so an
+    interrupt/crash never loses prior progress and a re-run resumes where it left off.
+
+    on_progress(done, total, counts) is called after each batch (the CLI prints it).
+    Runs after curriculum sync so new topics get images; safe to run on demand."""
+    from app.services import topic_image_service  # lazy → avoids httpx import at module load
+
+    state = _sync_state["topic_images"]
+    if state["running"]:
+        logger.info("Topic-image sync already running; skipping.")
+        return state
+    state["running"] = True
+    counts = {"total": 0, "resolved": 0, "none": 0, "error": 0, "skipped": 0}
+    try:
+        # 1) Read the topic list + coordinate maps (one session, no network).
+        async with async_session_factory() as db:
+            subjects = {s.hub_id: s.name for s in (await db.execute(select(RHSubject))).scalars()}
+            units = {u.hub_id: u for u in (await db.execute(select(RHUnit))).scalars()}
+            avail: Dict[int, tuple] = {}  # unit_hub_id -> (key_stage, year_group)
+            for a in (await db.execute(
+                select(RHAvailability).where(RHAvailability.unit_hub_id.isnot(None))
+            )).scalars():
+                avail.setdefault(a.unit_hub_id, (a.key_stage, a.year_group))
+            topics = (await db.execute(select(RHTopic))).scalars().all()
+            existing = {ti.topic_hub_id: ti
+                        for ti in (await db.execute(select(RHTopicImage))).scalars()}
+
+        todo = [t for t in topics
+                if force or not (existing.get(t.hub_id) and existing[t.hub_id].status == "ok")]
+        if limit:
+            todo = todo[:limit]
+        counts["total"] = len(topics)
+        counts["skipped"] = len(topics) - len(todo)
+        logger.info("TOPIC_IMAGE sync starting: %s topics, %s to resolve (force=%s)",
+                    len(topics), len(todo), force)
+        if on_progress:
+            on_progress(0, len(todo), counts)
+
+        # 2) Resolve images (network), rate-limited, committing in batches.
+        batch: List[dict] = []
+        async with httpx.AsyncClient(
+            timeout=httpx.Timeout(15.0), follow_redirects=True,
+            headers={"User-Agent": topic_image_service._UA},
+        ) as client:
+            for i, t in enumerate(todo):
+                unit = units.get(t.unit_hub_id)
+                subject_name = subjects.get(unit.subject_hub_id) if unit else None
+                ks, yr = avail.get(t.unit_hub_id, (None, None))
+                res = await topic_image_service.resolve_image(t.title, subject_name, client=client)
+                batch.append({
+                    "topic_hub_id": t.hub_id, "topic_title": t.title,
+                    "unit_hub_id": t.unit_hub_id, "subject_name": subject_name,
+                    "key_stage": ks, "year_group": yr, **res,
+                })
+                counts[res["status"]] = counts.get(res["status"], 0) + 1
+                await asyncio.sleep(0.1)  # be polite to the Wikipedia API
+                if len(batch) >= batch_size:
+                    await _upsert_topic_images(batch)
+                    batch = []
+                    logger.info("TOPIC_IMAGE progress: %s/%s (resolved=%s none=%s error=%s)",
+                                i + 1, len(todo), counts["resolved"], counts["none"], counts["error"])
+                    if on_progress:
+                        on_progress(i + 1, len(todo), counts)
+        # Final partial batch.
+        await _upsert_topic_images(batch)
+        if on_progress:
+            on_progress(len(todo), len(todo), counts)
+
+        state["last_error"] = None
+        state["counts"] = counts
+        logger.info(
+            "TOPIC_IMAGE sync complete: resolved=%s none=%s error=%s of total=%s (skipped=%s)",
+            counts["resolved"], counts["none"], counts["error"], counts["total"], counts["skipped"],
+        )
+    except Exception as exc:  # noqa: BLE001 — job must never crash the scheduler
+        state["last_error"] = str(exc)
+        logger.exception("Topic-image sync failed: %s", exc)
     finally:
         state["running"] = False
         state["last_run"] = _utcnow().isoformat()

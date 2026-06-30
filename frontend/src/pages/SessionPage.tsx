@@ -309,7 +309,7 @@ export default function SessionPage() {
   // Stable ref so the session event-bus subscription doesn't re-bind each render.
   const sendEventRef = useRef(channel.sendEvent);
   sendEventRef.current = channel.sendEvent;
-  const { messages, liveText, fillerText, busy, status: liveStatus } = channel;
+  const { messages, liveText, thinkingSteps, busy, status: liveStatus } = channel;
   const messagesLenRef = useRef(0);
   messagesLenRef.current = messages.length;
   const clearQuizOffer = useCallback(() => setQuizOffer(null), []);
@@ -1446,7 +1446,7 @@ export default function SessionPage() {
               onSpeak={speakText}
               liveText={liveText}
               liveStatus={liveStatus}
-              fillerText={fillerText}
+              thinkingSteps={thinkingSteps}
             />
             {toolResults.map((tr) => {
               if (tr.tool === "set_homework") {

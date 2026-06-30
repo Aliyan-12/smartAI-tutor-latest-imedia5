@@ -88,7 +88,7 @@ export default function ChatPage() {
     onTool: () => { /* web_search / deep_research results are folded into the streamed answer */ },
   });
   const {
-    messages, liveText, fillerText, busy, status: liveStatus,
+    messages, liveText, thinkingSteps, busy, status: liveStatus,
     sendMessage, sendAudio, stopTurn, hydrate, setMessages, disconnect, resume, error, clearError,
   } = channel;
   sendMessageRef.current = sendMessage;
@@ -367,7 +367,7 @@ export default function ChatPage() {
             onSpeak={speakText}
             liveText={liveText}
             liveStatus={liveStatus}
-            fillerText={fillerText}
+            thinkingSteps={thinkingSteps}
           />
         </div>
 

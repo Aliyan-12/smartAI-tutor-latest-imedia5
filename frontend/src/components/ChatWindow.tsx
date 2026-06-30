@@ -14,9 +14,11 @@ interface Props {
   revealContent?: string | null;
   revealedText?: string;
   lastKnownAiId?: number | null;
-  fillerText?: string | null;
+  // Live "thinking" steps for the in-flight turn (tool labels + brief thought lines),
+  // shown as a Claude-style strip; persisted steps render from role="thinking" messages.
+  thinkingSteps?: string[];
   // Unified session pipeline (useSessionChannel): the single in-flight assistant
-  // turn revealing in lockstep with its audio, plus its status.
+  // turn revealing as text, plus its status.
   liveText?: string | null;
   liveStatus?: "idle" | "connecting" | "waiting" | "speaking";
 }
@@ -30,7 +32,7 @@ export default function ChatWindow({
   revealContent,
   revealedText,
   lastKnownAiId,
-  fillerText,
+  thinkingSteps,
   liveText,
   liveStatus,
 }: Props) {
@@ -80,19 +82,33 @@ export default function ChatWindow({
     </div>
   );
 
-  // Distinctive "spoken aside" bubble shown while a pre-recorded filler phrase
-  // plays — visually nothing like the AI's real answer (gradient pill + equaliser).
-  const FillerBubble = ({ text }: { text: string }) => (
-    <div className="message assistant" style={{ animation: "msgSlideIn 0.22s ease", alignItems: "center" }}>
-      <AiAvatar />
-      <div className="message-content" style={{ paddingTop: 0 }}>
-        <div className="filler-bubble">
-          <span className="filler-eq"><i /><i /><i /></span>
-          <span className="filler-text">{text}</span>
+  // Claude-style "thinking" strip: a faded vertical list of one-line steps showing what
+  // the tutor did (tool labels + brief thought lines). `live` adds a trailing spinner
+  // while the turn is still running.
+  const ThinkingStrip = ({ steps, live }: { steps: string[]; live?: boolean }) => {
+    if ((!steps || steps.length === 0) && !live) return null;
+    return (
+      <div className="message assistant chat-msg-animate" style={{ alignItems: "flex-start" }}>
+        <AiAvatar />
+        <div className="message-content" style={{ paddingTop: 2 }}>
+          <div className="thinking-strip">
+            {steps?.map((s, i) => (
+              <div key={i} className="thinking-step">
+                <span className="thinking-check">✓</span>
+                <span className="thinking-text">{s}</span>
+              </div>
+            ))}
+            {live && (
+              <div className="thinking-step">
+                <span className="thinking-spin" />
+                <span className="thinking-text thinking-live">Thinking…</span>
+              </div>
+            )}
+          </div>
         </div>
       </div>
-    </div>
-  );
+    );
+  };
 
   return (
     <div ref={containerRef} style={{ display: "contents" }}>
@@ -152,48 +168,42 @@ export default function ChatWindow({
         .ai-free-text p { margin: 0 0 0.6em 0; }
         .ai-free-text p:last-child { margin-bottom: 0; }
 
-        @keyframes fillerEq {
-          0%, 100% { transform: scaleY(0.35); }
-          50%       { transform: scaleY(1); }
+        @keyframes thinkSpin { to { transform: rotate(360deg); } }
+        @keyframes thinkFade { from { opacity: 0; transform: translateY(3px); } to { opacity: 1; transform: translateY(0); } }
+        .thinking-strip {
+          display: flex;
+          flex-direction: column;
+          gap: 5px;
+          padding: 2px 0;
         }
-        @keyframes fillerGlow {
-          0%, 100% { box-shadow: 0 0 0 0 rgba(99,102,241,0); }
-          50%       { box-shadow: 0 0 0 4px rgba(99,102,241,0.10); }
-        }
-        .filler-bubble {
-          display: inline-flex;
+        .thinking-step {
+          display: flex;
           align-items: center;
-          gap: 9px;
-          padding: 8px 14px;
-          border-radius: 16px;
-          background: linear-gradient(135deg, rgba(99,102,241,0.13), rgba(26,115,232,0.13));
-          border: 1px solid rgba(99,102,241,0.28);
-          animation: fillerGlow 1.8s ease-in-out infinite;
+          gap: 8px;
+          animation: thinkFade 0.25s ease;
         }
-        .filler-eq {
-          display: inline-flex;
-          align-items: flex-end;
-          gap: 2px;
-          height: 14px;
+        .thinking-check {
+          flex-shrink: 0;
+          width: 15px;
+          font-size: 11px;
+          font-weight: 800;
+          color: #16a34a;
+          text-align: center;
         }
-        .filler-eq i {
-          display: block;
-          width: 3px;
-          height: 100%;
-          border-radius: 2px;
-          background: linear-gradient(#6366f1, #1a73e8);
-          transform-origin: bottom;
-          animation: fillerEq 0.85s ease-in-out infinite;
+        .thinking-spin {
+          flex-shrink: 0;
+          width: 12px; height: 12px;
+          border-radius: 50%;
+          border: 2px solid rgba(124,58,237,0.25);
+          border-top-color: #7c3aed;
+          animation: thinkSpin 0.7s linear infinite;
         }
-        .filler-eq i:nth-child(2) { animation-delay: 0.16s; }
-        .filler-eq i:nth-child(3) { animation-delay: 0.32s; }
-        .filler-text {
-          font-size: 0.9rem;
-          font-style: italic;
-          font-weight: 500;
-          color: #4338ca;
-          letter-spacing: 0.01em;
+        .thinking-text {
+          font-size: 0.86rem;
+          color: var(--text-muted, #64748b);
+          line-height: 1.4;
         }
+        .thinking-live { font-style: italic; color: #7c3aed; }
       `}</style>
 
       {/* ── All past messages ── */}
@@ -212,6 +222,13 @@ export default function ChatWindow({
               </div>
             </div>
           );
+        }
+
+        if (msg.role === "thinking") {
+          // Persisted thinking strip (loads on refresh / after the turn commits).
+          const steps = (msg.content || "").split("\n").filter(Boolean);
+          if (steps.length === 0) return null;
+          return <ThinkingStrip key={msg.id} steps={steps} />;
         }
 
         if (msg.role === "event") {
@@ -329,9 +346,14 @@ export default function ChatWindow({
         </div>
       )}
 
-      {/* ── Blob / filler: waiting for response OR TTS-off waiting for first token ── */}
-      {(isWaiting || (!isWaiting && streaming && !streamContent)) && (
-        fillerText && isWaiting ? <FillerBubble text={fillerText} /> : <ThinkingBlob />
+      {/* ── Live "thinking" strip: steps for the in-flight turn (above the answer) ── */}
+      {(liveStatus === "waiting" || liveStatus === "speaking") && (thinkingSteps?.length ?? 0) > 0 && (
+        <ThinkingStrip steps={thinkingSteps as string[]} live />
+      )}
+
+      {/* ── Blob: waiting for response OR TTS-off waiting for first token ── */}
+      {(isWaiting || (!isWaiting && streaming && !streamContent)) && (thinkingSteps?.length ?? 0) === 0 && (
+        <ThinkingBlob />
       )}
 
       {/* ── Unified session live turn (useSessionChannel): one in-flight reply ── */}
@@ -352,8 +374,8 @@ export default function ChatWindow({
             )}
           </div>
         </div>
-      ) : liveStatus === "waiting" ? (
-        fillerText ? <FillerBubble text={fillerText} /> : <ThinkingBlob />
+      ) : liveStatus === "waiting" && (thinkingSteps?.length ?? 0) === 0 ? (
+        <ThinkingBlob />
       ) : null}
 
       <div ref={bottomRef} />

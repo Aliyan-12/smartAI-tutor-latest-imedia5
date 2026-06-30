@@ -116,6 +116,32 @@ class RHAvailability(Base):
     )
 
 
+class RHTopicImage(Base):
+    """Cached representative image for a curriculum topic — powers image-driven
+    puzzles (label / match / identify) across most topics without hand-curating
+    hundreds of URLs. Resolved once (Wikipedia/Wikimedia lead image) by
+    `topic_image_service` and refreshed by the topic-image sync job; one row per
+    topic (`topic_hub_id` unique). `status` distinguishes a resolved image (`ok`),
+    a topic with no confident match (`none`), and a transient failure (`error`)."""
+    __tablename__ = "rh_topic_images"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    topic_hub_id: Mapped[int] = mapped_column(Integer, nullable=False, unique=True, index=True)
+    topic_title: Mapped[str] = mapped_column(String(500), nullable=False)
+    unit_hub_id: Mapped[int] = mapped_column(Integer, nullable=True, index=True)
+    subject_name: Mapped[str] = mapped_column(String(200), nullable=True)
+    key_stage: Mapped[str] = mapped_column(String(10), nullable=True, index=True)
+    year_group: Mapped[str] = mapped_column(String(50), nullable=True, index=True)
+
+    image_url: Mapped[str] = mapped_column(Text, nullable=True)
+    thumb_url: Mapped[str] = mapped_column(Text, nullable=True)
+    source: Mapped[str] = mapped_column(String(50), nullable=True)        # "wikipedia" | ...
+    attribution: Mapped[str] = mapped_column(Text, nullable=True)
+    license: Mapped[str] = mapped_column(String(120), nullable=True)
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default="pending", index=True)
+    synced_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+
+
 # ---------------------------------------------------------------------------
 # Resources + vector store
 # ---------------------------------------------------------------------------
