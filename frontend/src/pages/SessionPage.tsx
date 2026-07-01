@@ -273,6 +273,11 @@ export default function SessionPage() {
       } else if (SLIDE_TOOLS.includes(tool)) {
         // The AI moved/showed a teaching resource — render it in the "learn" panel.
         if (data.resource_hub_id) {
+          // Slides and puzzles are mutually-exclusive views: a puzzle overlays the
+          // slide while active, so moving to a slide must take the puzzle DOWN —
+          // otherwise the slide change is invisible behind a stuck puzzle (the
+          // "slides won't show when a puzzle is up" switching bug).
+          setCurrentPuzzle(null);
           setCurrentResource({
             resourceHubId: data.resource_hub_id as number,
             title: (data.title as string) || "",
@@ -309,7 +314,7 @@ export default function SessionPage() {
   // Stable ref so the session event-bus subscription doesn't re-bind each render.
   const sendEventRef = useRef(channel.sendEvent);
   sendEventRef.current = channel.sendEvent;
-  const { messages, liveText, fillerText, busy, status: liveStatus } = channel;
+  const { messages, liveText, thinkingSteps, liveParts, busy, status: liveStatus } = channel;
   const messagesLenRef = useRef(0);
   messagesLenRef.current = messages.length;
   const clearQuizOffer = useCallback(() => setQuizOffer(null), []);
@@ -1446,7 +1451,8 @@ export default function SessionPage() {
               onSpeak={speakText}
               liveText={liveText}
               liveStatus={liveStatus}
-              fillerText={fillerText}
+              thinkingSteps={thinkingSteps}
+              liveParts={liveParts}
             />
             {toolResults.map((tr) => {
               if (tr.tool === "set_homework") {

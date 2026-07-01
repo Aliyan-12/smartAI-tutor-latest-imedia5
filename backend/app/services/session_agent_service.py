@@ -901,6 +901,7 @@ ALWAYS use this content as your PRIMARY teaching source when it is present.
 - JUMPING: use show_resource ONLY when the student explicitly asks to see a specific slide ("show me the touch slide") — it may skip directly to that slide. Never use it to race forward during normal teaching.
 - Each slide tool returns "slide_content" — the exact text on the slide now showing. ALWAYS base that turn's explanation on that exact slide_content and nothing further ahead.
 - TEACH LIKE A WARM HUMAN TUTOR, not a narrator. Use the slide as your backbone — cover its points — but bring it to life with your own casual real-world examples and simple analogies a child relates to ("It's a bit like…"), add a sentence or two of your own so it truly lands (don't read it word-for-word), and weave the student's answers back in. Stay on THIS slide's concept.
+- IF THE SLIDES DON'T MATCH THE TOPIC: if the on-screen slides are clearly about a different topic than the one you're booked to teach (e.g. the deck covers the five senses but the lesson is "The Human Body / organs"), do NOT keep forcing them. Once, briefly, switch approach — stop calling the slide tools and teach from your own expert knowledge, leading with a VISUAL PUZZLE (prefer an image puzzle, see below) for hands-on practice. Don't apologise repeatedly about the slides; just teach the right thing.
 - Call these tools SILENTLY (never write the call as text, never say "loading the next slide"). The viewer updates automatically."""
     else:
         slides_block = """TEACHING SLIDES — NONE FOR THIS LESSON:
@@ -952,6 +953,12 @@ QUIZ STATUS: {quiz_timing_note}
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 TEACHING STYLE — FOLLOW THESE STRICTLY:
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+RULE A — YOU ARE AN AGENTIC TUTOR, NOT A CHATBOT — ACT ON THE LESSON STATE:
+- A "LESSON STATE" block is appended to EVERY student message. It is live and authoritative. It contains a "⚡ DO NOW" line — that is your TOP PRIORITY this turn. Perform it by calling the right tool (advance_lesson_slide / generate_quiz / show_puzzle / generate_session_report + end_lesson), then teach around it.
+- Drive the lesson off the STATE, not off whether the student asked. If time says move on, MOVE ON. If the quiz window is open, SET THE QUIZ. If a slide's point is done, ADVANCE THE SLIDE. If time's up, RECAP → report → end. Don't wait to be told.
+- Only call tools listed under "AVAILABLE ACTIONS THIS TURN". If you need one that isn't listed, do the teaching alternative instead — never pretend an action happened.
+- Lead with a short natural line about what you're doing ("Let's try a quick puzzle on this —"), then call the tool. The action shows up for the student; don't read out the tool name or its parameters.
 
 RULE 0 — RESPONSE LENGTH IS PROPORTIONAL TO STUDENT INPUT (most important rule):
 HARD LIMITS (always enforced):
@@ -1030,6 +1037,12 @@ Celebrate correctly but briefly: "Exactly." / "Perfect." / "Spot on." — one wo
 Correct gently: "Not quite — it's actually..." / "Close — the key thing is..."
 NEVER say "Great question!" — just answer the question.
 
+PROFESSIONAL CONDUCT — stay composed and in control:
+- You are the expert running this lesson. Be calm, confident and concise — never flustered, never gushing.
+- Do NOT grovel or over-apologise. If the student points out a mistake (wrong slide, off-topic content), acknowledge it in AT MOST a short half-sentence ("Good catch —") then immediately fix it and move on. NEVER write "I am so sorry", "I got ahead of myself", "my apologies", or stack multiple apologies in a row.
+- Never repeat the same apology or self-correction twice. Fix it once, silently, and continue teaching.
+- Don't narrate your own mechanics ("let me change the slide for you", "let me get the slides caught up"). Just do it with the tool and teach.
+
 RULE 4 — SILENCE AND DISENGAGEMENT:
 If the student's message is blank, very short (".", "...", "hmm", "hello?"), random characters, or clearly looks like noise or accidental input:
   → Do NOT continue teaching. Say ONLY: "Are you still there? Whenever you're ready, we'll carry on."
@@ -1060,11 +1073,13 @@ VISUAL PUZZLES — PRACTISE HANDS-ON (Maths/Science), PROACTIVELY:
 - This is your DEFAULT way to practise. Teach the concept first (use the slides), THEN when it's time to practise, LEAD with a puzzle — you do NOT wait for the student to ask. Say e.g. "Let's try one together — look at your screen," then show it.
 - AT EACH PRACTICE MOMENT decide: (1) call list_available_puzzles, (2) IF a puzzle fits the exact concept you just taught (for this subject + key_stage), call show_puzzle(puzzle_id, params) SILENTLY, tell the student what to do, then STOP and wait — their attempt returns as a [PUZZLE RESULT]. (3) IF nothing fits that concept, FALL BACK to a normal typed practice question (as you do now). Never invent a puzzle_id.
 - RHYTHM per concept: teach (slides) → ONE puzzle to practise → on success move to the next concept. Only use a typed question when the concept has no matching puzzle.
+- CHOOSE BY CATEGORY: list_available_puzzles tags each puzzle with a category (labelling, matching, recognition, sorting, sequencing, counting, fractions, number, geometry, data, algebra). Pick the category that fits the concept. For recognition/vocabulary (naming a structure, organ, shape, place, etc.) PREFER the image puzzles — 'identify_image' (show a real image, name it) or 'match_image' (match real images to names); they pull genuine images of THIS lesson's topic. If show_puzzle returns 'no_catalog_images', that topic has no images yet — just ask a typed question instead.
 - AGE-APPROPRIATE: scale the numbers/difficulty to the student's key stage AND year group — small numbers and simple fractions for KS1/early-primary years, larger values and harder concepts for older years. Only use puzzles list_available_puzzles offers for this subject + key stage.
 - On a CORRECT result: brief praise, then continue (next concept, or clear_puzzle and teach on). On INCORRECT: ONE hint tied to what's on screen, invite another try on the same puzzle — don't reveal the answer.
 - Don't spam — one focused puzzle per concept, then move on. If the student explicitly asks for a puzzle, show one immediately.
 - VALID IDs ONLY: pick puzzle_id strictly from what list_available_puzzles returns. NEVER tell the student to "look at" / "check" the puzzle UNLESS show_puzzle returned successfully (i.e. it did NOT return an 'error' field). If show_puzzle returns an error, do NOT mention a puzzle at all — just ask a normal typed question.
 - Never write the tool call as text and never read out raw params; the puzzle just appears on screen.
+- ACTIONS, NOT NARRATION: if you say you're clearing the puzzle / moving on from it, you MUST actually call clear_puzzle in the SAME turn (moving to a slide also clears it) — never just say "I'll clear that" without doing it. Same for every tool: do the action, don't describe doing it.
 
 END-OF-SESSION REPORT:
 - After delivering the final session summary/review (the last phase), call the generate_session_report tool.
@@ -1283,6 +1298,8 @@ Be age-appropriate for {key_stage}. Return ONLY valid JSON, no markdown."""
 # Bound concurrent Kokoro inferences across all sessions (avoid CPU oversubscription).
 _TTS_MAX_CONCURRENCY = int(os.getenv("TTS_MAX_CONCURRENCY", "4"))
 _tts_semaphore = asyncio.Semaphore(_TTS_MAX_CONCURRENCY)
+# Strong refs to in-flight background TTS tasks so they aren't GC'd mid-synthesis.
+_bg_tts_tasks: set = set()
 
 _MAX_SEGMENT_CHARS = 240
 _MIN_TTS_CHARS = 3
@@ -1356,75 +1373,45 @@ def _wav_duration_ms(wav: bytes) -> int:
         return 0
 
 
-async def build_segment(text: str, seq: int, tts: bool) -> dict:
-    """{type:"segment"} payload: display text (markdown/newlines preserved for the
-    live stream) + optional bundled audio (TTS runs on the stripped text)."""
-    display = strip_display_markers(text)          # keep newlines/spacing for markdown
-    tts_src = display.strip()                       # Kokoro gets clean text only
+async def _tts_segment(send, seq: int, text: str, turn_id: str) -> None:
+    """Synthesise ONE segment's Kokoro audio OFF the critical path and ship it as a
+    separate `segment_audio` frame. The text segment was already sent, so a slow or
+    failed clip never delays the on-screen reveal. ALWAYS emits exactly one frame per
+    seq (a null clip when the text is too short or Kokoro fails) so the client's in-order
+    audio queue never stalls waiting for a seq that will never come. Tagged with turn_id
+    so the client drops audio left over from a previous turn (seq restarts each turn)."""
+    tts_src = strip_display_markers(text).strip()       # Kokoro gets clean text only
     audio_b64 = None
-    duration_ms = None
-    if tts and len(tts_src) >= _MIN_TTS_CHARS:
+    duration_ms = 0
+    if len(tts_src) >= _MIN_TTS_CHARS:
         try:
             from app.services.voice_agent_service import text_to_speech
             async with _tts_semaphore:
                 wav, _mime = await asyncio.to_thread(text_to_speech, tts_src)
             audio_b64 = base64.b64encode(wav).decode("ascii")
             duration_ms = _wav_duration_ms(wav)
-        except Exception as e:  # noqa: BLE001 - a failed clip must not break the turn
+            logger.debug("SEGMENT audio seq=%s ms=%s", seq, duration_ms)
+        except Exception as e:  # noqa: BLE001 - a failed/late clip must never break the turn
             logger.warning("Segment TTS failed (seq=%s): %s", seq, e)
-    return {"type": "segment", "seq": seq, "text": display, "audio_b64": audio_b64, "duration_ms": duration_ms}
-
-
-# ===========================================================================
-# Filler phrases  (merged from filler_service)
-# ===========================================================================
-
-_manifest_cache: Optional[dict] = None
-
-
-def voices_dir() -> Path:
-    """uploads/voices/ — sibling of settings.upload_dir, matches the seeder."""
-    return Path(settings.upload_dir).resolve().parent / "voices"
-
-
-def get_manifest(force_reload: bool = False) -> dict:
-    """Load (and cache) uploads/voices/manifest.json produced by the seeder."""
-    global _manifest_cache
-    if _manifest_cache is not None and not force_reload:
-        return _manifest_cache
-    path = voices_dir() / "manifest.json"
-    if not path.exists():
-        logger.warning("Filler manifest not found at %s — run: python -m app.seed_voice_fillers", path)
-        _manifest_cache = {"categories": {}, "count": 0}
-    else:
-        try:
-            _manifest_cache = json.loads(path.read_text(encoding="utf-8"))
-        except Exception as e:  # noqa: BLE001
-            logger.error("Failed to read filler manifest: %s", e)
-            _manifest_cache = {"categories": {}, "count": 0}
-    return _manifest_cache
-
-
-def _random_phrase(category: str) -> Optional[dict]:
-    bucket = get_manifest().get("categories", {}).get(category)
-    if not bucket or not bucket.get("phrases"):
-        return None
-    return random.choice(bucket["phrases"])
-
-
-def get_neutral_filler() -> Optional[dict]:
-    """A short NEUTRAL bridge ("Okay.", "Right.") + its audio, played the instant the
-    student sends — covers the <1s before the model's first sentence (the real reaction)."""
-    phrase = _random_phrase("neutral")
-    if not phrase:
-        return None
-    audio_b64 = None
     try:
-        wav = (voices_dir() / phrase["file"]).read_bytes()
-        audio_b64 = base64.b64encode(wav).decode("ascii")
-    except Exception as e:  # noqa: BLE001
-        logger.warning("Neutral filler clip read failed (%s): %s", phrase.get("file"), e)
-    return {"text": phrase["text"], "audio_b64": audio_b64}
+        await send({"type": "segment_audio", "seq": seq, "turn_id": turn_id,
+                    "audio_b64": audio_b64, "duration_ms": duration_ms})
+    except Exception:
+        pass
+
+
+async def stream_segment(send, seq: int, sentence: str, *, tts: bool, turn_id: str) -> None:
+    """Send a segment's display TEXT immediately (GPT-style fast streaming), then — if
+    TTS is on — synthesise its audio in the BACKGROUND and ship it as a later
+    `segment_audio` frame (one per seq, possibly null). Text never waits on Kokoro.
+    Shared by the session and /chat turn pipelines."""
+    display = strip_display_markers(sentence)           # keep newlines/spacing for markdown
+    await send({"type": "segment", "seq": seq, "turn_id": turn_id, "text": display})
+    logger.debug("SEGMENT text seq=%s len=%s", seq, len(display))
+    if tts:
+        t = asyncio.create_task(_tts_segment(send, seq, display, turn_id))
+        _bg_tts_tasks.add(t)
+        t.add_done_callback(_bg_tts_tasks.discard)
 
 
 # ===========================================================================
@@ -1593,11 +1580,14 @@ async def _phase_and_next(db: AsyncSession, appt_id: int, elapsed: int, duration
 async def build_lesson_state_anchor(
     db: AsyncSession, appt_id: int, student_id: int, pstate: Optional[dict],
     available_actions: Optional[str] = None,
+    *, has_slides: bool = False, quiz_phase: bool = False,
+    closing_stage: bool = False, end_allowed: bool = False,
 ) -> str:
     """A compact, single-purpose live snapshot of the whole lesson, injected at maximum
     recency on EVERY turn so the model never loses track as the context grows:
       • real-time lesson clock (elapsed/remaining, server-computed)
       • current phase/step + what's next for the student
+      • ONE imperative "act on the clock" directive (advance / quiz / wrap up / end)
       • the student's learning status (strong / needs-work topics)
       • the interactive puzzle on screen (if any)
       • the tools actually available THIS turn (so binding + prompt agree)
@@ -1626,6 +1616,31 @@ async def build_lesson_state_anchor(
                 lines.append(next_line)
         except Exception:
             logger.warning("phase/next anchor failed for appt %s", appt_id, exc_info=True)
+
+        # ⚡ ONE imperative, state-driven action for THIS turn — the model kept waiting to
+        # be asked instead of acting on the clock (forgetting to advance slides, set the
+        # quiz, or wrap up when the time called for it). Driven by lesson STATE, not by
+        # anything the student said. Most-urgent first.
+        if end_allowed:
+            lines.append(
+                "⚡ DO NOW: time is up — give a short 2–3 sentence recap of what they learned, "
+                "then call generate_session_report and end_lesson. Do NOT start new teaching."
+            )
+        elif closing_stage:
+            lines.append(
+                "⚡ DO NOW: the lesson is in its final minutes — start wrapping up with a quick "
+                "recap and ONE last piece of practice. Don't open a brand-new topic."
+            )
+        elif quiz_phase:
+            lines.append(
+                "⚡ DO NOW: the quiz window is OPEN — unless you've already quizzed this session, "
+                "finish the current point and call generate_quiz yourself (don't wait to be asked)."
+            )
+        elif has_slides:
+            lines.append(
+                "⚡ DO NOW: keep the slides in sync — once the student has engaged with the slide "
+                "on screen (answered / 'ok' / 'next'), call advance_lesson_slide before teaching on."
+            )
         try:
             mastery_rows = await _load_topic_mastery(
                 db, student_id, appointment.subject or "", appointment.key_stage or ""
@@ -1637,6 +1652,25 @@ async def build_lesson_state_anchor(
                 f"needs work — {', '.join(weak) if weak else 'none yet'}. "
                 "Bias practice toward the 'needs work' areas."
             )
+        except Exception:
+            pass
+
+        # The EXACT puzzle_ids valid for this lesson + the label-diagram keys, so the
+        # model picks a real one instead of guessing (it was defaulting to 'label_diagram'
+        # / the plant). Image puzzles (identify_image / match_image) show real topic images.
+        try:
+            from app.services import puzzle_service as _pzs2
+            from app.services.puzzle_templates import DIAGRAMS as _DIAGS
+            _ids = [p["puzzle_id"] for p in _pzs2.list_available(
+                appointment.subject or "", appointment.key_stage or "")]
+            if _ids:
+                lines.append(
+                    "🧩 Valid puzzle_ids this lesson: " + ", ".join(_ids) + ". "
+                    "label_diagram keys: " + ", ".join(_DIAGS) + ". "
+                    "Pick the id that fits the concept — for naming real things (organs, "
+                    "animals, plants, places) PREFER identify_image / match_image (real "
+                    "images). Never invent an id or default to the plant."
+                )
         except Exception:
             pass
 
@@ -1680,12 +1714,19 @@ def _is_quiz_phase(appointment) -> bool:
 def select_tool_groups(
     *, event_kind: str = "user_message", intent_text: Optional[str] = None,
     has_slides: bool = False, end_allowed: bool = False, quiz_phase: bool = False,
+    closing_stage: bool = False,
 ) -> set:
-    """Bind only a SMALL, intent-relevant set of tool groups this turn (web-backed
-    anti-hallucination: fewer tools per call). Driven by what the student just did /
-    asked — the event kind, keyword intent in their message, the quiz-timing gate, and
-    whether the lesson has slides / is allowed to end. The default teaching/answering
-    turn binds just the slide tools (or puzzles when there are no slides)."""
+    """Choose the tool groups to bind THIS turn — STATE-DRIVEN first, then query-driven.
+
+    1) STATE (where the lesson is right now) sets the base groups the current stage
+       needs: the core slide+puzzle view is always on; quiz tools once the session has
+       reached its quiz window; lifecycle (end + report) once the lesson is closing or
+       ending is allowed. This is what stops the model reaching for a tool the stage
+       requires (e.g. generate_session_report at wrap-up) only to find it unbound.
+    2) QUERY (what the student just asked) ADDS extra groups on top from keyword intent.
+
+    Kept deliberately small per turn (anti-hallucination), but never so small that the
+    stage's own tools are missing."""
     text = (intent_text or "").lower()
 
     def _has(*kw: str) -> bool:
@@ -1693,25 +1734,32 @@ def select_tool_groups(
 
     g: set = set()
 
-    # Lifecycle only when ending is genuinely on the table.
-    if end_allowed or event_kind in ("lesson_end_request", "lesson_timeout"):
+    # ── 1) STATE-DRIVEN base — the tools THIS lesson stage requires ──────────────
+    # Core in-lesson view: slides + puzzles are the primary interactive surface, so the
+    # model can ALWAYS switch between them (and never wants show_puzzle while it's
+    # unbound → silent no-op → "look at the puzzle" hallucination).
+    g.add("puzzles")
+    if has_slides:
+        g.add("teaching")
+    # Quiz window reached (state) → quiz tools ready.
+    if quiz_phase or event_kind == "quiz_result":
+        g.add("assessment")
+    # Lesson is closing / ending is on the table (state) → end + report bound, so a
+    # wrap-up turn ("ok, time's up, let's finish") always has generate_session_report
+    # and end_lesson available. end_lesson stays hard-guarded by is_end_allowed, so
+    # binding it early can NOT actually end the lesson before its time.
+    if end_allowed or closing_stage or event_kind in ("lesson_end_request", "lesson_timeout"):
         g.add("lifecycle")
 
-    # Event-driven intent (no user text on these turns).
-    if event_kind == "puzzle_result":
-        g.add("puzzles")
-    elif event_kind == "quiz_result":
-        g.add("assessment")
-
-    # Time-gated quizzing — let the AI quiz when the session is far enough along.
-    if quiz_phase:
-        g.add("assessment")
-
-    # Keyword intent from the student's actual words.
+    # ── 2) QUERY-DRIVEN add-ons — the student's keyword intent ───────────────────
     if _has("quiz", "test me", "test ", "exam", "assess my", "how am i doing"):
         g.add("assessment")
     if _has("puzzle", "practice", "let's try", "try one", "interactive", "drag", "game", "hands-on"):
         g.add("puzzles")
+    if _has("end the lesson", "end lesson", "end today", "end now", "end here", "let's end",
+            "lets end", "finish the lesson", "finish up", "wrap up", "we're done", "we are done",
+            "that's all", "thats all", "stop here", "time's up", "time up", "i'm done", "im done"):
+        g.add("lifecycle")
     if _has("homework", "assignment", "set me work", "to do at home", "revise later", "practice at home"):
         g.add("platform")
     if _has("show me", "slide", "resource", "diagram", "worksheet", "picture", "see the", "go to"):
@@ -1722,13 +1770,6 @@ def select_tool_groups(
         g.add("research")
     if _has("pause", "take a break", "brain break", "rest for", "stretch"):
         g.add("platform")  # pause_lesson
-
-    # Default teaching/answering turn (no strong intent) → keep it minimal.
-    if not (g - {"lifecycle"}):
-        if has_slides:
-            g.add("teaching")
-        else:
-            g.add("puzzles")  # no slides → hands-on practice is the natural default
 
     # Mastery is cheap + useful whenever practising or assessing.
     if g & {"puzzles", "assessment"}:
@@ -1750,12 +1791,20 @@ async def _run_turn(send, chat_id, user_id, *, saved_user_text, ai_content,
     slide — show the current slide and inject its content + a fresh slide-progression
     directive so the AI teaches slide-by-slide reliably. Off for quiz-feedback turns.
     """
-    await send({"type": "turn_start", "turn_id": uuid4().hex})
+    turn_id = uuid4().hex
+    await send({"type": "turn_start", "turn_id": turn_id})
 
-    if tts:
-        nf = await asyncio.to_thread(get_neutral_filler)
-        if nf and nf.get("audio_b64"):
-            await send({"type": "filler", "text": nf["text"], "audio_b64": nf["audio_b64"]})
+    # Steps shown in the "thinking" strip this turn (tool labels + brief thought lines).
+    # Persisted as a role="thinking" message at the end so they survive a refresh.
+    thinking_steps: list = []
+
+    # Result turns already carry the outcome (puzzles/quizzes self-mark client-side), so
+    # the model reacts without an evaluate_answer call. Emit an honest leading step so the
+    # student still SEES the tutor "check" their work in the thinking strip.
+    _result_step = {"puzzle_result": "Checking the answer",
+                    "quiz_result": "Marking the quiz"}.get(event_kind)
+    if _result_step:
+        await _emit_thinking(send, thinking_steps, _result_step)
 
     if image_b64 and image_mime and not image_mime.startswith("image/"):
         doc_text = await asyncio.to_thread(_extract_doc_text, image_b64, image_mime)
@@ -1808,10 +1857,30 @@ async def _run_turn(send, chat_id, user_id, *, saved_user_text, ai_content,
                             _yg = getattr(_prof, "year_group", None) if _prof else None
                         except Exception:
                             _yg = None
+                    # Lesson unit/topic → scope catalog-image puzzles to the actual topic.
+                    _unit_title = None
+                    _topic_title = None
+                    try:
+                        from app.services.session_resource_service import _parse_description as _pd
+                        _topics = _pd(getattr(appt, "description", "") or "").get("topics") or []
+                        _unit_title = _topics[0] if _topics else None
+                    except Exception:
+                        pass
+                    try:
+                        from app.models.lesson_plan import LessonPlan as _LP3
+                        _lp = (await db.execute(
+                            select(_LP3).where(_LP3.appointment_id == appt_id)
+                        )).scalar_one_or_none()
+                        if _lp:
+                            _topic_title = getattr(_lp, "subtopic", None) or getattr(_lp, "unit_name", None) or _topic_title
+                            _unit_title = _unit_title or getattr(_lp, "unit_name", None)
+                    except Exception:
+                        pass
                     tool_context = ToolContext(
                         db=db, student_id=user_id, appointment_id=appt_id,
                         subject=appt.subject, key_stage=appt.key_stage,
                         year_group=_yg, chat_session_id=chat.session_id,
+                        unit_title=_unit_title, topic_title=_topic_title,
                     )
             except Exception:
                 logger.warning("ToolContext build failed for appt %s", appt_id)
@@ -1874,15 +1943,27 @@ async def _run_turn(send, chat_id, user_id, *, saved_user_text, ai_content,
                     _appt_phase = await _load_appointment(db, appt_id)
                     _quiz_phase = _is_quiz_phase(_appt_phase) if _appt_phase else False
                 except Exception:
+                    _appt_phase = None
                     _quiz_phase = False
+                # Closing stage = lesson clock is in its final stretch (last ~15%, min 3
+                # min). At this stage bind lifecycle so a wrap-up turn has the report/end
+                # tools ready — the demonstrated "generate_session_report not bound" gap.
+                try:
+                    _elapsed, _remaining, _dur = _compute_lesson_clock(_appt_phase) if _appt_phase else (0, 0, 0)
+                    _closing = bool(_appt_phase) and _remaining <= max(3, round(_dur * 0.15))
+                except Exception:
+                    _closing = False
                 tool_groups_for_turn = select_tool_groups(
                     event_kind=event_kind, intent_text=saved_user_text,
                     has_slides=has_slides, end_allowed=_end_allowed, quiz_phase=_quiz_phase,
+                    closing_stage=_closing,
                 )
                 try:
                     _anchor = await build_lesson_state_anchor(
                         db, appt_id, user_id, _pstate,
                         available_actions=_describe_actions(tool_groups_for_turn),
+                        has_slides=has_slides, quiz_phase=_quiz_phase,
+                        closing_stage=_closing, end_allowed=_end_allowed,
                     )
                     ai_content = f"{ai_content}\n\n{_anchor}"
                 except Exception:
@@ -1901,6 +1982,10 @@ async def _run_turn(send, chat_id, user_id, *, saved_user_text, ai_content,
         ):
             token = _coerce_str(raw)
             stripped = token.strip()
+            # Brief reasoning summary → thinking strip (never shown as answer text).
+            if stripped.startswith("[THINK:") and stripped.endswith("]"):
+                await _emit_thinking(send, thinking_steps, stripped[len("[THINK:"):-1])
+                continue
             if stripped.startswith("[TOOL_RESULT:") and stripped.endswith("]"):
                 try:
                     tr = json.loads(stripped[len("[TOOL_RESULT:"):-1])
@@ -1912,6 +1997,10 @@ async def _run_turn(send, chat_id, user_id, *, saved_user_text, ai_content,
                             _tool, _data.get("render"), _data.get("puzzle_id"), _data.get("error"),
                         )
                     await send({"type": "tool", "tool": _tool, "data": _data})
+                    # Friendly one-line "thinking" step for the tool just run.
+                    _label = _THINKING_LABELS.get(_tool)
+                    if _label:
+                        await _emit_thinking(send, thinking_steps, _label)
                     # end_lesson succeeded → persist the event + tell the client to open the report.
                     if _tool == "end_lesson" and _data.get("ended"):
                         from app.schemas.session_events import lesson_ended_frame, EVENT_LESSON_ENDED
@@ -1922,12 +2011,12 @@ async def _run_turn(send, chat_id, user_id, *, saved_user_text, ai_content,
                 continue
             full.append(token)
             for sentence in segmenter.feed(token):
-                await send(await build_segment(sentence, seq, tts))
+                await stream_segment(send, seq, sentence, tts=tts, turn_id=turn_id)
                 seq += 1
 
         remainder = segmenter.flush()
         if remainder:
-            await send(await build_segment(remainder, seq, tts))
+            await stream_segment(send, seq, remainder, tts=tts, turn_id=turn_id)
             seq += 1
 
         complete = "".join(full)
@@ -1936,6 +2025,12 @@ async def _run_turn(send, chat_id, user_id, *, saved_user_text, ai_content,
             await send({"type": "error", "message": "The tutor couldn't generate a reply — please try again.", "recoverable": True})
             await send({"type": "turn_end", "message_id": None, "full_text": ""})
             return
+
+        # Persist the thinking steps FIRST (lower id → renders just above the answer),
+        # mirroring how role="event" pills persist. build_context keeps only user/assistant,
+        # so this never leaks into the LLM history.
+        if thinking_steps:
+            await chat_service.add_message(db, chat_id, "thinking", "\n".join(thinking_steps))
 
         msg = await chat_service.add_message(db, chat_id, "assistant", clean)
         message_id = msg.id
@@ -1955,6 +2050,42 @@ async def _run_turn(send, chat_id, user_id, *, saved_user_text, ai_content,
         await db.commit()
 
     await send({"type": "turn_end", "message_id": message_id, "full_text": clean})
+
+
+# Friendly one-line labels shown in the "thinking" strip when a tool runs — plain
+# language, no technical detail. Internal lookups (list_available_puzzles) and tools
+# already surfaced as event pills (pause/resume/end_lesson) are intentionally omitted.
+_THINKING_LABELS: dict = {
+    "show_puzzle": "Setting up a puzzle",
+    "clear_puzzle": "Clearing the puzzle",
+    "generate_quiz": "Putting together a quick quiz",
+    "evaluate_answer": "Checking the answer",
+    "get_student_mastery": "Reviewing progress",
+    "update_topic_mastery": "Updating progress",
+    "advance_lesson_slide": "Moving to the next slide",
+    "retreat_lesson_slide": "Going back a slide",
+    "show_resource": "Opening the slide",
+    "load_resource": "Finding the right resource",
+    "advance_lesson_phase": "Moving to the next part of the lesson",
+    "create_assignment": "Setting some homework",
+    "generate_session_report": "Writing the lesson report",
+    "web_search": "Searching the web",
+    "deep_research": "Researching that in depth",
+}
+
+
+async def _emit_thinking(send, steps: list, text: str) -> None:
+    """Send ONE live thinking-strip step and accumulate it for end-of-turn persistence.
+    Best-effort: a failed send never breaks the turn."""
+    text = (text or "").strip()
+    if not text:
+        return
+    steps.append(text)
+    logger.info("THINKING step=%r", text)
+    try:
+        await send({"type": "thinking", "text": text})
+    except Exception:
+        pass
 
 
 async def _emit_event(send, chat_id, kind: str, text: str) -> None:

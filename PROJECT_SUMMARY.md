@@ -96,7 +96,7 @@ Curriculum comes from the **Resource Hub** and is mirrored into `rh_*` tables fo
 | Puzzles | `puzzle_templates.py` (template registry by subject + key stage), `puzzle_service.py` (build/solve + authoritative `puzzle_state`: `set_puzzle_shown`/`record_puzzle_attempt`/`get_puzzle_state`/`clear_puzzle_state`), `casbin_service.py` (RBAC), `school_service.py` (tenant CRUD), `oauth_service.py` (Authlib Google) | Visual-puzzle engine + auth/multi-tenant |
 | Routers | `auth.py`, `chat.py`, `voice.py`, `documents.py`, `curriculum.py` (**Resource Hub read API + admin sync**), `admin.py`, `teacher.py`, `parent.py`, `appointments.py`, `sessions.py`, `lessons.py`, `assessments.py`, `assignments.py`, `gamification.py`, `settings.py`, `subscription.py`, `health.py` | REST + WebSocket endpoints |
 | Middleware | `auth.py`, `rate_limit.py` | JWT guard, role-based access, rate limiting |
-| Scripts | `setup.py` (DB setup + **explicit `rh_*` table DDL/migrations**), `seed.py`, `seed_voice_fillers.py` | DB setup/seed; pre-generate the Kokoro **neutral-bridge** filler clips (`python -m app.seed_voice_fillers`) |
+| Scripts | `setup.py` (DB setup + **explicit `rh_*` table DDL/migrations**), `seed.py`, `seed_topic_images.py` | DB setup/seed; populate the **topic-image catalog** for image puzzles (`python -m app.seed_topic_images`) |
 
 ### Key Backend Features
 
@@ -105,8 +105,9 @@ Curriculum comes from the **Resource Hub** and is mirrored into `rh_*` tables fo
 - **RAG pipeline**: pgvector HNSW index (M=16, ef=64, cosine ops), Gemini text-embedding-001 (768d), top-5 chunks with min 0.3 similarity — now over `rh_document_chunks` (`rag_service.retrieve_hub_chunks`; sessions filter by curriculum + goal resource types, simple chat filters loosely)
 - **Document processing**: PDF (pypdf), DOCX (python-docx), PPTX (python-pptx) extraction — whole-text *and* **per-slide/page** (`extract_pages`, so each chunk keeps its `slide_index`); 500-token chunks with 50-token overlap; batch embedding; status tracking (pending → ready/failed/skipped)
 - **Chat**: two separate WebSocket pipelines — premium **session** (`/api/sessions/ws`, full tool suite, `get_llm`) and free **simple chat** (`/api/chat/ws`, `chat_tools` subset, `get_chat_llm`). Backend orchestrates each turn: saves the user message once, streams the reply as ordered sentence segments with bundled Kokoro audio, commits the assistant message once with the authoritative DB id (`turn_end`). Auto-generated titles, 20-message context window + RAG injection, per-message credit deduction. A per-turn `asyncio.wait_for` timeout means the socket can never hang.
-- **Voice (custom loop)**: the mic is captured client-side with RMS silence-VAD (`useVoiceCapture`); each utterance is sent as `user_audio` over the **same** chat/session WebSocket, transcribed by Gemini STT (`voice_agent_service.speech_to_text`), run through the **identical** turn pipeline, and spoken back as the segment audio. **Kokoro-82M** (`af_sky`, local CPU, ~280 ms) powers all TTS (`text_to_speech`, also `/api/voice/speak` for "Read aloud"), pre-warmed in lifespan. (The old Gemini Live socket was removed.)
-- **Neutral-bridge filler**: a tiny neutral phrase ("Okay.", "Right.", "Let me see.") + its Kokoro clip is sent at turn start to cover the <1 s before the first real segment; the **model's own first sentence** carries the actual reaction (praise/correction). The old situational-filler classifier was removed — only the `neutral` bucket in `seed_voice_fillers.py` remains, read by `session_agent_service.get_neutral_filler()`.
+- **Voice (custom loop)**: the mic is captured client-side with RMS silence-VAD (`useVoiceCapture`); each utterance is sent as `user_audio` over the **same** chat/session WebSocket, transcribed by Gemini STT (`voice_agent_service.speech_to_text`), run through the **identical** turn pipeline, and spoken back as audio. **Kokoro-82M** (warm **`af_heart`** voice, speed 0.95, local CPU) powers all TTS (`text_to_speech`, also `/api/voice/speak` for "Read aloud"), pre-warmed in lifespan. (The old Gemini Live socket was removed.)
+- **Fast text streaming (decoupled from TTS)**: `stream_segment` sends each sentence's display text **immediately** (`{type:"segment"}`) and synthesises its Kokoro audio in the background as a separate `{type:"segment_audio"}` frame (one per seq, possibly null). The client reveals text at a reading cadence right away and plays audio in seq order independently — so text is GPT-fast even when Kokoro is slow; `turn_end` is never gated on TTS.
+- **"Thinking" strip (replaces voice fillers)**: voice fillers are removed; each turn streams one-line `{type:"thinking"}` steps — tool labels (`_THINKING_LABELS`) + a brief Gemini thought summary (`include_thoughts`; thought parts → `[THINK:]`) — persisted as a `role="thinking"` message (filtered out of LLM history) so they survive a refresh.
 - **Session/Appointment system**: Teacher or parent books sessions; status flow (booked → confirmed → in_progress → completed/cancelled/terminated/paused); session passcode support
 - **Quiz/Assessment system**: a `generate_quiz` session tool generates quiz questions during sessions; answer evaluation; scoring (score_percent, correct_answers); strong/weak topic analysis (quiz feedback rides the same session WebSocket via a `quiz_result` message)
 - **Session reports**: Post-session AI-generated report (summary, quiz score, understanding level, strong areas, areas to improve, next session recommendation)
@@ -199,7 +200,7 @@ Curriculum comes from the **Resource Hub** and is mirrored into `rh_*` tables fo
 ### Voice
 | Method | Endpoint | Description |
 |--------|---------------------------|------------------------------|
-| POST | /api/voice/speak | Single-shot text-to-speech (Kokoro `af_sky`) — used by "Read aloud" |
+| POST | /api/voice/speak | Single-shot text-to-speech (Kokoro `af_heart`) — used by "Read aloud" |
 
 ### Documents (Knowledge Base)
 | Method | Endpoint | Description |
@@ -342,7 +343,7 @@ Curriculum comes from the **Resource Hub** and is mirrored into `rh_*` tables fo
 | LLM orchestration | LangChain (`langchain-google-genai` ≥4.0) — async `astream()`, `with_structured_output()`, `@tool` calling |
 | Embeddings | Gemini text-embedding-001 (768d with output_dimensionality) |
 | Voice | Custom STT → turn → TTS loop on the chat/session WebSocket. STT: Gemini transcription; client-side RMS silence-VAD for end-of-utterance |
-| TTS | Kokoro-82M (`af_sky`, local CPU, `kokoro` + `soundfile`); per-sentence segments; pre-warmed in lifespan |
+| TTS | Kokoro-82M (warm `af_heart`, speed 0.95, local CPU, `kokoro` + `soundfile`); text streams immediately, audio ships as separate `segment_audio` frames; pre-warmed in lifespan |
 | Vector Index | pgvector HNSW (M=16, ef=64, cosine similarity) — over `document_chunks` (legacy) + `rh_document_chunks` (Resource Hub) |
 | Curriculum source | External **Resource Hub** API mirrored into `rh_*` tables by APScheduler jobs (`httpx` client; curriculum every 12 h, resources every 6 h) |
 | Auth | JWT (python-jose) + bcrypt (passlib), **Authlib** Google OAuth (+ Starlette `SessionMiddleware`), email verification via DB tokens, **Casbin** RBAC (RBAC-with-domains, `casbin-async-sqlalchemy-adapter` → `casbin_rule`) |
@@ -489,6 +490,16 @@ Both run as backend-orchestrated WebSocket turns (`chat_service.run_chat_ws` / `
 | Backend (FastAPI/uvicorn) | 8001 | http://localhost:8001 |
 | PostgreSQL | 5432 | localhost:5432 |
 | API Docs (Swagger) | 8001 | http://localhost:8001/docs |
+
+---
+
+## Recent Changes (2026-06-30) — Thinking Strip + Fast Streaming + Image Puzzles
+
+Three session-experience upgrades:
+
+- **Voice fillers removed → "thinking" strip.** `seed_voice_fillers.py` and all neutral-bridge clips are deleted. Every turn now shows a Claude-style strip of one-line steps: tool labels (`_THINKING_LABELS` in `session_agent_service.py`, e.g. "🧩 Setting up a puzzle", "✓ Checking your answer") plus a brief best-effort Gemini thought summary (`include_thoughts` in `llm_service.py`; thought parts → `[THINK:]` in `gemini_service.stream_response_async`). Steps stream as `{type:"thinking"}` and are **persisted** as `role="thinking"` chat messages (filtered out of LLM history by `build_context`), so they survive a refresh. Rendered by `ChatWindow`'s `ThinkingStrip`.
+- **Fast text streaming decoupled from TTS.** `build_segment` → `stream_segment` + `_tts_segment`: the text `{type:"segment"}` frame is sent the instant Gemini emits a sentence; Kokoro audio is synthesised in the background and shipped as a separate `{type:"segment_audio"}` frame (one per seq, possibly null, `turn_id`-tagged). `useSessionChannel` runs an independent **text pump** (immediate reveal) and **audio pump** (in-order `nextAudioSeq` playback). `turn_end` no longer waits on TTS. Voice switched to warm **Kokoro `af_heart`** @ 0.95 + prosody-friendly `_prep_tts_text` (Kokoro has no style prompt).
+- **Puzzle categories + real curriculum images.** Every template is tagged with a **category** (chip in `PuzzlePlayer`). New **image puzzles** — `identify_image` (name a real topic image) and `match_image` (tap-to-pair images↔names, `components/puzzles/MatchImage.tsx` + `IdentifyImage.tsx`) — draw from a **topic-image catalog** (`rh_topic_images`): `services/topic_image_service.py` resolves a Wikipedia lead image per `rh_topics` row (verb-stripped title → summary/search), cached as stable URLs by `resource_sync_service.sync_topic_images()` (`python -m app.seed_topic_images`, also on the sync schedule + `POST /api/curriculum/sync?target=topic_images`). `show_puzzle` injects catalog rows scoped to the lesson's subject/KS/topic (`ToolContext.topic_title`); too few images → `no_catalog_images` fallback.
 
 ---
 

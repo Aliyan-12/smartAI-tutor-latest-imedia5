@@ -5,20 +5,28 @@ import type { ChatMessage } from "../types";
 /**
  * useSessionChannel — the unified session chat pipeline (one WebSocket).
  *
- * The backend streams each assistant turn as ordered *segments* (a sentence +
- * its bundled Kokoro audio). This hook plays each segment's audio while
- * revealing its words over the clip's exact duration → true TTS↔text sync.
- * Messages are committed only on `turn_end` via the authoritative DB id, so
- * there are no optimistic-id collisions, duplicates, or freezes.
+ * The backend streams each assistant turn as two INDEPENDENT streams: text
+ * `segment` frames (revealed immediately at a reading cadence — GPT-style, never
+ * waiting on TTS) and, when voice is on, `segment_audio` frames that arrive a beat
+ * later and play in seq order in the background. Decoupling them is what makes the
+ * text fast even when Kokoro is slow. Messages are committed only on `turn_end` via
+ * the authoritative DB id, so there are no optimistic-id collisions or duplicates.
  */
 export type SessionStatus = "idle" | "connecting" | "waiting" | "speaking";
 
-interface Segment {
+interface TextSeg {
   seq: number;
   text: string;
+}
+interface AudioSeg {
   audio_b64: string | null;
   duration_ms: number | null;
 }
+// One ordered piece of the in-flight turn: a "think" row (thought/tool step) or a
+// "text" chunk. Captured in arrival order so the live reply reads
+// think → act → speak → act → speak (Claude-style interleaving), rather than lumping
+// all thinking above the answer.
+export type LivePart = { kind: "think" | "text"; text: string };
 
 export interface SessionChannelOpts {
   /** Session pipeline: the appointment to attach to. Omit for the standalone /chat. */
@@ -50,7 +58,12 @@ export function useSessionChannel(opts: SessionChannelOpts) {
   const [liveText, setLiveText] = useState("");
   const [busy, setBusy] = useState(false); // a turn is in flight → disable input
   const [error, setError] = useState<string | null>(null);
-  const [fillerText, setFillerText] = useState<string | null>(null);
+  // Live "thinking" steps for the in-flight turn (tool labels + brief thought lines).
+  // Cleared on turn_start; the persisted role="thinking" message drives after-refresh.
+  const [thinkingSteps, setThinkingSteps] = useState<string[]>([]);
+  // Ordered parts (thinking rows + text) of the in-flight turn, interleaved in arrival
+  // order — this is what the live reply renders so it reads think → act → speak.
+  const [liveParts, setLiveParts] = useState<LivePart[]>([]);
 
   const optsRef = useRef(opts);
   optsRef.current = opts;
@@ -70,12 +83,24 @@ export function useSessionChannel(opts: SessionChannelOpts) {
   const heartbeatRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   // ── playback / turn ──
-  const segQueueRef = useRef<Segment[]>([]);
-  const playingRef = useRef(false);
+  // Text pump (reveals immediately, independent of audio).
+  const textQueueRef = useRef<TextSeg[]>([]);
+  const textPumpingRef = useRef(false);
   const liveTextRef = useRef("");
-  const audioRef = useRef<HTMLAudioElement | null>(null);
-  const fillerAudioRef = useRef<HTMLAudioElement | null>(null);
+  // Mirror of thinkingSteps so finalizeTurn can commit them as a local role="thinking"
+  // message (kept in sync with the persisted DB row that loads on refresh).
+  const thinkingStepsRef = useRef<string[]>([]);
+  // Ordered live parts (think + text) for interleaved rendering of the in-flight turn.
+  const livePartsRef = useRef<LivePart[]>([]);
   const revealTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Audio pump (plays segment_audio in seq order, independent of text).
+  const audioMapRef = useRef<Map<number, AudioSeg>>(new Map());
+  const nextAudioSeqRef = useRef(0);
+  const audioPumpingRef = useRef(false);
+  const audioRef = useRef<HTMLAudioElement | null>(null);
+  // The turn whose frames we currently accept — so late audio from a previous turn
+  // (seq numbering restarts each turn) is dropped instead of bleeding into this one.
+  const currentTurnIdRef = useRef<string | null>(null);
   const pendingCommitRef = useRef<{ message_id: number | null; full_text: string } | null>(null);
   // A puzzle the student solved while a turn was still streaming — sent the moment
   // we're free, so their solve is never silently dropped.
@@ -102,29 +127,47 @@ export function useSessionChannel(opts: SessionChannelOpts) {
   const resetTurnPlayback = () => {
     if (revealTimerRef.current) { clearTimeout(revealTimerRef.current); revealTimerRef.current = null; }
     if (audioRef.current) { try { audioRef.current.pause(); } catch { /* ignore */ } audioRef.current = null; }
-    if (fillerAudioRef.current) { try { fillerAudioRef.current.pause(); } catch { /* ignore */ } fillerAudioRef.current = null; }
-    segQueueRef.current = [];
-    playingRef.current = false;
+    textQueueRef.current = [];
+    textPumpingRef.current = false;
+    audioMapRef.current.clear();
+    nextAudioSeqRef.current = 0;
+    audioPumpingRef.current = false;
     liveTextRef.current = "";
     setLiveText("");
-    setFillerText(null);
+    livePartsRef.current = [];
+    setLiveParts([]);
     pendingCommitRef.current = null;
   };
 
-  // ── per-segment reveal + audio (the sync core) ──
+  // Mirror the interleaved parts to state + keep liveText (concat of text parts) in sync
+  // for read-aloud + activity detection.
+  const syncLiveParts = () => {
+    setLiveParts([...livePartsRef.current]);
+    liveTextRef.current = livePartsRef.current
+      .filter((p) => p.kind === "text").map((p) => p.text).join("");
+    setLiveText(liveTextRef.current);
+  };
+
+  // ── TEXT pump (fast reveal, no audio dependency) ──
   // Reveal the segment's RAW text (newlines/markdown preserved) in phrase-sized
-  // chunks — never word-by-word, and never flattening whitespace, so the live
-  // stream renders as proper markdown. Segments already carry their own trailing
-  // separator, so we just append (no manual spacing).
+  // chunks at a reading cadence — never word-by-word, and never flattening whitespace,
+  // so the live stream renders as proper markdown. Segments already carry their own
+  // trailing separator, so we just append (no manual spacing).
   const CHUNK_WORDS = 5;
-  const revealSegment = (seg: Segment): Promise<void> =>
+  const revealSegment = (seg: TextSeg): Promise<void> =>
     new Promise((resolve) => {
       const text = seg.text;
       if (!text) { resolve(); return; }
-      const base = liveTextRef.current;
+      // Reveal into the CURRENT text part. A thinking row since the last text starts a
+      // NEW text part, so text and thinking interleave in arrival order. (Appending a
+      // think row later never shifts an earlier index, so partIdx stays valid.)
+      const parts = livePartsRef.current;
+      if (parts.length === 0 || parts[parts.length - 1].kind !== "text") {
+        parts.push({ kind: "text", text: "" });
+      }
+      const partIdx = parts.length - 1;
+      const base = parts[partIdx].text;
 
-      // Checkpoints at every CHUNK_WORDS-th word boundary, indexing into the raw
-      // string so newlines/markdown between words are preserved when sliced.
       const ends: number[] = [];
       const re = /\S+/g;
       let m: RegExpExecArray | null;
@@ -135,14 +178,13 @@ export function useSessionChannel(opts: SessionChannelOpts) {
       }
       if (ends.length === 0 || ends[ends.length - 1] !== text.length) ends.push(text.length);
 
-      const total = seg.duration_ms && seg.duration_ms > 0
-        ? seg.duration_ms
-        : (words || 1) * DEFAULT_MS_PER_WORD;
+      // Reading cadence only — text never waits on TTS (Kokoro plays in the background).
+      const total = (words || 1) * DEFAULT_MS_PER_WORD;
       const per = Math.max(40, total / ends.length);
       let i = 0;
       const tick = () => {
-        liveTextRef.current = base + text.slice(0, ends[i]);
-        setLiveText(liveTextRef.current);
+        livePartsRef.current[partIdx].text = base + text.slice(0, ends[i]);
+        syncLiveParts();
         i++;
         if (i >= ends.length) { resolve(); return; }
         revealTimerRef.current = setTimeout(tick, per);
@@ -150,12 +192,28 @@ export function useSessionChannel(opts: SessionChannelOpts) {
       tick();
     });
 
-  const playAudio = (seg: Segment): Promise<void> =>
+  const pumpText = async () => {
+    if (textPumpingRef.current) return;
+    textPumpingRef.current = true;
+    setStatus("speaking");
+    while (textQueueRef.current.length > 0) {
+      const seg = textQueueRef.current.shift()!;
+      await revealSegment(seg);
+    }
+    textPumpingRef.current = false;
+    finalizeTurn(false);
+  };
+
+  // ── AUDIO pump (in-order playback, independent of text) ──
+  // segment_audio frames may arrive out of order (concurrent Kokoro), so we buffer by
+  // seq and play strictly in order. The backend emits exactly one frame per seq (a null
+  // clip for short/failed segments), so the queue never stalls on a missing seq.
+  const playAudioClip = (audio_b64: string | null): Promise<void> =>
     new Promise((resolve) => {
-      if (!seg.audio_b64 || !ttsEnabledRef.current) { resolve(); return; }
+      if (!audio_b64 || !ttsEnabledRef.current) { resolve(); return; }
       let url: string;
       try {
-        const bytes = Uint8Array.from(atob(seg.audio_b64), (c) => c.charCodeAt(0));
+        const bytes = Uint8Array.from(atob(audio_b64), (c) => c.charCodeAt(0));
         url = URL.createObjectURL(new Blob([bytes], { type: "audio/wav" }));
       } catch { resolve(); return; }
       const audio = new Audio(url);
@@ -167,29 +225,23 @@ export function useSessionChannel(opts: SessionChannelOpts) {
       audio.play().catch(done);
     });
 
-  // Neutral filler bridge: shown + (optionally) played until the first real segment.
-  const stopFiller = () => {
-    if (fillerAudioRef.current) { try { fillerAudioRef.current.pause(); } catch { /* ignore */ } fillerAudioRef.current = null; }
-    setFillerText(null);
-  };
-  const playFiller = (text: string, audioB64: string | null) => {
-    setFillerText(text);
-    if (!audioB64 || !ttsEnabledRef.current) return;
-    try {
-      const bytes = Uint8Array.from(atob(audioB64), (c) => c.charCodeAt(0));
-      const url = URL.createObjectURL(new Blob([bytes], { type: "audio/wav" }));
-      const audio = new Audio(url);
-      fillerAudioRef.current = audio;
-      const done = () => { URL.revokeObjectURL(url); if (fillerAudioRef.current === audio) fillerAudioRef.current = null; };
-      audio.onended = done;
-      audio.onerror = done;
-      audio.play().catch(done);
-    } catch { /* ignore */ }
+  const pumpAudio = async () => {
+    if (audioPumpingRef.current) return;
+    audioPumpingRef.current = true;
+    while (true) {
+      const seq = nextAudioSeqRef.current;
+      const seg = audioMapRef.current.get(seq);
+      if (!seg) break; // wait — the next arriving frame restarts the pump
+      audioMapRef.current.delete(seq);
+      nextAudioSeqRef.current = seq + 1;
+      await playAudioClip(seg.audio_b64);
+    }
+    audioPumpingRef.current = false;
   };
 
   const finalizeTurn = (forced: boolean) => {
-    if (playingRef.current) return;            // still speaking — will be called again
-    if (segQueueRef.current.length > 0) return; // more segments queued
+    if (textPumpingRef.current) return;          // still revealing — will be called again
+    if (textQueueRef.current.length > 0) return; // more text queued
     const pc = pendingCommitRef.current;
     if (!pc && !forced) return;
     pendingCommitRef.current = null;
@@ -197,35 +249,35 @@ export function useSessionChannel(opts: SessionChannelOpts) {
 
     if (pc && pc.full_text) {
       const id = pc.message_id;
+      const steps = thinkingStepsRef.current;
+      const ts = new Date().toISOString();
       setMessages((prev) => {
         if (id != null && prev.some((m) => m.id === id)) return prev; // no dupes
-        return [...prev, {
-          id: id ?? -Date.now(),
-          chat_id: 0,
-          role: "assistant" as const,
-          content: pc.full_text,
-          timestamp: new Date().toISOString(),
-        }];
+        const additions: ChatMessage[] = [];
+        // Local mirror of the persisted role="thinking" row so the strip stays visible
+        // after the turn (not just after a refresh). Lower id → renders above the answer.
+        if (steps.length > 0) {
+          additions.push({
+            id: -Date.now() - 1, chat_id: 0, role: "thinking" as const,
+            content: steps.join("\n"), timestamp: ts,
+          });
+        }
+        additions.push({
+          id: id ?? -Date.now(), chat_id: 0, role: "assistant" as const,
+          content: pc.full_text, timestamp: ts,
+        });
+        return [...prev, ...additions];
       });
     }
+    thinkingStepsRef.current = [];
     liveTextRef.current = "";
     setLiveText("");
-    setFillerText(null);
+    livePartsRef.current = [];
+    setLiveParts([]);
+    // Audio may still be narrating in the background — that's fine; the committed
+    // bubble stays put and a new turn_start will stop any leftover playback.
     setStatus("idle");
     setBusy(false);
-  };
-
-  const pumpPlayer = async () => {
-    if (playingRef.current) return;
-    playingRef.current = true;
-    setStatus("speaking");
-    stopFiller(); // first real segment takes over from the neutral bridge
-    while (segQueueRef.current.length > 0) {
-      const seg = segQueueRef.current.shift()!;
-      await Promise.all([revealSegment(seg), playAudio(seg)]);
-    }
-    playingRef.current = false;
-    finalizeTurn(false);
   };
 
   // ── server → client dispatch ──
@@ -253,17 +305,35 @@ export function useSessionChannel(opts: SessionChannelOpts) {
         optsRef.current.onUserTranscript?.(d.text);
         break;
       case "turn_start":
+        currentTurnIdRef.current = d.turn_id ?? null;
+        resetTurnPlayback();       // drop any leftover audio/text from a previous turn
+        thinkingStepsRef.current = [];
+        setThinkingSteps([]);      // fresh thinking strip for this turn
         setStatus("waiting");
         armWatchdog();
         break;
-      case "filler":
-        playFiller(d.text || "", d.audio_b64 ?? null);
+      case "thinking":
+        if (d.text) {
+          const step = String(d.text);
+          thinkingStepsRef.current = [...thinkingStepsRef.current, step];
+          setThinkingSteps((prev) => [...prev, step]);
+          // Interleave it into the live parts (a think row after text → the next text
+          // segment opens a fresh text part → think/text render in order).
+          livePartsRef.current = [...livePartsRef.current, { kind: "think", text: step }];
+          syncLiveParts();
+        }
         break;
       case "segment":
-        segQueueRef.current.push({
-          seq: d.seq, text: d.text || "", audio_b64: d.audio_b64 ?? null, duration_ms: d.duration_ms ?? null,
-        });
-        void pumpPlayer();
+        // Text only — revealed immediately (no wait for TTS). Ignore stale-turn frames.
+        if (currentTurnIdRef.current && d.turn_id && d.turn_id !== currentTurnIdRef.current) break;
+        textQueueRef.current.push({ seq: d.seq, text: d.text || "" });
+        void pumpText();
+        break;
+      case "segment_audio":
+        // Background audio for a text segment — play in seq order. Drop stale turns.
+        if (currentTurnIdRef.current && d.turn_id && d.turn_id !== currentTurnIdRef.current) break;
+        audioMapRef.current.set(d.seq, { audio_b64: d.audio_b64 ?? null, duration_ms: d.duration_ms ?? null });
+        void pumpAudio();
         break;
       case "tool":
         optsRef.current.onTool?.(d.tool, d.data || {});
@@ -503,7 +573,7 @@ export function useSessionChannel(opts: SessionChannelOpts) {
   useEffect(() => () => { _closeIntentional(); }, [_closeIntentional]);
 
   return {
-    connected, status, messages, liveText, fillerText, busy, error,
+    connected, status, messages, liveText, thinkingSteps, liveParts, busy, error,
     connect, disconnect, pause, resume,
     sendMessage, sendQuizResult, sendPuzzleResult, sendAudio, sendEvent, stopTurn,
     hydrate, setMessages, clearError,
