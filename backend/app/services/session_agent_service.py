@@ -1079,6 +1079,7 @@ VISUAL PUZZLES — PRACTISE HANDS-ON (Maths/Science), PROACTIVELY:
 - Don't spam — one focused puzzle per concept, then move on. If the student explicitly asks for a puzzle, show one immediately.
 - VALID IDs ONLY: pick puzzle_id strictly from what list_available_puzzles returns. NEVER tell the student to "look at" / "check" the puzzle UNLESS show_puzzle returned successfully (i.e. it did NOT return an 'error' field). If show_puzzle returns an error, do NOT mention a puzzle at all — just ask a normal typed question.
 - Never write the tool call as text and never read out raw params; the puzzle just appears on screen.
+- ACTIONS, NOT NARRATION: if you say you're clearing the puzzle / moving on from it, you MUST actually call clear_puzzle in the SAME turn (moving to a slide also clears it) — never just say "I'll clear that" without doing it. Same for every tool: do the action, don't describe doing it.
 
 END-OF-SESSION REPORT:
 - After delivering the final session summary/review (the last phase), call the generate_session_report tool.
@@ -1797,6 +1798,14 @@ async def _run_turn(send, chat_id, user_id, *, saved_user_text, ai_content,
     # Persisted as a role="thinking" message at the end so they survive a refresh.
     thinking_steps: list = []
 
+    # Result turns already carry the outcome (puzzles/quizzes self-mark client-side), so
+    # the model reacts without an evaluate_answer call. Emit an honest leading step so the
+    # student still SEES the tutor "check" their work in the thinking strip.
+    _result_step = {"puzzle_result": "Checking the answer",
+                    "quiz_result": "Marking the quiz"}.get(event_kind)
+    if _result_step:
+        await _emit_thinking(send, thinking_steps, _result_step)
+
     if image_b64 and image_mime and not image_mime.startswith("image/"):
         doc_text = await asyncio.to_thread(_extract_doc_text, image_b64, image_mime)
         image_b64 = None
@@ -2047,21 +2056,21 @@ async def _run_turn(send, chat_id, user_id, *, saved_user_text, ai_content,
 # language, no technical detail. Internal lookups (list_available_puzzles) and tools
 # already surfaced as event pills (pause/resume/end_lesson) are intentionally omitted.
 _THINKING_LABELS: dict = {
-    "show_puzzle": "🧩 Setting up a puzzle",
-    "clear_puzzle": "🧩 Clearing the puzzle",
-    "generate_quiz": "📝 Putting together a quick quiz",
-    "evaluate_answer": "✓ Checking your answer",
-    "get_student_mastery": "📊 Reviewing your progress",
-    "update_topic_mastery": "📊 Updating your progress",
-    "advance_lesson_slide": "➡️ Moving to the next slide",
-    "retreat_lesson_slide": "⬅️ Going back a slide",
-    "show_resource": "📑 Opening the slide",
-    "load_resource": "📑 Finding the right resource",
-    "advance_lesson_phase": "📍 Moving to the next part of the lesson",
-    "create_assignment": "📋 Setting some homework",
-    "generate_session_report": "📄 Writing your lesson report",
-    "web_search": "🔎 Searching the web",
-    "deep_research": "🔎 Researching that in depth",
+    "show_puzzle": "Setting up a puzzle",
+    "clear_puzzle": "Clearing the puzzle",
+    "generate_quiz": "Putting together a quick quiz",
+    "evaluate_answer": "Checking the answer",
+    "get_student_mastery": "Reviewing progress",
+    "update_topic_mastery": "Updating progress",
+    "advance_lesson_slide": "Moving to the next slide",
+    "retreat_lesson_slide": "Going back a slide",
+    "show_resource": "Opening the slide",
+    "load_resource": "Finding the right resource",
+    "advance_lesson_phase": "Moving to the next part of the lesson",
+    "create_assignment": "Setting some homework",
+    "generate_session_report": "Writing the lesson report",
+    "web_search": "Searching the web",
+    "deep_research": "Researching that in depth",
 }
 
 

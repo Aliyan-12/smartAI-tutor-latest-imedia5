@@ -8,6 +8,7 @@ same way slide_state is, so it survives across turns.
 """
 import logging
 import random
+import re
 import uuid
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
@@ -358,16 +359,29 @@ def _b_formula_triangle(p: dict) -> dict:
     }
 
 
+_ENUM_PREFIX = re.compile(r"^\s*(?:lesson|unit|topic|week|step|part)?\s*\d+\s*[.):\-]+\s*", re.IGNORECASE)
+
+
+def _clean_topic_name(title: str) -> str:
+    """Tidy a topic title for display as a puzzle option: drop the leading enumeration
+    ('2. Identifying Wild Plants' → 'Identifying Wild Plants'). Keep the rest intact."""
+    return _ENUM_PREFIX.sub("", (title or "").strip()).strip() or (title or "").strip()
+
+
 def _catalog_items(p: dict) -> List[dict]:
     """De-duplicated catalog rows with a real image, injected by the show_puzzle tool as
-    params['_catalog'] (each {topic_title, image_url, thumb_url})."""
+    params['_catalog'] (each {topic_title, image_url, thumb_url}). Only Wikimedia Commons
+    images are kept so a puzzle never shows a non-free cover/poster that doesn't depict the
+    topic; option names are cleaned of their enumeration prefix."""
     rows = p.get("_catalog") or []
     seen, out = set(), []
     for c in rows:
         url = c.get("thumb_url") or c.get("image_url")
-        title = (c.get("topic_title") or "").strip()
+        if not url or "/wikipedia/commons/" not in url:
+            continue
+        title = _clean_topic_name(c.get("topic_title") or "")
         key = title.lower()
-        if not url or not title or key in seen:
+        if not title or key in seen:
             continue
         seen.add(key)
         out.append({"name": title, "image": url})
@@ -385,7 +399,10 @@ def _b_identify_image(p: dict) -> dict:
     options = [target["name"]] + distractors
     random.shuffle(options)
     return {
-        "prompt": "Look at the image — what is it?",
+        # Framed as "which topic does this illustrate?" so it reads sensibly for topic
+        # titles (incl. abstract ones like "What nutrients our bodies need") — the image
+        # is a real picture OF that topic, not necessarily a single nameable object.
+        "prompt": "Which topic does this picture go with?",
         "params": {"image": target["image"], "options": options},
         "solution": target["name"],
     }
@@ -402,7 +419,7 @@ def _b_match_image(p: dict) -> dict:
     random.shuffle(images)
     random.shuffle(labels)
     return {
-        "prompt": "Match each image to its name.",
+        "prompt": "Match each picture to the topic it belongs to.",
         "params": {"images": images, "labels": labels},
         "solution": solution,
     }

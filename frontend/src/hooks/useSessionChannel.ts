@@ -22,6 +22,11 @@ interface AudioSeg {
   audio_b64: string | null;
   duration_ms: number | null;
 }
+// One ordered piece of the in-flight turn: a "think" row (thought/tool step) or a
+// "text" chunk. Captured in arrival order so the live reply reads
+// think → act → speak → act → speak (Claude-style interleaving), rather than lumping
+// all thinking above the answer.
+export type LivePart = { kind: "think" | "text"; text: string };
 
 export interface SessionChannelOpts {
   /** Session pipeline: the appointment to attach to. Omit for the standalone /chat. */
@@ -56,6 +61,9 @@ export function useSessionChannel(opts: SessionChannelOpts) {
   // Live "thinking" steps for the in-flight turn (tool labels + brief thought lines).
   // Cleared on turn_start; the persisted role="thinking" message drives after-refresh.
   const [thinkingSteps, setThinkingSteps] = useState<string[]>([]);
+  // Ordered parts (thinking rows + text) of the in-flight turn, interleaved in arrival
+  // order — this is what the live reply renders so it reads think → act → speak.
+  const [liveParts, setLiveParts] = useState<LivePart[]>([]);
 
   const optsRef = useRef(opts);
   optsRef.current = opts;
@@ -82,6 +90,8 @@ export function useSessionChannel(opts: SessionChannelOpts) {
   // Mirror of thinkingSteps so finalizeTurn can commit them as a local role="thinking"
   // message (kept in sync with the persisted DB row that loads on refresh).
   const thinkingStepsRef = useRef<string[]>([]);
+  // Ordered live parts (think + text) for interleaved rendering of the in-flight turn.
+  const livePartsRef = useRef<LivePart[]>([]);
   const revealTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   // Audio pump (plays segment_audio in seq order, independent of text).
   const audioMapRef = useRef<Map<number, AudioSeg>>(new Map());
@@ -124,7 +134,18 @@ export function useSessionChannel(opts: SessionChannelOpts) {
     audioPumpingRef.current = false;
     liveTextRef.current = "";
     setLiveText("");
+    livePartsRef.current = [];
+    setLiveParts([]);
     pendingCommitRef.current = null;
+  };
+
+  // Mirror the interleaved parts to state + keep liveText (concat of text parts) in sync
+  // for read-aloud + activity detection.
+  const syncLiveParts = () => {
+    setLiveParts([...livePartsRef.current]);
+    liveTextRef.current = livePartsRef.current
+      .filter((p) => p.kind === "text").map((p) => p.text).join("");
+    setLiveText(liveTextRef.current);
   };
 
   // ── TEXT pump (fast reveal, no audio dependency) ──
@@ -137,7 +158,15 @@ export function useSessionChannel(opts: SessionChannelOpts) {
     new Promise((resolve) => {
       const text = seg.text;
       if (!text) { resolve(); return; }
-      const base = liveTextRef.current;
+      // Reveal into the CURRENT text part. A thinking row since the last text starts a
+      // NEW text part, so text and thinking interleave in arrival order. (Appending a
+      // think row later never shifts an earlier index, so partIdx stays valid.)
+      const parts = livePartsRef.current;
+      if (parts.length === 0 || parts[parts.length - 1].kind !== "text") {
+        parts.push({ kind: "text", text: "" });
+      }
+      const partIdx = parts.length - 1;
+      const base = parts[partIdx].text;
 
       const ends: number[] = [];
       const re = /\S+/g;
@@ -154,8 +183,8 @@ export function useSessionChannel(opts: SessionChannelOpts) {
       const per = Math.max(40, total / ends.length);
       let i = 0;
       const tick = () => {
-        liveTextRef.current = base + text.slice(0, ends[i]);
-        setLiveText(liveTextRef.current);
+        livePartsRef.current[partIdx].text = base + text.slice(0, ends[i]);
+        syncLiveParts();
         i++;
         if (i >= ends.length) { resolve(); return; }
         revealTimerRef.current = setTimeout(tick, per);
@@ -243,6 +272,8 @@ export function useSessionChannel(opts: SessionChannelOpts) {
     thinkingStepsRef.current = [];
     liveTextRef.current = "";
     setLiveText("");
+    livePartsRef.current = [];
+    setLiveParts([]);
     // Audio may still be narrating in the background — that's fine; the committed
     // bubble stays put and a new turn_start will stop any leftover playback.
     setStatus("idle");
@@ -286,6 +317,10 @@ export function useSessionChannel(opts: SessionChannelOpts) {
           const step = String(d.text);
           thinkingStepsRef.current = [...thinkingStepsRef.current, step];
           setThinkingSteps((prev) => [...prev, step]);
+          // Interleave it into the live parts (a think row after text → the next text
+          // segment opens a fresh text part → think/text render in order).
+          livePartsRef.current = [...livePartsRef.current, { kind: "think", text: step }];
+          syncLiveParts();
         }
         break;
       case "segment":
@@ -538,7 +573,7 @@ export function useSessionChannel(opts: SessionChannelOpts) {
   useEffect(() => () => { _closeIntentional(); }, [_closeIntentional]);
 
   return {
-    connected, status, messages, liveText, thinkingSteps, busy, error,
+    connected, status, messages, liveText, thinkingSteps, liveParts, busy, error,
     connect, disconnect, pause, resume,
     sendMessage, sendQuizResult, sendPuzzleResult, sendAudio, sendEvent, stopTurn,
     hydrate, setMessages, clearError,

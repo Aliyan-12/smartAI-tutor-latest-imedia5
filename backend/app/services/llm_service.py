@@ -33,10 +33,12 @@ def _build_session_llm() -> ChatGoogleGenerativeAI:
         temperature=1.0,
         max_retries=5,
     )
-    # `include_thoughts` surfaces a brief reasoning summary in the stream; a small
-    # `thinking_budget` keeps it fast and cheap (we only want a one-liner, not deep CoT).
+    # `include_thoughts` surfaces a brief reasoning summary in the stream. A modest
+    # `thinking_budget` keeps it fast while making the model actually reason (and so emit a
+    # thought summary) on MOST turns — at 512 many simple turns produced no thoughts, so the
+    # thinking strip rarely showed; a larger budget makes "it's thinking" the norm.
     try:
-        llm = ChatGoogleGenerativeAI(**base, include_thoughts=True, thinking_budget=512)
+        llm = ChatGoogleGenerativeAI(**base, include_thoughts=True, thinking_budget=2048)
         logger.info(
             "Session LLM singleton created with thought summaries: model=%s",
             settings.gemini_session_model,

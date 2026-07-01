@@ -2,6 +2,7 @@ import { useState, useEffect, useRef, useCallback } from "react";
 import ReactMarkdown from "react-markdown";
 import { Volume2, ChevronDown } from "lucide-react";
 import type { ChatMessage } from "../types";
+import type { LivePart } from "../hooks/useSessionChannel";
 
 const AI_LOGO = "/images/aitutor 4 schools-robo.png";
 
@@ -19,7 +20,7 @@ function ThinkingStrip({ steps, live = false }: { steps: string[]; live?: boolea
   return (
     <div className="thinking-wrap">
       <button type="button" className="thinking-toggle" onClick={() => setOpen((o) => !o)}>
-        {live ? <span className="thinking-spin" /> : <span className="thinking-bulb">💭</span>}
+        {live ? <span className="thinking-spin" /> : <span className="thinking-dot" />}
         <span className="thinking-summary">{summary}</span>
         <ChevronDown size={13} className={`thinking-chev ${open ? "open" : ""}`} />
       </button>
@@ -27,7 +28,7 @@ function ThinkingStrip({ steps, live = false }: { steps: string[]; live?: boolea
         <div className="thinking-body">
           {steps?.map((s, i) => (
             <div key={i} className="thinking-step">
-              <span className="thinking-check">✓</span>
+              <span className="thinking-dot-sm" />
               <span className="thinking-text">{s}</span>
             </div>
           ))}
@@ -38,6 +39,18 @@ function ThinkingStrip({ steps, live = false }: { steps: string[]; live?: boolea
           )}
         </div>
       )}
+    </div>
+  );
+}
+
+// One inline "thinking" row for the LIVE turn (Claude-style): a subtle spinner (while it's
+// the newest, in-progress step) or a static dot, plus the plain step text — no emojis.
+// Rendered in arrival order so tool actions interleave with the streamed reply text.
+function ThinkingRow({ text, live = false }: { text: string; live?: boolean }) {
+  return (
+    <div className="think-row">
+      <span className={live ? "think-row-spin" : "think-row-dot"} />
+      <span className="think-row-text">{text}</span>
     </div>
   );
 }
@@ -54,6 +67,9 @@ interface Props {
   // Live "thinking" steps for the in-flight turn (tool labels + brief thought lines),
   // shown as a Claude-style strip; persisted steps render from role="thinking" messages.
   thinkingSteps?: string[];
+  // Ordered parts (thinking rows + text) of the in-flight turn — rendered interleaved so
+  // the live reply reads think → act → speak (Claude-style).
+  liveParts?: LivePart[];
   // Unified session pipeline (useSessionChannel): the single in-flight assistant
   // turn revealing as text, plus its status.
   liveText?: string | null;
@@ -70,6 +86,7 @@ export default function ChatWindow({
   revealedText,
   lastKnownAiId,
   thinkingSteps,
+  liveParts,
   liveText,
   liveStatus,
 }: Props) {
@@ -201,9 +218,13 @@ export default function ChatWindow({
           animation: thinkBody 0.18s ease;
         }
         .thinking-step { display: flex; align-items: center; gap: 8px; }
-        .thinking-check {
-          flex-shrink: 0; width: 15px;
-          font-size: 11px; font-weight: 800; color: #16a34a; text-align: center;
+        .thinking-dot-sm {
+          flex-shrink: 0; width: 5px; height: 5px; border-radius: 50%;
+          background: rgba(124,58,237,0.55);
+        }
+        .thinking-dot {
+          flex-shrink: 0; width: 7px; height: 7px; border-radius: 50%;
+          background: rgba(124,58,237,0.4);
         }
         .thinking-spin {
           flex-shrink: 0; width: 12px; height: 12px;
@@ -213,6 +234,27 @@ export default function ChatWindow({
         }
         .thinking-text { font-size: 0.85rem; color: var(--text-muted, #64748b); line-height: 1.4; }
         .thinking-live { font-style: italic; color: #7c3aed; }
+
+        /* Inline live "thinking" rows (Claude-style), interleaved with the reply text. */
+        .think-row {
+          display: flex; align-items: center; gap: 8px;
+          margin: 3px 0; padding: 1px 0;
+        }
+        .think-row-text {
+          font-size: 0.82rem; color: var(--text-muted, #64748b);
+          line-height: 1.4; letter-spacing: 0.01em;
+        }
+        .think-row-dot {
+          flex-shrink: 0; width: 6px; height: 6px; border-radius: 50%;
+          background: rgba(124,58,237,0.45);
+        }
+        .think-row-spin {
+          flex-shrink: 0; width: 12px; height: 12px; border-radius: 50%;
+          border: 2px solid rgba(124,58,237,0.25); border-top-color: #7c3aed;
+          animation: thinkSpin 0.7s linear infinite;
+        }
+        .live-text-part { margin: 2px 0; }
+        .live-text-part p:last-child { margin-bottom: 0; }
       `}</style>
 
       {/* ── All past messages ── */}
@@ -355,37 +397,38 @@ export default function ChatWindow({
         </div>
       )}
 
-      {/* ── Live "thinking" strip: steps for the in-flight turn (above the answer) ── */}
-      {(liveStatus === "waiting" || liveStatus === "speaking") && (thinkingSteps?.length ?? 0) > 0 && (
-        <ThinkingStrip steps={thinkingSteps as string[]} live />
-      )}
-
-      {/* ── Blob: waiting for response OR TTS-off waiting for first token ── */}
-      {(isWaiting || (!isWaiting && streaming && !streamContent)) && (thinkingSteps?.length ?? 0) === 0 && (
+      {/* ── Blob: legacy /chat path waiting for its first token ── */}
+      {(isWaiting || (!isWaiting && streaming && !streamContent)) && (thinkingSteps?.length ?? 0) === 0 && liveStatus == null && (
         <ThinkingBlob />
       )}
 
-      {/* ── Unified session live turn (useSessionChannel): one in-flight reply ── */}
-      {liveText ? (
-        <div className="message assistant chat-msg-animate">
-          <AiAvatar />
-          <div className="message-content ai-free-text">
-            <ReactMarkdown>{liveText}</ReactMarkdown>
-            {liveStatus === "speaking" ? (
-              <span className="tts-reveal-ball" />
-            ) : (
-              <div className="message-actions">
-                <button onClick={() => onSpeak(liveText)} title="Read aloud">
-                  <Volume2 size={14} />
-                  <span>Listen</span>
-                </button>
-              </div>
-            )}
+      {/* ── Unified session live turn (useSessionChannel): thinking rows + streaming text
+             INTERLEAVED in arrival order (think → act → speak → act → speak). ── */}
+      {(liveStatus === "waiting" || liveStatus === "speaking") && (
+        (liveParts?.length ?? 0) > 0 ? (
+          <div className="message assistant chat-msg-animate">
+            <AiAvatar />
+            <div className="message-content ai-free-text">
+              {(liveParts as LivePart[]).map((p, i) =>
+                p.kind === "think" ? (
+                  <ThinkingRow
+                    key={i}
+                    text={p.text}
+                    live={liveStatus === "waiting" && i === (liveParts as LivePart[]).length - 1}
+                  />
+                ) : (
+                  <div key={i} className="live-text-part">
+                    <ReactMarkdown>{p.text}</ReactMarkdown>
+                  </div>
+                )
+              )}
+              {liveStatus === "speaking" && <span className="tts-reveal-ball" />}
+            </div>
           </div>
-        </div>
-      ) : liveStatus === "waiting" && (thinkingSteps?.length ?? 0) === 0 ? (
-        <ThinkingBlob />
-      ) : null}
+        ) : (
+          <ThinkingBlob />
+        )
+      )}
 
       <div ref={bottomRef} />
 

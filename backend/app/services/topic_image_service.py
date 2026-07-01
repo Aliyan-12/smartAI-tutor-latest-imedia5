@@ -99,6 +99,14 @@ def _pick_image(summary: Optional[dict]) -> Optional[Dict[str, Any]]:
     img = thumb or orig            # thumbnail is plenty for a puzzle card
     if not img:
         return None
+    # Only accept FREE Wikimedia Commons media. Non-free "fair-use" files (book / album /
+    # magazine / TV covers, film posters) live under /wikipedia/<lang>/ and are almost
+    # always the WRONG image for a curriculum topic — e.g. a sci-fi *magazine cover* for
+    # "Everyday Materials", or the "Murderous Maths" *book cover* for "Working with
+    # fractions". Commons files (/wikipedia/commons/) are real educational photos/diagrams
+    # that actually depict the subject, so a puzzle image matches what's being asked.
+    if "/wikipedia/commons/" not in (img or ""):
+        return None
     page = ((summary.get("content_urls") or {}).get("desktop") or {}).get("page")
     return {
         "image_url": img,
@@ -151,6 +159,10 @@ async def get_for(
     most specific scope that yields rows: subject+ks+year → subject+ks → subject. When a
     target topic_title is given, its row (if present) is moved to the front so identify
     puzzles use the lesson's actual topic."""
+    # Only free Wikimedia Commons images (see _pick_image). This ALSO retro-filters rows
+    # cached before that rule shipped — non-free /wikipedia/<lang>/ covers/posters are
+    # dropped at read time, so junk images never reach a puzzle even without a re-sync.
+    _commons = RHTopicImage.image_url.like("%/wikipedia/commons/%")
     scopes = []
     if subject and key_stage and year_group:
         scopes.append([RHTopicImage.subject_name == subject,
@@ -162,7 +174,7 @@ async def get_for(
     if subject:
         scopes.append([RHTopicImage.subject_name == subject])
     for conds in scopes:
-        q = select(RHTopicImage).where(RHTopicImage.status == "ok", *conds).limit(limit)
+        q = select(RHTopicImage).where(RHTopicImage.status == "ok", _commons, *conds).limit(limit)
         rows = (await db.execute(q)).scalars().all()
         if len(rows) >= 1:
             out = [_row_dict(r) for r in rows]
