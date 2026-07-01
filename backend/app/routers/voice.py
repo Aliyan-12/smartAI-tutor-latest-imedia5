@@ -1,10 +1,10 @@
 """
 Voice router — text-to-speech only.
 
-The real-time Gemini Live socket and the thinking-filler endpoints have been
-removed. Voice now runs through the unified chat/session WebSocket pipeline
-(STT in → turn → segment-bundled Kokoro TTS out). This router only exposes the
-one-shot `/speak` endpoint used by the "Read aloud" buttons.
+The real-time Gemini Live socket has been removed. Voice now runs through the
+unified chat/session WebSocket pipeline (STT in → turn → fast text segments with
+Kokoro TTS streamed alongside as separate `segment_audio` frames). This router only
+exposes the one-shot `/speak` endpoint used by the "Read aloud" buttons.
 """
 import logging
 

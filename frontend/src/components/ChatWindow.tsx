@@ -2,8 +2,58 @@ import { useState, useEffect, useRef, useCallback } from "react";
 import ReactMarkdown from "react-markdown";
 import { Volume2, ChevronDown } from "lucide-react";
 import type { ChatMessage } from "../types";
+import type { LivePart } from "../hooks/useSessionChannel";
 
 const AI_LOGO = "/images/aitutor 4 schools-robo.png";
+
+// Claude-style collapsible "thinking" dropdown: a subtle toggle that expands the one-line
+// steps (tool labels + brief thoughts). Defined at MODULE scope (not inside ChatWindow) so
+// the per-second session-timer re-render never gives it a new identity — that remount was
+// what made the strip flicker every second. No avatar/logo, expanded while live, collapsed
+// once committed.
+function ThinkingStrip({ steps, live = false }: { steps: string[]; live?: boolean }) {
+  const [open, setOpen] = useState(live);
+  if ((!steps || steps.length === 0) && !live) return null;
+  const summary = live
+    ? "Thinking…"
+    : `Thought for ${steps.length} step${steps.length === 1 ? "" : "s"}`;
+  return (
+    <div className="thinking-wrap">
+      <button type="button" className="thinking-toggle" onClick={() => setOpen((o) => !o)}>
+        {live ? <span className="thinking-spin" /> : <span className="thinking-dot" />}
+        <span className="thinking-summary">{summary}</span>
+        <ChevronDown size={13} className={`thinking-chev ${open ? "open" : ""}`} />
+      </button>
+      {open && (
+        <div className="thinking-body">
+          {steps?.map((s, i) => (
+            <div key={i} className="thinking-step">
+              <span className="thinking-dot-sm" />
+              <span className="thinking-text">{s}</span>
+            </div>
+          ))}
+          {live && steps.length === 0 && (
+            <div className="thinking-step">
+              <span className="thinking-text thinking-live">Working on it…</span>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// One inline "thinking" row for the LIVE turn (Claude-style): a subtle spinner (while it's
+// the newest, in-progress step) or a static dot, plus the plain step text — no emojis.
+// Rendered in arrival order so tool actions interleave with the streamed reply text.
+function ThinkingRow({ text, live = false }: { text: string; live?: boolean }) {
+  return (
+    <div className="think-row">
+      <span className={live ? "think-row-spin" : "think-row-dot"} />
+      <span className="think-row-text">{text}</span>
+    </div>
+  );
+}
 
 interface Props {
   messages: ChatMessage[];
@@ -14,9 +64,14 @@ interface Props {
   revealContent?: string | null;
   revealedText?: string;
   lastKnownAiId?: number | null;
-  fillerText?: string | null;
+  // Live "thinking" steps for the in-flight turn (tool labels + brief thought lines),
+  // shown as a Claude-style strip; persisted steps render from role="thinking" messages.
+  thinkingSteps?: string[];
+  // Ordered parts (thinking rows + text) of the in-flight turn — rendered interleaved so
+  // the live reply reads think → act → speak (Claude-style).
+  liveParts?: LivePart[];
   // Unified session pipeline (useSessionChannel): the single in-flight assistant
-  // turn revealing in lockstep with its audio, plus its status.
+  // turn revealing as text, plus its status.
   liveText?: string | null;
   liveStatus?: "idle" | "connecting" | "waiting" | "speaking";
 }
@@ -30,7 +85,8 @@ export default function ChatWindow({
   revealContent,
   revealedText,
   lastKnownAiId,
-  fillerText,
+  thinkingSteps,
+  liveParts,
   liveText,
   liveStatus,
 }: Props) {
@@ -76,20 +132,6 @@ export default function ChatWindow({
       <AiAvatar />
       <div className="message-content" style={{ paddingTop: 0 }}>
         <span className="tts-reveal-ball" style={{ width: 11, height: 11 }} />
-      </div>
-    </div>
-  );
-
-  // Distinctive "spoken aside" bubble shown while a pre-recorded filler phrase
-  // plays — visually nothing like the AI's real answer (gradient pill + equaliser).
-  const FillerBubble = ({ text }: { text: string }) => (
-    <div className="message assistant" style={{ animation: "msgSlideIn 0.22s ease", alignItems: "center" }}>
-      <AiAvatar />
-      <div className="message-content" style={{ paddingTop: 0 }}>
-        <div className="filler-bubble">
-          <span className="filler-eq"><i /><i /><i /></span>
-          <span className="filler-text">{text}</span>
-        </div>
       </div>
     </div>
   );
@@ -152,48 +194,67 @@ export default function ChatWindow({
         .ai-free-text p { margin: 0 0 0.6em 0; }
         .ai-free-text p:last-child { margin-bottom: 0; }
 
-        @keyframes fillerEq {
-          0%, 100% { transform: scaleY(0.35); }
-          50%       { transform: scaleY(1); }
+        @keyframes thinkSpin { to { transform: rotate(360deg); } }
+        @keyframes thinkBody { from { opacity: 0; transform: translateY(-2px); } to { opacity: 1; transform: translateY(0); } }
+        .thinking-wrap { margin: 2px 0 8px 0; max-width: 88%; }
+        .thinking-toggle {
+          display: inline-flex; align-items: center; gap: 7px;
+          background: transparent; border: none; cursor: pointer;
+          padding: 4px 8px; border-radius: 9px;
+          color: var(--text-muted, #64748b);
+          font-size: 0.82rem; font-weight: 600; font-family: inherit;
+          transition: background 0.15s ease;
         }
-        @keyframes fillerGlow {
-          0%, 100% { box-shadow: 0 0 0 0 rgba(99,102,241,0); }
-          50%       { box-shadow: 0 0 0 4px rgba(99,102,241,0.10); }
+        .thinking-toggle:hover { background: rgba(124,58,237,0.08); color: #6d28d9; }
+        .thinking-bulb { font-size: 13px; line-height: 1; }
+        .thinking-summary { letter-spacing: 0.01em; }
+        .thinking-chev { opacity: 0.7; transition: transform 0.18s ease; }
+        .thinking-chev.open { transform: rotate(180deg); }
+        .thinking-body {
+          margin: 5px 0 0 12px;
+          padding: 8px 0 8px 14px;
+          border-left: 2px solid rgba(124,58,237,0.22);
+          display: flex; flex-direction: column; gap: 7px;
+          animation: thinkBody 0.18s ease;
         }
-        .filler-bubble {
-          display: inline-flex;
-          align-items: center;
-          gap: 9px;
-          padding: 8px 14px;
-          border-radius: 16px;
-          background: linear-gradient(135deg, rgba(99,102,241,0.13), rgba(26,115,232,0.13));
-          border: 1px solid rgba(99,102,241,0.28);
-          animation: fillerGlow 1.8s ease-in-out infinite;
+        .thinking-step { display: flex; align-items: center; gap: 8px; }
+        .thinking-dot-sm {
+          flex-shrink: 0; width: 5px; height: 5px; border-radius: 50%;
+          background: rgba(124,58,237,0.55);
         }
-        .filler-eq {
-          display: inline-flex;
-          align-items: flex-end;
-          gap: 2px;
-          height: 14px;
+        .thinking-dot {
+          flex-shrink: 0; width: 7px; height: 7px; border-radius: 50%;
+          background: rgba(124,58,237,0.4);
         }
-        .filler-eq i {
-          display: block;
-          width: 3px;
-          height: 100%;
-          border-radius: 2px;
-          background: linear-gradient(#6366f1, #1a73e8);
-          transform-origin: bottom;
-          animation: fillerEq 0.85s ease-in-out infinite;
+        .thinking-spin {
+          flex-shrink: 0; width: 12px; height: 12px;
+          border-radius: 50%;
+          border: 2px solid rgba(124,58,237,0.25); border-top-color: #7c3aed;
+          animation: thinkSpin 0.7s linear infinite;
         }
-        .filler-eq i:nth-child(2) { animation-delay: 0.16s; }
-        .filler-eq i:nth-child(3) { animation-delay: 0.32s; }
-        .filler-text {
-          font-size: 0.9rem;
-          font-style: italic;
-          font-weight: 500;
-          color: #4338ca;
-          letter-spacing: 0.01em;
+        .thinking-text { font-size: 0.85rem; color: var(--text-muted, #64748b); line-height: 1.4; }
+        .thinking-live { font-style: italic; color: #7c3aed; }
+
+        /* Inline live "thinking" rows (Claude-style), interleaved with the reply text. */
+        .think-row {
+          display: flex; align-items: center; gap: 8px;
+          margin: 3px 0; padding: 1px 0;
         }
+        .think-row-text {
+          font-size: 0.82rem; color: var(--text-muted, #64748b);
+          line-height: 1.4; letter-spacing: 0.01em;
+        }
+        .think-row-dot {
+          flex-shrink: 0; width: 6px; height: 6px; border-radius: 50%;
+          background: rgba(124,58,237,0.45);
+        }
+        .think-row-spin {
+          flex-shrink: 0; width: 12px; height: 12px; border-radius: 50%;
+          border: 2px solid rgba(124,58,237,0.25); border-top-color: #7c3aed;
+          animation: thinkSpin 0.7s linear infinite;
+        }
+        .live-text-part { margin: 2px 0; }
+        .live-text-part p:last-child { margin-bottom: 0; }
       `}</style>
 
       {/* ── All past messages ── */}
@@ -212,6 +273,13 @@ export default function ChatWindow({
               </div>
             </div>
           );
+        }
+
+        if (msg.role === "thinking") {
+          // Persisted thinking strip (loads on refresh / after the turn commits).
+          const steps = (msg.content || "").split("\n").filter(Boolean);
+          if (steps.length === 0) return null;
+          return <ThinkingStrip key={msg.id} steps={steps} />;
         }
 
         if (msg.role === "event") {
@@ -329,32 +397,38 @@ export default function ChatWindow({
         </div>
       )}
 
-      {/* ── Blob / filler: waiting for response OR TTS-off waiting for first token ── */}
-      {(isWaiting || (!isWaiting && streaming && !streamContent)) && (
-        fillerText && isWaiting ? <FillerBubble text={fillerText} /> : <ThinkingBlob />
+      {/* ── Blob: legacy /chat path waiting for its first token ── */}
+      {(isWaiting || (!isWaiting && streaming && !streamContent)) && (thinkingSteps?.length ?? 0) === 0 && liveStatus == null && (
+        <ThinkingBlob />
       )}
 
-      {/* ── Unified session live turn (useSessionChannel): one in-flight reply ── */}
-      {liveText ? (
-        <div className="message assistant chat-msg-animate">
-          <AiAvatar />
-          <div className="message-content ai-free-text">
-            <ReactMarkdown>{liveText}</ReactMarkdown>
-            {liveStatus === "speaking" ? (
-              <span className="tts-reveal-ball" />
-            ) : (
-              <div className="message-actions">
-                <button onClick={() => onSpeak(liveText)} title="Read aloud">
-                  <Volume2 size={14} />
-                  <span>Listen</span>
-                </button>
-              </div>
-            )}
+      {/* ── Unified session live turn (useSessionChannel): thinking rows + streaming text
+             INTERLEAVED in arrival order (think → act → speak → act → speak). ── */}
+      {(liveStatus === "waiting" || liveStatus === "speaking") && (
+        (liveParts?.length ?? 0) > 0 ? (
+          <div className="message assistant chat-msg-animate">
+            <AiAvatar />
+            <div className="message-content ai-free-text">
+              {(liveParts as LivePart[]).map((p, i) =>
+                p.kind === "think" ? (
+                  <ThinkingRow
+                    key={i}
+                    text={p.text}
+                    live={liveStatus === "waiting" && i === (liveParts as LivePart[]).length - 1}
+                  />
+                ) : (
+                  <div key={i} className="live-text-part">
+                    <ReactMarkdown>{p.text}</ReactMarkdown>
+                  </div>
+                )
+              )}
+              {liveStatus === "speaking" && <span className="tts-reveal-ball" />}
+            </div>
           </div>
-        </div>
-      ) : liveStatus === "waiting" ? (
-        fillerText ? <FillerBubble text={fillerText} /> : <ThinkingBlob />
-      ) : null}
+        ) : (
+          <ThinkingBlob />
+        )
+      )}
 
       <div ref={bottomRef} />
 

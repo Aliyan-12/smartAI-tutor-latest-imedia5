@@ -164,13 +164,14 @@ The Docker setup uses `pgvector/pgvector:pg16` image which includes pgvector pre
 ## Key Features
 
 - **Structured AI Lessons + Lesson State Engine**: goal/duration-specific lesson plans; every session turn carries an authoritative, live **LESSON STATE** anchor (real-time server-computed clock, current phase/step + what's-next, student learning status, and the on-screen puzzle) injected at maximum recency so the AI never loses track or hallucinates tool state in long sessions. The AI teaches **slide-by-slide** from Resource Hub content (slide tools are gated on whether the lesson actually has resources)
-- **Interactive Visual Puzzles** (Synthesis-style): the AI selects a pre-authored template (Maths + Science, KS1–KS5) and shows it via `show_puzzle`; rendered as SVG + react-konva manipulatives. Authoritative puzzle state (per-show `instance_id`, solved/attempted tracking) makes "show → solve → next puzzle → reset" reliable
+- **Interactive Visual Puzzles** (Synthesis-style): the AI selects a pre-authored template (Maths + Science, KS1–KS5) and shows it via `show_puzzle`; rendered as SVG + react-konva manipulatives, each tagged with a **category** chip (labelling, matching, recognition, …). Includes **image puzzles** — `identify_image` / `match_image` — that use real curriculum-topic images from a cached **topic-image catalog** (Wikipedia lead images per topic; seed with `python -m app.seed_topic_images`). Authoritative puzzle state (per-show `instance_id`, solved/attempted tracking) makes "show → solve → next puzzle → reset" reliable
+- **"Thinking" strip**: instead of voice fillers, each turn shows Claude-style one-line steps — what tool the tutor ran + a brief thought summary — persisted in the chat so they survive a refresh
 - **Auth & Multi-tenant Schools**: dual-mode signup (School / Individual), **Google OAuth** (Authlib) + email verification, multi-step onboarding, **Casbin** RBAC; a platform **administrator** approves school-admin signups, each **admin** is scoped to their own school
 - **RAG Knowledge Base**: curriculum + teaching files come from the external **Resource Hub** (mirrored into `rh_*` tables), vectorized per-slide and retrieved via pgvector HNSW index
-- **Real-time Voice**: custom STT (Gemini) → turn → Kokoro TTS over the chat/session WebSocket, with client-side mic VAD
+- **Real-time Voice**: custom STT (Gemini) → turn → warm Kokoro **`af_heart`** TTS over the chat/session WebSocket, with client-side mic VAD
 - **Multi-role**: Administrator (all schools), Admin (own school), Teacher (manage content + monitor students), Student (lessons + chat + voice + puzzles), Parent (book + track children)
 - **Credit System**: Per-message billing with subscription plans
-- **Streaming**: one WebSocket per chat/session — turns stream as sentence segments with bundled TTS audio
+- **Streaming**: one WebSocket per chat/session — **text streams immediately** (GPT-style); Kokoro TTS audio follows in the background as separate `segment_audio` frames, so text never waits on speech
 
 ## Environment Variables
 

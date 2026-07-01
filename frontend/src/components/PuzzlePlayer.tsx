@@ -1,6 +1,8 @@
 import { useState } from "react";
 import type { PuzzlePayload } from "./puzzles/types";
-import { pBtn, pBtnGhost, Feedback } from "./puzzles/ui";
+import { pBtn, pBtnGhost, Feedback, CategoryChip } from "./puzzles/ui";
+import IdentifyImage from "./puzzles/IdentifyImage";
+import MatchImage from "./puzzles/MatchImage";
 import FractionBar from "./puzzles/FractionBar";
 import PieFraction from "./puzzles/PieFraction";
 import NumberLine from "./puzzles/NumberLine";
@@ -26,10 +28,12 @@ const DISPLAY: Record<string, React.ComponentType<{ params: Record<string, unkno
   place_value: PlaceValue, array_grid: ArrayGrid, shape_count: ShapeCount, area_grid: AreaGrid,
   clock: Clock, angle: AngleViz, coordinate_grid: CoordinateGrid, bar_chart: BarChart,
   balance_scales: BalanceScales, particle_state: ParticleState, formula_triangle: FormulaTriangle,
+  identify_image: IdentifyImage,
 };
-// Konva "interactive" puzzles self-evaluate and call onSolved.
+// "interactive" puzzles self-evaluate and call onSolved.
 const INTERACTIVE: Record<string, React.ComponentType<{ payload: PuzzlePayload; onSolved: (a: unknown, c: boolean) => void; disabled?: boolean }>> = {
-  build_fraction: BuildFraction, label_diagram: LabelDiagram, states_of_matter: StatesOfMatter, food_chain_order: FoodChainOrder,
+  build_fraction: BuildFraction, label_diagram: LabelDiagram, states_of_matter: StatesOfMatter,
+  food_chain_order: FoodChainOrder, match_image: MatchImage,
 };
 
 const inputStyle: React.CSSProperties = {
@@ -85,8 +89,9 @@ export default function PuzzlePlayer({
 
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%", background: "#fff" }}>
-      <div style={{ padding: "10px 14px", borderBottom: "1px solid #e2e8f0", flexShrink: 0, display: "flex", alignItems: "center", gap: 10 }}>
+      <div style={{ padding: "10px 14px", borderBottom: "1px solid #e2e8f0", flexShrink: 0, display: "flex", alignItems: "center", gap: 8 }}>
         <span style={{ fontSize: 11, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.04em", color: "#7c3aed", background: "rgba(124,58,237,0.1)", padding: "3px 8px", borderRadius: 6 }}>Puzzle</span>
+        <CategoryChip category={payload.category} />
         <span style={{ fontSize: 13, fontWeight: 600, color: "#0f172a" }}>{payload.title}</span>
         <button
           onClick={reset}

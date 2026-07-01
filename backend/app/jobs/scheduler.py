@@ -39,9 +39,13 @@ def start_scheduler() -> AsyncIOScheduler | None:
         hours=settings.resource_sync_hours, id="resource_sync",
         max_instances=1, coalesce=True,
     )
+    # NOTE: the topic-image catalog is NOT a separate scheduled job — it is chained
+    # automatically at the end of each SUCCESSFUL sync_curriculum() run (see
+    # resource_sync_service.sync_curriculum), so it always refreshes right after the
+    # topic list is up to date.
     _scheduler.start()
     logger.info(
-        "Resource Hub scheduler started (curriculum=%dh, resources=%dh).",
+        "Resource Hub scheduler started (curriculum=%dh, resources=%dh; topic-images chained after curriculum).",
         settings.curriculum_sync_hours, settings.resource_sync_hours,
     )
     return _scheduler

@@ -3,7 +3,9 @@ export interface PuzzlePayload {
   render: string;
   title: string;
   prompt: string;
-  answer_type: "fraction" | "integer" | "choice" | "drag" | "text";
+  answer_type: "fraction" | "integer" | "choice" | "drag" | "text" | "match";
+  /** Puzzle category (labelling, matching, recognition, fractions, …) for the UI chip. */
+  category?: string;
   params: Record<string, unknown>;
   solution: unknown;
   /** Unique per show_puzzle call — used as a React key so each fresh puzzle fully

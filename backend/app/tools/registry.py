@@ -8,7 +8,8 @@ each turn (web-backed anti-hallucination: fewer, scoped tools per call). Groups:
   assessment — generate_quiz (platform) — bind in quiz phase / practice
   mastery    — student mastery + answer evaluation (platform)
   platform   — lesson-phase, assignments, load_resource, pause/resume (platform)
-  lifecycle  — end_lesson + report (platform) — bind ONLY when end_allowed
+  lifecycle  — end_lesson + report (platform) — bound when end_allowed OR the lesson is
+               in its closing stage / the student asks to end (end_lesson stays guarded)
   research   — web/deep search (platform)
 """
 import logging

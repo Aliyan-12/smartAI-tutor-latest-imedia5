@@ -30,10 +30,26 @@ class ToolContext:
     key_stage: str
     year_group: Optional[str] = None
     chat_session_id: Optional[str] = None
+    # Lesson unit/topic — used to scope catalog-image puzzles (match/identify) to the
+    # actual topic being taught.
+    unit_title: Optional[str] = None
+    topic_title: Optional[str] = None
     # Turn-scoped guard: at most ONE slide move (advance/retreat/show) per reply,
     # so the AI can't race several slides ahead in a single turn. Reset each turn
     # because a fresh ToolContext is built per turn in _run_turn.
     slide_moved: bool = False
+
+
+async def _clear_puzzle_on_slide(ctx: "ToolContext") -> None:
+    """Slides and puzzles are mutually-exclusive views of the Learn panel — moving to a
+    slide takes any on-screen puzzle off, so drop it from authoritative puzzle_state too.
+    Keeps the per-turn LESSON STATE anchor honest (no 'puzzle still showing' after a slide
+    move) and matches the frontend, which clears the puzzle overlay on any slide tool."""
+    from app.services import puzzle_service
+    try:
+        await puzzle_service.clear_puzzle_state(ctx.db, ctx.appointment_id)
+    except Exception as e:  # noqa: BLE001
+        logger.warning("clear puzzle_state on slide move failed: %s", e)
 
 
 def session_tool_groups(ctx: ToolContext) -> dict:
@@ -55,10 +71,12 @@ def session_tool_groups(ctx: ToolContext) -> dict:
         # call. It still counts as this turn's slide move, so a stray sequential
         # advance/retreat afterwards is suppressed.
         ctx.slide_moved = True
-        return await slide_action(
+        result = await slide_action(
             ctx.db, ctx.appointment_id, mode="show",
             resource_hub_id=resource_hub_id, slide_index=slide_index,
         )
+        await _clear_puzzle_on_slide(ctx)
+        return result
 
     @tool
     async def advance_lesson_slide() -> dict:
@@ -80,7 +98,9 @@ def session_tool_groups(ctx: ToolContext) -> dict:
             )
             return payload
         ctx.slide_moved = True
-        return await slide_action(ctx.db, ctx.appointment_id, mode="advance")
+        result = await slide_action(ctx.db, ctx.appointment_id, mode="advance")
+        await _clear_puzzle_on_slide(ctx)
+        return result
 
     @tool
     async def retreat_lesson_slide() -> dict:
@@ -99,15 +119,21 @@ def session_tool_groups(ctx: ToolContext) -> dict:
             )
             return payload
         ctx.slide_moved = True
-        return await slide_action(ctx.db, ctx.appointment_id, mode="retreat")
+        result = await slide_action(ctx.db, ctx.appointment_id, mode="retreat")
+        await _clear_puzzle_on_slide(ctx)
+        return result
 
     @tool
     async def list_available_puzzles() -> dict:
         """
         List the interactive visual puzzles available for THIS lesson's subject and
-        key stage (e.g. fraction bars, number lines, label-the-diagram). Call this
-        before show_puzzle so you choose a real puzzle_id with valid params — never
-        invent a puzzle_id. Returns each puzzle's id, what it shows, and its params,
+        key stage, each tagged with a CATEGORY (labelling, matching, recognition,
+        sorting, sequencing, counting, fractions, number, geometry, data, algebra).
+        Includes image puzzles that show REAL topic images: 'identify_image' (show an
+        image, name it) and 'match_image' (match images to names) — prefer these for
+        recognition/vocabulary practice on the lesson's topic. Call this before
+        show_puzzle so you choose a real puzzle_id with valid params — never invent a
+        puzzle_id. Returns each puzzle's id, category, what it shows, and its params,
         plus the student's key_stage + year_group so you scale the numbers to their age.
         """
         from app.services import puzzle_service
@@ -162,11 +188,31 @@ def session_tool_groups(ctx: ToolContext) -> dict:
                 "available": avail,
             }
 
+        # Image puzzles (match/identify) pull REAL topic images from the cached catalog,
+        # scoped to this lesson's subject/key stage/topic. Inject them as params.
+        if resolved in ("identify_image", "match_image"):
+            try:
+                from app.services import topic_image_service
+                catalog = await topic_image_service.get_for(
+                    ctx.db, subject=ctx.subject, key_stage=ctx.key_stage,
+                    year_group=ctx.year_group, topic_title=ctx.topic_title, limit=12,
+                )
+            except Exception as e:  # noqa: BLE001
+                logger.warning("topic-image catalog lookup failed: %s", e)
+                catalog = []
+            params = {**(params or {}), "_catalog": catalog}
+
         payload = puzzle_service.build(resolved, params)
         if payload.get("error"):
             logger.warning("show_puzzle: build error for id=%s: %s", resolved, payload.get("error"))
-            return {"action": "show_puzzle", "error": payload.get("error"), "available": avail,
-                    "message": "Could not build that puzzle — ask a typed question instead."}
+            _msg = (
+                "There aren't enough topic images for an image puzzle here — ask a typed "
+                "question or pick a different puzzle_id instead."
+                if payload.get("error") == "no_catalog_images"
+                else "Could not build that puzzle — ask a typed question instead."
+            )
+            return {"action": "show_puzzle", "error": payload.get("error"),
+                    "available": avail, "message": _msg}
 
         # Persist as the authoritative on-screen puzzle and stamp a fresh instance_id
         # so the frontend remounts a clean puzzle (no leftover solved/locked state from

@@ -43,31 +43,45 @@ def _get_client() -> genai.Client:
 
 _kokoro: Optional[KPipeline] = None
 
-# Voice: af_sky — energetic, bright, expressive American English.
+# Voice: af_heart — warm, soft, friendly American English (sounds more like a
+# patient teacher than the brighter/peppier af_sky). A slightly slower speed gives
+# a calmer, more deliberate teacherly pace. Kokoro has no style/SSML prompt, so the
+# only warmth levers are the voice, the speed, and prosody-friendly text shaping
+# (see _prep_tts_text, which keeps commas/dashes/ellipses as natural pauses).
 # lang_code MUST match the voice prefix: "a" for af_*/am_*, "b" for bf_*/bm_*.
-TTS_VOICE = "af_sky"
-TTS_SPEED = 1.05
+TTS_VOICE = "af_heart"
+TTS_SPEED = 0.95
 
 
 def _get_kokoro() -> KPipeline:
-    """Lazy-init the Kokoro pipeline (American English, af_sky voice)."""
+    """Lazy-init the Kokoro pipeline (American English; warm af_heart voice)."""
     global _kokoro
     if _kokoro is None:
-        logger.info("Initialising Kokoro TTS pipeline (lang_code='a', voice=af_sky)...")
+        logger.info(
+            "Initialising Kokoro TTS pipeline (lang_code='a', voice=%s, speed=%s)...",
+            TTS_VOICE, TTS_SPEED,
+        )
         _kokoro = KPipeline(lang_code="a")
         logger.info("Kokoro TTS pipeline ready.")
     return _kokoro
 
 
 def _prep_tts_text(text: str) -> str:
-    """Strip markdown Kokoro would read literally; keep prosody punctuation."""
-    text = _re.sub(r'\*{1,3}([^*]+)\*{1,3}', r'\1', text)
-    text = _re.sub(r'^#{1,6}\s+', '', text, flags=_re.MULTILINE)
-    text = _re.sub(r'`+([^`]+)`+', r'\1', text)
-    text = _re.sub(r'^\s*[-*•]\s+', '', text, flags=_re.MULTILINE)
+    """Strip markdown Kokoro would read literally, but KEEP prosody punctuation
+    (commas, em-dashes, ellipses) so phrasing sounds natural, and turn line/paragraph
+    breaks into spoken pauses rather than a flat run-on — so the voice sounds like a
+    teacher pausing between points, not reading a wall of text."""
+    text = _re.sub(r'\*{1,3}([^*]+)\*{1,3}', r'\1', text)          # **bold** / *italic*
+    text = _re.sub(r'^#{1,6}\s+', '', text, flags=_re.MULTILINE)    # # headings
+    text = _re.sub(r'`+([^`]+)`+', r'\1', text)                     # `code`
+    text = _re.sub(r'^\s*[-*•]\s+', '', text, flags=_re.MULTILINE)  # bullet markers
+    text = _re.sub(r'\[[A-Z_:][^\]]*\]', '', text)                 # [MARKER] control tags
+    # Breaks → pauses: a blank line is a full stop; a single line break is a short pause.
     text = _re.sub(r'\n{2,}', '. ', text)
-    text = _re.sub(r'\n', ' ', text)
-    text = _re.sub(r'\[[A-Z_:][^\]]*\]', '', text)
+    text = _re.sub(r'\n', ', ', text)
+    # Collapse any punctuation pile-ups the joins created (". , ", ", . ", ". . ")
+    # into the strongest single pause.
+    text = _re.sub(r'(?:\s*[.,]\s*){2,}', lambda m: '. ' if '.' in m.group(0) else ', ', text)
     text = _re.sub(r' {2,}', ' ', text)
     return text.strip()
 
