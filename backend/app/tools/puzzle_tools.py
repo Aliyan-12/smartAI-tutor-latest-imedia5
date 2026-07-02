@@ -79,15 +79,16 @@ def puzzle_tool_groups(ctx: ToolContext) -> dict:
         return await _persist_and_return(puzzle_service.build_explanatory(url, caption, title))
 
     @tool
-    async def labelling_puzzle(items: Union[list, str], prompt: str = "") -> dict:
+    async def labelling_puzzle(items: str, prompt: str = "") -> dict:
         """
         Practice: show 3–4 SEPARATE generated pictures, one at a time, and the student
         types what each one is. Use for recognition/vocabulary (organs, shapes, animals,
-        apparatus, materials…). items is a list of {"label": "<correct name>",
-        "image_prompt": "<a clear picture of ONE such thing on a white background>"} — give
-        3–4. Keep each image_prompt to a single, unambiguous subject so the picture clearly
-        shows that thing. After showing it, invite the student to name each, then WAIT — on
-        submit call labelling_evaluator. Call SILENTLY.
+        apparatus, materials…). items is a JSON array STRING of
+        [{"label": "<correct name>", "image_prompt": "<a clear picture of ONE such thing on
+        a white background>"}] — give 3–4 objects. Keep each image_prompt to a single,
+        unambiguous subject so the picture clearly shows that thing. After showing it,
+        invite the student to name each, then WAIT — on submit call labelling_evaluator.
+        Call SILENTLY.
         """
         its = _coerce_list(items)
         urls = await image_gen_service.generate_images([it.get("image_prompt", "") for it in its])
@@ -99,12 +100,13 @@ def puzzle_tool_groups(ctx: ToolContext) -> dict:
         return await _persist_and_return(full)
 
     @tool
-    async def matching_puzzle(items: Union[list, str], prompt: str = "") -> dict:
+    async def matching_puzzle(items: str, prompt: str = "") -> dict:
         """
         Practice: show several generated pictures AND their names jumbled; the student
-        matches each picture to its name. Same items shape as labelling_puzzle
-        ({"label", "image_prompt"}) but give 3–6. Good for pairing terms to visuals. After
-        showing it, WAIT — on submit call matching_evaluator. Call SILENTLY.
+        matches each picture to its name. Same items shape as labelling_puzzle — a JSON
+        array STRING of [{"label": ..., "image_prompt": ...}] — but give 3–6 objects. Good
+        for pairing terms to visuals. After showing it, WAIT — on submit call
+        matching_evaluator. Call SILENTLY.
         """
         its = _coerce_list(items)
         urls = await image_gen_service.generate_images([it.get("image_prompt", "") for it in its])

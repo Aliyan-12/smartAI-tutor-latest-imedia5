@@ -1262,7 +1262,11 @@ Be age-appropriate for {key_stage}. Return ONLY valid JSON, no markdown."""
             model=None,
             stream=False,
         )
-        raw = raw.strip()
+        # generate_response can hand back a list of content parts (multi-part responses) —
+        # join them before string ops so this never raises 'list has no attribute strip'.
+        if isinstance(raw, list):
+            raw = "".join(str(x) for x in raw)
+        raw = (raw or "").strip()
         if raw.startswith("```"):
             raw = _re.sub(r"^```[a-z]*\n?", "", raw)
             raw = _re.sub(r"\n?```$", "", raw)
