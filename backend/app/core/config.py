@@ -25,6 +25,12 @@ class Settings(BaseSettings):
     # Set GEMINI_SESSION_MODEL to a Gemini 3 id when ready.
     gemini_session_model: str = "gemini-2.5-pro"
     gemini_chat_model: str = "gemini-2.5-flash"
+    # "Nano Banana" — Gemini native image generation, used to create puzzle/explanatory
+    # images live during a lesson. Overridable via GEMINI_IMAGE_MODEL.
+    gemini_image_model: str = "gemini-2.5-flash-image"
+    # Where generated puzzle media (Nano Banana PNGs + matplotlib graphs) are written,
+    # then served publicly at /api/puzzles/media/{name}.
+    puzzle_media_dir: str = "uploads/gen_puzzles"
 
     jwt_secret_key: str = "change-this-to-a-random-64-char-string"
     jwt_algorithm: str = "HS256"

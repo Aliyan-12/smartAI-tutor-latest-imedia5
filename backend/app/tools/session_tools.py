@@ -123,134 +123,13 @@ def session_tool_groups(ctx: ToolContext) -> dict:
         await _clear_puzzle_on_slide(ctx)
         return result
 
-    @tool
-    async def list_available_puzzles() -> dict:
-        """
-        List the interactive visual puzzles available for THIS lesson's subject and
-        key stage, each tagged with a CATEGORY (labelling, matching, recognition,
-        sorting, sequencing, counting, fractions, number, geometry, data, algebra).
-        Includes image puzzles that show REAL topic images: 'identify_image' (show an
-        image, name it) and 'match_image' (match images to names) — prefer these for
-        recognition/vocabulary practice on the lesson's topic. Call this before
-        show_puzzle so you choose a real puzzle_id with valid params — never invent a
-        puzzle_id. Returns each puzzle's id, category, what it shows, and its params,
-        plus the student's key_stage + year_group so you scale the numbers to their age.
-        """
-        from app.services import puzzle_service
-        return {
-            "subject": ctx.subject,
-            "key_stage": ctx.key_stage,
-            "year_group": ctx.year_group,
-            "puzzles": puzzle_service.list_available(ctx.subject, ctx.key_stage),
-        }
-
-    @tool
-    async def show_puzzle(puzzle_id: str, params: Optional[Union[dict, str]] = None) -> dict:
-        """
-        Display an interactive visual puzzle on the student's screen to teach or check
-        a concept (Synthesis-style). Use for hands-on Maths/Science moments — e.g. naming
-        a fraction on a bar, reading a number line, labelling a diagram. Pick puzzle_id
-        from list_available_puzzles and pass its params (see each puzzle's `params`),
-        using the EXACT param names shown there (e.g. total_parts, shaded_parts).
-        After showing it, ask the student to solve it and WAIT — their answer arrives as a
-        [PUZZLE RESULT] message; then praise + advance, or give a hint and try again.
-        Call this SILENTLY (never write the call as text).
-        """
-        from app.services import puzzle_service
-        # Gemini sometimes serializes the params object as a JSON string — coerce it.
-        if isinstance(params, str):
-            try:
-                params = json.loads(params)
-            except Exception:
-                params = {}
-        if not isinstance(params, dict):
-            params = {}
-
-        # Map the id the model gave to a REAL available template (it sometimes
-        # invents ids or uses a render name). If nothing fits, tell the model
-        # plainly so it doesn't pretend a puzzle is on screen.
-        resolved = puzzle_service.resolve_id(puzzle_id, ctx.subject, ctx.key_stage)
-        avail = [p["puzzle_id"] for p in puzzle_service.list_available(ctx.subject, ctx.key_stage)]
-        if not resolved:
-            logger.warning(
-                "show_puzzle: NO match for id=%r (subject=%s, key_stage=%s). Available=%s",
-                puzzle_id, ctx.subject, ctx.key_stage, avail,
-            )
-            return {
-                "action": "show_puzzle",
-                "error": "no_matching_puzzle",
-                "message": (
-                    f"There is no puzzle '{puzzle_id}' for {ctx.subject} {ctx.key_stage}. "
-                    "Do NOT tell the student to look at a puzzle. "
-                    f"Available puzzle_ids: {avail}. Either call show_puzzle again with one of "
-                    "these, or just ask a normal typed practice question instead."
-                ),
-                "available": avail,
-            }
-
-        # Image puzzles (match/identify) pull REAL topic images from the cached catalog,
-        # scoped to this lesson's subject/key stage/topic. Inject them as params.
-        if resolved in ("identify_image", "match_image"):
-            try:
-                from app.services import topic_image_service
-                catalog = await topic_image_service.get_for(
-                    ctx.db, subject=ctx.subject, key_stage=ctx.key_stage,
-                    year_group=ctx.year_group, topic_title=ctx.topic_title, limit=12,
-                )
-            except Exception as e:  # noqa: BLE001
-                logger.warning("topic-image catalog lookup failed: %s", e)
-                catalog = []
-            params = {**(params or {}), "_catalog": catalog}
-
-        payload = puzzle_service.build(resolved, params)
-        if payload.get("error"):
-            logger.warning("show_puzzle: build error for id=%s: %s", resolved, payload.get("error"))
-            _msg = (
-                "There aren't enough topic images for an image puzzle here — ask a typed "
-                "question or pick a different puzzle_id instead."
-                if payload.get("error") == "no_catalog_images"
-                else "Could not build that puzzle — ask a typed question instead."
-            )
-            return {"action": "show_puzzle", "error": payload.get("error"),
-                    "available": avail, "message": _msg}
-
-        # Persist as the authoritative on-screen puzzle and stamp a fresh instance_id
-        # so the frontend remounts a clean puzzle (no leftover solved/locked state from
-        # the previous one). The model only treats the puzzle as "shown" when this
-        # succeeds — confirmed back to it next turn via the LESSON INTERACTIVE STATE anchor.
-        try:
-            instance_id = await puzzle_service.set_puzzle_shown(ctx.db, ctx.appointment_id, payload)
-            payload["instance_id"] = instance_id
-        except Exception as e:  # noqa: BLE001
-            logger.warning("set_puzzle_shown failed: %s", e)
-        payload["rendered"] = True
-        logger.info(
-            "show_puzzle: rendering id=%s render=%s instance=%s (asked=%r) prompt=%r",
-            payload.get("puzzle_id"), payload.get("render"), payload.get("instance_id"),
-            puzzle_id, payload.get("prompt"),
-        )
-        return payload
-
-    @tool
-    async def clear_puzzle() -> dict:
-        """
-        Remove the current puzzle from the student's screen (e.g. once they've mastered
-        it and you're moving on to teaching/slides). Call silently.
-        """
-        from app.services import puzzle_service
-        try:
-            await puzzle_service.clear_puzzle_state(ctx.db, ctx.appointment_id)
-        except Exception as e:  # noqa: BLE001
-            logger.warning("clear puzzle_state failed: %s", e)
-        return {"action": "clear_puzzle"}
-
     return {
         "teaching": [show_resource, advance_lesson_slide, retreat_lesson_slide],
-        "puzzles": [list_available_puzzles, show_puzzle, clear_puzzle],
     }
 
 
 def make_session_tools(ctx: ToolContext) -> list:
-    """Back-compat: the in-lesson view tools (teaching + puzzles) as a flat list."""
+    """Back-compat: the slide tools + the generative puzzle tools as a flat list."""
+    from app.tools.puzzle_tools import puzzle_tool_groups
     g = session_tool_groups(ctx)
-    return g["teaching"] + g["puzzles"]
+    return g["teaching"] + puzzle_tool_groups(ctx)["puzzles"]

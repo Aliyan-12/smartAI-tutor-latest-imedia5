@@ -104,7 +104,7 @@ export function useSessionChannel(opts: SessionChannelOpts) {
   const pendingCommitRef = useRef<{ message_id: number | null; full_text: string } | null>(null);
   // A puzzle the student solved while a turn was still streaming — sent the moment
   // we're free, so their solve is never silently dropped.
-  const pendingPuzzleRef = useRef<{ puzzleId: string; prompt: string; answer: unknown; correct: boolean } | null>(null);
+  const pendingPuzzleRef = useRef<{ puzzleType: string; prompt: string; answer: unknown } | null>(null);
   const watchdogRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const msgHandlerRef = useRef<(d: any) => void>(() => {});
 
@@ -498,36 +498,36 @@ export function useSessionChannel(opts: SessionChannelOpts) {
     armWatchdog();
   }, []);
 
-  /** Send the student's puzzle attempt — the AI reacts (praise/advance or hint). */
+  /** Send the student's puzzle answer — the AI marks it with the matching evaluator, then
+   *  gives feedback. `answer` is the structured submission (labels dict / pairs / text);
+   *  correctness is decided server-side, so we send no `correct` flag. */
   const sendPuzzleResult = useCallback((
-    puzzleId: string, prompt: string, answer: unknown, correct: boolean,
+    puzzleType: string, prompt: string, answer: unknown,
   ) => {
     if (busyAt.current) {
-      // A turn is mid-flight — buffer the solve and flush it when the turn ends
-      // (see the effect below). Keep the latest only.
-      pendingPuzzleRef.current = { puzzleId, prompt, answer, correct };
+      // A turn is mid-flight — buffer the submission and flush it when the turn ends.
+      pendingPuzzleRef.current = { puzzleType, prompt, answer };
       return;
     }
     const ok = _send({
       type: "puzzle_result",
-      puzzle_id: puzzleId, prompt, answer: String(answer), correct,
+      puzzle_type: puzzleType, prompt, answer,
       tts: ttsEnabledRef.current,
     });
     if (!ok) return;
     busyAt.current = true;
-    // The server echoes + persists the "🧩 Puzzle …" event bubble (role:"event"),
-    // so we don't add an optimistic one here.
+    // The server echoes + persists the "🧩 Answer submitted" event bubble (role:"event").
     setBusy(true);
     setStatus("waiting");
     armWatchdog();
   }, []);
 
-  // Flush a buffered puzzle solve once the in-flight turn finishes.
+  // Flush a buffered puzzle submission once the in-flight turn finishes.
   useEffect(() => {
     if (!busy && pendingPuzzleRef.current) {
       const p = pendingPuzzleRef.current;
       pendingPuzzleRef.current = null;
-      sendPuzzleResult(p.puzzleId, p.prompt, p.answer, p.correct);
+      sendPuzzleResult(p.puzzleType, p.prompt, p.answer);
     }
   }, [busy, sendPuzzleResult]);
 

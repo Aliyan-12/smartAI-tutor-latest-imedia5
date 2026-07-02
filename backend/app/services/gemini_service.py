@@ -517,18 +517,15 @@ async def stream_response_async(
                 logger.info(f"Tool loop completed after {_round + 1} round(s)")
             break
 
-        # This round called tools. Any text it emitted is "preamble" the model writes
-        # before the call and then re-states next round → keep it only as a fallback.
-        # Run the tool(s) FIRST (so the viewer/quiz updates), THEN the next round's
-        # text is what the student sees → "execute tool, then respond".
+        # This round called tools. STREAM its lead-in text as the visible reply NOW,
+        # before running the tools, so the turn reads: "Okay, I'll make you a puzzle" →
+        # [tool] → "Here it is, take a look". If the model re-states this line after the
+        # tool, the router's dedup guard drops the exact repeat (that restatement was the
+        # original reason this text used to be buffered).
         if round_text.strip():
             preamble_text = round_text
-            # Surface that "about to do X" line as a THINKING step (not response text),
-            # so the agentic loop is visible — intent → tool → response — without risking
-            # a duplicate answer bubble (the post-tool round carries the real reply).
-            _pre = _condense_thought(round_text)
-            if _pre:
-                yield f"\n[THINK:{_pre}]\n"
+            yield round_text
+            emitted_text = True
 
         tool_map = {t.name: t for t in tools}
         tool_messages = []

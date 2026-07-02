@@ -12,7 +12,7 @@ from app.middleware.rate_limit import RateLimitMiddleware
 from app.routers import auth, chat, voice, health, admin, teacher, subscription, documents
 from app.routers import parent, appointments, assessments, gamification, lessons, assignments
 from app.routers import settings as settings_router
-from app.routers import sessions, curriculum, school
+from app.routers import sessions, curriculum, school, puzzles
 
 logging.basicConfig(
     level=logging.INFO,
@@ -131,3 +131,4 @@ app.include_router(settings_router.router)
 app.include_router(sessions.router)
 app.include_router(curriculum.router)
 app.include_router(school.router)
+app.include_router(puzzles.router)

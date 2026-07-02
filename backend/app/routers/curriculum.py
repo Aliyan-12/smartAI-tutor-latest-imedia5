@@ -99,20 +99,14 @@ async def list_topics(
 
 @router.post("/sync")
 async def trigger_sync(
-    target: str = Query("all", description="all | curriculum | resources | topic_images"),
-    force: bool = Query(False, description="topic_images: re-resolve rows already cached"),
+    target: str = Query("all", description="all | curriculum | resources"),
     current_user: User = Depends(require_admin),
 ):
-    """Kick off a sync in the background (returns immediately). The topic-image catalog
-    is refreshed automatically after each successful curriculum sync; target=topic_images
-    is only needed for a manual / forced re-resolve."""
+    """Kick off a sync in the background (returns immediately)."""
     if target in ("all", "curriculum"):
-        # sync_curriculum chains sync_topic_images on success.
         asyncio.create_task(resource_sync_service.sync_curriculum())
     if target in ("all", "resources"):
         asyncio.create_task(resource_sync_service.sync_resources())
-    if target == "topic_images":
-        asyncio.create_task(resource_sync_service.sync_topic_images(force=force))
     return {"status": "started", "target": target}
 
 

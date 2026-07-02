@@ -16,6 +16,7 @@ import logging
 from typing import Iterable, List, Set
 
 from app.tools.session_tools import ToolContext, session_tool_groups
+from app.tools.puzzle_tools import puzzle_tool_groups
 from app.tools.platform_tools import platform_tool_groups
 
 logger = logging.getLogger(__name__)
@@ -32,7 +33,8 @@ def make_tools(ctx: ToolContext, groups: Iterable[str]) -> list:
     bound groups + tool names so the per-turn filtering is visible in backend logs."""
     wanted = set(groups)
     grouped: dict = {}
-    grouped.update(session_tool_groups(ctx))
+    grouped.update(session_tool_groups(ctx))     # teaching (slide nav)
+    grouped.update(puzzle_tool_groups(ctx))      # puzzles (generators + evaluators)
     grouped.update(platform_tool_groups(ctx))
 
     tools: list = []

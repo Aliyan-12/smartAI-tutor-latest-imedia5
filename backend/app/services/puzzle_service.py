@@ -1,14 +1,19 @@
 """
-Puzzle build + evaluation + per-session persistence.
+puzzle_service.py — build + persist + semantically evaluate GENERATED puzzles.
 
-`build()` turns an AI-selected template id + a few params into a render payload
-the frontend draws (and the `solution` it checks against for instant feedback).
-The current puzzle is persisted in LessonPlan.session_state["puzzle_state"], the
-same way slide_state is, so it survives across turns.
+The AI supplies the pedagogy (labels, image prompts, the correct answer, a graph spec);
+this module turns that into a render payload (generating media via image_gen_service /
+graph_service) and persists the SOLUTION server-side in
+`LessonPlan.session_state["puzzle_state"]` (never sent to the client). After the student
+submits, `evaluate()` judges their answer SEMANTICALLY with a fast model
+("mitochondrion" ≈ "mitochondria", "a half" ≈ "1/2").
+
+Puzzle types (render key):
+  explanatory_image · labelling · matching · math · graph
 """
+import json
 import logging
 import random
-import re
 import uuid
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
@@ -16,445 +21,163 @@ from typing import Any, Dict, List, Optional
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.services.puzzle_templates import (
-    TEMPLATES_BY_ID, templates_for, DIAGRAMS, SORTING_SETS, FOOD_CHAINS,
-)
+from app.core.config import settings
+from app.services import image_gen_service, graph_service
 
 logger = logging.getLogger(__name__)
 
 
-def _clamp(v: Any, lo: int, hi: int, default: int) -> int:
-    try:
-        n = int(v)
-    except (TypeError, ValueError):
-        n = default
-    return max(lo, min(hi, n))
+# ── Builders ─────────────────────────────────────────────────────────────────────
+# Each returns a full payload INCLUDING `solution` + `puzzle_type`. The tool persists
+# the whole thing, then strips `solution` before handing the client payload to the model.
 
-
-def _get(p: dict, *keys: str, default: Any = None) -> Any:
-    """First present (non-None) value among the given key aliases — the model
-    doesn't always use the documented param name (e.g. 'parts' vs 'total_parts')."""
-    for k in keys:
-        if isinstance(p, dict) and p.get(k) is not None:
-            return p[k]
-    return default
-
-
-def resolve_id(puzzle_id: str, subject: str, key_stage: str) -> Optional[str]:
-    """Map a (possibly imperfect) puzzle_id the AI gave to a real, available
-    template id for this subject/key stage. Returns None if nothing reasonable
-    matches (so the caller can fall back to a typed question)."""
-    pid = (puzzle_id or "").strip().lower().replace("-", "_").replace(" ", "_")
-    if not pid:
-        return None
-    avail = [t["id"] for t in templates_for(subject, key_stage)]
-    if pid in avail:
-        return pid
-    # render-key match (e.g. AI passed the render name)
-    for t in TEMPLATES_BY_ID.values():
-        if t["render"] == pid and t["id"] in avail:
-            return t["id"]
-    # substring either way
-    for tid in avail:
-        if pid in tid or tid in pid:
-            return tid
-    # token overlap (e.g. "fractions_pie" → "pie_fraction")
-    toks = set(pid.split("_"))
-    best, best_score = None, 0
-    for tid in avail:
-        score = len(toks & set(tid.split("_")))
-        if score > best_score:
-            best, best_score = tid, score
-    return best if best_score > 0 else None
-
-
-def list_available(subject: str, key_stage: str) -> List[dict]:
-    """Template metadata the AI may choose from for this lesson, grouped by category."""
-    return [
-        {
-            "puzzle_id": t["id"], "title": t["title"], "render": t["render"],
-            "category": t.get("category", "practice"),
-            "description": t["description"], "params": t["params_doc"],
-            "key_stages": t["key_stages"],
-        }
-        for t in templates_for(subject, key_stage)
-    ]
-
-
-def build(puzzle_id: str, params: Optional[dict] = None) -> Dict[str, Any]:
-    """Validate params, compute the solution, return the render payload."""
-    t = TEMPLATES_BY_ID.get(puzzle_id)
-    if not t:
-        return {"error": "unknown_puzzle", "puzzle_id": puzzle_id, "action": "show_puzzle"}
-    p = params or {}
-    builder = _BUILDERS[t["render"]]
-    payload = builder(p)
-    if payload.get("error"):
-        payload.setdefault("action", "show_puzzle")
-        return payload
-    payload.update({
-        "puzzle_id": puzzle_id,
-        "render": t["render"],
-        "title": t["title"],
-        "answer_type": t["answer_type"],
-        "category": t.get("category", "practice"),
-        "action": "show_puzzle",
-    })
-    return payload
-
-
-# ── Per-type builders ───────────────────────────────────────────────────────────
-def _b_fraction_bar(p: dict) -> dict:
-    total = _clamp(_get(p, "total_parts", "parts", "denominator", "total"), 2, 12, 4)
-    shaded = _clamp(_get(p, "shaded_parts", "shaded", "numerator", "shaded_count"), 0, total, 1)
+def build_explanatory(image_url: str, caption: str = "", title: str = "") -> Dict[str, Any]:
     return {
-        "prompt": "What fraction of the bar is shaded? Write it as a fraction (e.g. 3/4).",
-        "params": {"total": total, "shaded": shaded},
-        "solution": {"numerator": shaded, "denominator": total},
+        "render": "explanatory_image",
+        "puzzle_type": "explanatory",
+        "title": title or "Let's look at this",
+        "prompt": caption or "",
+        "params": {"image": image_url, "caption": caption or ""},
+        "solution": None,            # display-only, nothing to grade
+        "answer_type": "none",
     }
 
 
-def _b_number_line(p: dict) -> dict:
-    mn = _clamp(_get(p, "min", "start", "from"), -100, 1000, 0)
-    mx = _clamp(_get(p, "max", "end", "to"), mn + 1, 1000, max(mn + 10, 10))
-    step = _clamp(_get(p, "step", "interval"), 1, max(1, mx - mn), 1)
-    marker = _clamp(_get(p, "marker", "value", "position", "point", "target"), mn, mx, mn + step)
+def build_labelling(items: List[Dict[str, str]], prompt: str = "") -> Dict[str, Any]:
+    """items: [{label, image_url}] — student names each image in turn."""
+    good = [it for it in items if it.get("image_url")]
+    if len(good) < 2:
+        return {"error": "image_gen_failed"}
+    imgs = [{"id": str(i), "image": it["image_url"]} for i, it in enumerate(good)]
+    solution = {str(i): (it.get("label") or "").strip() for i, it in enumerate(good)}
     return {
-        "prompt": "What number is the arrow pointing to?",
-        "params": {"min": mn, "max": mx, "step": step, "marker": marker},
-        "solution": marker,
+        "render": "labelling",
+        "puzzle_type": "labelling",
+        "title": "Name each picture",
+        "prompt": prompt or "Look at each picture and type what it is.",
+        "params": {"images": imgs},                 # no labels sent to the client
+        "solution": solution,
+        "answer_type": "labels",
     }
 
 
-def _b_shape_count(p: dict) -> dict:
-    tri = _clamp(_get(p, "triangles", "triangle"), 0, 8, 3)
-    cir = _clamp(_get(p, "circles", "circle"), 0, 8, 2)
-    sq = _clamp(_get(p, "squares", "square"), 0, 8, 2)
-    target = str(_get(p, "target_shape", "target", "shape") or "triangle").lower()
-    if target not in ("triangle", "circle", "square"):
-        target = "triangle"
-    counts = {"triangle": tri, "circle": cir, "square": sq}
-    shapes: List[str] = (["triangle"] * tri) + (["circle"] * cir) + (["square"] * sq)
-    random.shuffle(shapes)
-    return {
-        "prompt": f"How many {target}s can you count?",
-        "params": {"shapes": shapes, "target": target},
-        "solution": counts[target],
-    }
-
-
-def _b_area_grid(p: dict) -> dict:
-    w = _clamp(_get(p, "width", "w", "columns", "cols"), 1, 12, 4)
-    h = _clamp(_get(p, "height", "h", "rows"), 1, 12, 3)
-    return {
-        "prompt": f"This rectangle is {w} squares wide and {h} squares tall. What is its area?",
-        "params": {"width": w, "height": h},
-        "solution": w * h,
-    }
-
-
-def _b_build_fraction(p: dict) -> dict:
-    total = _clamp(_get(p, "total_parts", "parts", "denominator", "total"), 2, 12, 4)
-    target = _clamp(_get(p, "target_num", "target", "numerator", "shaded_parts", "shaded"), 0, total, 1)
-    return {
-        "prompt": f"Shade the bar to show the fraction {target}/{total}.",
-        "params": {"total": total, "target_num": target},
-        "solution": {"numerator": target, "denominator": total},
-    }
-
-
-def _b_label_diagram(p: dict) -> dict:
-    key = str(_get(p, "diagram", "type", "image", "id") or "plant").lower()
-    spec = DIAGRAMS.get(key) or next(iter(DIAGRAMS.values()))
-    labels = [s["label"] for s in spec["slots"]]
+def build_matching(items: List[Dict[str, str]], prompt: str = "") -> Dict[str, Any]:
+    """items: [{label, image_url}] — student matches each image to its name."""
+    good = [it for it in items if it.get("image_url")]
+    if len(good) < 3:
+        return {"error": "image_gen_failed"}
+    imgs = [{"id": str(i), "image": it["image_url"]} for i, it in enumerate(good)]
+    solution = {str(i): (it.get("label") or "").strip() for i, it in enumerate(good)}
+    labels = [it["label"] for it in good]
+    random.shuffle(imgs)
     random.shuffle(labels)
     return {
-        "prompt": spec["title"] + " — drag each label onto the right part.",
-        "params": {
-            "diagram": key, "width": spec["width"], "height": spec["height"],
-            "slots": [{"id": s["id"], "x": s["x"], "y": s["y"]} for s in spec["slots"]],
-            "labels": labels,
-        },
-        "solution": {s["id"]: s["label"] for s in spec["slots"]},
+        "render": "matching",
+        "puzzle_type": "matching",
+        "title": "Match the pictures",
+        "prompt": prompt or "Match each picture to its name.",
+        "params": {"images": imgs, "labels": labels},
+        "solution": solution,
+        "answer_type": "match",
     }
 
 
-def _b_states_of_matter(p: dict) -> dict:
-    key = str(_get(p, "set", "set_id", "id", "items") or "everyday").lower()
-    spec = SORTING_SETS.get(key) or next(iter(SORTING_SETS.values()))
-    items = [{"name": it["name"]} for it in spec["items"]]
-    random.shuffle(items)
+def build_math(question: str, answer: str, *, mode: str = "latex",
+               latex: str = "", image_url: str = "") -> Dict[str, Any]:
+    mode = mode if mode in ("latex", "image") else "latex"
+    if mode == "image" and not image_url:
+        mode = "latex"
     return {
-        "prompt": spec["title"] + ".",
-        "params": {"bins": spec["bins"], "items": items},
-        "solution": {it["name"]: it["bin"] for it in spec["items"]},
+        "render": "math",
+        "puzzle_type": "math",
+        "title": "Have a go",
+        "prompt": question or "Solve it.",
+        "params": {"mode": mode, "latex": latex or "", "image": image_url or ""},
+        "solution": str(answer),
+        "answer_type": "text",
     }
 
 
-def _b_food_chain_order(p: dict) -> dict:
-    key = str(_get(p, "chain", "seq", "sequence", "set", "id", "habitat") or "grassland").lower()
-    spec = FOOD_CHAINS.get(key) or next(iter(FOOD_CHAINS.values()))
-    shuffled = list(spec["order"])
-    random.shuffle(shuffled)
-    is_chain = key in ("grassland", "pond", "ocean")
-    hint = " — start with the producer." if is_chain else " — start with the first stage."
+def build_graph(question: str, answer: str, image_url: str) -> Dict[str, Any]:
     return {
-        "prompt": spec["title"] + hint,
-        "params": {"items": shuffled},
-        "solution": {"order": spec["order"]},
+        "render": "graph",
+        "puzzle_type": "graph",
+        "title": "Read the graph",
+        "prompt": question or "Answer from the graph.",
+        "params": {"image": image_url},
+        "solution": str(answer),
+        "answer_type": "text",
     }
 
 
-def _b_pie_fraction(p: dict) -> dict:
-    total = _clamp(_get(p, "total_parts", "parts", "slices", "denominator", "total"), 2, 12, 4)
-    shaded = _clamp(_get(p, "shaded_parts", "shaded", "numerator"), 0, total, 1)
-    return {
-        "prompt": "What fraction of the circle is shaded? Write it as a fraction (e.g. 3/4).",
-        "params": {"total": total, "shaded": shaded},
-        "solution": {"numerator": shaded, "denominator": total},
-    }
-
-
-def _b_place_value(p: dict) -> dict:
-    h = _clamp(_get(p, "hundreds", "h"), 0, 9, 1)
-    t = _clamp(_get(p, "tens", "t"), 0, 9, 3)
-    o = _clamp(_get(p, "ones", "o", "units"), 0, 9, 4)
-    value = h * 100 + t * 10 + o
-    return {
-        "prompt": "What number do these base-ten blocks show?",
-        "params": {"hundreds": h, "tens": t, "ones": o},
-        "solution": value,
-    }
-
-
-def _b_array_grid(p: dict) -> dict:
-    rows = _clamp(_get(p, "rows", "r"), 1, 10, 3)
-    cols = _clamp(_get(p, "cols", "columns", "c"), 1, 10, 4)
-    return {
-        "prompt": f"How many dots are there altogether? ({rows} rows of {cols})",
-        "params": {"rows": rows, "cols": cols},
-        "solution": rows * cols,
-    }
-
-
-def _b_clock(p: dict) -> dict:
-    hour = _clamp(_get(p, "hour", "hours", "h"), 1, 12, 3)
-    minute = _clamp(_get(p, "minute", "minutes", "m"), 0, 59, 30)
-    return {
-        "prompt": "What time is shown on the clock? Write it as h:mm (e.g. 3:30).",
-        "params": {"hour": hour, "minute": minute},
-        "solution": f"{hour}:{minute:02d}",
-    }
-
-
-def _b_angle(p: dict) -> dict:
-    deg = _clamp(_get(p, "degrees", "angle", "deg"), 10, 330, 45)
-    if deg < 90:
-        kind = "acute"
-    elif deg == 90:
-        kind = "right"
-    elif deg < 180:
-        kind = "obtuse"
-    elif deg == 180:
-        kind = "straight"
-    else:
-        kind = "reflex"
-    return {
-        "prompt": "What type of angle is this?",
-        "params": {"degrees": deg, "options": ["acute", "right", "obtuse", "reflex"]},
-        "solution": kind,
-    }
-
-
-def _b_coordinate_grid(p: dict) -> dict:
-    size = _clamp(_get(p, "size", "max", "grid"), 5, 10, 6)
-    x = _clamp(_get(p, "x", "x_coord"), 0, size, 3)
-    y = _clamp(_get(p, "y", "y_coord"), 0, size, 2)
-    return {
-        "prompt": "What are the coordinates of the plotted point? Write them as x,y.",
-        "params": {"x": x, "y": y, "size": size},
-        "solution": f"{x},{y}",
-    }
-
-
-def _b_bar_chart(p: dict) -> dict:
-    raw = _get(p, "bars", "data", "values")
-    bars: list = []
-    if isinstance(raw, list):
-        for b in raw:
-            if isinstance(b, dict) and "label" in b:
-                bars.append({"label": str(b["label"]), "value": _clamp(b.get("value"), 0, 100, 0)})
-    if not bars:
-        bars = [{"label": "Mon", "value": 4}, {"label": "Tue", "value": 7},
-                {"label": "Wed", "value": 3}, {"label": "Thu", "value": 6}]
-    ask = str(_get(p, "ask", "read", "label") or bars[0]["label"])
-    match = next((b for b in bars if b["label"].lower() == ask.lower()), bars[0])
-    return {
-        "prompt": f"Read the bar chart: what is the value for '{match['label']}'?",
-        "params": {"bars": bars, "ask": match["label"]},
-        "solution": match["value"],
-    }
-
-
-def _b_balance_scales(p: dict) -> dict:
-    op = str(_get(p, "op", "operation") or "add").lower()
-    a = _clamp(_get(p, "a", "coefficient", "addend"), 1, 20, 3)
-    if op in ("mul", "multiply", "times", "*"):
-        x = _clamp(_get(p, "x", "solution"), 1, 12, 4)
-        b = a * x
-        prompt = f"The scales balance. If {a} × x = {b}, what is x?"
-        left = f"{a}·x"
-    else:
-        op = "add"
-        x = _clamp(_get(p, "x", "solution"), 0, 20, 5)
-        b = x + a
-        prompt = f"The scales balance. If x + {a} = {b}, what is x?"
-        left = f"x + {a}"
-    return {
-        "prompt": prompt,
-        "params": {"op": op, "a": a, "b": b, "left": left},
-        "solution": x,
-    }
-
-
-def _b_particle_state(p: dict) -> dict:
-    state = str(_get(p, "state", "answer", "type") or "solid").lower()
-    if state not in ("solid", "liquid", "gas"):
-        state = "solid"
-    return {
-        "prompt": "Which state of matter do these particles show?",
-        "params": {"state": state, "options": ["solid", "liquid", "gas"]},
-        "solution": state,
-    }
-
-
-def _b_formula_triangle(p: dict) -> dict:
-    def node(key: str, dlabel: str) -> dict:
-        n = _get(p, key)
-        if not isinstance(n, dict):
-            n = {}
-        label = str(n.get("label") or dlabel)
-        v = n.get("value")
-        try:
-            v = int(v) if v is not None and v != "" else None
-        except (TypeError, ValueError):
-            v = None
-        return {"label": label, "value": v}
-
-    top, left, right = node("top", "distance"), node("left", "speed"), node("right", "time")
-    if top["value"] is None and left["value"] is not None and right["value"] is not None:
-        unknown, sol = "top", left["value"] * right["value"]
-    elif left["value"] is None and top["value"] is not None and right["value"] not in (None, 0):
-        unknown, sol = "left", top["value"] // right["value"]
-    elif right["value"] is None and top["value"] is not None and left["value"] not in (None, 0):
-        unknown, sol = "right", top["value"] // left["value"]
-    else:
-        # fallback to a clean worked example: distance = speed(4) × time(3)
-        left["value"], right["value"], top["value"] = 4, 3, None
-        unknown, sol = "top", 12
-    return {
-        "prompt": f"Use the triangle: {top['label']} = {left['label']} × {right['label']}. What is the missing value?",
-        "params": {"top": top, "left": left, "right": right, "unknown": unknown},
-        "solution": sol,
-    }
-
-
-_ENUM_PREFIX = re.compile(r"^\s*(?:lesson|unit|topic|week|step|part)?\s*\d+\s*[.):\-]+\s*", re.IGNORECASE)
-
-
-def _clean_topic_name(title: str) -> str:
-    """Tidy a topic title for display as a puzzle option: drop the leading enumeration
-    ('2. Identifying Wild Plants' → 'Identifying Wild Plants'). Keep the rest intact."""
-    return _ENUM_PREFIX.sub("", (title or "").strip()).strip() or (title or "").strip()
-
-
-def _catalog_items(p: dict) -> List[dict]:
-    """De-duplicated catalog rows with a real image, injected by the show_puzzle tool as
-    params['_catalog'] (each {topic_title, image_url, thumb_url}). Only Wikimedia Commons
-    images are kept so a puzzle never shows a non-free cover/poster that doesn't depict the
-    topic; option names are cleaned of their enumeration prefix."""
-    rows = p.get("_catalog") or []
-    seen, out = set(), []
-    for c in rows:
-        url = c.get("thumb_url") or c.get("image_url")
-        if not url or "/wikipedia/commons/" not in url:
-            continue
-        title = _clean_topic_name(c.get("topic_title") or "")
-        key = title.lower()
-        if not title or key in seen:
-            continue
-        seen.add(key)
-        out.append({"name": title, "image": url})
+def _client_payload(full: Dict[str, Any]) -> Dict[str, Any]:
+    """Strip the server-only solution before the payload goes to the model / frontend."""
+    out = {k: v for k, v in full.items() if k != "solution"}
+    out["action"] = "show_puzzle"
     return out
 
 
-def _b_identify_image(p: dict) -> dict:
-    """Show ONE real topic image; student picks its name from sibling topics. The first
-    catalog row is the lesson's target topic (get_for sorts it first)."""
-    items = _catalog_items(p)
-    if len(items) < 2:
-        return {"error": "no_catalog_images"}
-    target = items[0]
-    distractors = [c["name"] for c in items[1:]][:3]
-    options = [target["name"]] + distractors
-    random.shuffle(options)
+# ── Semantic evaluation (fast model) ──────────────────────────────────────────────
+_JUDGE_SYS = (
+    "You are marking a young student's answer to a puzzle. Be encouraging but accurate. "
+    "Accept correct meaning regardless of spelling, case, synonyms, or equivalent form "
+    "(e.g. 'mitochondrion'='mitochondria', 'a half'='1/2'='0.5'). Reply ONLY as JSON."
+)
+
+
+def _judge_sync(puzzle_type: str, question: str, solution: Any, answer: Any) -> Dict[str, Any]:
+    from google import genai
+    client = genai.Client(api_key=settings.gemini_api_key)
+    payload = {
+        "puzzle_type": puzzle_type,
+        "question": question,
+        "correct_answer": solution,
+        "student_answer": answer,
+    }
+    instruction = (
+        _JUDGE_SYS
+        + "\nGiven this puzzle, mark the student's answer. For labelling/matching, "
+        "correct_answer and student_answer are {id: name} maps — mark each id. "
+        "Return JSON: {\"score\": <int 0-10>, \"correct\": <true|false>, "
+        "\"per_item\": {<id>: <true|false>}, \"feedback\": \"<one short, warm sentence: "
+        "praise if right; if wrong, a gentle hint toward the right idea WITHOUT stating "
+        "the full answer>\"}. per_item may be {} for single-answer puzzles.\n\nPUZZLE:\n"
+        + json.dumps(payload, ensure_ascii=False)
+    )
+    resp = client.models.generate_content(
+        model=settings.gemini_chat_model,
+        contents=instruction,
+        config={"response_mime_type": "application/json"},
+    )
+    txt = (getattr(resp, "text", "") or "").strip()
+    data = json.loads(txt)
+    score = int(data.get("score", 0))
     return {
-        # Framed as "which topic does this illustrate?" so it reads sensibly for topic
-        # titles (incl. abstract ones like "What nutrients our bodies need") — the image
-        # is a real picture OF that topic, not necessarily a single nameable object.
-        "prompt": "Which topic does this picture go with?",
-        "params": {"image": target["image"], "options": options},
-        "solution": target["name"],
+        "score": max(0, min(10, score)),
+        "correct": bool(data.get("correct", score >= 7)),
+        "per_item": data.get("per_item") or {},
+        "feedback": str(data.get("feedback", "")).strip(),
     }
 
 
-def _b_match_image(p: dict) -> dict:
-    """Match several real topic images to their names (image id → label)."""
-    items = _catalog_items(p)[:5]
-    if len(items) < 3:
-        return {"error": "no_catalog_images"}
-    images = [{"id": i, "image": c["image"]} for i, c in enumerate(items)]
-    solution = {str(i): items[i]["name"] for i in range(len(items))}
-    labels = [c["name"] for c in items]
-    random.shuffle(images)
-    random.shuffle(labels)
-    return {
-        "prompt": "Match each picture to the topic it belongs to.",
-        "params": {"images": images, "labels": labels},
-        "solution": solution,
-    }
+async def evaluate(puzzle_type: str, solution: Any, student_answer: Any,
+                   question: str = "") -> Dict[str, Any]:
+    """Semantically mark the student's answer. Never raises — falls back to a neutral
+    'try again' verdict so the tutor can still respond."""
+    import asyncio
+    try:
+        return await asyncio.to_thread(
+            _judge_sync, puzzle_type, question, solution, student_answer
+        )
+    except Exception as e:  # noqa: BLE001
+        logger.warning("puzzle evaluate failed: %s: %s", type(e).__name__, e)
+        return {"score": 0, "correct": False, "per_item": {},
+                "feedback": "I couldn't quite mark that — let's talk it through together."}
 
 
-_BUILDERS = {
-    "identify_image": _b_identify_image,
-    "match_image": _b_match_image,
-    "fraction_bar": _b_fraction_bar,
-    "pie_fraction": _b_pie_fraction,
-    "particle_state": _b_particle_state,
-    "formula_triangle": _b_formula_triangle,
-    "number_line": _b_number_line,
-    "place_value": _b_place_value,
-    "array_grid": _b_array_grid,
-    "shape_count": _b_shape_count,
-    "area_grid": _b_area_grid,
-    "clock": _b_clock,
-    "angle": _b_angle,
-    "coordinate_grid": _b_coordinate_grid,
-    "bar_chart": _b_bar_chart,
-    "balance_scales": _b_balance_scales,
-    "build_fraction": _b_build_fraction,
-    "label_diagram": _b_label_diagram,
-    "states_of_matter": _b_states_of_matter,
-    "food_chain_order": _b_food_chain_order,
-}
-
-
-# ── Authoritative interactive state (LessonPlan.session_state["puzzle_state"]) ────
-# This is the single source of truth for "what puzzle is on the student's screen
-# and what has happened to it". It is injected into the model's input every turn
-# (see session_agent_service._puzzle_state_anchor) so the model never has to guess
-# from chat history whether a puzzle is showing / solved — which is what made it
-# hallucinate ("label the puzzle" when none existed) or skip calling show_puzzle.
+# ── Authoritative interactive state (LessonPlan.session_state["puzzle_state"]) ─────
+# Single source of truth for what puzzle is on screen, its SOLUTION (server-only), and
+# what the student has submitted. Injected into the model each turn via the anchor.
 
 async def _load_plan(db: AsyncSession, appointment_id: int):
     from app.models.lesson_plan import LessonPlan
@@ -463,25 +186,23 @@ async def _load_plan(db: AsyncSession, appointment_id: int):
     )).scalar_one_or_none()
 
 
-async def set_puzzle_shown(db: AsyncSession, appointment_id: int, payload: dict) -> str:
-    """Record that a NEW puzzle is now on screen. Returns an instance_id (nonce) the
-    frontend keys on so each fresh puzzle fully remounts (no stale solved/locked state)."""
+async def set_puzzle_shown(db: AsyncSession, appointment_id: int, full_payload: dict) -> str:
+    """Record a NEW puzzle on screen (incl. its server-only solution). Returns an
+    instance_id the frontend keys on so each fresh puzzle fully remounts."""
     plan = await _load_plan(db, appointment_id)
     if plan is None:
         return ""
     state = dict(plan.session_state) if plan.session_state else {}
     instance_id = uuid.uuid4().hex[:12]
-    # Solution stays client-side only (returned in the tool payload); we keep just
-    # enough here to describe the on-screen puzzle to the model each turn.
     state["puzzle_state"] = {
-        "puzzle_id": payload.get("puzzle_id"),
-        "render": payload.get("render"),
-        "prompt": payload.get("prompt"),
+        "puzzle_type": full_payload.get("puzzle_type"),
+        "render": full_payload.get("render"),
+        "prompt": full_payload.get("prompt"),
+        "solution": full_payload.get("solution"),   # server-only
         "instance_id": instance_id,
         "status": "showing",
         "attempts": 0,
         "last_answer": None,
-        "last_correct": None,
         "shown_at": datetime.now(timezone.utc).isoformat(),
     }
     plan.session_state = state
@@ -489,11 +210,7 @@ async def set_puzzle_shown(db: AsyncSession, appointment_id: int, payload: dict)
     return instance_id
 
 
-async def record_puzzle_attempt(
-    db: AsyncSession, appointment_id: int, answer: Any, correct: bool
-) -> None:
-    """Record the student's attempt against the on-screen puzzle so the next turn's
-    anchor reflects it (solved / still-wrong). No-op if nothing is on screen."""
+async def record_puzzle_attempt(db: AsyncSession, appointment_id: int, answer: Any) -> None:
     plan = await _load_plan(db, appointment_id)
     if plan is None:
         return
@@ -502,9 +219,8 @@ async def record_puzzle_attempt(
     if not ps:
         return
     ps["attempts"] = int(ps.get("attempts", 0)) + 1
-    ps["status"] = "solved" if correct else "attempted_wrong"
-    ps["last_answer"] = str(answer)
-    ps["last_correct"] = bool(correct)
+    ps["status"] = "submitted"
+    ps["last_answer"] = answer
     ps["answered_at"] = datetime.now(timezone.utc).isoformat()
     state["puzzle_state"] = ps
     plan.session_state = state
@@ -512,7 +228,6 @@ async def record_puzzle_attempt(
 
 
 async def clear_puzzle_state(db: AsyncSession, appointment_id: int) -> None:
-    """Remove the on-screen puzzle from authoritative state."""
     plan = await _load_plan(db, appointment_id)
     if plan is None:
         return
@@ -523,16 +238,7 @@ async def clear_puzzle_state(db: AsyncSession, appointment_id: int) -> None:
 
 
 async def get_puzzle_state(db: AsyncSession, appointment_id: int) -> Optional[dict]:
-    """Current on-screen puzzle record, or None if nothing is showing."""
     plan = await _load_plan(db, appointment_id)
     if plan is None or not plan.session_state:
         return None
     return plan.session_state.get("puzzle_state")
-
-
-async def save_puzzle_state(db: AsyncSession, appointment_id: int, payload: Optional[dict]) -> None:
-    """Back-compat shim: payload=None clears, a payload records a fresh show."""
-    if payload is None:
-        await clear_puzzle_state(db, appointment_id)
-    else:
-        await set_puzzle_shown(db, appointment_id, payload)
