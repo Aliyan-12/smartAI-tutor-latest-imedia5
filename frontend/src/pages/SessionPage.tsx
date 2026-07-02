@@ -1169,10 +1169,10 @@ export default function SessionPage() {
           currentPuzzle ? (
             <div style={{ flex: 1, minHeight: "70vh", display: "flex", flexDirection: "column" }}>
               <PuzzlePlayer
-                key={currentPuzzle.instance_id || `${currentPuzzle.puzzle_id}:${currentPuzzle.prompt}`}
+                key={currentPuzzle.instance_id || `${currentPuzzle.puzzle_type}:${currentPuzzle.prompt}`}
                 payload={currentPuzzle}
-                onSolved={(answer, correct) =>
-                  channel.sendPuzzleResult(currentPuzzle.puzzle_id, currentPuzzle.prompt, answer, correct)
+                onSubmit={(answer) =>
+                  channel.sendPuzzleResult(currentPuzzle.puzzle_type, currentPuzzle.prompt, answer)
                 }
               />
             </div>

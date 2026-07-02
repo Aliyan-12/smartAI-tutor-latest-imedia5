@@ -12,7 +12,7 @@ from app.models.lesson_plan import LessonPlan
 from app.models.assignment import Homework, HomeworkAssignment
 from app.models.resource_hub import (
     RHKeyStage, RHYearGroup, RHSubject, RHUnit, RHTopic,
-    RHAvailability, RHResource, RHDocument, RHDocumentChunk, RHTopicImage,
+    RHAvailability, RHResource, RHDocument, RHDocumentChunk,
 )
 
 __all__ = [
@@ -27,5 +27,5 @@ __all__ = [
     "LessonPlan",
     "Homework", "HomeworkAssignment",
     "RHKeyStage", "RHYearGroup", "RHSubject", "RHUnit", "RHTopic",
-    "RHAvailability", "RHResource", "RHDocument", "RHDocumentChunk", "RHTopicImage",
+    "RHAvailability", "RHResource", "RHDocument", "RHDocumentChunk",
 ]

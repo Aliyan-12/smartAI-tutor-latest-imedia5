@@ -955,7 +955,7 @@ TEACHING STYLE — FOLLOW THESE STRICTLY:
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 RULE A — YOU ARE AN AGENTIC TUTOR, NOT A CHATBOT — ACT ON THE LESSON STATE:
-- A "LESSON STATE" block is appended to EVERY student message. It is live and authoritative. It contains a "⚡ DO NOW" line — that is your TOP PRIORITY this turn. Perform it by calling the right tool (advance_lesson_slide / generate_quiz / show_puzzle / generate_session_report + end_lesson), then teach around it.
+- A "LESSON STATE" block is appended to EVERY student message. It is live and authoritative. It contains a "⚡ DO NOW" line — that is your TOP PRIORITY this turn. Perform it by calling the right tool (advance_lesson_slide / a puzzle generator / generate_quiz / generate_session_report + end_lesson), then teach around it.
 - Drive the lesson off the STATE, not off whether the student asked. If time says move on, MOVE ON. If the quiz window is open, SET THE QUIZ. If a slide's point is done, ADVANCE THE SLIDE. If time's up, RECAP → report → end. Don't wait to be told.
 - Only call tools listed under "AVAILABLE ACTIONS THIS TURN". If you need one that isn't listed, do the teaching alternative instead — never pretend an action happened.
 - Lead with a short natural line about what you're doing ("Let's try a quick puzzle on this —"), then call the tool. The action shows up for the student; don't read out the tool name or its parameters.
@@ -1007,20 +1007,10 @@ RULE 1 — READ USER INTENT, NOT LITERAL TEXT:
   • "I understand" mid-explanation = stop explaining that point, move to the next one.
   • If the student is clearly moving fast and getting things right, accelerate — don't slow down with recaps.
 
-RULE 2 — STEP TYPE:
-   - During RECAP or TEACH steps: PURE TEACHING only. Do NOT ask check questions. Teach clearly, then move on.
-   - During PRACTICE steps: PREFER a visual puzzle when one fits the concept you just taught — call list_available_puzzles then show_puzzle, and wait for the [PUZZLE RESULT] (see VISUAL PUZZLES below). ONLY if no puzzle fits, ask ONE focused typed question per response and wait for the answer.
-
-   ── WHEN QUIZ STATUS = QUIZ LOCKED and you are in a PRACTICE step ──
-   - End each practice response with ONE short, direct question.
-   - STRICTLY ROTATE through all of these types — do NOT default to True/False repeatedly:
-     • Sentence recall:  "In one sentence, what is [concept]?"
-     • Process/sequence: "Which step comes first — X or Y?"
-     • Purpose/function: "What is the role of [term]?"
-     • Cause/effect:     "What causes X?"
-     • True/False:       "True or false: [statement]?" — use sparingly, at most once every 3–4 turns.
-   - The question must be answerable in a few words or one sentence.
-   - After the student answers: ONE sentence affirming or correcting, then continue. No lengthy praise.
+RULE 2 — STEP TYPE (teach visually; practise in puzzle form, NOT plain text):
+   - During RECAP or TEACH steps: PURE TEACHING only. Do NOT ask check questions. Teach clearly (use slides, or generate an explanatory_puzzle diagram to explain it), then move on.
+   - During PRACTICE steps: ASK IN PUZZLE FORM. Generate the fitting puzzle (labelling / matching / math / graph — see GENERATIVE PUZZLES below), invite the student to have a go, and WAIT for the [PUZZLE RESULT]. A plain typed question is a LAST resort — only if a puzzle genuinely can't capture the concept.
+   - After the student's answer is marked by the evaluator: ONE warm sentence, then continue. No lengthy praise.
 
    ── WHEN QUIZ STATUS = QUIZ PHASE ACTIVE ──
    - STOP asking inline questions. Call the generate_quiz tool after 1–2 more teaching turns.
@@ -1068,18 +1058,31 @@ QUIZ RULES — FOLLOW EXACTLY:
 
 {slides_block}
 
-VISUAL PUZZLES — PRACTISE HANDS-ON (Maths/Science), PROACTIVELY:
-- SOURCE OF TRUTH: a "LESSON INTERACTIVE STATE" block is appended to every student message telling you EXACTLY what puzzle (if any) is on screen. Always obey it: if it says none is showing, you MUST call show_puzzle yourself before referring to any puzzle; if it says one is showing/solved, act on THAT — never contradict it from memory of the chat.
-- This is your DEFAULT way to practise. Teach the concept first (use the slides), THEN when it's time to practise, LEAD with a puzzle — you do NOT wait for the student to ask. Say e.g. "Let's try one together — look at your screen," then show it.
-- AT EACH PRACTICE MOMENT decide: (1) call list_available_puzzles, (2) IF a puzzle fits the exact concept you just taught (for this subject + key_stage), call show_puzzle(puzzle_id, params) SILENTLY, tell the student what to do, then STOP and wait — their attempt returns as a [PUZZLE RESULT]. (3) IF nothing fits that concept, FALL BACK to a normal typed practice question (as you do now). Never invent a puzzle_id.
-- RHYTHM per concept: teach (slides) → ONE puzzle to practise → on success move to the next concept. Only use a typed question when the concept has no matching puzzle.
-- CHOOSE BY CATEGORY: list_available_puzzles tags each puzzle with a category (labelling, matching, recognition, sorting, sequencing, counting, fractions, number, geometry, data, algebra). Pick the category that fits the concept. For recognition/vocabulary (naming a structure, organ, shape, place, etc.) PREFER the image puzzles — 'identify_image' (show a real image, name it) or 'match_image' (match real images to names); they pull genuine images of THIS lesson's topic. If show_puzzle returns 'no_catalog_images', that topic has no images yet — just ask a typed question instead.
-- AGE-APPROPRIATE: scale the numbers/difficulty to the student's key stage AND year group — small numbers and simple fractions for KS1/early-primary years, larger values and harder concepts for older years. Only use puzzles list_available_puzzles offers for this subject + key stage.
-- On a CORRECT result: brief praise, then continue (next concept, or clear_puzzle and teach on). On INCORRECT: ONE hint tied to what's on screen, invite another try on the same puzzle — don't reveal the answer.
-- Don't spam — one focused puzzle per concept, then move on. If the student explicitly asks for a puzzle, show one immediately.
-- VALID IDs ONLY: pick puzzle_id strictly from what list_available_puzzles returns. NEVER tell the student to "look at" / "check" the puzzle UNLESS show_puzzle returned successfully (i.e. it did NOT return an 'error' field). If show_puzzle returns an error, do NOT mention a puzzle at all — just ask a normal typed question.
-- Never write the tool call as text and never read out raw params; the puzzle just appears on screen.
-- ACTIONS, NOT NARRATION: if you say you're clearing the puzzle / moving on from it, you MUST actually call clear_puzzle in the SAME turn (moving to a slide also clears it) — never just say "I'll clear that" without doing it. Same for every tool: do the action, don't describe doing it.
+GENERATIVE PUZZLES — TEACH + PRACTISE WITH VISUALS, NOT WALLS OF TEXT (CRITICAL):
+You have tools that GENERATE real images/graphs/maths LIVE. For Science / Physics / Chemistry / Biology / Maths you must TEACH and QUIZ visually — plain-text questioning is the rare last resort, not the default. A "LESSON STATE" block tells you what's on screen each turn; trust it over the chat.
+
+RHYTHM — SAY → DO → SAY (do this every time you use a puzzle/evaluator tool):
+- FIRST stream ONE short, natural sentence saying what you're about to do — e.g. "Okay, let me set up a quick puzzle for you." or "Let me draw you a diagram of this." This is normal reply text; it shows immediately.
+- THEN call the tool (the call itself is silent — never write the function name or raw params as text; the image/graph just appears).
+- THEN, once it's on screen, continue in text — invite them to have a go ("Right — see if you can name each picture."), or teach from the diagram.
+- When a [PUZZLE RESULT] comes in: say a short line first ("Let me check that."), THEN call the matching evaluator, THEN give the verdict in text. Don't dump everything before the tool and go silent after — keep the say → do → say rhythm.
+
+WHEN NOTHING NEEDS SOLVING (intro + teaching):
+- If there are teaching slides, teach from them. If there are NO slides — or the slides don't fit — call explanatory_puzzle to GENERATE a clear diagram that explains the concept (e.g. "a labelled diagram comparing a plant and animal cell", "forces on a falling parachute", "the water cycle"), and teach from THAT. This is your MOST-USED tool: reach for it whenever a picture would help — new students, anyone who looks stuck, and any hard Science/Maths idea. Show 5–6 across a session. It's display-only; just keep teaching from it.
+- DURING teaching, do NOT pepper the student with check-questions. Explain the idea with the visual, keep it flowing. Save questions for practice/quiz.
+
+WHEN IT'S TIME TO PRACTISE / QUIZ (ask in PUZZLE form, never plain text):
+- Say your short lead-in (see RHYTHM above), pick the generator that fits the concept and call it (silently — no call syntax as text), then invite the student to have a go and WAIT (their answer returns as a [PUZZLE RESULT]):
+  • labelling_puzzle — 3–4 generated pictures, student names each in turn (recognition/vocabulary: organs, shapes, apparatus…).
+  • matching_puzzle — several pictures + jumbled names, student matches them.
+  • math_puzzle — a maths problem shown as LaTeX (equations/arithmetic) or as an image (visual concepts like fractions). Never ask maths as plain chat text.
+  • graph_puzzle — a real matplotlib graph + a question (coordinates, straight lines, quadratics, trig — mostly KS4/KS5).
+- You supply the pedagogy (the labels + image prompts, the correct answer, the graph spec); the tool draws it and keeps the answer private.
+- MARKING: when the [PUZZLE RESULT] arrives, first say briefly you'll check it, then call the MATCHING evaluator — labelling_evaluator / matching_evaluator / math_evaluator / graph_evaluator — and use ITS verdict to give warm feedback (praise what's right; a gentle hint for anything wrong, without revealing the answer). Never guess the mark yourself.
+- AGE-APPROPRIATE: scale difficulty to the key stage + year group. ONE focused puzzle per concept, then move on — don't spam.
+- If a generator returns an 'error', do NOT tell the student to look at anything — briefly try once more or ask the question another way.
+- Never write a tool call as text or read out raw params; the visual just appears on screen.
+- ACTIONS, NOT NARRATION: if you say you're clearing/moving on, actually call clear_puzzle in the SAME turn (moving to a slide also clears it). Do the action — don't just describe it.
 
 END-OF-SESSION REPORT:
 - After delivering the final session summary/review (the last phase), call the generate_session_report tool.
@@ -1259,7 +1262,11 @@ Be age-appropriate for {key_stage}. Return ONLY valid JSON, no markdown."""
             model=None,
             stream=False,
         )
-        raw = raw.strip()
+        # generate_response can hand back a list of content parts (multi-part responses) —
+        # join them before string ops so this never raises 'list has no attribute strip'.
+        if isinstance(raw, list):
+            raw = "".join(str(x) for x in raw)
+        raw = (raw or "").strip()
         if raw.startswith("```"):
             raw = _re.sub(r"^```[a-z]*\n?", "", raw)
             raw = _re.sub(r"\n?```$", "", raw)
@@ -1511,33 +1518,34 @@ def _puzzle_state_lines(pstate: Optional[dict]) -> str:
     status = (pstate or {}).get("status")
     if not pstate or status in (None, "cleared"):
         return (
-            "🧩 Puzzle: NONE on screen right now.\n"
-            "• If it's a practice moment (or the student asks for a puzzle), YOU must call "
-            "list_available_puzzles then show_puzzle — don't expect one to already be there.\n"
-            "• NEVER tell the student to look at / label / solve / 'see' a puzzle unless YOU "
-            "just called show_puzzle successfully (no 'error'). Otherwise there's nothing to look at."
+            "Puzzle: NONE on screen right now.\n"
+            "• To EXPLAIN a concept (teaching, or a student who's stuck) call explanatory_puzzle.\n"
+            "• To PRACTISE/QUIZ, generate the fitting puzzle yourself — labelling_puzzle / "
+            "matching_puzzle / math_puzzle / graph_puzzle — don't expect one to already be there.\n"
+            "• NEVER tell the student to look at / name / solve / 'see' a puzzle unless a generator "
+            "tool just returned successfully (no 'error'). Otherwise there's nothing on screen."
         )
-    pid = pstate.get("puzzle_id", "puzzle")
+    ptype = pstate.get("puzzle_type", "puzzle")
     prompt = pstate.get("prompt", "")
     ans = pstate.get("last_answer")
+    if ptype == "explanatory":
+        return (
+            f"Puzzle: an EXPLANATORY image is on screen ({prompt!r}). Teach from it — there's "
+            "nothing for the student to submit. Call clear_puzzle when you move on."
+        )
     if status == "showing":
         return (
-            f"🧩 Puzzle: ON SCREEN now → id='{pid}', asking: \"{prompt}\". Awaiting the student's "
-            "attempt (arrives as a [PUZZLE RESULT]). Do NOT show another puzzle, move on, or "
-            "re-describe it — just invite them to solve it, then wait."
+            f"Puzzle: a '{ptype}' puzzle is ON SCREEN now, asking: \"{prompt}\". Awaiting the "
+            "student's answer (arrives as a [PUZZLE RESULT]). Do NOT show another puzzle or move "
+            "on — just invite them to have a go, then wait."
         )
-    if status == "solved":
+    if status == "submitted":
         return (
-            f"🧩 Puzzle: id='{pid}' was just SOLVED CORRECTLY (answer: {ans}). To set ANOTHER, call "
-            "show_puzzle again (it REPLACES this one). To return to slides, call clear_puzzle. "
-            "Don't refer to a NEW puzzle until show_puzzle has actually run."
+            f"Puzzle: the student SUBMITTED an answer to the '{ptype}' puzzle (answer: {ans}). "
+            f"Call {ptype}_evaluator NOW to mark it, then give warm feedback (praise if right; a "
+            "gentle hint if not). Don't guess the mark yourself."
         )
-    # attempted_wrong
-    return (
-        f"🧩 Puzzle: id='{pid}' was attempted but INCORRECT (answer: {ans}). It is STILL on screen — "
-        "give ONE short hint tied to the visual and invite them to try the SAME puzzle again. "
-        "Don't reveal the answer or show a new puzzle yet."
-    )
+    return f"Puzzle: a '{ptype}' puzzle is on screen ({prompt!r})."
 
 
 async def _phase_and_next(db: AsyncSession, appt_id: int, elapsed: int, duration: int) -> tuple[str, str]:
@@ -1652,25 +1660,6 @@ async def build_lesson_state_anchor(
                 f"needs work — {', '.join(weak) if weak else 'none yet'}. "
                 "Bias practice toward the 'needs work' areas."
             )
-        except Exception:
-            pass
-
-        # The EXACT puzzle_ids valid for this lesson + the label-diagram keys, so the
-        # model picks a real one instead of guessing (it was defaulting to 'label_diagram'
-        # / the plant). Image puzzles (identify_image / match_image) show real topic images.
-        try:
-            from app.services import puzzle_service as _pzs2
-            from app.services.puzzle_templates import DIAGRAMS as _DIAGS
-            _ids = [p["puzzle_id"] for p in _pzs2.list_available(
-                appointment.subject or "", appointment.key_stage or "")]
-            if _ids:
-                lines.append(
-                    "🧩 Valid puzzle_ids this lesson: " + ", ".join(_ids) + ". "
-                    "label_diagram keys: " + ", ".join(_DIAGS) + ". "
-                    "Pick the id that fits the concept — for naming real things (organs, "
-                    "animals, plants, places) PREFER identify_image / match_image (real "
-                    "images). Never invent an id or default to the plant."
-                )
         except Exception:
             pass
 
@@ -1798,11 +1787,11 @@ async def _run_turn(send, chat_id, user_id, *, saved_user_text, ai_content,
     # Persisted as a role="thinking" message at the end so they survive a refresh.
     thinking_steps: list = []
 
-    # Result turns already carry the outcome (puzzles/quizzes self-mark client-side), so
-    # the model reacts without an evaluate_answer call. Emit an honest leading step so the
-    # student still SEES the tutor "check" their work in the thinking strip.
-    _result_step = {"puzzle_result": "Checking the answer",
-                    "quiz_result": "Marking the quiz"}.get(event_kind)
+    # Quiz results self-mark client-side, so the model reacts without a tool — emit an
+    # honest leading step so the student still SEES the tutor "mark" their work. (Puzzle
+    # results are marked by a *_evaluator tool, which emits its own "Checking the answer"
+    # step, so we don't double it up here.)
+    _result_step = {"quiz_result": "Marking the quiz"}.get(event_kind)
     if _result_step:
         await _emit_thinking(send, thinking_steps, _result_step)
 
@@ -1973,7 +1962,20 @@ async def _run_turn(send, chat_id, user_id, *, saved_user_text, ai_content,
 
         segmenter = SentenceSegmenter()
         seq = 0
-        full: list = []
+        full: list = []          # the deduped sentences actually shown (also persisted)
+        _seen_norm: set = set()  # normalised sentences already streamed THIS turn
+
+        def _dup(sentence: str) -> bool:
+            # The lead-in now streams as text (before a tool), and Gemini sometimes
+            # RE-STATES it after the tool → drop an exact repeat so it isn't shown twice.
+            norm = " ".join((sentence or "").split()).lower().strip(" .!?,:;")
+            if len(norm) < 12:
+                return False  # keep short interjections ("OK.", "Well done!")
+            if norm in _seen_norm:
+                return True
+            _seen_norm.add(norm)
+            return False
+
         async for raw in gemini_service.stream_response_async(
             hist_slice, ai_content, rag_chunks=rag_chunks,
             system_prompt_override=session_system_prompt, tool_context=tool_context,
@@ -1991,12 +1993,21 @@ async def _run_turn(send, chat_id, user_id, *, saved_user_text, ai_content,
                     tr = json.loads(stripped[len("[TOOL_RESULT:"):-1])
                     _tool = tr.get("tool", "")
                     _data = tr.get("data", {}) or {}
-                    if _tool in ("show_puzzle", "clear_puzzle"):
+                    # Generators are named per type (explanatory_puzzle, math_puzzle, …) but
+                    # the frontend renders any `action:"show_puzzle"` payload through one
+                    # handler — normalise the WS `tool` field so it keeps working.
+                    _action = _data.get("action")
+                    _ws_tool = _tool
+                    if _action == "show_puzzle":
+                        _ws_tool = "show_puzzle"
+                    elif _action == "clear_puzzle":
+                        _ws_tool = "clear_puzzle"
+                    if _action in ("show_puzzle", "clear_puzzle"):
                         logger.info(
-                            "WS → tool=%s render=%s id=%s error=%s",
-                            _tool, _data.get("render"), _data.get("puzzle_id"), _data.get("error"),
+                            "WS → tool=%s (%s) render=%s error=%s",
+                            _ws_tool, _tool, _data.get("render"), _data.get("error"),
                         )
-                    await send({"type": "tool", "tool": _tool, "data": _data})
+                    await send({"type": "tool", "tool": _ws_tool, "data": _data})
                     # Friendly one-line "thinking" step for the tool just run.
                     _label = _THINKING_LABELS.get(_tool)
                     if _label:
@@ -2009,14 +2020,17 @@ async def _run_turn(send, chat_id, user_id, *, saved_user_text, ai_content,
                 except Exception as _tr_err:
                     logger.warning("Failed to forward TOOL_RESULT: %s", _tr_err)
                 continue
-            full.append(token)
             for sentence in segmenter.feed(token):
+                if _dup(sentence):
+                    continue
                 await stream_segment(send, seq, sentence, tts=tts, turn_id=turn_id)
+                full.append(sentence)
                 seq += 1
 
         remainder = segmenter.flush()
-        if remainder:
+        if remainder and not _dup(remainder):
             await stream_segment(send, seq, remainder, tts=tts, turn_id=turn_id)
+            full.append(remainder)
             seq += 1
 
         complete = "".join(full)
@@ -2053,11 +2067,19 @@ async def _run_turn(send, chat_id, user_id, *, saved_user_text, ai_content,
 
 
 # Friendly one-line labels shown in the "thinking" strip when a tool runs — plain
-# language, no technical detail. Internal lookups (list_available_puzzles) and tools
-# already surfaced as event pills (pause/resume/end_lesson) are intentionally omitted.
+# language, no technical detail. Tools already surfaced as event pills
+# (pause/resume/end_lesson) are intentionally omitted.
 _THINKING_LABELS: dict = {
-    "show_puzzle": "Setting up a puzzle",
+    "explanatory_puzzle": "Generating a diagram",
+    "labelling_puzzle": "Setting up a labelling puzzle",
+    "matching_puzzle": "Setting up a matching puzzle",
+    "math_puzzle": "Writing a maths problem",
+    "graph_puzzle": "Drawing a graph",
     "clear_puzzle": "Clearing the puzzle",
+    "labelling_evaluator": "Checking the answer",
+    "matching_evaluator": "Checking the answer",
+    "math_evaluator": "Checking the answer",
+    "graph_evaluator": "Checking the answer",
     "generate_quiz": "Putting together a quick quiz",
     "evaluate_answer": "Checking the answer",
     "get_student_mastery": "Reviewing progress",
@@ -2177,45 +2199,40 @@ async def _handle_quiz_result(send, chat_id, user_id, data):
                     tts=bool(data.get("tts", True)), anchor_slides=False, event_kind="quiz_result")
 
 
-def _build_puzzle_ctx(puzzle_id: str, prompt: str, answer, correct: bool) -> str:
-    verdict = "CORRECT" if correct else "INCORRECT"
+def _build_puzzle_ctx(puzzle_type: str, prompt: str, answer) -> str:
     return (
-        f"[PUZZLE RESULT] The student just attempted the on-screen puzzle '{puzzle_id}'.\n"
+        f"[PUZZLE RESULT] The student submitted an answer to the on-screen '{puzzle_type}' puzzle.\n"
         f"Question shown: {prompt}\n"
         f"Their answer: {answer}\n"
-        f"Result: {verdict}.\n"
-        "Respond as the tutor in 1-2 sentences: if CORRECT, give brief specific praise "
-        "then continue (move to the next concept, or clear_puzzle and teach on). If "
-        "INCORRECT, give ONE encouraging hint tied to the visual and invite them to try "
-        "again on the SAME puzzle — do not reveal the answer yet."
+        f"Now: briefly tell them you'll check it (short text), then call {puzzle_type}_evaluator "
+        "to mark it (it compares against the correct answer semantically). Using ITS verdict, "
+        "reply warmly in 1–2 sentences: praise what's right; for anything wrong give ONE gentle "
+        "hint (do NOT reveal the answer) and invite another try; then continue teaching, or "
+        "clear_puzzle and move on. Do not guess the mark yourself."
     )
 
 
 async def _handle_puzzle_result(send, chat_id, user_id, data):
-    correct = bool(data.get("correct"))
     prompt = data.get("prompt", "")
-    from app.schemas.session_events import EVENT_PUZZLE_SOLVED, EVENT_PUZZLE_TRIED
+    puzzle_type = data.get("puzzle_type") or "puzzle"
+    answer = data.get("answer", "")
+    from app.schemas.session_events import EVENT_PUZZLE_TRIED
     await _emit_event(
-        send, chat_id,
-        EVENT_PUZZLE_SOLVED if correct else EVENT_PUZZLE_TRIED,
-        f"🧩 Puzzle {'solved ✓' if correct else 'attempted'}" + (f" — {prompt}" if prompt else ""),
+        send, chat_id, EVENT_PUZZLE_TRIED,
+        "🧩 Answer submitted" + (f" — {prompt}" if prompt else ""),
     )
-    # Record the attempt into authoritative lesson state, so both this turn's anchor
-    # and every later turn reflect it — the model never misses a solve.
+    # Record the submitted answer into authoritative lesson state so this turn's anchor +
+    # the evaluator tool can mark it (solution is stored server-side).
     try:
         from app.services import puzzle_service
         async with async_session_factory() as _db:
             _appt_id = await _resolve_appt_id(_db, chat_id)
             if _appt_id:
-                await puzzle_service.record_puzzle_attempt(
-                    _db, _appt_id, data.get("answer", ""), correct,
-                )
+                await puzzle_service.record_puzzle_attempt(_db, _appt_id, answer)
                 await _db.commit()
     except Exception:
         logger.warning("record_puzzle_attempt failed", exc_info=True)
-    ctx = _build_puzzle_ctx(
-        data.get("puzzle_id", "puzzle"), prompt, data.get("answer", ""), correct,
-    )
+    ctx = _build_puzzle_ctx(puzzle_type, prompt, answer)
     await _run_turn(send, chat_id, user_id, saved_user_text=None, ai_content=ctx,
                     tts=bool(data.get("tts", True)), anchor_slides=False, event_kind="puzzle_result")
 

@@ -44,11 +44,12 @@ class UserAudioEvent(_Base):
 
 class PuzzleResultEvent(_Base):
     type: Literal["puzzle_result"]
-    puzzle_id: str = "puzzle"
+    puzzle_type: str = "puzzle"          # labelling | matching | math | graph
     prompt: str = ""
-    answer: Any = ""
-    correct: bool = False
+    answer: Any = ""                      # structured submission (dict / str)
     tts: bool = True
+    # Legacy field — correctness is now decided server-side by the *_evaluator tools.
+    correct: bool = False
 
 
 class QuizResultEvent(_Base):
