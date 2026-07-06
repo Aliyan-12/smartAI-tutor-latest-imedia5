@@ -98,6 +98,9 @@ export function useSessionChannel(opts: SessionChannelOpts) {
   const nextAudioSeqRef = useRef(0);
   const audioPumpingRef = useRef(false);
   const audioRef = useRef<HTMLAudioElement | null>(null);
+  // One-shot TTS ("Listen"/quiz read-aloud) audio — a `tts_audio` reply to a `speak`
+  // request. Separate from the turn's segment-audio pump so the two never fight.
+  const oneShotAudioRef = useRef<HTMLAudioElement | null>(null);
   // The turn whose frames we currently accept — so late audio from a previous turn
   // (seq numbering restarts each turn) is dropped instead of bleeding into this one.
   const currentTurnIdRef = useRef<string | null>(null);
@@ -338,6 +341,26 @@ export function useSessionChannel(opts: SessionChannelOpts) {
       case "tool":
         optsRef.current.onTool?.(d.tool, d.data || {});
         break;
+      case "tts_audio": {
+        // One-shot TTS reply to a `speak` request (quiz read-aloud / "Listen"). The caller
+        // already decided it wants audio, so just play it. Stop any previous one-shot clip.
+        if (oneShotAudioRef.current) {
+          try { oneShotAudioRef.current.pause(); } catch { /* ignore */ }
+          oneShotAudioRef.current = null;
+        }
+        if (!d.audio_b64) break;
+        try {
+          const bytes = Uint8Array.from(atob(d.audio_b64), (c) => c.charCodeAt(0));
+          const url = URL.createObjectURL(new Blob([bytes], { type: d.mime || "audio/wav" }));
+          const audio = new Audio(url);
+          oneShotAudioRef.current = audio;
+          const done = () => { URL.revokeObjectURL(url); if (oneShotAudioRef.current === audio) oneShotAudioRef.current = null; };
+          audio.onended = done;
+          audio.onerror = done;
+          audio.play().catch(done);
+        } catch { /* ignore playback errors */ }
+        break;
+      }
       case "event":
         // Lifecycle / interactive event → render a centered pill in the chat.
         setMessages((prev) => [...prev, {
@@ -555,13 +578,33 @@ export function useSessionChannel(opts: SessionChannelOpts) {
    */
   const sendAudio = useCallback((audioB64: string, mime: string) => {
     if (busyAt.current) return;
-    const ok = _send({ type: "user_audio", audio_b64: audioB64, mime, stt: true, tts: ttsEnabledRef.current });
+    // A spoken utterance means the student is in voice-to-voice mode, so ALWAYS speak the
+    // reply back (true voice loop) — don't gate it on the "Read aloud" toggle, which only
+    // governs typed turns. Everything else (thinking, puzzles, tools) is already identical.
+    const ok = _send({ type: "user_audio", audio_b64: audioB64, mime, stt: true, tts: true });
     if (!ok) return;
     busyAt.current = true;
     setBusy(true);
     setStatus("waiting");
     armWatchdog();
   }, []);
+
+  /**
+   * One-shot text-to-speech over the socket (replaces the old /voice/speak REST call).
+   * Backend synthesises Kokoro audio and returns a `tts_audio` frame we play. Used by the
+   * "Listen"/"Read aloud" buttons and the quiz auto-read. ALL TTS goes through the WS now.
+   */
+  const speak = useCallback((text: string) => {
+    const t = (text || "").trim();
+    if (!t) return;
+    _send({ type: "speak", text: t, id: String(Date.now()) });
+  }, []);
+
+  /**
+   * "Student is active" heartbeat (no AI turn) — sent on each quiz answer so a student
+   * working through a quiz is never flagged idle by the server's inactivity watchdog.
+   */
+  const sendActivity = useCallback(() => { _send({ type: "activity" }); }, []);
 
   /** Cancel the in-flight turn server-side without closing the socket. */
   const stopTurn = useCallback(() => { _send({ type: "stop" }); }, []);
@@ -576,6 +619,7 @@ export function useSessionChannel(opts: SessionChannelOpts) {
     connected, status, messages, liveText, thinkingSteps, liveParts, busy, error,
     connect, disconnect, pause, resume,
     sendMessage, sendQuizResult, sendPuzzleResult, sendAudio, sendEvent, stopTurn,
+    speak, sendActivity,
     hydrate, setMessages, clearError,
   };
 }

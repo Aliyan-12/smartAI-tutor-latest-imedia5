@@ -464,6 +464,15 @@ async def generate_session_report(
     from app.services.llm_service import get_llm
     from langchain_core.messages import SystemMessage, HumanMessage
 
+    # IMMUTABLE: once an authentic report exists for this appointment it is FINAL — never
+    # regenerate or overwrite it (re-entry from the tool, the time-up fallback, or a report
+    # re-fetch all return the same saved report).
+    if lesson_plan is not None and getattr(lesson_plan, "session_summary", None):
+        try:
+            return json.loads(lesson_plan.session_summary)
+        except Exception:
+            pass  # malformed JSON only → allow a single regeneration below
+
     subject = appointment.subject
     key_stage = appointment.key_stage
     duration = appointment.duration_minutes
@@ -651,6 +660,62 @@ Output raw JSON only (no markdown fences):
         logger.info(f"Saved session report to lesson_plan_id={lesson_plan.id}")
 
     return report
+
+
+async def ensure_report_for_appointment(
+    db: AsyncSession,
+    appointment_id: int,
+) -> Optional[Dict[str, Any]]:
+    """Guarantee an authentic session report exists for this appointment, generating it
+    from the REAL session (conversation messages + this session's quiz assessments) if the
+    AI never called the report tool. Idempotent + immutable: if a report is already saved,
+    it's returned unchanged. Used by the time-up fallback so the student ALWAYS gets a real
+    report (never a missing/placeholder one) the moment the lesson ends."""
+    from app.models.appointment import Appointment
+    from app.models.assessment import Assessment
+    from app.models.chat import Chat, Message
+    from app.models.user import User
+
+    appt = (await db.execute(
+        select(Appointment).where(Appointment.id == appointment_id)
+    )).scalar_one_or_none()
+    if not appt:
+        return None
+
+    lesson_plan = (await db.execute(
+        select(LessonPlan).where(LessonPlan.appointment_id == appointment_id)
+    )).scalar_one_or_none()
+
+    # Already have an authentic report → return it (immutable, no regeneration).
+    if lesson_plan is not None and getattr(lesson_plan, "session_summary", None):
+        try:
+            return json.loads(lesson_plan.session_summary)
+        except Exception:
+            pass
+
+    chat = (await db.execute(
+        select(Chat).where(Chat.appointment_id == appointment_id)
+    )).scalar_one_or_none()
+    messages: List[Any] = []
+    if chat:
+        messages = list((await db.execute(
+            select(Message).where(Message.chat_id == chat.id)
+            .order_by(Message.timestamp).limit(100)
+        )).scalars().all())
+
+    assessments = list((await db.execute(
+        select(Assessment).where(Assessment.appointment_id == appointment_id)
+        .order_by(Assessment.created_at.desc()).limit(20)
+    )).scalars().all())
+
+    student = (await db.execute(
+        select(User).where(User.id == appt.student_id)
+    )).scalar_one_or_none()
+
+    return await generate_session_report(
+        db=db, appointment=appt, lesson_plan=lesson_plan, assessments=assessments,
+        student_name=student.name if student else "Student", messages=messages,
+    )
 
 
 async def get_appointment_report(

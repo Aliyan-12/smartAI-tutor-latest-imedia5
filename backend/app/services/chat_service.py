@@ -411,6 +411,19 @@ async def run_chat_ws(websocket: WebSocket) -> None:
             elif mtype == "stop":
                 if current_turn and not current_turn.done():
                     current_turn.cancel()
+            elif mtype == "speak":
+                # One-shot TTS over the socket ("Read aloud" in chat). All TTS goes through
+                # the WS now — /voice/speak is gone. Own task so it never blocks a turn.
+                _sp_text = data.get("text") or ""
+                _sp_id = data.get("id") or ""
+
+                async def _speak_task(_t=_sp_text, _i=_sp_id):
+                    try:
+                        from app.services.voice_agent_service import synth_speak_frame
+                        await send(await synth_speak_frame(_t, _i))
+                    except Exception:  # noqa: BLE001
+                        pass
+                asyncio.create_task(_speak_task())
             elif mtype in _handlers:
                 if current_turn and not current_turn.done():
                     continue

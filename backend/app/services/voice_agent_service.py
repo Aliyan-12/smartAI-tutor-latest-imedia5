@@ -116,6 +116,27 @@ def text_to_speech(text: str, lang: str = "en") -> tuple[bytes, str]:
     return buf.getvalue(), "audio/wav"
 
 
+async def synth_speak_frame(text: str, req_id: str = "") -> dict:
+    """One-shot TTS for a WS `speak` request → a `{type:"tts_audio"}` frame with the clip
+    base64-encoded. ALL text-to-speech now goes through the WebSocket channel (the
+    /api/voice/speak REST endpoint is gone); the client plays this frame directly. Never
+    raises — on failure returns a null-audio frame so the caller's UI just stays silent."""
+    import asyncio as _asyncio
+    import base64 as _base64
+    clean = (text or "").strip()
+    if not clean:
+        return {"type": "tts_audio", "id": req_id, "audio_b64": None}
+    try:
+        wav, mime = await _asyncio.to_thread(text_to_speech, clean)
+        return {
+            "type": "tts_audio", "id": req_id,
+            "audio_b64": _base64.b64encode(wav).decode("ascii"), "mime": mime,
+        }
+    except Exception as e:  # noqa: BLE001
+        logger.warning("WS speak TTS failed: %s", e)
+        return {"type": "tts_audio", "id": req_id, "audio_b64": None, "error": "tts_failed"}
+
+
 def speech_to_text(audio_bytes: bytes, filename: str = "audio.webm") -> Optional[str]:
     try:
         client = _get_client()

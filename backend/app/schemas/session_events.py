@@ -88,6 +88,21 @@ class StopEvent(_Base):
     type: Literal["stop"]
 
 
+class SpeakEvent(_Base):
+    """One-shot TTS request over the socket (replaces the old /voice/speak REST call).
+    All TTS now flows through the WS channel."""
+    type: Literal["speak"]
+    text: str = ""
+    id: str = ""
+
+
+class ActivityEvent(_Base):
+    """A lightweight 'student is active' heartbeat (e.g. answering each quiz question) —
+    resets the idle clock WITHOUT running an AI turn, so a student working through a quiz
+    is never treated as idle."""
+    type: Literal["activity"]
+
+
 class UnknownEvent(_Base):
     """Anything we don't recognise — caller logs + ignores it (never crashes)."""
     type: str = "unknown"
@@ -97,7 +112,7 @@ InboundEvent = Annotated[
     Union[
         UserMessageEvent, UserAudioEvent, PuzzleResultEvent, QuizResultEvent,
         LessonPauseEvent, LessonResumeEvent, LessonEndRequestEvent, StudentIdleEvent,
-        PingEvent, StopEvent,
+        PingEvent, StopEvent, SpeakEvent, ActivityEvent,
     ],
     Field(discriminator="type"),
 ]
