@@ -11,7 +11,6 @@ import type { PuzzlePayload } from "../components/puzzles/types";
 import { sessionBus, type SessionBusEvent } from "../lib/sessionBus";
 import AssessmentMode from "../components/AssessmentMode";
 import PostSessionScreen from "../components/PostSessionScreen";
-import { useVoice } from "../hooks/useVoice";
 import { useSessionChannel } from "../hooks/useSessionChannel";
 import { useVoiceCapture } from "../hooks/useVoiceCapture";
 import { useAuth } from "../context/AuthContext";
@@ -192,7 +191,6 @@ export default function SessionPage() {
 
   const hasAutoStartedRef = useRef(false);
 
-  const { speakText } = useVoice();
   // Custom voice-to-voice loop (mic → STT → same turn pipeline → Kokoro TTS).
   const [voiceActive, setVoiceActive] = useState(false);
 
@@ -486,31 +484,32 @@ export default function SessionPage() {
     return () => { if (timerRef.current) clearInterval(timerRef.current); };
   }, [sessionState, sessionStartedAt, durationMinutes, isPaused, totalPausedMs, apptId]);
 
-  // Auto-read test question via TTS (both chat and voice mode)
+  // Auto-read test question via TTS over the WebSocket (no /voice/speak REST call)
   useEffect(() => {
     if (!testAssessment) return;
     const q = testAssessment.questions[testCurrentQ];
     if (!q) return;
+    channel.sendActivity(); // viewing a quiz question counts as active (idle clock reset)
     const opts = q.options.map((o, i) => `${["A", "B", "C", "D"][i]}: ${o}.`).join(" ");
     if (!ttsEnabledRef.current) return;
-    speakText(`Question ${testCurrentQ + 1}: ${q.question_text}. Options are: ${opts}`);
+    channel.speak(`Question ${testCurrentQ + 1}: ${q.question_text}. Options are: ${opts}`);
   }, [testCurrentQ, testAssessment?.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Auto-read feedback via TTS (both chat and voice mode)
+  // Auto-read feedback via TTS over the WebSocket
   useEffect(() => {
     if (!testFeedback) return;
     const result = testFeedback.isCorrect ? "Correct!" : "Not quite.";
     const explanation = testFeedback.explanation ? ` ${testFeedback.explanation}` : "";
     const fullText = `${result}${explanation}`;
     if (!ttsEnabledRef.current) return;
-    speakText(fullText);
+    channel.speak(fullText);
   }, [testFeedback]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Auto-read final test score via TTS (both chat and voice mode)
+  // Auto-read final test score via TTS over the WebSocket
   useEffect(() => {
     if (!testResult || !ttsEnabledRef.current) return;
     const weakMsg = testResult.weak.length > 0 ? `Areas to review: ${testResult.weak.join(", ")}.` : "Great job on all topics!";
-    speakText(`Quiz complete! You scored ${Math.round(testResult.score)} percent. ${weakMsg}`);
+    channel.speak(`Quiz complete! You scored ${Math.round(testResult.score)} percent. ${weakMsg}`);
   }, [testResult]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Listen for tool_result events dispatched by useChat
@@ -670,6 +669,9 @@ export default function SessionPage() {
   const handleTestAnswer = async (answerIndex: number) => {
     if (!testAssessment || testAnswering) return;
     setTestAnswering(true);
+    // Each quiz answer is a "student active" heartbeat → the server resets its idle clock,
+    // so working through a quiz is never mistaken for inactivity (no "still there?" nudge).
+    channel.sendActivity();
     try {
       const q = testAssessment.questions[testCurrentQ];
       const updated = await assessmentsApi.submitAnswer(testAssessment.id, {
@@ -1448,7 +1450,7 @@ export default function SessionPage() {
               messages={displayMessages}
               streaming={false}
               streamContent=""
-              onSpeak={speakText}
+              onSpeak={channel.speak}
               liveText={liveText}
               liveStatus={liveStatus}
               thinkingSteps={thinkingSteps}

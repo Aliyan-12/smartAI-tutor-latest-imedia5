@@ -1,11 +1,11 @@
 """
 Voice audio service — Kokoro TTS + Gemini STT.
 
-Low-level audio helpers shared by the chat/session WebSocket pipelines and the
-`/api/voice/speak` endpoint. The real-time Gemini Live path (system-prompt
-assembly, live config, history seeding, tool-call handling, per-turn RAG
-injection) has been removed — voice now runs through the unified turn pipeline
-(STT in → turn → segment-bundled Kokoro TTS out).
+Low-level audio helpers used exclusively by the chat/session WebSocket pipelines.
+ALL voice now flows through the WS channel: STT in (`user_audio`), turn-segment
+Kokoro TTS out, and one-shot TTS out (`speak` → `tts_audio`, see synth_speak_frame).
+The old `/api/voice/speak` REST endpoint and the real-time Gemini Live path have both
+been removed.
 """
 import io as _io
 import logging
