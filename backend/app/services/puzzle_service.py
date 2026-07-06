@@ -110,6 +110,45 @@ def build_graph(question: str, answer: str, image_url: str) -> Dict[str, Any]:
     }
 
 
+def _clampi(v: Any, lo: int, hi: int, default: int) -> int:
+    try:
+        n = int(v)
+    except (TypeError, ValueError):
+        n = default
+    return max(lo, min(hi, n))
+
+
+def diagram_math_spec(concept: str, params: Optional[dict]) -> tuple:
+    """For a DETERMINISTIC maths diagram (fraction | clock): validate/clamp the params,
+    then compute the EXACT answer server-side (so the AI's/evaluator's answer can never be
+    wrong or disagree with the picture) and give a default question. Returns
+    (clean_params, answer, default_question); answer='' if the concept is unknown."""
+    concept = (concept or "").strip().lower()
+    p = params or {}
+    if concept == "fraction":
+        total = _clampi(p.get("total", p.get("denominator", p.get("parts"))), 2, 12, 4)
+        shaded = _clampi(p.get("shaded", p.get("numerator", p.get("filled"))), 0, total, 1)
+        return ({"total": total, "shaded": shaded}, f"{shaded}/{total}",
+                "What fraction of the shape is shaded? Write it like 1/4.")
+    if concept == "clock":
+        hour = _clampi(p.get("hour", p.get("hours")), 1, 12, 3)
+        minute = _clampi(p.get("minute", p.get("minutes")), 0, 59, 0)
+        if minute == 0:
+            ans = f"{hour} o'clock"
+        elif minute == 30:
+            ans = f"half past {hour}"
+        else:
+            ans = f"{hour}:{minute:02d}"
+        return ({"hour": hour, "minute": minute}, ans, "What time does the clock show?")
+    if concept == "ruler":
+        length = _clampi(p.get("length_cm", p.get("length", p.get("cm"))), 1, 30, 8)
+        start = _clampi(p.get("start", 0), 0, 29, 0)
+        obj = str(p.get("object", p.get("name", "object")) or "object").strip() or "object"
+        return ({"length_cm": length, "start": start, "object": obj}, f"{length} cm",
+                f"How long is the {obj}? Give your answer in centimetres (cm).")
+    return ({}, "", "")
+
+
 def _client_payload(full: Dict[str, Any]) -> Dict[str, Any]:
     """Strip the server-only solution before the payload goes to the model / frontend."""
     out = {k: v for k, v in full.items() if k != "solution"}

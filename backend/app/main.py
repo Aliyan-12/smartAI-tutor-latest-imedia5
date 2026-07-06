@@ -9,7 +9,7 @@ from starlette.middleware.sessions import SessionMiddleware
 
 from app.core.config import settings
 from app.middleware.rate_limit import RateLimitMiddleware
-from app.routers import auth, chat, voice, health, admin, teacher, subscription, documents
+from app.routers import auth, chat, health, admin, teacher, subscription, documents
 from app.routers import parent, appointments, assessments, gamification, lessons, assignments
 from app.routers import settings as settings_router
 from app.routers import sessions, curriculum, school, puzzles
@@ -116,7 +116,6 @@ async def unhandled_exception_handler(request: Request, exc: Exception):
 app.include_router(health.router)
 app.include_router(auth.router)
 app.include_router(chat.router)
-app.include_router(voice.router)
 app.include_router(admin.router)
 app.include_router(teacher.router)
 app.include_router(subscription.router)

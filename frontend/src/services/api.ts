@@ -229,18 +229,6 @@ export function chatWsUrl(sessionId: string | null): string {
   return url;
 }
 
-export const voiceApi = {
-  async speak(text: string): Promise<Blob> {
-    const res = await fetch(`${API_BASE}/voice/speak`, {
-      method: "POST",
-      headers: authHeaders(),
-      body: JSON.stringify({ text }),
-    });
-    if (!res.ok) throw new Error("TTS request failed");
-    return res.blob();
-  },
-};
-
 export const adminApi = {
   async getDashboard() {
     const res = await fetch(`${API_BASE}/admin/dashboard`, { headers: authHeaders() });

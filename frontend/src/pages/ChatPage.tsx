@@ -6,7 +6,6 @@ import ChatWindow from "../components/ChatWindow";
 import ChatInput from "../components/ChatInput";
 import { useSessionChannel } from "../hooks/useSessionChannel";
 import { useVoiceCapture } from "../hooks/useVoiceCapture";
-import { useVoice } from "../hooks/useVoice";
 import { chatApi, appointmentsApi, chatWsUrl } from "../services/api";
 import type { ChatMessage, ChatListItem, Chat, Appointment } from "../types";
 
@@ -45,8 +44,6 @@ export default function ChatPage() {
   const [voiceActive, setVoiceActive] = useState(false);
   const [webSearchEnabled, setWebSearchEnabled] = useState(false);
   const [researchEnabled, setResearchEnabled] = useState(false);
-
-  const { speakText } = useVoice();
 
   const loadChats = useCallback(async () => {
     try { setChatList((await chatApi.listChats()) as ChatListItem[]); } catch { /* ignore */ }
@@ -364,7 +361,7 @@ export default function ChatPage() {
             messages={messages}
             streaming={false}
             streamContent=""
-            onSpeak={speakText}
+            onSpeak={channel.speak}
             liveText={liveText}
             liveStatus={liveStatus}
             thinkingSteps={thinkingSteps}

@@ -1061,24 +1061,24 @@ QUIZ RULES — FOLLOW EXACTLY:
 GENERATIVE PUZZLES — TEACH + PRACTISE WITH VISUALS, NOT WALLS OF TEXT (CRITICAL):
 You have tools that GENERATE real images/graphs/maths LIVE. For Science / Physics / Chemistry / Biology / Maths you must TEACH and QUIZ visually — plain-text questioning is the rare last resort, not the default. A "LESSON STATE" block tells you what's on screen each turn; trust it over the chat.
 
-RHYTHM — SAY → DO → SAY (do this every time you use a puzzle/evaluator tool):
-- FIRST stream ONE short, natural sentence saying what you're about to do — e.g. "Okay, let me set up a quick puzzle for you." or "Let me draw you a diagram of this." This is normal reply text; it shows immediately.
-- THEN call the tool (the call itself is silent — never write the function name or raw params as text; the image/graph just appears).
-- THEN, once it's on screen, continue in text — invite them to have a go ("Right — see if you can name each picture."), or teach from the diagram.
-- When a [PUZZLE RESULT] comes in: say a short line first ("Let me check that."), THEN call the matching evaluator, THEN give the verdict in text. Don't dump everything before the tool and go silent after — keep the say → do → say rhythm.
+HOW A TOOL TURN WORKS (write your reply ONCE, AFTER the tool — never before AND after):
+- Decide, then ACT: call the tool you need straight away (the call is silent — never write the function name or raw params as text; the image/graph just appears). The student sees a small "thinking" note while you work.
+- Then, AFTER the tool has run, write your reply ONE time as a single clean message — invite them to have a go ("Right — see if you can name each picture."), or teach from the diagram. Do NOT write your answer, call the tool, and then repeat the same thing: say it once, after the tool.
+- When a [PUZZLE RESULT] comes in: call the matching evaluator FIRST, then give the verdict using ITS result. Never pre-judge before the evaluator, and never say the same feedback twice.
 
 WHEN NOTHING NEEDS SOLVING (intro + teaching):
 - If there are teaching slides, teach from them. If there are NO slides — or the slides don't fit — call explanatory_puzzle to GENERATE a clear diagram that explains the concept (e.g. "a labelled diagram comparing a plant and animal cell", "forces on a falling parachute", "the water cycle"), and teach from THAT. This is your MOST-USED tool: reach for it whenever a picture would help — new students, anyone who looks stuck, and any hard Science/Maths idea. Show 5–6 across a session. It's display-only; just keep teaching from it.
 - DURING teaching, do NOT pepper the student with check-questions. Explain the idea with the visual, keep it flowing. Save questions for practice/quiz.
 
 WHEN IT'S TIME TO PRACTISE / QUIZ (ask in PUZZLE form, never plain text):
-- Say your short lead-in (see RHYTHM above), pick the generator that fits the concept and call it (silently — no call syntax as text), then invite the student to have a go and WAIT (their answer returns as a [PUZZLE RESULT]):
+- Pick the generator that fits the concept and call it (silently — no call syntax as text), then invite the student to have a go and WAIT (their answer returns as a [PUZZLE RESULT]):
   • labelling_puzzle — 3–4 generated pictures, student names each in turn (recognition/vocabulary: organs, shapes, apparatus…).
   • matching_puzzle — several pictures + jumbled names, student matches them.
-  • math_puzzle — a maths problem shown as LaTeX (equations/arithmetic) or as an image (visual concepts like fractions). Never ask maths as plain chat text.
+  • math_puzzle — a maths problem shown as LaTeX (equations, arithmetic, algebra). Never ask maths as plain chat text.
+  • diagram_math_puzzle — a DETERMINISTIC drawn diagram whose answer the SERVER computes, so it is ALWAYS right. USE THIS (never a generated image) for anything where the EXACT picture decides the answer: fractions (concept "fraction", with a total and a shaded count), telling the time (concept "clock", with an hour and a minute), and reading a length off a ruler (concept "ruler", with a length in cm and the object's name). A generated photo cannot render exact counts, hand positions or ruler scales, so its answer would be wrong — that is why the ruler and fraction answers got marked wrong before. You do NOT supply the answer for these — the server derives it from the numbers you give.
   • graph_puzzle — a real matplotlib graph + a question (coordinates, straight lines, quadratics, trig — mostly KS4/KS5).
 - You supply the pedagogy (the labels + image prompts, the correct answer, the graph spec); the tool draws it and keeps the answer private.
-- MARKING: when the [PUZZLE RESULT] arrives, first say briefly you'll check it, then call the MATCHING evaluator — labelling_evaluator / matching_evaluator / math_evaluator / graph_evaluator — and use ITS verdict to give warm feedback (praise what's right; a gentle hint for anything wrong, without revealing the answer). Never guess the mark yourself.
+- MARKING: when the [PUZZLE RESULT] arrives, call the MATCHING evaluator — labelling_evaluator / matching_evaluator / math_evaluator / graph_evaluator — and then, in ONE message, use ITS verdict to give warm feedback (praise what's right; a gentle hint for anything wrong, without revealing the answer). Never guess the mark yourself, and never state the verdict before you've called the evaluator.
 - AGE-APPROPRIATE: scale difficulty to the key stage + year group. ONE focused puzzle per concept, then move on — don't spam.
 - If a generator returns an 'error', do NOT tell the student to look at anything — briefly try once more or ask the question another way.
 - Never write a tool call as text or read out raw params; the visual just appears on screen.
@@ -1826,7 +1826,7 @@ async def _run_turn(send, chat_id, user_id, *, saved_user_text, ai_content,
                     db, appt_id, user_id, history_len=max(0, len(history) - 1)
                 )
             except Exception:
-                logger.warning("Session prompt build failed for appt %s", appt_id)
+                logger.warning("Session prompt build failed for appt %s", appt_id, exc_info=True)
             try:
                 from app.services.appointment_service import get_appointment
                 from app.tools.session_tools import ToolContext
@@ -1966,11 +1966,13 @@ async def _run_turn(send, chat_id, user_id, *, saved_user_text, ai_content,
         _seen_norm: set = set()  # normalised sentences already streamed THIS turn
 
         def _dup(sentence: str) -> bool:
-            # The lead-in now streams as text (before a tool), and Gemini sometimes
-            # RE-STATES it after the tool → drop an exact repeat so it isn't shown twice.
+            # The lead-in streams as text (before a tool), and Gemini sometimes RE-STATES
+            # it (or its verdict) after the tool → drop a repeat so it isn't shown twice.
+            # Threshold kept low so short-but-meaningful repeats ("You got it!", "Correct.")
+            # are also caught, while true fillers ("OK", "Yes") slip through.
             norm = " ".join((sentence or "").split()).lower().strip(" .!?,:;")
-            if len(norm) < 12:
-                return False  # keep short interjections ("OK.", "Well done!")
+            if len(norm) < 6:
+                return False
             if norm in _seen_norm:
                 return True
             _seen_norm.add(norm)
@@ -2012,9 +2014,18 @@ async def _run_turn(send, chat_id, user_id, *, saved_user_text, ai_content,
                     _label = _THINKING_LABELS.get(_tool)
                     if _label:
                         await _emit_thinking(send, thinking_steps, _label)
-                    # end_lesson succeeded → persist the event + tell the client to open the report.
+                    # end_lesson succeeded → GUARANTEE a real report exists (server-side,
+                    # from the actual session), then tell the client to open it. Immutable:
+                    # if the AI already called generate_session_report, this returns it.
                     if _tool == "end_lesson" and _data.get("ended"):
                         from app.schemas.session_events import lesson_ended_frame, EVENT_LESSON_ENDED
+                        if appt_id:
+                            try:
+                                from app.services import lesson_service as _ls
+                                await _ls.ensure_report_for_appointment(db, appt_id)
+                                await db.commit()
+                            except Exception as _rep_err:  # noqa: BLE001
+                                logger.warning("ensure_report on end_lesson failed appt=%s: %s", appt_id, _rep_err)
                         await _emit_event(send, chat_id, EVENT_LESSON_ENDED, "🏁 Lesson ended — opening your report.")
                         await send(lesson_ended_frame(appointment_id=appt_id))
                 except Exception as _tr_err:
@@ -2130,9 +2141,12 @@ async def _emit_event(send, chat_id, kind: str, text: str) -> None:
 
 
 async def _force_end_and_report(send, chat_id) -> None:
-    """Ensure the lesson is terminated + the report card generated, even if the AI
-    didn't call end_lesson. Idempotent — no-op if already ended."""
-    from app.services import appointment_service
+    """Ensure the lesson is terminated AND an authentic report card exists, even if the AI
+    never called end_lesson/generate_session_report. The report is built server-side from
+    the real session (conversation + this session's quiz score) and is immutable once
+    saved — so on time-up the student always gets a real report, never a dummy/missing one.
+    Idempotent."""
+    from app.services import appointment_service, lesson_service
     from app.schemas.session_events import lesson_ended_frame, EVENT_LESSON_ENDED
     try:
         async with async_session_factory() as db:
@@ -2140,10 +2154,18 @@ async def _force_end_and_report(send, chat_id) -> None:
             if not appt_id:
                 return
             appt = await appointment_service.get_appointment(db, appt_id)
+            did_terminate = False
             if appt and appt.status in ("started", "paused"):
                 await appointment_service.update_status(db, appt, "terminated")
-                await db.commit()
-                logger.info("force-end → terminated appt=%s", appt_id)
+                did_terminate = True
+            # GUARANTEE a real report before the client opens it (idempotent + immutable).
+            try:
+                await lesson_service.ensure_report_for_appointment(db, appt_id)
+            except Exception as e:  # noqa: BLE001
+                logger.warning("ensure_report failed appt=%s: %s", appt_id, e)
+            await db.commit()
+            if did_terminate:
+                logger.info("force-end → terminated appt=%s (+report ensured)", appt_id)
                 await _emit_event(send, chat_id, EVENT_LESSON_ENDED, "🏁 Lesson ended — opening your report.")
                 await send(lesson_ended_frame(appointment_id=appt_id))
     except Exception as e:  # noqa: BLE001
@@ -2591,6 +2613,25 @@ async def run_session_ws(websocket: WebSocket) -> None:
                 pending_event = None
                 if current_turn and not current_turn.done():
                     current_turn.cancel()
+            elif mtype == "speak":
+                # One-shot TTS over the socket (quiz read-aloud, "Listen" buttons). All TTS
+                # now flows through the WS — no /voice/speak REST call. Runs off the turn
+                # path (its own task) so synthesis never blocks the receive loop or a turn.
+                _sp_text = data.get("text") or ""
+                _sp_id = data.get("id") or ""
+
+                async def _speak_task(_t=_sp_text, _i=_sp_id):
+                    try:
+                        from app.services.voice_agent_service import synth_speak_frame
+                        await send(await synth_speak_frame(_t, _i))
+                    except Exception:  # noqa: BLE001
+                        pass
+                asyncio.create_task(_speak_task())
+            elif mtype == "activity":
+                # Student is actively interacting (answering each quiz question) → reset the
+                # idle clock so a quiz-in-progress is never flagged idle. No AI turn.
+                last_activity = time.monotonic()
+                idle_stage = 0
             elif mtype in _AI_HANDLERS or mtype in _SIDE_HANDLERS:
                 _dispatch(mtype, data)
             else:

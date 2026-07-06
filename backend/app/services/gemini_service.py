@@ -508,24 +508,26 @@ async def stream_response_async(
             if round_text:
                 yield round_text
                 emitted_text = True
-            elif not emitted_text and preamble_text:
-                # Model went silent after a tool — surface the earlier text so the
-                # student never gets an empty bubble.
+            elif preamble_text:
+                # Post-tool round was silent → surface the BUFFERED pre-tool substance
+                # (the model said everything before the call). We only streamed its first
+                # sentence as the lead-in, so yield the full preamble here; the router's
+                # sentence dedup drops that already-shown lead-in and shows the rest — the
+                # student never gets a lead-in with no answer, and nothing is doubled.
                 yield preamble_text
                 emitted_text = True
             if _round > 0:
                 logger.info(f"Tool loop completed after {_round + 1} round(s)")
             break
 
-        # This round called tools. STREAM its lead-in text as the visible reply NOW,
-        # before running the tools, so the turn reads: "Okay, I'll make you a puzzle" →
-        # [tool] → "Here it is, take a look". If the model re-states this line after the
-        # tool, the router's dedup guard drops the exact repeat (that restatement was the
-        # original reason this text used to be buffered).
+        # This round called tools. Buffer its text as a fallback ONLY — do NOT stream it.
+        # The model writes its full answer BEFORE calling the tool and then RE-writes it in
+        # the next round, so streaming the pre-tool text duplicated the whole reply. Instead
+        # the "thinking" strip shows what the tutor is doing while the tool runs, then we
+        # stream the FINAL post-tool round as one clean response. If the model falls silent
+        # after the tool, this buffer is surfaced (deduped) by the branch above.
         if round_text.strip():
             preamble_text = round_text
-            yield round_text
-            emitted_text = True
 
         tool_map = {t.name: t for t in tools}
         tool_messages = []

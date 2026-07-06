@@ -1,11 +1,11 @@
 """
 Voice audio service — Kokoro TTS + Gemini STT.
 
-Low-level audio helpers shared by the chat/session WebSocket pipelines and the
-`/api/voice/speak` endpoint. The real-time Gemini Live path (system-prompt
-assembly, live config, history seeding, tool-call handling, per-turn RAG
-injection) has been removed — voice now runs through the unified turn pipeline
-(STT in → turn → segment-bundled Kokoro TTS out).
+Low-level audio helpers used exclusively by the chat/session WebSocket pipelines.
+ALL voice now flows through the WS channel: STT in (`user_audio`), turn-segment
+Kokoro TTS out, and one-shot TTS out (`speak` → `tts_audio`, see synth_speak_frame).
+The old `/api/voice/speak` REST endpoint and the real-time Gemini Live path have both
+been removed.
 """
 import io as _io
 import logging
@@ -114,6 +114,27 @@ def text_to_speech(text: str, lang: str = "en") -> tuple[bytes, str]:
     buf = _io.BytesIO()
     sf.write(buf, np.concatenate(chunks).astype(np.float32), samplerate=24000, format="WAV")
     return buf.getvalue(), "audio/wav"
+
+
+async def synth_speak_frame(text: str, req_id: str = "") -> dict:
+    """One-shot TTS for a WS `speak` request → a `{type:"tts_audio"}` frame with the clip
+    base64-encoded. ALL text-to-speech now goes through the WebSocket channel (the
+    /api/voice/speak REST endpoint is gone); the client plays this frame directly. Never
+    raises — on failure returns a null-audio frame so the caller's UI just stays silent."""
+    import asyncio as _asyncio
+    import base64 as _base64
+    clean = (text or "").strip()
+    if not clean:
+        return {"type": "tts_audio", "id": req_id, "audio_b64": None}
+    try:
+        wav, mime = await _asyncio.to_thread(text_to_speech, clean)
+        return {
+            "type": "tts_audio", "id": req_id,
+            "audio_b64": _base64.b64encode(wav).decode("ascii"), "mime": mime,
+        }
+    except Exception as e:  # noqa: BLE001
+        logger.warning("WS speak TTS failed: %s", e)
+        return {"type": "tts_audio", "id": req_id, "audio_b64": None, "error": "tts_failed"}
 
 
 def speech_to_text(audio_bytes: bytes, filename: str = "audio.webm") -> Optional[str]:

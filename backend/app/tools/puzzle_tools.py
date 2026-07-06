@@ -121,19 +121,51 @@ def puzzle_tool_groups(ctx: ToolContext) -> dict:
     async def math_puzzle(question: str, answer: str, mode: str = "latex",
                           latex: str = "", image_prompt: str = "") -> dict:
         """
-        Practice: pose a MATHS problem visually (never as plain chat text). Pick mode by
-        topic: mode="latex" for equations/arithmetic/algebra (give the problem in `latex`,
-        e.g. "\\frac{3}{4}+\\frac{1}{4}=\\;?"), or mode="image" for a concept that a picture
-        makes clearer (give `image_prompt`, e.g. "a pizza cut into 4 equal slices with 3
-        shaded"). `question` is the short instruction shown to the student; `answer` is the
-        correct answer (kept private, used to mark). After showing it, WAIT — on submit call
-        math_evaluator. Not for graphs (use graph_puzzle). Call SILENTLY.
+        Practice: pose a MATHS problem visually (never as plain chat text). Best for
+        equations/arithmetic/algebra: mode="latex", give the problem in `latex`
+        (e.g. "\\frac{3}{4}+\\frac{1}{4}=\\;?"). mode="image" (give `image_prompt`) is ONLY
+        for a loose real-world illustration where the exact picture doesn't decide the
+        answer — do NOT use it for "what fraction is shaded" or clocks (the image won't
+        match your answer; use diagram_math_puzzle for those). `question` is the short
+        instruction; `answer` is the correct answer (kept private, used to mark). After
+        showing it, WAIT — on submit call math_evaluator. Not for graphs (use graph_puzzle).
+        Call SILENTLY.
         """
         image_url = ""
         if mode == "image" and image_prompt:
             image_url = await image_gen_service.generate_image(image_prompt) or ""
         return await _persist_and_return(
             puzzle_service.build_math(question, answer, mode=mode, latex=latex, image_url=image_url)
+        )
+
+    @tool
+    async def diagram_math_puzzle(concept: str, params: Union[dict, str] = "",
+                                  question: str = "") -> dict:
+        """
+        Practice: a DETERMINISTIC maths diagram where the answer must EXACTLY match the
+        picture — the server draws it precisely AND computes the answer, so it's ALWAYS
+        right (unlike a generated image, which can't render exact counts/positions).
+        USE THIS (not math_puzzle/image) for:
+          • concept="fraction", params {"total": 8, "shaded": 1}  → a circle with that many
+            equal parts, that many shaded; answer is derived (e.g. "1/8").
+          • concept="clock", params {"hour": 3, "minute": 0}      → an analogue clock;
+            answer derived (e.g. "3 o'clock", or "half past 3" for minute 30).
+          • concept="ruler", params {"length_cm": 8, "object": "pencil"} → an object drawn
+            against a cm ruler; answer derived (e.g. "8 cm"). Use for measuring length.
+        Do NOT pass your own answer — the server owns it. After showing it, invite a go and
+        WAIT; on submit call math_evaluator. Call SILENTLY.
+        """
+        p = _coerce_dict(params)
+        clean, answer, default_q = puzzle_service.diagram_math_spec(concept, p)
+        if not answer:
+            return {"action": "show_puzzle", "error": "bad_concept",
+                    "message": "Use concept 'fraction' or 'clock' for a diagram maths puzzle."}
+        url = await graph_service.generate_math_diagram(concept, clean)
+        if not url:
+            return {"action": "show_puzzle", "error": "render_failed",
+                    "message": "Couldn't draw that — ask the question another way."}
+        return await _persist_and_return(
+            puzzle_service.build_math(question or default_q, answer, mode="image", image_url=url)
         )
 
     @tool
@@ -214,8 +246,8 @@ def puzzle_tool_groups(ctx: ToolContext) -> dict:
 
     return {
         "puzzles": [
-            explanatory_puzzle, labelling_puzzle, matching_puzzle, math_puzzle, graph_puzzle,
-            clear_puzzle,
+            explanatory_puzzle, labelling_puzzle, matching_puzzle, math_puzzle,
+            diagram_math_puzzle, graph_puzzle, clear_puzzle,
             labelling_evaluator, matching_evaluator, math_evaluator, graph_evaluator,
         ],
     }
