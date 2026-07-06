@@ -1545,6 +1545,15 @@ def _puzzle_state_lines(pstate: Optional[dict]) -> str:
             f"Call {ptype}_evaluator NOW to mark it, then give warm feedback (praise if right; a "
             "gentle hint if not). Don't guess the mark yourself."
         )
+    if status == "evaluated":
+        v = pstate.get("verdict") or {}
+        score = v.get("score")
+        return (
+            f"Puzzle: the '{ptype}' puzzle has ALREADY been marked"
+            + (f" (score {score})" if score is not None else "")
+            + ". It is DONE — do NOT evaluate or mention checking it again. Move on: teach the "
+            "next thing, set a NEW puzzle, or call clear_puzzle."
+        )
     return f"Puzzle: a '{ptype}' puzzle is on screen ({prompt!r})."
 
 
@@ -2285,7 +2294,10 @@ async def _handle_user_audio(send, chat_id, user_id, data):
     ext = (mime.split("/")[-1] or "webm").split(";")[0]
     transcript = await asyncio.to_thread(speech_to_text, audio_bytes, f"audio.{ext}")
     if not transcript:
-        await send({"type": "error", "message": "Sorry, I couldn't hear that — please try again.", "recoverable": True})
+        # Empty or non-speech (silence / noise / the tutor's own TTS bleeding into the mic,
+        # which STT drops). SILENTLY end the turn — no error bubble, no AI reply — so a
+        # phantom capture just vanishes and the mic re-arms instead of the AI answering it.
+        logger.info("user_audio: dropped (no usable speech) chat=%s", chat_id)
         await send({"type": "turn_end", "message_id": None, "full_text": ""})
         return
     await send({"type": "user_transcript", "text": transcript})

@@ -312,17 +312,19 @@ export default function SessionPage() {
   // Stable ref so the session event-bus subscription doesn't re-bind each render.
   const sendEventRef = useRef(channel.sendEvent);
   sendEventRef.current = channel.sendEvent;
-  const { messages, liveText, thinkingSteps, liveParts, busy, status: liveStatus } = channel;
+  const { messages, liveText, thinkingSteps, liveParts, busy, status: liveStatus, audioActive } = channel;
   const messagesLenRef = useRef(0);
   messagesLenRef.current = messages.length;
   const clearQuizOffer = useCallback(() => setQuizOffer(null), []);
 
   // Hands-free voice loop: capture the student's utterance and send it over the
-  // SAME session WebSocket as `user_audio`. The mic is paused while a turn runs
-  // (AI thinking/speaking) so the tutor's own TTS is never recorded.
+  // SAME session WebSocket as `user_audio`. The mic is muted while a turn runs
+  // (busy) AND while the tutor is SPEAKING (audioActive, incl. a short tail) — the AI's
+  // spoken reply plays after the text turn ends, so muting on `busy` alone let the mic
+  // record the tutor's own voice and loop forever. Muting on both stops the self-talk.
   useVoiceCapture({
     active: voiceActive && !isPaused,
-    paused: busy,
+    paused: busy || audioActive,
     onUtterance: (b64, mime) => channel.sendAudio(b64, mime),
     onError: (msg) => { console.warn(msg); setVoiceActive(false); },
   });

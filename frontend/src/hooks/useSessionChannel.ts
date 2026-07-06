@@ -101,6 +101,27 @@ export function useSessionChannel(opts: SessionChannelOpts) {
   // One-shot TTS ("Listen"/quiz read-aloud) audio — a `tts_audio` reply to a `speak`
   // request. Separate from the turn's segment-audio pump so the two never fight.
   const oneShotAudioRef = useRef<HTMLAudioElement | null>(null);
+  // Whether the tutor is currently SPEAKING (any TTS clip playing) — stays true for a
+  // short tail after the last clip. The voice-capture mic is muted while this is true so
+  // it never records the tutor's own voice (which caused an endless self-talk loop).
+  const [audioActive, setAudioActive] = useState(false);
+  const audioPlayingCountRef = useRef(0);
+  const audioTailTimerRef = useRef<number | null>(null);
+  const markAudioStart = () => {
+    audioPlayingCountRef.current += 1;
+    if (audioTailTimerRef.current) { clearTimeout(audioTailTimerRef.current); audioTailTimerRef.current = null; }
+    setAudioActive(true);
+  };
+  const markAudioEnd = () => {
+    audioPlayingCountRef.current = Math.max(0, audioPlayingCountRef.current - 1);
+    if (audioPlayingCountRef.current > 0) return;
+    if (audioTailTimerRef.current) clearTimeout(audioTailTimerRef.current);
+    // Keep the mic muted a beat after the voice stops so the tail/echo isn't captured.
+    audioTailTimerRef.current = window.setTimeout(() => {
+      audioTailTimerRef.current = null;
+      if (audioPlayingCountRef.current === 0) setAudioActive(false);
+    }, 700);
+  };
   // The turn whose frames we currently accept — so late audio from a previous turn
   // (seq numbering restarts each turn) is dropped instead of bleeding into this one.
   const currentTurnIdRef = useRef<string | null>(null);
@@ -221,10 +242,15 @@ export function useSessionChannel(opts: SessionChannelOpts) {
       } catch { resolve(); return; }
       const audio = new Audio(url);
       audioRef.current = audio;
-      const done = () => { URL.revokeObjectURL(url); if (audioRef.current === audio) audioRef.current = null; resolve(); };
+      let ended = false;
+      const done = () => {
+        if (!ended) { ended = true; markAudioEnd(); }
+        URL.revokeObjectURL(url); if (audioRef.current === audio) audioRef.current = null; resolve();
+      };
       audio.onended = done;
       audio.onerror = done;
       audio.onpause = done; // resolves at once if muted-stop pauses it
+      markAudioStart();
       audio.play().catch(done);
     });
 
@@ -354,9 +380,14 @@ export function useSessionChannel(opts: SessionChannelOpts) {
           const url = URL.createObjectURL(new Blob([bytes], { type: d.mime || "audio/wav" }));
           const audio = new Audio(url);
           oneShotAudioRef.current = audio;
-          const done = () => { URL.revokeObjectURL(url); if (oneShotAudioRef.current === audio) oneShotAudioRef.current = null; };
+          let ended = false;
+          const done = () => {
+            if (!ended) { ended = true; markAudioEnd(); }
+            URL.revokeObjectURL(url); if (oneShotAudioRef.current === audio) oneShotAudioRef.current = null;
+          };
           audio.onended = done;
           audio.onerror = done;
+          markAudioStart();
           audio.play().catch(done);
         } catch { /* ignore playback errors */ }
         break;
@@ -617,6 +648,7 @@ export function useSessionChannel(opts: SessionChannelOpts) {
 
   return {
     connected, status, messages, liveText, thinkingSteps, liveParts, busy, error,
+    audioActive,
     connect, disconnect, pause, resume,
     sendMessage, sendQuizResult, sendPuzzleResult, sendAudio, sendEvent, stopTurn,
     speak, sendActivity,
