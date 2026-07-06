@@ -209,12 +209,24 @@ def puzzle_tool_groups(ctx: ToolContext) -> dict:
         if not ps:
             return {"action": "evaluate", "error": "no_puzzle",
                     "message": "There's no puzzle on screen to mark."}
-        if ps.get("status") != "submitted":
+        status = ps.get("status")
+        if status == "evaluated":
+            # Already graded once — never re-check a solved puzzle (this is what made the AI
+            # re-mark a puzzle from many messages ago). Move on instead.
+            return {"action": "evaluate", "error": "already_evaluated",
+                    "message": "You have already marked this puzzle — do NOT check it again. "
+                               "Move on: teach the next thing, set a NEW puzzle, or clear it."}
+        if status != "submitted":
             return {"action": "evaluate", "error": "no_submission",
                     "message": "The student hasn't submitted an answer yet — invite them to have a go, then wait."}
         verdict = await puzzle_service.evaluate(
             ps.get("puzzle_type"), ps.get("solution"), ps.get("last_answer"), ps.get("prompt", "")
         )
+        # Grade exactly once: flip to 'evaluated' so it can't be re-marked later.
+        try:
+            await puzzle_service.mark_puzzle_evaluated(ctx.db, ctx.appointment_id, verdict)
+        except Exception as e:  # noqa: BLE001
+            logger.warning("mark_puzzle_evaluated failed: %s", e)
         logger.info("PUZZLE evaluated type=%s score=%s correct=%s",
                     ps.get("puzzle_type"), verdict.get("score"), verdict.get("correct"))
         return {"action": "evaluate", "puzzle_type": ps.get("puzzle_type"), **verdict}

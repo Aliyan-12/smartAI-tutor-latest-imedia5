@@ -266,6 +266,27 @@ async def record_puzzle_attempt(db: AsyncSession, appointment_id: int, answer: A
     await db.flush()
 
 
+async def mark_puzzle_evaluated(db: AsyncSession, appointment_id: int,
+                                verdict: Optional[dict] = None) -> None:
+    """Flip the on-screen puzzle to 'evaluated' once it's been marked, so it is graded
+    EXACTLY ONCE. The lesson-state anchor then stops telling the AI to 'call the evaluator',
+    and a second evaluator call is refused — otherwise the AI re-checks an already-solved
+    puzzle turns later."""
+    plan = await _load_plan(db, appointment_id)
+    if plan is None:
+        return
+    state = dict(plan.session_state) if plan.session_state else {}
+    ps = dict(state.get("puzzle_state") or {})
+    if not ps:
+        return
+    ps["status"] = "evaluated"
+    if verdict is not None:
+        ps["verdict"] = {"score": verdict.get("score"), "correct": verdict.get("correct")}
+    state["puzzle_state"] = ps
+    plan.session_state = state
+    await db.flush()
+
+
 async def clear_puzzle_state(db: AsyncSession, appointment_id: int) -> None:
     plan = await _load_plan(db, appointment_id)
     if plan is None:

@@ -137,6 +137,47 @@ async def synth_speak_frame(text: str, req_id: str = "") -> dict:
         return {"type": "tts_audio", "id": req_id, "audio_b64": None, "error": "tts_failed"}
 
 
+_FILLER_RE = _re.compile(r"\b(h+m+|m+h+|hmm+|u+h+|u+m+|erm?|a+h+|ahem|huh|mhm+|mm+)\b", _re.IGNORECASE)
+
+
+def _is_non_speech_transcript(text: str) -> bool:
+    """True when a transcript is almost certainly NOT real speech — Gemini's audio model
+    hallucinates timecodes ("00:04", "00:00:00-00:02:44"), sound tags ("[throat clearing]")
+    and repeated tokens when it's fed silence, breathing or background noise (or the tutor's
+    own TTS bleeding into the mic). We drop these so the AI never answers a phantom turn.
+    A short bare number ("7", "42") is a VALID spoken answer and must pass through."""
+    s = (text or "").strip()
+    if not s:
+        return True
+    # Strip bracketed/parenthetical sound descriptions + standalone filler tokens first.
+    core = _re.sub(r"[\[(][^\])]*[\])]", " ", s)
+    core = _FILLER_RE.sub(" ", core).strip()
+    if not core:
+        return True
+    # Timecode: digits/separators AND (contains a colon OR is a long digit run). A short
+    # bare number like "7" has no colon and few digits, so it is NOT flagged here.
+    digits = _re.sub(r"\D", "", core)
+    if _re.fullmatch(r"[\d\s:.,\-–—]+", core) and (":" in core or len(digits) >= 5):
+        return True
+    letters = _re.sub(r"[^A-Za-zÀ-￿]", "", core)
+    has_digit = bool(_re.search(r"\d", core))
+    if not letters and not has_digit:
+        return True  # nothing but punctuation/symbols left
+    if not letters and has_digit:
+        return False  # a plain number answer ("7", "42") — valid
+    if len(letters) < 2:
+        return True  # a single stray letter with no number
+    # A single token dominating (noise heard as one word repeated, e.g. "la la la la") is a
+    # hallucination, not speech.
+    words = [w for w in _re.sub(r"[^\w\s]", " ", core).split() if w]
+    if len(words) >= 4:
+        from collections import Counter
+        top = Counter(w.lower() for w in words).most_common(1)[0][1]
+        if top / len(words) >= 0.6:
+            return True
+    return False
+
+
 def speech_to_text(audio_bytes: bytes, filename: str = "audio.webm") -> Optional[str]:
     try:
         client = _get_client()
@@ -151,23 +192,45 @@ def speech_to_text(audio_bytes: bytes, filename: str = "audio.webm") -> Optional
             tmp.write(audio_bytes)
             tmp_path = tmp.name
 
-        uploaded = client.files.upload(file=tmp_path, config={"mime_type": mime_type})
-        response = client.models.generate_content(
-            model=settings.gemini_model,
-            contents=[
-                types.Content(
-                    role="user",
-                    parts=[
-                        types.Part.from_uri(file_uri=uploaded.uri, mime_type=mime_type),
-                        types.Part(text="Transcribe this audio exactly as spoken. Return only the transcribed text, nothing else. If the audio is empty or unclear, return an empty string."),
-                    ],
-                )
-            ],
-        )
-        os.unlink(tmp_path)
+        try:
+            uploaded = client.files.upload(file=tmp_path, config={"mime_type": mime_type})
+            response = client.models.generate_content(
+                model=settings.gemini_model,
+                contents=[
+                    types.Content(
+                        role="user",
+                        parts=[
+                            types.Part.from_uri(file_uri=uploaded.uri, mime_type=mime_type),
+                            types.Part(text=(
+                                "Transcribe ONLY the actual words a person clearly speaks, as plain "
+                                "text. If there is no clear human speech — silence, background noise, "
+                                "breathing, coughing, throat-clearing, or music — return an EMPTY "
+                                "string. Never output timestamps or timecodes (like 00:00 or "
+                                "00:00:00-00:02:44), and never output bracketed descriptions of "
+                                "sounds (like [music] or [throat clearing]). Output the spoken words "
+                                "only, or nothing."
+                            )),
+                        ],
+                    )
+                ],
+            )
+        finally:
+            try:
+                os.unlink(tmp_path)
+            except OSError:
+                pass
 
-        transcribed = response.text.strip()
-        return transcribed or None
+        # response.text is None when the model returns no text (silent/unclear audio, or a
+        # safety-blocked / non-text response) — guard it so a quiet utterance degrades to
+        # "couldn't hear that" instead of crashing on None.strip().
+        transcribed = (getattr(response, "text", None) or "").strip()
+        if not transcribed:
+            logger.info("STT: empty transcript (bytes=%s, mime=%s)", len(audio_bytes or b""), mime_type)
+            return None
+        if _is_non_speech_transcript(transcribed):
+            logger.info("STT: dropped non-speech transcript %r (bytes=%s)", transcribed[:60], len(audio_bytes or b""))
+            return None
+        return transcribed
     except Exception as e:
         logger.error(f"Gemini STT error: {e}")
         return None
