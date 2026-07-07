@@ -2075,7 +2075,9 @@ async def _run_turn(send, chat_id, user_id, *, saved_user_text, ai_content,
                 await platform_service.check_and_deduct_credit(db, fresh_user)
                 await send({"type": "credits", "value": float(fresh_user.credits)})
                 try:
-                    await platform_service.award_xp(db, user_id, 5, "chat_message")
+                    # NOTE: no XP for simply sending a message during a lesson — XP is earned
+                    # by actually doing the work (puzzle answers → puzzle_tools._award_puzzle_xp,
+                    # quiz completion, finishing the session). Keep the daily streak ticking.
                     await platform_service.check_and_update_streak(db, user_id)
                 except Exception:
                     pass
@@ -2208,6 +2210,7 @@ async def _handle_user_message(send, chat_id, user_id, data):
     if not text and not image_b64:
         return
     await _resume_if_paused(send, chat_id)  # student is back → unfreeze the clock
+    await _clear_pending_end(chat_id)       # they carried on → cancel any pending end
     research = bool(data.get("research"))
     saved = text if text else "(shared an image)"
     if research and text:
@@ -2239,7 +2242,8 @@ def _build_puzzle_ctx(puzzle_type: str, prompt: str, answer) -> str:
         "to mark it (it compares against the correct answer semantically). Using ITS verdict, "
         "reply warmly in 1–2 sentences: praise what's right; for anything wrong give ONE gentle "
         "hint (do NOT reveal the answer) and invite another try; then continue teaching, or "
-        "clear_puzzle and move on. Do not guess the mark yourself."
+        "clear_puzzle and move on. Do not guess the mark yourself. If the verdict includes "
+        "xp_awarded greater than 0, cheerfully mention they earned that many XP (e.g. '+12 XP!')."
     )
 
 
@@ -2302,6 +2306,7 @@ async def _handle_user_audio(send, chat_id, user_id, data):
         return
     await send({"type": "user_transcript", "text": transcript})
     await _resume_if_paused(send, chat_id)  # student is back → unfreeze the clock
+    await _clear_pending_end(chat_id)       # they carried on → cancel any pending end
     await _run_turn(send, chat_id, user_id, saved_user_text=transcript, ai_content=transcript,
                     tts=bool(data.get("tts", True)))
 
@@ -2339,21 +2344,90 @@ async def _handle_lesson_resume(send, chat_id, user_id, data):
     await _emit_event(send, chat_id, EVENT_LESSON_RESUMED, "▶ Lesson resumed.")
 
 
+# If this much lesson time (or less) is left, an End click just ends — no pushback, no
+# penalty (they're effectively at the finish line). More time left → the AI encourages
+# continuing first, and ending anyway costs some XP.
+_END_GRACE_MIN = 2
+
+
+async def _clear_pending_end(chat_id) -> None:
+    """The student kept going after being asked to reconsider ending → cancel the pending
+    end so their next End click starts the reconsider flow fresh (not an instant end)."""
+    try:
+        from app.services import session_state_service
+        async with async_session_factory() as db:
+            appt_id = await _resolve_appt_id(db, chat_id)
+            if appt_id and await session_state_service.get_flag(db, appt_id, "pending_end", False):
+                await session_state_service.set_flag(db, appt_id, "pending_end", False)
+                await db.commit()
+                logger.info("pending_end cleared (student continued) appt=%s", appt_id)
+    except Exception:
+        pass
+
+
 async def _handle_lesson_end_request(send, chat_id, user_id, data):
-    """AI_REACTIVE: the student clicked End. Allow ending, let the AI give a short
-    encouraging recap + call end_lesson, then a server fallback guarantees the exit."""
+    """AI_REACTIVE: the student clicked End Lesson.
+
+    Two-stage so students aren't nudged out of a lesson they've barely started:
+      • FIRST click with real time left → the AI pushes back — encourages continuing (names
+        the next thing) and warns that ending early means less XP. It does NOT end; a
+        `pending_end` flag is set so the next click confirms.
+      • SECOND click (or little time left, or `confirmed`) → allow + end for real. When time
+        still remained, an `ended_early` flag is set so the post-session pipeline docks XP.
+    """
     from app.services import session_state_service, appointment_service
+    from app.schemas.session_events import EVENT_LESSON_END_REQUEST
+    # Show a centered event pill above the AI's reply — same treatment as puzzle/quiz/pause
+    # events — so it's clear the student pressed End (and it survives a refresh).
+    await _emit_event(send, chat_id, EVENT_LESSON_END_REQUEST, "🔚 You clicked End Lesson")
     appt_id = None
+    remaining = 0
+    pending = False
     async with async_session_factory() as db:
         appt_id = await _resolve_appt_id(db, chat_id)
         if appt_id:
-            await session_state_service.set_end_allowed(db, appt_id, True)
+            appt = await appointment_service.get_appointment(db, appt_id)
+            if appt:
+                _, remaining, _dur = _compute_lesson_clock(appt)
+            pending = bool(await session_state_service.get_flag(db, appt_id, "pending_end", False))
+    confirmed = bool(data.get("confirmed"))
+
+    # Stage 1 — plenty of time left and they haven't been asked yet → reconsider, don't end.
+    if appt_id and remaining > _END_GRACE_MIN and not pending and not confirmed:
+        async with async_session_factory() as db:
+            await session_state_service.set_flag(db, appt_id, "pending_end", True)
             await db.commit()
-    logger.info("lesson_end_request: appt=%s end_allowed=True", appt_id)
+        logger.info("lesson_end_request: appt=%s remaining=%dmin → reconsider (pending_end)",
+                    appt_id, remaining)
+        ai = (
+            f"[END REQUESTED — {remaining} minutes still left] The student clicked End Lesson, "
+            f"but there's real time left. Do NOT end and do NOT call end_lesson. In 2-3 warm "
+            f"sentences: say you'd love to keep going, name the very next thing you'd teach, and "
+            f"gently let them know that ending early means they won't earn the full session XP. "
+            f"Then ask whether they'd like to carry on — and if they're sure they want to stop, "
+            f"they can click End Lesson again to confirm."
+        )
+        await _run_turn(send, chat_id, user_id, saved_user_text=None, ai_content=ai,
+                        tts=bool(data.get("tts", True)), anchor_slides=False,
+                        event_kind="lesson_end_request")
+        return  # student decides next — no force-end
+
+    # Stage 2 — confirmed (second click / little time left) → allow end + end for real.
+    ended_early = remaining > _END_GRACE_MIN
+    async with async_session_factory() as db:
+        if appt_id:
+            await session_state_service.set_end_allowed(db, appt_id, True)
+            await session_state_service.set_flag(db, appt_id, "pending_end", False)
+            if ended_early:
+                await session_state_service.set_flag(db, appt_id, "ended_early", True)
+            await db.commit()
+    logger.info("lesson_end_request: appt=%s end_allowed=True ended_early=%s", appt_id, ended_early)
     ai = (
-        "[END REQUESTED] The student clicked End Lesson. In 2-3 sentences: warmly note "
-        "you could keep going (name the very next thing you'd cover), give a short recap "
-        "of what they did well today, then call the end_lesson tool. Keep it brief and kind."
+        "[END CONFIRMED] The student wants to end now. In 2-3 sentences: give a short, kind "
+        "recap of what they did well today, "
+        + ("gently note that because they're finishing early they'll earn a bit less XP this "
+           "time, " if ended_early else "")
+        + "then call the end_lesson tool. Keep it brief and warm."
     )
     await _run_turn(send, chat_id, user_id, saved_user_text=None, ai_content=ai,
                     tts=bool(data.get("tts", True)), anchor_slides=False, event_kind="lesson_end_request")

@@ -141,6 +141,7 @@ EVENT_STUDENT_IDLE = "student.idle"
 EVENT_LESSON_PAUSED = "lesson.paused"
 EVENT_LESSON_RESUMED = "lesson.resumed"
 EVENT_LESSON_TIMEOUT = "lesson.timeout"
+EVENT_LESSON_END_REQUEST = "lesson.end_request"
 EVENT_LESSON_ENDED = "lesson.ended"
 
 

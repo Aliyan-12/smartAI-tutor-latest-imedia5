@@ -464,12 +464,18 @@ async def generate_session_report(
     from app.services.llm_service import get_llm
     from langchain_core.messages import SystemMessage, HumanMessage
 
-    # IMMUTABLE: once an authentic report exists for this appointment it is FINAL — never
-    # regenerate or overwrite it (re-entry from the tool, the time-up fallback, or a report
-    # re-fetch all return the same saved report).
+    # IMMUTABLE: once an AUTHENTIC (successfully AI-generated) report exists for this
+    # appointment it is FINAL — never regenerate or overwrite it (re-entry from the tool, the
+    # time-up fallback, or a report re-fetch all return the same saved report). A report saved
+    # from the crash fallback is marked `_ok: false`, so we DON'T lock that in — the next call
+    # gets one more chance to produce the real thing.
     if lesson_plan is not None and getattr(lesson_plan, "session_summary", None):
         try:
-            return json.loads(lesson_plan.session_summary)
+            cached = json.loads(lesson_plan.session_summary)
+            if cached.get("_ok", True):  # legacy reports (no flag) are treated as final
+                return cached
+            logger.info("Prior report for appointment_id=%s was a fallback — regenerating once",
+                        appointment.id)
         except Exception:
             pass  # malformed JSON only → allow a single regeneration below
 
@@ -483,16 +489,22 @@ async def generate_session_report(
     unit = (lesson_plan.unit_name if lesson_plan else "") or appointment.subject
     subtopic = lesson_plan.subtopic if lesson_plan else ""
 
-    # --- Quiz stats: only from assessments linked to THIS appointment ---
-    total_questions = sum(getattr(a, "total_questions", 0) for a in assessments)
-    total_correct = sum(getattr(a, "correct_answers", 0) for a in assessments)
+    # --- Quiz stats: only COMPLETED assessments linked to THIS appointment ---
+    # Filter to finished quizzes so an abandoned/in-progress quiz (0 correct so far) can't
+    # dilute the real score — e.g. a completed 90% quiz was showing as 60% because an
+    # unfinished quiz's questions were being counted as all-wrong.
+    scored = [a for a in assessments if getattr(a, "status", None) == "completed"]
+    if not scored:  # nothing completed → fall back to whatever assessments we have
+        scored = list(assessments)
+    total_questions = sum(getattr(a, "total_questions", 0) for a in scored)
+    total_correct = sum(getattr(a, "correct_answers", 0) for a in scored)
     quiz_taken = total_questions > 0
     quiz_score: Optional[float] = (total_correct / total_questions * 100) if quiz_taken else None
 
     quiz_weak: List[str] = []
     quiz_strong: List[str] = []
     if quiz_taken:
-        for a in assessments:
+        for a in scored:
             weak = a.weak_topics if hasattr(a, "weak_topics") and a.weak_topics else {}
             strong = a.strong_topics if hasattr(a, "strong_topics") and a.strong_topics else {}
             if isinstance(weak, dict):
@@ -600,7 +612,10 @@ Output raw JSON only (no markdown fences):
             HumanMessage(content=prompt),
         ]
         response = await asyncio.to_thread(get_llm().invoke, lc_messages)
-        raw = response.content.strip()
+        # Gemini 2.5 (thinking) can return `.content` as a LIST of parts → `.strip()` on a
+        # list crashes and drops us into the generic fallback report. Flatten it first.
+        from app.services.gemini_service import response_text as _resp_text
+        raw = _resp_text(response)
         if raw.startswith("```"):
             parts = raw.split("```")
             raw = parts[1] if len(parts) > 1 else raw
@@ -613,10 +628,12 @@ Output raw JSON only (no markdown fences):
             report["quiz_score_percent"] = None
             report["weak_areas"] = []
             report["strong_areas"] = []
+        report["_ok"] = True  # authentic AI report → immutability guard will lock it in
     except Exception as exc:
         logger.error(f"Failed to generate session report via Gemini: {exc}")
         topic_label = unit or subject
         report = {
+            "_ok": False,  # crash fallback → NOT final; a later call may regenerate
             "summary": f"{student_name} completed a {subject} session on {topic_label}. {student_msg_count} exchanges with the AI tutor.",
             "phases": phases_schema,
             "topics_covered": [topic_label] if topic_label else [subject],
