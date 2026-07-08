@@ -2026,6 +2026,11 @@ async def _run_turn(send, chat_id, user_id, *, saved_user_text, ai_content,
                     _label = _THINKING_LABELS.get(_tool)
                     if _label:
                         await _emit_thinking(send, thinking_steps, _label)
+                    # Puzzle XP earned this turn → surface it in the thinking strip (NOT in the
+                    # AI's reply text), so the student sees the reward without the tutor bragging.
+                    _xp = _data.get("xp_awarded")
+                    if isinstance(_xp, (int, float)) and _xp > 0:
+                        await _emit_thinking(send, thinking_steps, f"🌟 +{int(_xp)} XP earned")
                     # end_lesson succeeded → GUARANTEE a real report exists (server-side,
                     # from the actual session), then tell the client to open it. Immutable:
                     # if the AI already called generate_session_report, this returns it.
@@ -2261,8 +2266,8 @@ def _build_puzzle_ctx(puzzle_type: str, prompt: str, answer) -> str:
         "to mark it (it compares against the correct answer semantically). Using ITS verdict, "
         "reply warmly in 1–2 sentences: praise what's right; for anything wrong give ONE gentle "
         "hint (do NOT reveal the answer) and invite another try; then continue teaching, or "
-        "clear_puzzle and move on. Do not guess the mark yourself. If the verdict includes "
-        "xp_awarded greater than 0, cheerfully mention they earned that many XP (e.g. '+12 XP!')."
+        "clear_puzzle and move on. Do not guess the mark yourself. Do NOT mention XP, points "
+        "or scores in your reply — the app displays any XP earned separately."
     )
 
 
