@@ -222,6 +222,27 @@ def _condense_thought(text: str) -> str:
     return line
 
 
+def response_text(response) -> str:
+    """Flatten a LangChain response's `.content` to plain text. Gemini 2.5 (thinking mode)
+    can return `.content` as a LIST of parts, so calling `.strip()` on it directly crashes
+    with "'list' object has no attribute 'strip'" — join the text parts instead. Shared by
+    the non-streaming callers (reports, titles)."""
+    content = getattr(response, "content", response)
+    if isinstance(content, str):
+        return content.strip()
+    if isinstance(content, list):
+        out = []
+        for p in content:
+            if isinstance(p, str):
+                out.append(p)
+            elif isinstance(p, dict):
+                # Skip 'thinking' parts; keep visible text.
+                if p.get("type") in (None, "text"):
+                    out.append(p.get("text") or p.get("content") or "")
+        return "".join(out).strip()
+    return str(content or "").strip()
+
+
 def _friendly_error(exc: Exception) -> str:
     msg = str(exc).lower()
     if "quota" in msg or "resource_exhausted" in msg or "429" in msg:
@@ -699,7 +720,7 @@ Mention specific strong and weak areas. Suggest what to review next. Keep it war
     ]
     try:
         response = get_llm().invoke(lc_messages)
-        return (response.content if hasattr(response, "content") else str(response)).strip()
+        return response_text(response) or f"Quiz completed with a score of {score_percent:.0f}%."
     except Exception as e:
         logger.error(f"generate_assessment_report failed: {e}")
         return f"Quiz completed with a score of {score_percent:.0f}%."
@@ -716,7 +737,7 @@ def generate_chat_title(user_message: str) -> str:
     ]
     try:
         response = get_llm().invoke(lc_messages)
-        title = (response.content if hasattr(response, "content") else str(response)).strip()
+        title = response_text(response)
         return title[:60] if len(title) > 60 else title
     except Exception as e:
         logger.warning(f"Title generation failed: {e}")

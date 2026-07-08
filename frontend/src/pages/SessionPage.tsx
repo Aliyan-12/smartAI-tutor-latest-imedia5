@@ -1789,9 +1789,9 @@ export default function SessionPage() {
             </div>
             <h2 id="end-modal-title" style={styles.endModalTitle}>End this lesson?</h2>
             <p style={styles.endModalText}>
-              Your lesson is still in progress. If you end now, the AI tutor will stop
-              and a session summary will be generated. You can’t resume this session
-              afterwards.
+              Your lesson is still in progress. If you end early, you’ll earn less XP for
+              this session, the AI tutor will stop, and a session summary will be
+              generated. You can’t resume this session afterwards.
             </p>
             <div style={styles.endModalActions}>
               <button

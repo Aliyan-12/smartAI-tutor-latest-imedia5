@@ -360,13 +360,19 @@ def send_session_report(
     weak_html = "".join(f"<li>{w}</li>" for w in weak_areas) if weak_areas else "<li>None identified</li>"
     strong_html = "".join(f"<li>{s}</li>" for s in strong_areas) if strong_areas else "<li>None identified</li>"
 
-    # Score colour coding
-    if score >= 80:
-        score_colour = "#22c55e"  # green
-    elif score >= 60:
-        score_colour = "#f59e0b"  # amber
+    # Score colour coding — score is None when no quiz was taken (e.g. a lesson ended
+    # before any quiz), so guard against None before comparing / formatting.
+    if score is None:
+        score_colour = "#6b7280"  # grey — no quiz
+        score_display = "N/A"
     else:
-        score_colour = "#ef4444"  # red
+        if score >= 80:
+            score_colour = "#22c55e"  # green
+        elif score >= 60:
+            score_colour = "#f59e0b"  # amber
+        else:
+            score_colour = "#ef4444"  # red
+        score_display = f"{score:.0f}%"
 
     body = f"""
     <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; background: #f9fafb; border-radius: 8px;">
@@ -381,7 +387,7 @@ def send_session_report(
 
         <div style="display: flex; gap: 16px; margin: 20px 0;">
           <div style="flex: 1; background: #f0f9ff; border-radius: 8px; padding: 16px; text-align: center;">
-            <div style="font-size: 32px; font-weight: bold; color: {score_colour};">{score:.0f}%</div>
+            <div style="font-size: 32px; font-weight: bold; color: {score_colour};">{score_display}</div>
             <div style="color: #6b7280; font-size: 14px;">Quiz Score</div>
           </div>
           <div style="flex: 1; background: #f0f9ff; border-radius: 8px; padding: 16px; text-align: center;">
@@ -503,7 +509,8 @@ async def get_or_create_profile(db: AsyncSession, student_id: int) -> StudentPro
 async def award_xp(db: AsyncSession, student_id: int, amount: int, reason: str = "") -> StudentProfile:
     """Add *amount* XP to the student's profile and recalculate their level."""
     profile = await get_or_create_profile(db, student_id)
-    profile.xp_total = (profile.xp_total or 0) + amount
+    # amount may be negative (e.g. an ended-early penalty) — never let the total go below 0.
+    profile.xp_total = max(0, (profile.xp_total or 0) + amount)
     profile.xp_level = _calculate_level(profile.xp_total)
     profile.updated_at = datetime.now(timezone.utc)
     await db.flush()

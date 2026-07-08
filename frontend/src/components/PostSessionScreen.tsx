@@ -65,8 +65,8 @@ export default function PostSessionScreen({
       .then((p: any) => {
         setStreak(p?.current_streak ?? 0);
         setXpTotal(p?.xp_total ?? 0);
-        // Animate XP count-up
-        const target = p?.xp_earned_today ?? xpEarned;
+        // Animate XP count-up — show THIS session's XP (from the report), not today's total.
+        const target = xpEarned;
         let start = 0;
         const step = Math.ceil(target / 40);
         const iv = setInterval(() => {
@@ -81,7 +81,7 @@ export default function PostSessionScreen({
   const firstName = user?.name?.split(" ")[0] ?? "Student";
   const timeSpent = report?.time_spent_minutes ?? durationMinutes;
   const quizScore = report?.quiz_score_percent;
-  const xpEarned = report?.xp_earned ?? 120;
+  const xpEarned = report?.xp_earned ?? 0;
 
   return (
     <div style={styles.overlay}>

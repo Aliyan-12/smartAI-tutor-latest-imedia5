@@ -41,6 +41,29 @@ def _coerce_dict(v: Any) -> dict:
     return v if isinstance(v, dict) else {}
 
 
+# XP earned for a fully-correct puzzle, by key-stage difficulty (harder stage → more XP).
+# A wrong answer earns nothing; a partially-correct answer earns a proportional share.
+_PUZZLE_XP_BY_KS = {"KS1": 10, "KS2": 12, "KS3": 15, "KS4": 18, "KS5": 20}
+
+
+async def _award_puzzle_xp(ctx: ToolContext, verdict: dict) -> int:
+    """Award XP for a graded puzzle attempt: nothing for a wrong answer, otherwise XP scaled
+    by the puzzle's key-stage difficulty and how well they did (score 0-10). Called exactly
+    once per puzzle (the evaluator flips status→'evaluated' right after), so it never
+    double-counts. Returns the XP granted (0 if none)."""
+    from app.services import platform_service
+    score = float(verdict.get("score") or 0)
+    correct = bool(verdict.get("correct"))
+    # Wrong answer (and not close) → no XP, so XP reflects real understanding.
+    if not correct and score < 7:
+        return 0
+    ks = (ctx.key_stage or "").upper().replace(" ", "")
+    base = _PUZZLE_XP_BY_KS.get(ks, 12)
+    xp = max(1, round(base * min(score, 10.0) / 10.0))
+    await platform_service.award_xp(ctx.db, ctx.student_id, xp, "puzzle_correct")
+    return xp
+
+
 def puzzle_tool_groups(ctx: ToolContext) -> dict:
     """Generative puzzle tools (generators + clear + evaluators) for the registry."""
 
@@ -227,9 +250,16 @@ def puzzle_tool_groups(ctx: ToolContext) -> dict:
             await puzzle_service.mark_puzzle_evaluated(ctx.db, ctx.appointment_id, verdict)
         except Exception as e:  # noqa: BLE001
             logger.warning("mark_puzzle_evaluated failed: %s", e)
-        logger.info("PUZZLE evaluated type=%s score=%s correct=%s",
-                    ps.get("puzzle_type"), verdict.get("score"), verdict.get("correct"))
-        return {"action": "evaluate", "puzzle_type": ps.get("puzzle_type"), **verdict}
+        # Award XP for the attempt (correct → XP by difficulty; wrong → none). Once only.
+        xp_awarded = 0
+        try:
+            xp_awarded = await _award_puzzle_xp(ctx, verdict)
+        except Exception as e:  # noqa: BLE001
+            logger.warning("puzzle XP award failed: %s", e)
+        logger.info("PUZZLE evaluated type=%s score=%s correct=%s xp=%s",
+                    ps.get("puzzle_type"), verdict.get("score"), verdict.get("correct"), xp_awarded)
+        return {"action": "evaluate", "puzzle_type": ps.get("puzzle_type"),
+                "xp_awarded": xp_awarded, **verdict}
 
     @tool
     async def labelling_evaluator() -> dict:

@@ -231,6 +231,34 @@ async def _run_post_session_pipeline(db: AsyncSession, appointment: Appointment)
         await platform_service.award_xp(
             db, appointment.student_id, xp_amount, reason="session_completed"
         )
+        # Ended the lesson early (before the clock ran out)? Dock some XP so leaving early
+        # has a visible cost — the `ended_early` flag is set by _handle_lesson_end_request.
+        penalty = 0
+        try:
+            if lesson_plan and (lesson_plan.session_state or {}).get("ended_early"):
+                penalty = -min(30, max(10, xp_amount // 3))
+                await platform_service.award_xp(
+                    db, appointment.student_id, penalty, reason="ended_early_penalty"
+                )
+                logger.info(
+                    f"Ended-early XP penalty {penalty} applied for appointment_id={appointment.id}"
+                )
+        except Exception as _pex:
+            logger.warning(f"ended_early penalty skipped: {_pex}")
+
+        # Record the REAL XP earned for this session into the report so the report card shows
+        # the actual amount (dynamic) instead of the frontend's static fallback. Net of the
+        # early-end penalty. Re-persist the enriched report JSON (same authentic report).
+        session_xp_earned = max(0, xp_amount + penalty)
+        try:
+            report["xp_earned"] = session_xp_earned
+            if lesson_plan is not None:
+                import json as _json
+                lesson_plan.session_summary = _json.dumps(report)
+                await db.flush()
+        except Exception as _xex:
+            logger.warning(f"Could not persist xp_earned into report: {_xex}")
+
         await platform_service.check_and_update_streak(db, appointment.student_id)
 
         topics_covered = report.get("topics_covered") or []
