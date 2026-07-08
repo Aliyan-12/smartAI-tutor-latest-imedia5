@@ -126,6 +126,10 @@ export function useSessionChannel(opts: SessionChannelOpts) {
   // (seq numbering restarts each turn) is dropped instead of bleeding into this one.
   const currentTurnIdRef = useRef<string | null>(null);
   const pendingCommitRef = useRef<{ message_id: number | null; full_text: string } | null>(null);
+  // A `lesson_ended` that arrived while the closing message was still revealing — we hold
+  // it and navigate to the report only after the text finishes, so the report never opens
+  // mid-sentence.
+  const pendingEndedRef = useRef<any | null>(null);
   // A puzzle the student solved while a turn was still streaming — sent the moment
   // we're free, so their solve is never silently dropped.
   const pendingPuzzleRef = useRef<{ puzzleType: string; prompt: string; answer: unknown } | null>(null);
@@ -225,7 +229,7 @@ export function useSessionChannel(opts: SessionChannelOpts) {
       await revealSegment(seg);
     }
     textPumpingRef.current = false;
-    finalizeTurn(false);
+    finalizeTurn(false);  // fires any deferred lesson_ended once text is fully revealed
   };
 
   // ── AUDIO pump (in-order playback, independent of text) ──
@@ -307,6 +311,13 @@ export function useSessionChannel(opts: SessionChannelOpts) {
     // bubble stays put and a new turn_start will stop any leftover playback.
     setStatus("idle");
     setBusy(false);
+    // Turn fully finalised — if a lesson_ended was waiting on the closing message, open
+    // the report now. (Cleared on first fire, so it never double-navigates.)
+    if (pendingEndedRef.current) {
+      const data = pendingEndedRef.current;
+      pendingEndedRef.current = null;
+      optsRef.current.onEnded?.(data);
+    }
   };
 
   // ── server → client dispatch ──
@@ -402,9 +413,16 @@ export function useSessionChannel(opts: SessionChannelOpts) {
       case "lesson_timeout":
         // Soft notice — the paired `event` frame already renders the pill.
         break;
-      case "lesson_ended":
-        optsRef.current.onEnded?.(d.data || {});
+      case "lesson_ended": {
+        // Wait for the AI's closing message to finish revealing before opening the report.
+        const stillRevealing = textPumpingRef.current || textQueueRef.current.length > 0;
+        if (stillRevealing) {
+          pendingEndedRef.current = d.data || {};
+        } else {
+          optsRef.current.onEnded?.(d.data || {});
+        }
         break;
+      }
       case "credits":
         if (typeof d.value === "number") optsRef.current.onCredits?.(d.value);
         break;

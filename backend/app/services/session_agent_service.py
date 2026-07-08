@@ -1973,6 +1973,9 @@ async def _run_turn(send, chat_id, user_id, *, saved_user_text, ai_content,
         seq = 0
         full: list = []          # the deduped sentences actually shown (also persisted)
         _seen_norm: set = set()  # normalised sentences already streamed THIS turn
+        # If end_lesson runs this turn, we DON'T open the report immediately — we hold the
+        # navigation until the AI's closing message has fully streamed (see after turn_end).
+        _pending_ended_appt = None
 
         def _dup(sentence: str) -> bool:
             # The lead-in streams as text (before a tool), and Gemini sometimes RE-STATES
@@ -2027,7 +2030,6 @@ async def _run_turn(send, chat_id, user_id, *, saved_user_text, ai_content,
                     # from the actual session), then tell the client to open it. Immutable:
                     # if the AI already called generate_session_report, this returns it.
                     if _tool == "end_lesson" and _data.get("ended"):
-                        from app.schemas.session_events import lesson_ended_frame, EVENT_LESSON_ENDED
                         if appt_id:
                             try:
                                 from app.services import lesson_service as _ls
@@ -2035,8 +2037,9 @@ async def _run_turn(send, chat_id, user_id, *, saved_user_text, ai_content,
                                 await db.commit()
                             except Exception as _rep_err:  # noqa: BLE001
                                 logger.warning("ensure_report on end_lesson failed appt=%s: %s", appt_id, _rep_err)
-                        await _emit_event(send, chat_id, EVENT_LESSON_ENDED, "🏁 Lesson ended — opening your report.")
-                        await send(lesson_ended_frame(appointment_id=appt_id))
+                        # Hold the "open your report" navigation until AFTER the closing
+                        # message has fully streamed — otherwise the report opens mid-sentence.
+                        _pending_ended_appt = appt_id
                 except Exception as _tr_err:
                     logger.warning("Failed to forward TOOL_RESULT: %s", _tr_err)
                 continue
@@ -2058,6 +2061,9 @@ async def _run_turn(send, chat_id, user_id, *, saved_user_text, ai_content,
         if not clean or "[Error:" in complete:
             await send({"type": "error", "message": "The tutor couldn't generate a reply — please try again.", "recoverable": True})
             await send({"type": "turn_end", "message_id": None, "full_text": ""})
+            # Even with no closing text, if the lesson was ended this turn the student must
+            # still be taken to the report.
+            await _open_report_if_ended(send, chat_id, _pending_ended_appt)
             return
 
         # Persist the thinking steps FIRST (lower id → renders just above the answer),
@@ -2086,6 +2092,19 @@ async def _run_turn(send, chat_id, user_id, *, saved_user_text, ai_content,
         await db.commit()
 
     await send({"type": "turn_end", "message_id": message_id, "full_text": clean})
+
+    # The closing message has now fully streamed — NOW open the report (deferred navigation).
+    await _open_report_if_ended(send, chat_id, _pending_ended_appt)
+
+
+async def _open_report_if_ended(send, chat_id, appt_id) -> None:
+    """Emit the 'lesson ended → open your report' pill + navigation frame, but only after the
+    AI's final message has fully streamed. No-op unless end_lesson ran this turn."""
+    if not appt_id:
+        return
+    from app.schemas.session_events import lesson_ended_frame, EVENT_LESSON_ENDED
+    await _emit_event(send, chat_id, EVENT_LESSON_ENDED, "🏁 Lesson ended — opening your report.")
+    await send(lesson_ended_frame(appointment_id=appt_id))
 
 
 # Friendly one-line labels shown in the "thinking" strip when a tool runs — plain
