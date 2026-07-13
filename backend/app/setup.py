@@ -17,6 +17,7 @@ logger = logging.getLogger("setup")
 async def run_setup(fresh: bool = False):
     from sqlalchemy import text
     from app.db.session import engine, Base
+    from app.db.init_db import SCHEMA_LOCK_KEY
 
     import app.models  # noqa: F401
 
@@ -31,9 +32,16 @@ async def run_setup(fresh: bool = False):
         logger.error("Make sure PostgreSQL is running and .env credentials are correct")
         sys.exit(1)
 
-    if fresh:
-        logger.info("Dropping all existing tables...")
-        async with engine.begin() as conn:
+    # ONE transaction holding the schema advisory lock for the whole drop -> create window.
+    # The app's own startup also runs create_all, and `uvicorn --reload` will happily restart
+    # it mid-setup (a git pull is enough). Without the lock both processes see an empty schema
+    # and both issue CREATE TABLE, and the loser dies with "duplicate key value violates unique
+    # constraint pg_type_typname_nsp_index". With it, the app simply waits for us to finish.
+    async with engine.begin() as conn:
+        await conn.execute(text("SELECT pg_advisory_xact_lock(:k)"), {"k": SCHEMA_LOCK_KEY})
+
+        if fresh:
+            logger.info("Dropping all existing tables...")
             # Deliberately NOT Base.metadata.drop_all(). Two reasons:
             #  1. users <-> schools is a real FK cycle, and drop_all can only order a DROP
             #     across it if the constraint is named in the LIVE database — which it isn't
@@ -43,18 +51,18 @@ async def run_setup(fresh: bool = False):
             # Dropping the schema wholesale sidesteps both and is what "fresh" should mean.
             await conn.execute(text("DROP SCHEMA public CASCADE"))
             await conn.execute(text("CREATE SCHEMA public"))
-        logger.info("Tables dropped")
+            logger.info("Tables dropped")
 
-    # AFTER the fresh drop, never before: the extension lives in the public schema, so
-    # dropping that schema takes pgvector with it.
-    try:
-        async with engine.begin() as conn:
-            await conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
-        logger.info("pgvector extension enabled")
-    except Exception:
-        logger.warning("pgvector extension not available. Vector features will be disabled.")
+        # AFTER the fresh drop, never before: the extension lives in the public schema, so
+        # dropping that schema takes pgvector with it. Nested so that a DB without pgvector
+        # available degrades to a warning instead of aborting the whole transaction.
+        try:
+            async with conn.begin_nested():
+                await conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
+            logger.info("pgvector extension enabled")
+        except Exception:
+            logger.warning("pgvector extension not available. Vector features will be disabled.")
 
-    async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
 
     logger.info("All tables created successfully")
