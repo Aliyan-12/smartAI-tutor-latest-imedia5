@@ -45,6 +45,7 @@ services:
     volumes:
       - ./backend:/app
       - backend_uploads:/app/uploads
+      - hf_cache:/root/.cache/huggingface
 
   frontend:
     build: ./frontend
@@ -57,3 +58,4 @@ services:
 volumes:
   pgdata:
   backend_uploads:
+  hf_cache:
