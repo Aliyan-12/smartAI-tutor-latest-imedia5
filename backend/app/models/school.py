@@ -28,8 +28,21 @@ class School(Base):
     account_type: Mapped[str] = mapped_column(String(20), default=SCHOOL_ACCOUNT, nullable=False)
     # The user that owns/administers this school (its superadmin). Nullable so the
     # school row can be created in the same transaction as the user.
+    #
+    # users.school_id -> schools.id and schools.superadmin_user_id -> users.id form a
+    # deliberate FK CYCLE. SQLAlchemy can't order a CREATE/DROP across a cycle, so this side
+    # is marked use_alter: it is emitted as its own ALTER TABLE ADD CONSTRAINT after both
+    # tables exist, and dropped with DROP CONSTRAINT before them. use_alter REQUIRES an
+    # explicit name — without it `metadata.drop_all()` raises CircularDependencyError.
     superadmin_user_id: Mapped[Optional[int]] = mapped_column(
-        Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+        Integer,
+        ForeignKey(
+            "users.id",
+            ondelete="SET NULL",
+            use_alter=True,
+            name="fk_schools_superadmin_user_id",
+        ),
+        nullable=True,
     )
     is_default: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False, index=True)
     created_at: Mapped[datetime] = mapped_column(

@@ -31,18 +31,28 @@ async def run_setup(fresh: bool = False):
         logger.error("Make sure PostgreSQL is running and .env credentials are correct")
         sys.exit(1)
 
+    if fresh:
+        logger.info("Dropping all existing tables...")
+        async with engine.begin() as conn:
+            # Deliberately NOT Base.metadata.drop_all(). Two reasons:
+            #  1. users <-> schools is a real FK cycle, and drop_all can only order a DROP
+            #     across it if the constraint is named in the LIVE database — which it isn't
+            #     on any DB created before fk_schools_superadmin_user_id was named.
+            #  2. It only drops tables the models still declare, silently orphaning any that
+            #     were renamed or removed.
+            # Dropping the schema wholesale sidesteps both and is what "fresh" should mean.
+            await conn.execute(text("DROP SCHEMA public CASCADE"))
+            await conn.execute(text("CREATE SCHEMA public"))
+        logger.info("Tables dropped")
+
+    # AFTER the fresh drop, never before: the extension lives in the public schema, so
+    # dropping that schema takes pgvector with it.
     try:
         async with engine.begin() as conn:
             await conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
         logger.info("pgvector extension enabled")
     except Exception:
         logger.warning("pgvector extension not available. Vector features will be disabled.")
-
-    if fresh:
-        logger.info("Dropping all existing tables...")
-        async with engine.begin() as conn:
-            await conn.run_sync(Base.metadata.drop_all)
-        logger.info("Tables dropped")
 
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
