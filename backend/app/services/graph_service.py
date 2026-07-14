@@ -19,6 +19,7 @@ import matplotlib
 matplotlib.use("Agg")  # headless — no display, thread-safe rendering
 import matplotlib.pyplot as plt  # noqa: E402
 import matplotlib.patches as mpatches  # noqa: E402
+from matplotlib.ticker import MultipleLocator  # noqa: E402
 
 from app.core.config import settings
 from app.services.image_gen_service import media_url
@@ -38,6 +39,62 @@ def _media_dir() -> Path:
     return d
 
 
+# Distinct, colour-blind-safe line colours. A two-line graph is useless if the student can't
+# tell the lines apart.
+_LINE_COLOURS = ["#2563eb", "#dc2626", "#059669", "#d97706", "#7c3aed"]
+
+
+def _normalise_functions(spec: Dict[str, Any]) -> list[Dict[str, Any]]:
+    """Every way the model might express "plot these curves" → one list of {expr, label}.
+
+    `kind="function"` originally accepted only a SINGLE `expr`, which made a whole class of
+    question — "where do these two lines intersect?" — impossible to draw correctly: the model
+    would ask about two lines and the renderer would plot one. So we now accept a list, and
+    keep the old single `expr` working.
+    """
+    raw = spec.get("functions") or spec.get("exprs") or spec.get("expr")
+    if raw is None:
+        raw = "x"
+    if isinstance(raw, (str, dict)):
+        raw = [raw]
+
+    out: list[Dict[str, Any]] = []
+    for item in raw:
+        if isinstance(item, str):
+            out.append({"expr": item, "label": item})
+        elif isinstance(item, dict) and item.get("expr"):
+            out.append({"expr": str(item["expr"]), "label": str(item.get("label") or item["expr"])})
+    return out
+
+
+def curve_count(spec: Dict[str, Any]) -> int:
+    """How many curves/series this spec will actually draw. The tool layer uses this to refuse
+    a question that talks about two lines when only one would appear on screen."""
+    spec = spec or {}
+    kind = str(spec.get("kind", "line")).lower()
+    if kind == "function":
+        return len(_normalise_functions(spec))
+    if kind == "line":
+        series = spec.get("series")
+        if series:
+            return len(series)
+        return 1 if spec.get("points") else 0
+    return 1 if (spec.get("values") or spec.get("points")) else 0
+
+
+def _tidy_axes(ax, spec: Dict[str, Any]) -> None:
+    """Readable gridlines. A coordinate-reading question is unanswerable if the student can't
+    count squares — so on a small range we force ticks every 1 unit."""
+    for axis, lo_key, hi_key in ((ax.xaxis, "xmin", "xmax"), (ax.yaxis, "ymin", "ymax")):
+        lo, hi = (spec.get(lo_key), spec.get(hi_key))
+        try:
+            span = abs(float(hi) - float(lo)) if lo is not None and hi is not None else None
+        except (TypeError, ValueError):
+            span = None
+        if span and span <= 12:
+            axis.set_major_locator(MultipleLocator(1))
+
+
 def _draw(spec: Dict[str, Any]) -> str:
     kind = str(spec.get("kind", "line")).lower()
     title = str(spec.get("title", "") or "")
@@ -47,14 +104,22 @@ def _draw(spec: Dict[str, Any]) -> str:
     fig, ax = plt.subplots(figsize=(5.2, 4.0), dpi=130)
     try:
         if kind == "function":
-            expr = str(spec.get("expr", "x"))
+            funcs = _normalise_functions(spec)
             xmin = float(spec.get("xmin", -10))
             xmax = float(spec.get("xmax", 10))
             x = np.linspace(xmin, xmax, 400)
-            y = eval(expr, {"__builtins__": {}}, {**_SAFE_NS, "x": x})  # noqa: S307 — whitelisted ns only
-            ax.plot(x, y, linewidth=2)
+            for i, f in enumerate(funcs):
+                # A failed expression must NOT silently vanish — a graph that's missing a line
+                # the question asks about is worse than no graph at all, because the student
+                # is then asked something unanswerable. Let it raise; the tool reports it.
+                y = eval(f["expr"], {"__builtins__": {}}, {**_SAFE_NS, "x": x})  # noqa: S307 — whitelisted ns only
+                y = np.broadcast_to(np.asarray(y, dtype=float), x.shape)  # constants, e.g. "3"
+                ax.plot(x, y, linewidth=2, color=_LINE_COLOURS[i % len(_LINE_COLOURS)],
+                        label=f["label"])
             ax.axhline(0, color="#888", linewidth=0.8)
             ax.axvline(0, color="#888", linewidth=0.8)
+            if len(funcs) > 1:
+                ax.legend()   # with 2+ lines the student MUST be able to tell which is which
         elif kind == "bar":
             labels = [str(l) for l in (spec.get("labels") or [])]
             values = [float(v) for v in (spec.get("values") or [])]
@@ -80,6 +145,8 @@ def _draw(spec: Dict[str, Any]) -> str:
         ax.set_xlabel(xlabel)
         ax.set_ylabel(ylabel)
         ax.grid(True, linestyle="--", alpha=0.4)
+        if kind == "function":
+            _tidy_axes(ax, spec)
         fig.tight_layout()
 
         name = f"g_{uuid.uuid4().hex[:16]}.png"

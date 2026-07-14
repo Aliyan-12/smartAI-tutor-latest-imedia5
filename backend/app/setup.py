@@ -1,10 +1,16 @@
 """
-Database setup script.
-Run this once after cloning the project to create all tables.
+Database setup script — creates the schema, applies the raw-SQL migrations, and seeds.
 
 Usage:
-    cd backend
-    python -m app.setup
+    docker compose exec backend python -m app.setup            # additive; safe on an existing DB
+    docker compose exec backend python -m app.setup --fresh    # DROPS EVERYTHING, recreates, seeds
+    docker compose exec backend python -m app.setup --no-seed  # schema only
+
+Scope: this touches the SCHEMA and the SEED DATA only. It does NOT sync the Resource Hub.
+--fresh does drop the rh_* mirror, but the backend's scheduler rebuilds it on its own a few
+minutes after boot (RESOURCE_SYNC_START_DELAY_MINUTES) — which is the window this command is
+designed to run in. Syncing from here as well would mean two processes walking the same
+resource list, and one of them dying on the unique rh_resources.hub_id.
 """
 import asyncio
 import logging
@@ -14,10 +20,11 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(me
 logger = logging.getLogger("setup")
 
 
-async def run_setup(fresh: bool = False):
+async def run_setup(fresh: bool = False, seed: bool = True):
     from sqlalchemy import text
     from app.db.session import engine, Base
     from app.db.init_db import SCHEMA_LOCK_KEY
+    from app.core.config import settings
 
     import app.models  # noqa: F401
 
@@ -41,16 +48,50 @@ async def run_setup(fresh: bool = False):
         await conn.execute(text("SELECT pg_advisory_xact_lock(:k)"), {"k": SCHEMA_LOCK_KEY})
 
         if fresh:
+            # Kick every OTHER connection off this database first.
+            #
+            # DROP SCHEMA CASCADE needs an ACCESS EXCLUSIVE lock on every table, so a single
+            # live backend connection blocks it forever — most often the Resource Hub sync,
+            # which sits "idle in transaction" holding rh_* locks for minutes after startup.
+            # That's the hang at "Dropping all existing tables...".
+            #
+            # We can't stop the backend CONTAINER from in here (this process runs inside it,
+            # and there's no docker socket). But stopping the container was only ever a means
+            # to this end: get its connections off the database. pg_terminate_backend does
+            # exactly that, directly. The backend's pool reconnects on its next query
+            # (pool_pre_ping in db/session.py makes that transparent).
+            killed = (await conn.execute(text("""
+                SELECT count(*) FROM (
+                    SELECT pg_terminate_backend(pid) FROM pg_stat_activity
+                    WHERE datname = current_database()
+                      AND pid <> pg_backend_pid()
+                      AND backend_type = 'client backend'
+                ) t
+            """))).scalar()
+            if killed:
+                logger.info("Disconnected %s other DB connection(s) (the running backend).", killed)
+
             logger.info("Dropping all existing tables...")
-            # Deliberately NOT Base.metadata.drop_all(). Two reasons:
-            #  1. users <-> schools is a real FK cycle, and drop_all can only order a DROP
-            #     across it if the constraint is named in the LIVE database — which it isn't
-            #     on any DB created before fk_schools_superadmin_user_id was named.
-            #  2. It only drops tables the models still declare, silently orphaning any that
-            #     were renamed or removed.
-            # Dropping the schema wholesale sidesteps both and is what "fresh" should mean.
-            await conn.execute(text("DROP SCHEMA public CASCADE"))
-            await conn.execute(text("CREATE SCHEMA public"))
+            # Belt and braces: if something reconnects in the split second after the kill, fail
+            # fast with an explanation instead of hanging silently forever.
+            await conn.execute(text("SET LOCAL lock_timeout = '20s'"))
+            try:
+                # Deliberately NOT Base.metadata.drop_all(). Two reasons:
+                #  1. users <-> schools is a real FK cycle, and drop_all can only order a DROP
+                #     across it if the constraint is named in the LIVE database — which it isn't
+                #     on any DB created before fk_schools_superadmin_user_id was named.
+                #  2. It only drops tables the models still declare, silently orphaning any that
+                #     were renamed or removed.
+                # Dropping the schema wholesale sidesteps both and is what "fresh" should mean.
+                await conn.execute(text("DROP SCHEMA public CASCADE"))
+                await conn.execute(text("CREATE SCHEMA public"))
+            except Exception as e:  # noqa: BLE001
+                if "lock" not in str(e).lower():
+                    raise
+                logger.error("Could not drop the schema — something is still holding table locks")
+                logger.error("even after disconnecting other clients. Stop the backend and retry:")
+                logger.error("    docker compose stop backend")
+                sys.exit(1)
             logger.info("Tables dropped")
 
         # AFTER the fresh drop, never before: the extension lives in the public schema, so
@@ -273,6 +314,34 @@ async def run_setup(fresh: bool = False):
                 logger.info(f"Migration applied: {sql[:70]}")
             except Exception as e:
                 logger.warning(f"Migration skipped (already applied?): {e}")
+
+    # ── Seed ──────────────────────────────────────────────────────────────────────────
+    # Run automatically: a freshly-wiped database with no users and no school can't be
+    # logged into, so "setup then remember to seed" was a footgun with no upside. Seeding
+    # is idempotent, so it's safe on the additive path too.
+    if seed:
+        logger.info("")
+        logger.info("Seeding default users, school and policies...")
+        from app.seed import run_seed
+        await run_seed()
+
+    # ── Resource Hub ──────────────────────────────────────────────────────────────────
+    # NOT rebuilt here, on purpose. --fresh drops the whole rh_* mirror (curriculum AND
+    # resources + their RAG vectors), but syncing it back is the backend's job, not setup's:
+    # setup runs as a second process inside the backend container, so a sync started here
+    # races the one the backend runs and one of them dies on the unique rh_resources.hub_id.
+    #
+    # The backend's scheduler picks it up by itself, RESOURCE_SYNC_START_DELAY_MINUTES after
+    # it boots (default 5) — which is exactly the window this command is meant to run in.
+    if fresh and settings.resource_sync_enabled:
+        logger.info("")
+        logger.info(
+            "The Resource Hub mirror (curriculum, slides, RAG vectors) was dropped. The backend "
+            "rebuilds it automatically ~%d min after it starts — no action needed.",
+            settings.resource_sync_start_delay_minutes,
+        )
+        logger.info("Watch it with:  docker compose logs -f backend")
+
     await engine.dispose()
 
 
@@ -281,11 +350,18 @@ def main():
     logger.info("=" * 40)
 
     fresh = "--fresh" in sys.argv
-    if fresh:
-        logger.info("Fresh mode: will drop and recreate all tables")
+    seed = "--no-seed" not in sys.argv
 
-    asyncio.run(run_setup(fresh=fresh))
-    logger.info("Setup complete. You can now run: python -m app.seed")
+    if fresh:
+        logger.info("Fresh mode: drop + recreate every table, then seed")
+
+    asyncio.run(run_setup(fresh=fresh, seed=seed))
+
+    logger.info("")
+    logger.info("=" * 40)
+    logger.info("Setup complete.")
+    if not seed:
+        logger.info("Seeding was skipped (--no-seed). Run: python -m app.seed")
 
 
 if __name__ == "__main__":

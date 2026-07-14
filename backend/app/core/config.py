@@ -70,6 +70,12 @@ class Settings(BaseSettings):
     resource_sync_enabled: bool = True
     curriculum_sync_hours: int = 12
     resource_sync_hours: int = 6
+    # How long the backend waits after boot before the FIRST sync of each job. The sync is
+    # deliberately not part of startup: after a rebuild you need a window in which to run
+    # `python -m app.setup --fresh` (which drops and recreates the schema) without a sync
+    # holding table locks or writing into a schema that's about to be dropped. Once this
+    # delay elapses, the jobs run on their normal intervals.
+    resource_sync_start_delay_minutes: int = 1
 
     email_enabled: bool = False
     email_smtp_host: str = "smtp.gmail.com"

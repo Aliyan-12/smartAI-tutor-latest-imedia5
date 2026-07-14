@@ -144,14 +144,28 @@ async def run_seed():
                 db.add(invite)
                 logger.info(f"Generated invite code for {student.name}: {code}")
 
-        # Create StudentProfile for the seeded student (gamification)
+        # Create StudentProfile for the seeded student (gamification + learning preferences).
+        #
+        # KEY_STAGE and YEAR_GROUP are seeded deliberately, not left NULL. The seeded users are
+        # marked onboarding_completed=True, so they never walk through onboarding — which is the
+        # only other place these get set. Leaving them empty meant the test student landed on
+        # /lesson/setup with Key Stage and Year Group locked at "Set in your profile" and no way
+        # to start a lesson.
+        #
+        # KS3 / Year 9 is the default because it's mid-range and the Resource Hub has
+        # plenty of KS3 Year 9 content, so a fresh seed can start a real lesson immediately.
         if student:
             from sqlalchemy import select as sa_select
             from app.models.student_profile import StudentProfile
-            existing_profile = await db.execute(
+
+            SEED_KEY_STAGE = "KS3"
+            SEED_YEAR_GROUP = "Year 9"
+
+            existing_profile = (await db.execute(
                 sa_select(StudentProfile).where(StudentProfile.student_id == student.id)
-            )
-            if not existing_profile.scalar_one_or_none():
+            )).scalar_one_or_none()
+
+            if existing_profile is None:
                 profile = StudentProfile(
                     student_id=student.id,
                     xp_total=0,
@@ -161,9 +175,32 @@ async def run_seed():
                     last_active_date=None,
                     interests=["Science", "Maths"],
                     preferred_subjects=["Maths", "Physics"],
+                    key_stage=SEED_KEY_STAGE,
+                    year_group=SEED_YEAR_GROUP,
+                    # The tutor is handed these every turn, so give it something real to work with.
+                    learning_style=["visual", "step_by_step"],
+                    teaching_pace="just_right",
+                    teaching_preferences={
+                        "step_by_step": True,
+                        "real_life_examples": True,
+                        "practice_as_we_go": True,
+                    },
+                    learning_goals="Build confidence in algebra and graphs",
                 )
                 db.add(profile)
-                logger.info(f"Created StudentProfile for {student.name}")
+                logger.info(
+                    f"Created StudentProfile for {student.name} "
+                    f"({SEED_KEY_STAGE} / {SEED_YEAR_GROUP})"
+                )
+            elif not existing_profile.key_stage or not existing_profile.year_group:
+                # Re-seeding over a DB whose profile predates this — backfill rather than skip,
+                # otherwise the student stays stuck on "Set in your profile" forever.
+                existing_profile.key_stage = existing_profile.key_stage or SEED_KEY_STAGE
+                existing_profile.year_group = existing_profile.year_group or SEED_YEAR_GROUP
+                logger.info(
+                    f"Backfilled key stage / year group for {student.name} "
+                    f"({existing_profile.key_stage} / {existing_profile.year_group})"
+                )
 
         await db.commit()
 

@@ -49,18 +49,12 @@ async def lifespan(app: FastAPI):
     except Exception as _kokoro_err:
         logger.warning(f"Kokoro TTS pre-warm failed (non-fatal): {_kokoro_err}")
 
-    # Resource Hub: kick off an initial sync + start the periodic scheduler
-    # (all non-fatal — the app must boot even if the hub is unreachable). The
-    # initial sync is decoupled from the scheduler so it still runs if APScheduler
-    # is unavailable.
+    # Resource Hub: hand both syncs to the scheduler and move on (non-fatal — the app must
+    # boot even if the hub is unreachable). Startup deliberately does NOT run them itself:
+    # the first run is delayed (RESOURCE_SYNC_START_DELAY_MINUTES, default 5), leaving a
+    # window after a rebuild in which `python -m app.setup --fresh` can drop and recreate
+    # the schema without a sync holding rh_* table locks. See app/jobs/scheduler.py.
     if settings.resource_sync_enabled:
-        try:
-            from app.services import resource_sync_service
-            asyncio.create_task(resource_sync_service.sync_curriculum())
-            asyncio.create_task(resource_sync_service.sync_resources())
-            logger.info("Resource Hub initial sync scheduled.")
-        except Exception as _sync_err:
-            logger.warning(f"Resource Hub initial sync failed (non-fatal): {_sync_err}")
         try:
             from app.jobs.scheduler import start_scheduler
             start_scheduler()

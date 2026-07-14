@@ -198,14 +198,47 @@ def puzzle_tool_groups(ctx: ToolContext) -> dict:
         coordinate / trig topics (mostly KS4/KS5). spec describes the graph:
         {"kind":"line"|"bar"|"scatter"|"function", "title","xlabel","ylabel", and one of:
         "series":[{"points":[[x,y],…],"label"?}], "points":[[x,y],…],
-        "labels"+"values" (bar), or "expr"+"xmin"+"xmax" (function, e.g. "sin(x)", "x**2")}.
+        "labels"+"values" (bar), or for "function": "xmin","xmax" plus EITHER
+        "expr":"x**2"  (one curve)  OR  "functions":[{"expr":"2*x-1","label":"y = 2x - 1"},
+        {"expr":"-x+5","label":"y = -x + 5"}]  (SEVERAL curves, drawn in different colours
+        with a legend).
+
+        EVERY line your question refers to must be in the spec. If you ask where two lines
+        intersect, you MUST pass BOTH of them in "functions" — passing one and describing two
+        is rejected, because the student would be asked about a line that isn't on screen.
+        Pick xmin/xmax so the point you're asking about is actually visible.
+
         `question` is shown to the student; `answer` is the correct answer (private). After
         showing it, WAIT — on submit call graph_evaluator. Call SILENTLY.
         """
-        url = await graph_service.generate_graph(_coerce_dict(spec))
+        spec_d = _coerce_dict(spec)
+        n_curves = graph_service.curve_count(spec_d)
+
+        # Guard the exact failure that shipped: the model asked "where do these two lines
+        # intersect?" while the spec held ONE expression, so one line was drawn and the puzzle
+        # was unanswerable. It then "apologised and fixed it" — and drew one line again,
+        # because nothing ever told it the graph couldn't match the question. Now it does.
+        q = (question or "").lower()
+        implies_multi = any(w in q for w in (
+            "intersect", "cross", "both lines", "two lines", "each other",
+            "simultaneous", "meet",
+        ))
+        if implies_multi and n_curves < 2:
+            return {
+                "action": "show_puzzle", "error": "needs_two_curves",
+                "message": (
+                    "Your question refers to two or more lines but the spec only draws "
+                    f"{n_curves}. Re-call graph_puzzle with kind='function' and "
+                    "\"functions\":[{\"expr\":\"…\",\"label\":\"…\"},{\"expr\":\"…\",\"label\":\"…\"}] "
+                    "so every line you ask about is actually drawn."
+                ),
+            }
+
+        url = await graph_service.generate_graph(spec_d)
         if not url:
             return {"action": "show_puzzle", "error": "graph_failed",
                     "message": "Couldn't draw that graph — ask the question another way."}
+        logger.info("PUZZLE graph curves=%s q=%r", n_curves, (question or "")[:60])
         return await _persist_and_return(puzzle_service.build_graph(question, answer, url))
 
     @tool

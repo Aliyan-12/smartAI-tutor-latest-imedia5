@@ -878,6 +878,10 @@ async def update_learning_preferences(
         "auto_start_next_topic",
         "interests",
         "preferred_subjects",
+        # Both are echoed back in the response but were missing from this list — so a student
+        # changing their key stage or year group in Settings got a cheerful 200 and no write.
+        "year_group",
+        "key_stage",
     ]
     for field in updatable_fields:
         if field in data and data[field] is not None:

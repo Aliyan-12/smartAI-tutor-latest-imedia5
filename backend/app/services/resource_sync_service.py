@@ -8,8 +8,12 @@ Job 2  sync_resources()   — resources + per-slide vectorization (implemented i
 
 Both jobs open their own AsyncSession (they run outside request scope) and are
 idempotent: upsert by the hub's own id, prune rows whose hub id has vanished.
-Run on startup + on an interval by app.jobs.scheduler, or on demand via the
-admin endpoint POST /api/curriculum/sync.
+
+Triggered ONLY by app.jobs.scheduler (first run a few minutes after boot, then on an
+interval) or on demand via the admin endpoint POST /api/curriculum/sync. Startup does
+not run them, and neither does app.setup — see app/jobs/scheduler.py for why. Because
+every trigger now lives in the backend process, the in-process "already running" guard
+below is enough to stop two syncs overlapping.
 """
 import asyncio
 import hashlib
@@ -48,6 +52,31 @@ _sync_state: Dict[str, Dict[str, Any]] = {
 
 def get_sync_state() -> Dict[str, Dict[str, Any]]:
     return _sync_state
+
+
+async def _await_curriculum(timeout_s: float = 900.0) -> None:
+    """Block until the curriculum mirror exists, building it first if it doesn't.
+
+    Job 2 depends on Job 1: it resolves each resource's subject/unit/topic to a hub id by
+    looking it up in the curriculum tables. Run it against an empty or half-built mirror —
+    a fresh database, or simply both jobs firing on the same tick — and every resource is
+    stored with subject_hub_id / unit_hub_id / topic_hub_id NULL, which silently breaks the
+    session slide lookup. So wait for a curriculum sync that's already in flight, and kick
+    one off ourselves if the mirror is empty.
+    """
+    waited = 0.0
+    while _sync_state["curriculum"]["running"] and waited < timeout_s:
+        if waited == 0.0:
+            logger.info("Resource sync: waiting for the in-flight curriculum sync to finish...")
+        await asyncio.sleep(2.0)
+        waited += 2.0
+
+    async with async_session_factory() as db:
+        has_curriculum = (await db.execute(select(RHSubject.id).limit(1))).first() is not None
+
+    if not has_curriculum:
+        logger.info("Resource sync: curriculum mirror is empty — building it first.")
+        await sync_curriculum()
 
 
 # ===========================================================================
@@ -391,6 +420,9 @@ async def sync_resources() -> Dict[str, Any]:
     state["running"] = True
     counts = {"resources": 0, "vectorized": 0, "skipped": 0, "failed": 0, "pruned": 0}
     try:
+        # 0. Job 2 depends on Job 1 — don't start until the curriculum mirror is there.
+        await _await_curriculum()
+
         # 1. Pull every published resource from the hub.
         items: List[dict] = []
         async with ResourceHubClient() as hub:
@@ -481,6 +513,16 @@ async def sync_resources() -> Dict[str, Any]:
 
                 resource.content_hash = new_hash
                 await db.flush()
+                # Commit per resource, not once at the very end. Each iteration is a file
+                # download plus a round of Gemini embeddings, so a full run is minutes long —
+                # and with a single end-of-run commit, ANY interruption (a dropped connection,
+                # a container restart, `app.setup --fresh` disconnecting clients) threw away
+                # every resource processed so far and left the RAG corpus empty. Committing as
+                # we go makes the work durable and the sync resumable: the `content_hash` +
+                # `vectorize_status == "ready"` check above then skips what's already done.
+                # Safe because the session factory sets expire_on_commit=False, so the ORM
+                # objects held in `existing` stay usable after a commit.
+                await db.commit()
 
             # Prune resources removed from the hub.
             for hub_id, resource in existing.items():

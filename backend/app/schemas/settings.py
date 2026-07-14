@@ -14,6 +14,12 @@ class LearningPreferencesUpdate(BaseModel):
     auto_start_next_topic: Optional[bool] = None
     interests: Optional[List[str]] = None
     preferred_subjects: Optional[List[str]] = None
+    # SettingsPage has Key Stage / Year Group fields and PATCHes them here, but they were
+    # declared only on LearningPreferencesResponse — so pydantic silently DROPPED them from the
+    # request body and the response echoed the unchanged DB value straight back. The save
+    # looked like it worked and never wrote anything.
+    year_group: Optional[str] = None
+    key_stage: Optional[str] = None
 
 
 class LearningPreferencesResponse(BaseModel):

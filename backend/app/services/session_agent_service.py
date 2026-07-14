@@ -540,8 +540,11 @@ async def build_session_system_prompt(
     teaching_pace = profile.teaching_pace if profile else "just_right"
     interests_list = profile.interests or [] if profile else []
     interests = ", ".join(interests_list) if interests_list else "not specified"
-    learning_goals_list = profile.learning_goals if profile and hasattr(profile, "learning_goals") and profile.learning_goals else []
-    learning_goals_str = ", ".join(learning_goals_list) if learning_goals_list else "not specified"
+    # learning_goals is a Text column (free prose), NOT a list — ", ".join() on a string
+    # splits it into characters ("algebra" -> "a, l, g, e, b, r, a"), which is what the AI
+    # was being shown. Use it as-is.
+    _goals = (profile.learning_goals or "").strip() if profile else ""
+    learning_goals_str = _goals or "not specified"
     teaching_prefs = profile.teaching_preferences or {} if profile else {}
 
     prefs_parts = []
