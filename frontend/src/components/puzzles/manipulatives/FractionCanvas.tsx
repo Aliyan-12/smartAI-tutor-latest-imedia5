@@ -15,6 +15,10 @@ const FILL_COLOURS = ["#2563eb", "#16a34a", "#f97316", "#ec4899", "#7c3aed", "#d
  * ÷3 gives sixths. Glue puts the whole thing back together so they can try another route.
  */
 export default function FractionCanvas({ payload, onSubmit, disabled }: InteractivePuzzleProps) {
+  // A bar one time, a pie the next — the server alternates. 3/4 of a rectangle and 3/4 of a
+  // circle are the same fraction, and a child who has only ever met one hasn't really met it.
+  const shape = (payload.params.shape as string) || "rectangle";
+
   const [parts, setParts] = useState(1);
   const [filled, setFilled] = useState<Set<number>>(new Set());
   const [colour, setColour] = useState(FILL_COLOURS[0]);
@@ -48,44 +52,83 @@ export default function FractionCanvas({ payload, onSubmit, disabled }: Interact
   const cols = Math.min(parts, Math.ceil(Math.sqrt(parts)));
   const rows = Math.ceil(parts / cols);
 
+  const SIZE = 400;
+
+  /** One pie slice as an SVG wedge. A whole (parts === 1) is just the circle. */
+  const wedge = (i: number) => {
+    const r = SIZE / 2 - 6;
+    const cx = SIZE / 2;
+    const cy = SIZE / 2;
+    if (parts === 1) return `M ${cx} ${cy} m ${-r} 0 a ${r} ${r} 0 1 0 ${r * 2} 0 a ${r} ${r} 0 1 0 ${-r * 2} 0`;
+    const a0 = (i / parts) * 2 * Math.PI - Math.PI / 2;
+    const a1 = ((i + 1) / parts) * 2 * Math.PI - Math.PI / 2;
+    const large = a1 - a0 > Math.PI ? 1 : 0;
+    return [
+      `M ${cx} ${cy}`,
+      `L ${cx + r * Math.cos(a0)} ${cy + r * Math.sin(a0)}`,
+      `A ${r} ${r} 0 ${large} 1 ${cx + r * Math.cos(a1)} ${cy + r * Math.sin(a1)}`,
+      "Z",
+    ].join(" ");
+  };
+
+  const board = shape === "circle" ? (
+    <svg
+      viewBox={`0 0 ${SIZE} ${SIZE}`}
+      style={{ width: "min(58vh, 420px)", height: "min(58vh, 420px)" }}
+    >
+      {Array.from({ length: parts }, (_, i) => (
+        <path
+          key={`${parts}-${i}`}
+          d={wedge(i)}
+          fill={filled.has(i) ? colour : "#f8fafc"}
+          stroke={BAND.ink}
+          strokeWidth={4}
+          style={{ cursor: disabled ? "default" : "pointer", transition: "fill .15s" }}
+          onClick={() => toggle(i)}
+        />
+      ))}
+    </svg>
+  ) : (
+    <div
+      style={{
+        display: "grid",
+        gridTemplateColumns: `repeat(${cols}, 1fr)`,
+        gridTemplateRows: `repeat(${rows}, 1fr)`,
+        gap: 3,
+        width: "min(58vh, 420px)",
+        height: "min(58vh, 420px)",
+        border: `4px solid ${BAND.ink}`,
+        borderRadius: 8,
+        background: BAND.ink,
+        padding: 3,
+      }}
+    >
+      {Array.from({ length: parts }, (_, i) => (
+        <motion.button
+          key={`${parts}-${i}`}
+          layout
+          initial={{ scale: 0.85, opacity: 0 }}
+          animate={{ scale: 1, opacity: 1 }}
+          transition={{ type: "spring", stiffness: 400, damping: 26 }}
+          onClick={() => toggle(i)}
+          disabled={disabled}
+          aria-label={`Part ${i + 1}`}
+          style={{
+            border: "none",
+            borderRadius: 4,
+            cursor: disabled ? "default" : "pointer",
+            background: filled.has(i) ? colour : "#f8fafc",
+            transition: "background .15s",
+          }}
+        />
+      ))}
+    </div>
+  );
+
   return (
     <>
       <Stage style={{ flexDirection: "row", alignItems: "center", gap: 24 }}>
-        {/* The shape */}
-        <div
-          style={{
-            display: "grid",
-            gridTemplateColumns: `repeat(${cols}, 1fr)`,
-            gridTemplateRows: `repeat(${rows}, 1fr)`,
-            gap: 3,
-            width: "min(58vh, 420px)",
-            height: "min(58vh, 420px)",
-            border: `4px solid ${BAND.ink}`,
-            borderRadius: 8,
-            background: BAND.ink,
-            padding: 3,
-          }}
-        >
-          {Array.from({ length: parts }, (_, i) => (
-            <motion.button
-              key={`${parts}-${i}`}
-              layout
-              initial={{ scale: 0.85, opacity: 0 }}
-              animate={{ scale: 1, opacity: 1 }}
-              transition={{ type: "spring", stiffness: 400, damping: 26 }}
-              onClick={() => toggle(i)}
-              disabled={disabled}
-              aria-label={`Part ${i + 1}`}
-              style={{
-                border: "none",
-                borderRadius: 4,
-                cursor: disabled ? "default" : "pointer",
-                background: filled.has(i) ? colour : "#f8fafc",
-                transition: "background .15s",
-              }}
-            />
-          ))}
-        </div>
+        {board}
 
         {/* Tools */}
         <div style={{ display: "flex", flexDirection: "column", gap: 12, flexShrink: 0 }}>

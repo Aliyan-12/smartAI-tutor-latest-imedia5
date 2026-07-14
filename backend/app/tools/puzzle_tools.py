@@ -84,6 +84,9 @@ def puzzle_tool_groups(ctx: ToolContext) -> dict:
                 await manipulative_service.bump_mix(
                     ctx.db, ctx.appointment_id,
                     "manipulative" if ptype == "manipulative" else "classic",
+                    # For a manipulative, `render` IS the kind — recorded so the next
+                    # suggestion can avoid repeating it.
+                    kind=full.get("render") if ptype == "manipulative" else None,
                 )
             except Exception as e:  # noqa: BLE001
                 logger.warning("bump_mix failed: %s", e)

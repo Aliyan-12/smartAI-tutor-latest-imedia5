@@ -1603,7 +1603,8 @@ async def _resolve_appt_id(db: AsyncSession, chat_id: int) -> Optional[int]:
     return _appt_id_from_chat(chat) if chat else None
 
 
-def _puzzle_state_lines(pstate: Optional[dict], next_style: str = "") -> str:
+def _puzzle_state_lines(pstate: Optional[dict], next_style: str = "",
+                        next_kind: str = "") -> str:
     """The interactive-puzzle portion of the LESSON STATE anchor: exactly what puzzle
     (if any) is on the student's screen right now and what to do about it.
 
@@ -1618,8 +1619,16 @@ def _puzzle_state_lines(pstate: Optional[dict], next_style: str = "") -> str:
         if next_style == "manipulative":
             style_line = (
                 "• 🧩 NEXT PUZZLE STYLE: HANDS-ON. Use manipulative_puzzle — this student's age "
-                "learns by doing, not by typing. Pick the kind that fits what you're teaching.\n"
+                "learns by doing, not by typing.\n"
             )
+            if next_kind:
+                style_line += (
+                    f"• 🎲 USE kind=\"{next_kind}\" for it. This is chosen fresh each time so the "
+                    "student can't predict what's coming — do NOT default to the same activity "
+                    "you used last time. Override it ONLY if this kind genuinely cannot carry "
+                    "the concept you're teaching right now (e.g. a fractions lesson can't use "
+                    "times_table_dash); in that case pick the closest kind that can.\n"
+                )
         elif next_style == "classic":
             style_line = (
                 "• 🧩 NEXT PUZZLE STYLE: CLASSIC. Use math_puzzle / graph_puzzle this time "
@@ -1786,16 +1795,24 @@ async def build_lesson_state_anchor(
     # KS3 60%, KS4 30%, KS5 0%). Computed server-side from what's actually been shown so far,
     # so the ratio is achieved rather than left to the model's judgement.
     next_style = ""
+    next_kind = ""
     try:
         from app.services import manipulative_service
         _ks = getattr(appointment, "key_stage", None) if appointment is not None else None
         if manipulative_service.manipulatives_enabled(_ks):
             _mix = await manipulative_service.get_mix(db, appt_id)
             next_style = manipulative_service.next_puzzle_style(_ks, _mix)
+            if next_style == "manipulative":
+                # The SERVER picks the activity, at random and never the one just used. Left to
+                # itself the model runs the same sequence every lesson (counting → counters →
+                # …), because the tool's docstring lists them in an order and the model follows
+                # it. Choosing here is the only thing that actually varies the order.
+                _hist = await manipulative_service.get_history(db, appt_id)
+                next_kind = manipulative_service.suggest_kind(_ks, _hist)
     except Exception:
         logger.warning("puzzle-mix anchor failed for appt %s", appt_id, exc_info=True)
 
-    lines.append(_puzzle_state_lines(pstate, next_style))
+    lines.append(_puzzle_state_lines(pstate, next_style, next_kind))
     if available_actions:
         lines.append(
             f"🛠 AVAILABLE ACTIONS THIS TURN: {available_actions}. "

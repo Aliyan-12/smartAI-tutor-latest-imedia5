@@ -139,6 +139,35 @@ def _commaed(n: int) -> str:
     return f"{n:,}"
 
 
+# ── Variation ────────────────────────────────────────────────────────────────────
+# Every build draws from a FRESH, unseeded RNG. The first version of this file seeded each
+# builder from its own params ("so the puzzle can't drift from its solution") — which was
+# wrong twice over: the generated params AND the solution are both persisted in puzzle_state,
+# so nothing needed to be reproducible, and the effect was that identical params produced a
+# byte-identical puzzle every single time. The 8x table always asked the same ten questions in
+# the same order. A child who saw it twice had memorised it.
+#
+# So: same params, different puzzle, every time — and a `variant` on each kind so the SHAPE of
+# the activity changes too, not just the numbers.
+
+def _rng() -> random.Random:
+    return random.Random()
+
+
+def _pick(seq: List[Any]) -> Any:
+    return _rng().choice(seq)
+
+
+COUNTER_SHAPES = ["circle", "square", "diamond", "star"]
+DOT_THEMES = ["#60a5fa", "#f472b6", "#4ade80", "#fbbf24", "#c084fc", "#22d3ee"]
+COUNT_ITEMS = [
+    ("apples", "🍎"), ("stars", "⭐"), ("frogs", "🐸"), ("cars", "🚗"), ("cakes", "🧁"),
+    ("fish", "🐠"), ("balloons", "🎈"), ("ducks", "🦆"), ("shells", "🐚"), ("bees", "🐝"),
+]
+COUNT_LAYOUTS = ["scatter", "rows", "ten_frame"]
+FRACTION_SHAPES = ["rectangle", "circle"]
+
+
 # ── 1. place_value_counters ──────────────────────────────────────────────────────
 # Columns of draggable counters (1000s / 100s / 10s / 1s) with +/- controls, an expanded
 # form line and a running total. Params: {"target": 3471}.
@@ -169,7 +198,10 @@ def _build_place_value(p: dict, key_stage: Optional[str] = None) -> Tuple[dict, 
     expanded = " + ".join(
         _commaed(digits[str(pl)] * pl) for pl in _PLACES if digits[str(pl)] > 0
     )
-    clean = {"target": target, "columns": columns, "expanded": expanded, "max_per_column": 9}
+    clean = {
+        "target": target, "columns": columns, "expanded": expanded, "max_per_column": 9,
+        "counter_shape": _pick(COUNTER_SHAPES),
+    }
     prompt = f"Build {_commaed(target)} using the counters. Add or take away until the total is right."
     return clean, digits, prompt, f"Make {_commaed(target)}"
 
@@ -249,18 +281,31 @@ def _build_number_grid(p: dict, key_stage: Optional[str] = None) -> Tuple[dict, 
                 if v is not None:
                     flat.append(v)
     need = size * size
-    rng = random.Random(size * 31 + len(flat))
+    rng = _rng()
     while len(flat) < need:
         flat.append(rng.randint(1, 9))
     grid = [[max(1, min(9, flat[r * size + c])) for c in range(size)] for r in range(size)]
 
-    # Blank one cell per row, stepping the column each time — deterministic, and it
-    # guarantees no row or column is left entirely blank (which would be unsolvable).
-    blanks = [[r, (r + 1) % size] for r in range(size)]
+    # Blank one cell per row, each in a DIFFERENT column (a random permutation, so no row or
+    # column is ever left entirely blank — that would be unsolvable). This used to be
+    # `(r + 1) % size`, so the holes appeared on the same diagonal every single time and a
+    # student learned the shape of the puzzle instead of the maths.
+    hole_cols = list(range(size))
+    rng.shuffle(hole_cols)
+    blanks = [[r, hole_cols[r]] for r in range(size)]
     solution = {f"{r},{c}": grid[r][c] for r, c in blanks}
 
-    tiles = sorted(solution.values())
+    tiles = list(solution.values())
+    # A spare tile that fits nowhere, so the tray can't be solved by elimination alone.
+    if size >= 3:
+        needed = sorted(tiles)
+        for _ in range(12):
+            decoy = rng.randint(1, 9)
+            if decoy not in needed:
+                tiles.append(decoy)
+                break
     rng.shuffle(tiles)
+
     clean = {
         "size": size,
         "grid": [[(None if [r, c] in blanks else grid[r][c]) for c in range(size)]
@@ -300,12 +345,24 @@ def _build_times_table(p: dict, key_stage: Optional[str] = None) -> Tuple[dict, 
     )
     count = _clampi(p.get("count", p.get("questions")), 5, 20, 10)
     seconds = _clampi(p.get("seconds", p.get("time_limit")), 30, 180, 60)
-    # Deterministic question set: seeded so the prompt, the cards and the solution can never
-    # drift apart across a rebuild or a re-read of the persisted state.
-    rng = random.Random(table * 1000 + count)
-    others = [rng.randint(1, 12) for _ in range(count)]
-    questions = [{"a": table, "b": b} for b in others]
-    solution = [table * b for b in others]
+
+    rng = _rng()
+    # Draw WITHOUT replacement first, so a 10-question round covers ten different facts rather
+    # than asking 8x7 three times. Only once all twelve are used do we start repeating.
+    pool = list(range(1, 13))
+    rng.shuffle(pool)
+    others = [pool[i % 12] for i in range(count)]
+    if count > 12:
+        rng.shuffle(others)
+
+    # Half the time, flip the card round (7 x 8 instead of 8 x 7). Commutativity is worth
+    # meeting by surprise, and it stops the deck being recognisable at a glance.
+    questions = [
+        {"a": table, "b": b} if rng.random() < 0.5 else {"a": b, "b": table}
+        for b in others
+    ]
+    solution = [q["a"] * q["b"] for q in questions]
+
     clean = {"table": table, "questions": questions, "seconds": seconds}
     prompt = (f"Answer as many {table}× questions as you can before the timer runs out. "
               f"Tap the numbers, then the green tick.")
@@ -345,7 +402,12 @@ def _build_fraction_canvas(p: dict, key_stage: Optional[str] = None) -> Tuple[di
         p, ("shaded", "numerator", "filled"), 0, den,
         f"It's how many of the {den} parts must be coloured in (the top of the fraction).",
     )
-    clean = {"denominator": den, "shaded": num, "shape": "rectangle"}
+    # A bar one time, a pie the next. Same fraction, different mental picture — which is the
+    # point: a child who only ever meets 3/4 as a rectangle hasn't really met 3/4.
+    shape = str(p.get("shape") or "").strip().lower()
+    if shape not in FRACTION_SHAPES:
+        shape = _pick(FRACTION_SHAPES)
+    clean = {"denominator": den, "shaded": num, "shape": shape}
     part_word = "part" if num == 1 else "parts"
     prompt = (f"Split the shape into {den} equal parts, then colour in {num} {part_word} "
               f"to show {num}/{den}.")
@@ -385,7 +447,7 @@ def _build_dot_array(p: dict, key_stage: Optional[str] = None) -> Tuple[dict, An
         "It's how many dots are in each row — the second number of the multiplication.",
     )
     product = rows * cols
-    clean = {"rows": rows, "cols": cols, "max": 12}
+    clean = {"rows": rows, "cols": cols, "max": 12, "dot_colour": _pick(DOT_THEMES)}
     prompt = (f"Build the array for {rows} × {cols} — make {rows} rows of {cols} dots — "
               f"then type the answer.")
     return clean, {"rows": rows, "cols": cols, "product": product}, prompt, f"{rows} × {cols}"
@@ -420,8 +482,21 @@ def _build_counting(p: dict, key_stage: Optional[str] = None) -> Tuple[dict, Any
         "It's how many objects to draw — and it must fit the lesson's range "
         "('within 10' means 1-10).",
     )
-    item = str(p.get("item", p.get("object", "bubbles")) or "bubbles").strip() or "bubbles"
-    clean = {"count": count, "item": item}
+    # If the tutor didn't name the objects, pick some — and pick DIFFERENT ones each time. Ten
+    # apples, then ten apples again, is the same picture; ten frogs is a new one.
+    item = str(p.get("item", p.get("object", "")) or "").strip()
+    emoji = ""
+    if item:
+        emoji = next((e for name, e in COUNT_ITEMS if name == item.lower()), "")
+    else:
+        item, emoji = _pick(COUNT_ITEMS)
+
+    clean = {
+        "count": count, "item": item, "emoji": emoji,
+        # scatter / neat rows / a ten-frame. The ten-frame is the one that actually teaches
+        # number bonds, so it isn't just decoration.
+        "layout": _pick(COUNT_LAYOUTS) if count <= 10 else _pick(["scatter", "rows"]),
+    }
     prompt = f"How many {item} can you count? Tap each one, then type your answer."
     return clean, count, prompt, "Count them all"
 
@@ -563,18 +638,60 @@ async def get_mix(db: AsyncSession, appointment_id: int) -> dict:
     return dict(plan.session_state.get("puzzle_mix") or {"manipulative": 0, "classic": 0})
 
 
-async def bump_mix(db: AsyncSession, appointment_id: int, style: str) -> None:
-    """Count a shown puzzle against the quota. Read-modify-write the whole session_state dict
-    (the same pattern as puzzle_service.set_puzzle_shown) — session_state is a JSONB column,
-    so mutating a nested key in place would not be seen as dirty and would silently not save.
+async def bump_mix(db: AsyncSession, appointment_id: int, style: str,
+                   kind: Optional[str] = None) -> None:
+    """Count a shown puzzle against the quota, and remember WHICH activity it was.
+
+    Read-modify-write the whole session_state dict (the same pattern as
+    puzzle_service.set_puzzle_shown) — session_state is a JSONB column, so mutating a nested
+    key in place isn't seen as dirty and would silently not save. Both the mix and the history
+    are written in ONE pass for the same reason: two separate read-modify-writes would clobber
+    each other.
     """
     plan = await _load_plan(db, appointment_id)
     if plan is None:
         return
     state = dict(plan.session_state) if plan.session_state else {}
+
     mix = dict(state.get("puzzle_mix") or {"manipulative": 0, "classic": 0})
     key = "manipulative" if style == "manipulative" else "classic"
     mix[key] = int(mix.get(key, 0) or 0) + 1
     state["puzzle_mix"] = mix
+
+    if kind:
+        history = list(state.get("manip_history") or [])
+        history.append(kind)
+        state["manip_history"] = history[-12:]
+
     plan.session_state = state
     await db.flush()
+
+
+async def get_history(db: AsyncSession, appointment_id: int) -> List[str]:
+    plan = await _load_plan(db, appointment_id)
+    if plan is None or not plan.session_state:
+        return []
+    return list(plan.session_state.get("manip_history") or [])
+
+
+def suggest_kind(key_stage: Optional[str], history: Optional[List[str]] = None) -> str:
+    """Pick the NEXT hands-on activity — at random, and never the one just used.
+
+    Left to itself the model reaches for the same activity in the same order every lesson
+    (counting, then counters, then the same third thing), because a list in a docstring has an
+    order and an LLM has a bias. So the SERVER chooses and the anchor tells it what to use.
+
+    Not a pure coin flip: activities used least this lesson are preferred, and the most recent
+    one is excluded outright, so a short lesson still gets genuine variety rather than random
+    repetition.
+    """
+    allowed = allowed_kinds(key_stage)
+    if not allowed:
+        return ""
+    hist = list(history or [])
+    recent = hist[-1] if hist else None
+
+    pool = [k for k in allowed if k != recent] or allowed
+    fewest = min(hist.count(k) for k in pool)
+    least_used = [k for k in pool if hist.count(k) == fewest]
+    return _rng().choice(least_used)

@@ -6,6 +6,15 @@ import { playTapSound } from "../../../lib/sounds";
 
 interface Column { place: number; label: string; colour: string }
 
+/** The counters aren't always discs — the server picks a shape per puzzle, so the board never
+ *  looks identical twice. Purely cosmetic; the maths is the same. */
+const SHAPE_STYLE: Record<string, React.CSSProperties> = {
+  circle:  { borderRadius: "50%" },
+  square:  { borderRadius: 6 },
+  diamond: { borderRadius: 4, transform: "rotate(45deg)" },
+  star:    { borderRadius: "50%", clipPath: "polygon(50% 0%, 61% 35%, 98% 35%, 68% 57%, 79% 91%, 50% 70%, 21% 91%, 32% 57%, 2% 35%, 39% 35%)" },
+};
+
 /**
  * Place value as physical counters. Each column holds up to 9 counters; +/- adds and removes
  * them, the expanded form builds itself underneath, and the running total updates live — so
@@ -14,6 +23,7 @@ interface Column { place: number; label: string; colour: string }
 export default function PlaceValueCounters({ payload, onSubmit, disabled }: InteractivePuzzleProps) {
   const columns = (payload.params.columns as Column[]) || [];
   const maxPer = (payload.params.max_per_column as number) ?? 9;
+  const shape = SHAPE_STYLE[(payload.params.counter_shape as string) || "circle"] ?? SHAPE_STYLE.circle;
 
   const [counts, setCounts] = useState<Record<string, number>>(
     () => Object.fromEntries(columns.map((c) => [String(c.place), 0])),
@@ -76,9 +86,9 @@ export default function PlaceValueCounters({ payload, onSubmit, disabled }: Inte
                         style={{
                           width: 34,
                           height: 34,
-                          borderRadius: "50%",
                           background: col.colour,
                           boxShadow: "inset 0 -3px 0 rgba(0,0,0,0.14)",
+                          ...shape,
                         }}
                       />
                     ))}

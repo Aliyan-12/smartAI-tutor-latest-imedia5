@@ -11,6 +11,7 @@ import { playTapSound } from "../../../lib/sounds";
  */
 export default function DotArray({ payload, onSubmit, disabled }: InteractivePuzzleProps) {
   const max = (payload.params.max as number) ?? 12;
+  const dotColour = (payload.params.dot_colour as string) || "#60a5fa";
 
   const [rows, setRows] = useState(1);
   const [cols, setCols] = useState(1);
@@ -65,7 +66,7 @@ export default function DotArray({ payload, onSubmit, disabled }: InteractivePuz
                       width: Math.max(16, Math.min(30, 300 / Math.max(rows, cols))),
                       height: Math.max(16, Math.min(30, 300 / Math.max(rows, cols))),
                       borderRadius: "50%",
-                      background: "#60a5fa",
+                      background: dotColour,
                     }}
                   />
                 ))}
