@@ -49,6 +49,67 @@ async def _load_student_profile(db: AsyncSession, student_id: int) -> Optional[S
     return result.scalar_one_or_none()
 
 
+# ── Who are we actually teaching? ─────────────────────────────────────────────
+# The tutor used to be told the XP level and the learning style but NOT the year group, so a
+# Year 2 child and a Year 12 student got the same register, the same sentence length and the
+# same kind of practice. Year group is the sharpest signal we have; the appointment's key
+# stage is the fallback when onboarding never captured one.
+
+def _parse_year(year_group: Optional[str]) -> Optional[int]:
+    """'Year 4' / 'Y4' / '4' -> 4; 'Reception' -> 0. None when we genuinely don't know."""
+    if not year_group:
+        return None
+    s = str(year_group).strip().lower()
+    if s.startswith("recep") or s in ("r", "eyfs"):
+        return 0
+    digits = "".join(ch for ch in s if ch.isdigit())
+    if not digits:
+        return None
+    try:
+        n = int(digits)
+    except ValueError:
+        return None
+    return n if 0 <= n <= 13 else None
+
+
+# (year_min, year_max) -> (age range, how to teach them)
+_AGE_BANDS = [
+    (0, 2, "4-7", (
+        "Speak in very short, simple sentences — 1-2 at a time, then stop. One idea per turn. "
+        "No jargon at all. Praise warmly and often. Give them something to DO every few minutes "
+        "(a hands-on activity beats an explanation). Never write a paragraph."
+    )),
+    (3, 6, "7-11", (
+        "Keep it bright, short and concrete — 2-3 sentences, then a question or an activity. "
+        "Use real, everyday examples they can picture. Mix explaining with frequent doing, and "
+        "celebrate progress out loud."
+    )),
+    (7, 9, "11-14", (
+        "Clear, modern and to the point — up to 4-5 sentences. Use proper terminology but define "
+        "it the first time. Show a worked example, then get them practising. Treat them as capable "
+        "of some independence."
+    )),
+    (10, 13, "14-18", (
+        "Exam-focused and precise. Use correct technical terminology and mark-scheme language. No "
+        "childish framing, no gimmicks, no over-praise. Be concise, show method and marks, and "
+        "point out the exam traps."
+    )),
+]
+
+
+def _age_guidance(year_group: Optional[str], key_stage: Optional[str]) -> tuple[str, str]:
+    """(age_range, teaching guidance) for this student. Falls back through year group →
+    key stage → the middle band, so it always returns something usable."""
+    y = _parse_year(year_group)
+    if y is None:
+        ks = (key_stage or "").upper().replace(" ", "")
+        y = {"KS1": 1, "KS2": 4, "KS3": 8, "KS4": 10, "KS5": 12}.get(ks, 8)
+    for lo, hi, ages, guidance in _AGE_BANDS:
+        if lo <= y <= hi:
+            return ages, guidance
+    return _AGE_BANDS[2][2], _AGE_BANDS[2][3]
+
+
 async def _load_topic_mastery(
     db: AsyncSession,
     student_id: int,
@@ -560,6 +621,35 @@ async def build_session_system_prompt(
         prefs_parts.append("analogies")
     preferences_str = ", ".join(prefs_parts) if prefs_parts else "not specified"
 
+    # WHO we're teaching. Built as a plain string OUTSIDE the big f-string below: that
+    # f-string contains no literal braces, and a stray '{' from a profile value would blow up
+    # the whole system prompt at format time ("Session prompt build failed") — leaving the
+    # tutor with no instructions at all.
+    student_year_group = (getattr(profile, "year_group", None) if profile else None) or ""
+    profile_key_stage = (getattr(profile, "key_stage", None) if profile else None) or ""
+    age_range, age_guidance = _age_guidance(student_year_group, profile_key_stage or key_stage)
+    streak = getattr(profile, "current_streak", 0) if profile else 0
+    subj_list = ", ".join(getattr(profile, "preferred_subjects", None) or []) if profile else ""
+
+    student_section = "\n".join([
+        "STUDENT PROFILE — WHO YOU ARE TEACHING:",
+        f"- Year group: {student_year_group or 'not set'} "
+        f"(Key Stage {profile_key_stage or key_stage}, roughly {age_range} years old)",
+        f"- HOW TO PITCH IT: {age_guidance}",
+        f"- Learning style: {learning_style} | Pace: {teaching_pace} | Prefers: {preferences_str}",
+        f"- Interests: {interests}"
+        + (f" | Favourite subjects: {subj_list}" if subj_list else ""),
+        f"- Their goal: {learning_goals_str}",
+        f"- XP level {xp_level}/10"
+        + (f" · {streak}-day streak" if streak else "")
+        + ". Weave their interests into your examples — it's the fastest way to make an idea land.",
+    ])
+    logger.info(
+        "STUDENT CONTEXT appt=%s student=%s year_group=%r key_stage=%r -> ages %s",
+        appointment_id, student_id, student_year_group or None,
+        profile_key_stage or key_stage, age_range,
+    )
+
     # Load topic mastery
     mastery_rows = await _load_topic_mastery(db, student_id, subject, key_stage)
     weak_topics = [
@@ -934,10 +1024,7 @@ TUTOR NOTES FROM BOOKING:
 {tutor_notes}
 {materials_section}
 
-STUDENT PROFILE:
-- XP Level: {xp_level}/10 | Learning Style: {learning_style} | Pace: {teaching_pace}
-- Interests: {interests} | Preferences: {preferences_str}
-- Learning Goals: {learning_goals_str}
+{student_section}
 
 STUDENT PROGRESS IN {subject.upper()}:
 - Strong: {strong_str}
@@ -1012,7 +1099,7 @@ RULE 1 — READ USER INTENT, NOT LITERAL TEXT:
 
 RULE 2 — STEP TYPE (teach visually; practise in puzzle form, NOT plain text):
    - During RECAP or TEACH steps: PURE TEACHING only. Do NOT ask check questions. Teach clearly (use slides, or generate an explanatory_puzzle diagram to explain it), then move on.
-   - During PRACTICE steps: ASK IN PUZZLE FORM. Generate the fitting puzzle (labelling / matching / math / graph — see GENERATIVE PUZZLES below), invite the student to have a go, and WAIT for the [PUZZLE RESULT]. A plain typed question is a LAST resort — only if a puzzle genuinely can't capture the concept.
+   - During PRACTICE steps: ASK IN PUZZLE FORM. Generate the fitting puzzle (manipulative / labelling / matching / math / graph — see GENERATIVE PUZZLES below), invite the student to have a go, and WAIT for the [PUZZLE RESULT]. A plain typed question is a LAST resort — only if a puzzle genuinely can't capture the concept.
    - After the student's answer is marked by the evaluator: ONE warm sentence, then continue. No lengthy praise.
 
    ── WHEN QUIZ STATUS = QUIZ PHASE ACTIVE ──
@@ -1079,10 +1166,11 @@ WHEN IT'S TIME TO PRACTISE / QUIZ (ask in PUZZLE form, never plain text):
   • matching_puzzle — several pictures + jumbled names, student matches them.
   • math_puzzle — a maths problem shown as LaTeX (equations, arithmetic, algebra). Never ask maths as plain chat text.
   • diagram_math_puzzle — a DETERMINISTIC drawn diagram whose answer the SERVER computes, so it is ALWAYS right. USE THIS (never a generated image) for anything where the EXACT picture decides the answer: fractions (concept "fraction", with a total and a shaded count), telling the time (concept "clock", with an hour and a minute), and reading a length off a ruler (concept "ruler", with a length in cm and the object's name). A generated photo cannot render exact counts, hand positions or ruler scales, so its answer would be wrong — that is why the ruler and fraction answers got marked wrong before. You do NOT supply the answer for these — the server derives it from the numbers you give.
+  • manipulative_puzzle — a HANDS-ON activity the student plays with (taps, drags, colours) instead of typing: place_value_counters · column_addition · number_grid_sums · times_table_dash · fraction_canvas · dot_array · counting_bubbles. THE BEST practice tool for younger students. You pass ONLY the kind + its params ({{"target": 3471}}) — never a question, never an answer; the server writes both, so it cannot contradict itself. Mark it with manipulative_evaluator.
   • graph_puzzle — a real matplotlib graph + a question (coordinates, straight lines, quadratics, trig — mostly KS4/KS5).
 - You supply the pedagogy (the labels + image prompts, the correct answer, the graph spec); the tool draws it and keeps the answer private.
-- MARKING: when the [PUZZLE RESULT] arrives, call the MATCHING evaluator — labelling_evaluator / matching_evaluator / math_evaluator / graph_evaluator — and then, in ONE message, use ITS verdict to give warm feedback (praise what's right; a gentle hint for anything wrong, without revealing the answer). Never guess the mark yourself, and never state the verdict before you've called the evaluator.
-- AGE-APPROPRIATE: scale difficulty to the key stage + year group. ONE focused puzzle per concept, then move on — don't spam.
+- MARKING: when the [PUZZLE RESULT] arrives, call the MATCHING evaluator — labelling_evaluator / matching_evaluator / math_evaluator / graph_evaluator / manipulative_evaluator — and then, in ONE message, use ITS verdict to give warm feedback (praise what's right; a gentle hint for anything wrong, without revealing the answer). Never guess the mark yourself, and never state the verdict before you've called the evaluator.
+- AGE-APPROPRIATE: scale difficulty to the key stage + year group (see STUDENT PROFILE). The younger the student, the more of their practice should be HANDS-ON rather than typed — the LESSON STATE anchor tells you the style to use for the next puzzle; follow it. ONE focused puzzle per concept, then move on — don't spam.
 - If a generator returns an 'error', do NOT tell the student to look at anything — briefly try once more or ask the question another way.
 - Never write a tool call as text or read out raw params; the visual just appears on screen.
 - ACTIONS, NOT NARRATION: if you say you're clearing/moving on, actually call clear_puzzle in the SAME turn (moving to a slide also clears it). Do the action — don't just describe it.
@@ -1515,17 +1603,36 @@ async def _resolve_appt_id(db: AsyncSession, chat_id: int) -> Optional[int]:
     return _appt_id_from_chat(chat) if chat else None
 
 
-def _puzzle_state_lines(pstate: Optional[dict]) -> str:
+def _puzzle_state_lines(pstate: Optional[dict], next_style: str = "") -> str:
     """The interactive-puzzle portion of the LESSON STATE anchor: exactly what puzzle
-    (if any) is on the student's screen right now and what to do about it."""
+    (if any) is on the student's screen right now and what to do about it.
+
+    `next_style` ("manipulative" | "classic" | "") is the running age quota — KS1/KS2 get
+    100% hands-on, KS3 60%, KS4 30%, KS5 none. Telling the model the style for the NEXT
+    puzzle here (rather than hoping it infers it from the key stage) is what actually holds
+    the ratio.
+    """
     status = (pstate or {}).get("status")
     if not pstate or status in (None, "cleared"):
+        style_line = ""
+        if next_style == "manipulative":
+            style_line = (
+                "• 🧩 NEXT PUZZLE STYLE: HANDS-ON. Use manipulative_puzzle — this student's age "
+                "learns by doing, not by typing. Pick the kind that fits what you're teaching.\n"
+            )
+        elif next_style == "classic":
+            style_line = (
+                "• 🧩 NEXT PUZZLE STYLE: CLASSIC. Use math_puzzle / graph_puzzle this time "
+                "(keep the hands-on activities for their share of the practice).\n"
+            )
         return (
             "Puzzle: NONE on screen right now.\n"
             "• To EXPLAIN a concept (teaching, or a student who's stuck) call explanatory_puzzle.\n"
-            "• To PRACTISE/QUIZ, generate the fitting puzzle yourself — labelling_puzzle / "
-            "matching_puzzle / math_puzzle / graph_puzzle — don't expect one to already be there.\n"
-            "• NEVER tell the student to look at / name / solve / 'see' a puzzle unless a generator "
+            "• To PRACTISE/QUIZ, generate the fitting puzzle yourself — manipulative_puzzle / "
+            "labelling_puzzle / matching_puzzle / math_puzzle / graph_puzzle — don't expect one "
+            "to already be there.\n"
+            + style_line
+            + "• NEVER tell the student to look at / name / solve / 'see' a puzzle unless a generator "
             "tool just returned successfully (no 'error'). Otherwise there's nothing on screen."
         )
     ptype = pstate.get("puzzle_type", "puzzle")
@@ -1675,7 +1782,20 @@ async def build_lesson_state_anchor(
         except Exception:
             pass
 
-    lines.append(_puzzle_state_lines(pstate))
+    # Which style the NEXT puzzle should be, from the running age quota (KS1/KS2 100% hands-on,
+    # KS3 60%, KS4 30%, KS5 0%). Computed server-side from what's actually been shown so far,
+    # so the ratio is achieved rather than left to the model's judgement.
+    next_style = ""
+    try:
+        from app.services import manipulative_service
+        _ks = getattr(appointment, "key_stage", None) if appointment is not None else None
+        if manipulative_service.manipulatives_enabled(_ks):
+            _mix = await manipulative_service.get_mix(db, appt_id)
+            next_style = manipulative_service.next_puzzle_style(_ks, _mix)
+    except Exception:
+        logger.warning("puzzle-mix anchor failed for appt %s", appt_id, exc_info=True)
+
+    lines.append(_puzzle_state_lines(pstate, next_style))
     if available_actions:
         lines.append(
             f"🛠 AVAILABLE ACTIONS THIS TURN: {available_actions}. "
@@ -2123,10 +2243,13 @@ _THINKING_LABELS: dict = {
     "labelling_puzzle": "Setting up a labelling puzzle",
     "matching_puzzle": "Setting up a matching puzzle",
     "math_puzzle": "Writing a maths problem",
+    "diagram_math_puzzle": "Drawing a maths diagram",
+    "manipulative_puzzle": "Setting up a hands-on activity",
     "graph_puzzle": "Drawing a graph",
     "clear_puzzle": "Clearing the puzzle",
     "labelling_evaluator": "Checking the answer",
     "matching_evaluator": "Checking the answer",
+    "manipulative_evaluator": "Checking the answer",
     "math_evaluator": "Checking the answer",
     "graph_evaluator": "Checking the answer",
     "generate_quiz": "Putting together a quick quiz",

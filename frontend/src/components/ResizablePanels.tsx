@@ -14,8 +14,14 @@ interface Props {
 }
 
 export default function ResizablePanels({ panels, initialWidths }: Props) {
-  const [widths, setWidths] = useState<number[]>(initialWidths ?? [35, 30, 35]);
-  const [hidden, setHidden] = useState<boolean[]>([false, false, false]);
+  // Everything below is sized off panels.length. These used to be hard-coded to three entries
+  // ([35,30,35] / [false,false,false]), which happened to work only because there were always
+  // exactly three panels — an even split is the honest default for any other count.
+  const evenWidths = () => panels.map(() => 100 / panels.length);
+  const [widths, setWidths] = useState<number[]>(
+    initialWidths && initialWidths.length === panels.length ? initialWidths : evenWidths(),
+  );
+  const [hidden, setHidden] = useState<boolean[]>(() => panels.map(() => false));
 
   const containerRef = useRef<HTMLDivElement>(null);
   const draggingRef = useRef<{
@@ -23,7 +29,9 @@ export default function ResizablePanels({ panels, initialWidths }: Props) {
     startX: number;
     startWidths: number[];
   } | null>(null);
-  const prevWidthsRef = useRef<number[]>(initialWidths ? [...initialWidths] : [35, 30, 35]);
+  const prevWidthsRef = useRef<number[]>(
+    initialWidths && initialWidths.length === panels.length ? [...initialWidths] : evenWidths(),
+  );
 
   const hidePanel = (i: number) => {
     const newHidden = [...hidden];

@@ -15,7 +15,7 @@ from typing import Any, List, Optional, Union
 
 from langchain_core.tools import tool
 
-from app.services import image_gen_service, graph_service, puzzle_service
+from app.services import image_gen_service, graph_service, puzzle_service, manipulative_service
 from app.tools.session_tools import ToolContext
 
 logger = logging.getLogger(__name__)
@@ -75,6 +75,18 @@ def puzzle_tool_groups(ctx: ToolContext) -> dict:
         except Exception as e:  # noqa: BLE001
             logger.warning("set_puzzle_shown failed: %s", e)
             instance_id = ""
+        ptype = full.get("puzzle_type")
+        # Count it against the hands-on quota (KS1/2 100% · KS3 60% · KS4 30% · KS5 0%), which
+        # is what the LESSON STATE anchor reads to tell the model which style to use next.
+        # `explanatory` is a teaching diagram, not practice, so it doesn't count either way.
+        if ptype != "explanatory":
+            try:
+                await manipulative_service.bump_mix(
+                    ctx.db, ctx.appointment_id,
+                    "manipulative" if ptype == "manipulative" else "classic",
+                )
+            except Exception as e:  # noqa: BLE001
+                logger.warning("bump_mix failed: %s", e)
         client = puzzle_service._client_payload(full)
         client["instance_id"] = instance_id
         client["rendered"] = True
@@ -242,6 +254,87 @@ def puzzle_tool_groups(ctx: ToolContext) -> dict:
         return await _persist_and_return(puzzle_service.build_graph(question, answer, url))
 
     @tool
+    async def manipulative_puzzle(kind: str, params: Union[dict, str] = "") -> dict:
+        """
+        Practice: a HANDS-ON maths activity the student physically plays with — tapping,
+        dragging, colouring — instead of typing an answer into a box. This is the BEST
+        practice tool for younger students (KS1/KS2), and the one to reach for whenever the
+        LESSON STATE anchor says the next puzzle should be an interactive manipulative.
+
+        You pass ONLY `kind` and its params. Do NOT pass a question and do NOT pass an
+        answer — the server writes the question and works out the answer itself from your
+        params, so the activity can never disagree with the marking.
+
+        SIZE THE NUMBERS TO THIS LESSON. Every param is REQUIRED and there are NO defaults:
+        if you leave one out the call is rejected, because a made-up number is worse than no
+        puzzle. Read the lesson's topic and the student's year group, and match them exactly —
+        a Year 1 "Place Value (within 10)" lesson means target 1-9, NOT 3,471. "Within 100"
+        means up to 99; "within 1000" up to 999. The NUMBER you pass is the difficulty.
+
+          • kind="place_value_counters", params {"target": 6}   ← "within 10" lesson
+              Counters in 1000s/100s/10s/1s columns with +/- buttons, an expanded-form line and
+              a running total. All four columns are ALWAYS shown, whatever the target — working
+              out that 6 has zero thousands, zero hundreds and zero tens IS the place-value
+              skill. For place value and expanded form.
+          • kind="column_addition", params {"addends": [24, 38]}
+              A column sum with per-digit answer boxes. 2-4 numbers, sized for the year group.
+              For column addition and carrying.
+          • kind="number_grid_sums", params {"size": 3, "values": [[7,8,3],[8,7,8],[3,2,1]]}
+              A grid with row and column totals; some cells are blank and the missing tiles sit
+              in a tray. size 2-4, values 1-9. For number bonds / mental maths.
+          • kind="times_table_dash", params {"table": 8, "count": 10, "seconds": 60}
+              Flashcards + a phone numpad + a countdown bar + a streak counter. A race — great
+              for fluency and motivation. table 2-12.
+          • kind="fraction_canvas", params {"denominator": 4, "shaded": 3}
+              A shape the student splits into equal parts and colours in. For naming and
+              building fractions. Halves and quarters for the youngest.
+          • kind="dot_array", params {"rows": 4, "cols": 4}
+              Tap to build an array of dots, then give the product. For times tables, arrays
+              and square numbers.
+          • kind="counting_bubbles", params {"count": 7, "item": "apples"}
+              Tap each object and count them. KS1 counting. count 1-20.
+
+        After showing it, invite them to have a go and WAIT — on submit call
+        manipulative_evaluator. Call SILENTLY.
+        """
+        k = (kind or "").strip().lower()
+        if not manipulative_service.manipulatives_enabled(ctx.key_stage):
+            return {"action": "show_puzzle", "error": "not_for_key_stage",
+                    "message": "Manipulatives aren't used at this key stage — set a "
+                               "math_puzzle or graph_puzzle instead."}
+        if k not in manipulative_service.MANIPULATIVES:
+            return {"action": "show_puzzle", "error": "bad_kind",
+                    "message": f"Unknown kind {kind!r}. Choose one of: "
+                               f"{', '.join(manipulative_service.KINDS)}."}
+
+        try:
+            clean, solution, prompt, title = manipulative_service.build_spec(
+                k, _coerce_dict(params), ctx.key_stage,
+            )
+        except manipulative_service.ParamError as e:
+            # Hand the reason straight back to the model instead of quietly substituting a
+            # default. A silent default is how a Year 1 "make 6" became "Build 3,471": the
+            # tutor said one number and the screen showed another.
+            topic = f" This lesson's topic is {ctx.topic_title!r}." if ctx.topic_title else ""
+            logger.info("MANIPULATIVE bad params kind=%s: %s", k, e)
+            return {"action": "show_puzzle", "error": "bad_params",
+                    "message": f"{e}{topic} Fix the params and call manipulative_puzzle again."}
+        if solution is None:
+            return {"action": "show_puzzle", "error": "bad_kind",
+                    "message": f"Unknown kind {kind!r}. Choose one of: "
+                               f"{', '.join(manipulative_service.KINDS)}."}
+        full = puzzle_service.build_manipulative(k, clean, solution, prompt, title)
+        return await _persist_and_return(full)
+
+    @tool
+    async def manipulative_evaluator() -> dict:
+        """Mark the student's answer to the hands-on activity on screen. Marked exactly
+        (no guessing — the server knows the answer it set), and returns
+        {score, correct, per_item, feedback}. Then narrate it warmly: praise what they got
+        right, and for anything wrong use the feedback's hint WITHOUT giving the answer away."""
+        return await _evaluate("manipulative")
+
+    @tool
     async def clear_puzzle() -> dict:
         """
         Remove the current puzzle/diagram from the student's screen (e.g. once they've
@@ -275,8 +368,11 @@ def puzzle_tool_groups(ctx: ToolContext) -> dict:
         if status != "submitted":
             return {"action": "evaluate", "error": "no_submission",
                     "message": "The student hasn't submitted an answer yet — invite them to have a go, then wait."}
+        # `render` carries the manipulative KIND (place_value_counters, …) — evaluate() needs
+        # it to pick the right deterministic marker. For the generative puzzles it's ignored.
         verdict = await puzzle_service.evaluate(
-            ps.get("puzzle_type"), ps.get("solution"), ps.get("last_answer"), ps.get("prompt", "")
+            ps.get("puzzle_type"), ps.get("solution"), ps.get("last_answer"),
+            ps.get("prompt", ""), render=ps.get("render", ""),
         )
         # Grade exactly once: flip to 'evaluated' so it can't be re-marked later.
         try:
@@ -319,10 +415,13 @@ def puzzle_tool_groups(ctx: ToolContext) -> dict:
         warmly with the verdict and a hint if they were off."""
         return await _evaluate("graph")
 
-    return {
-        "puzzles": [
-            explanatory_puzzle, labelling_puzzle, matching_puzzle, math_puzzle,
-            diagram_math_puzzle, graph_puzzle, clear_puzzle,
-            labelling_evaluator, matching_evaluator, math_evaluator, graph_evaluator,
-        ],
-    }
+    puzzles = [
+        explanatory_puzzle, labelling_puzzle, matching_puzzle, math_puzzle,
+        diagram_math_puzzle, graph_puzzle, clear_puzzle,
+        labelling_evaluator, matching_evaluator, math_evaluator, graph_evaluator,
+    ]
+    # KS5 never gets manipulatives — an A-Level student does not want counters, and an
+    # unbound tool is a harder guarantee than an instruction the model can talk itself out of.
+    if manipulative_service.manipulatives_enabled(ctx.key_stage):
+        puzzles += [manipulative_puzzle, manipulative_evaluator]
+    return {"puzzles": puzzles}
