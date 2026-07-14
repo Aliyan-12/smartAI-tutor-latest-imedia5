@@ -5,11 +5,22 @@
  * the student's structured answer and sends it back.
  */
 export type PuzzleRender =
+  // ── Generated media: the AI writes the question and hands over the answer ──
   | "explanatory_image"   // display-only diagram that explains a concept
   | "labelling"           // name each generated image in turn
   | "matching"            // match generated images to their names
   | "math"                // a maths problem shown as LaTeX or an image
-  | "graph";              // a matplotlib graph + a question
+  | "graph"               // a matplotlib graph + a question
+  // ── Deterministic manipulatives: the AI passes params only; the SERVER derives the
+  //    question AND the answer from them, and marks by exact comparison. The render key IS
+  //    the kind (see backend manipulative_service.MANIPULATIVES). ──
+  | "place_value_counters"
+  | "column_addition"
+  | "number_grid_sums"
+  | "times_table_dash"
+  | "fraction_canvas"
+  | "dot_array"
+  | "counting_bubbles";
 
 export interface PuzzlePayload {
   render: PuzzleRender;

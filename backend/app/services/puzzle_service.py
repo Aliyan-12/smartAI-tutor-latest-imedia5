@@ -10,6 +10,10 @@ submits, `evaluate()` judges their answer SEMANTICALLY with a fast model
 
 Puzzle types (render key):
   explanatory_image · labelling · matching · math · graph
+  + the DETERMINISTIC manipulatives (place_value_counters, fraction_canvas, …) — see
+    manipulative_service. Those invert the contract: the AI passes params only, the server
+    derives the question AND the answer from them, and marking is an exact comparison
+    rather than an LLM judge, so the puzzle can't contradict itself.
 """
 import json
 import logging
@@ -110,6 +114,27 @@ def build_graph(question: str, answer: str, image_url: str) -> Dict[str, Any]:
     }
 
 
+def build_manipulative(kind: str, clean_params: Dict[str, Any], solution: Any,
+                       prompt: str, title: str) -> Dict[str, Any]:
+    """A deterministic interactive manipulative (place-value counters, fraction canvas,
+    times-table dash…). `render` IS the kind, so the frontend switches straight to the right
+    component. `puzzle_type` is always "manipulative" — that's what routes marking away from
+    the LLM judge and into manipulative_service.mark (see evaluate()).
+
+    prompt and solution are BOTH derived from clean_params by manipulative_service.build_spec,
+    so they cannot disagree with each other or with the picture. The AI supplies neither.
+    """
+    return {
+        "render": kind,
+        "puzzle_type": "manipulative",
+        "title": title or "Have a go",
+        "prompt": prompt or "",
+        "params": {"kind": kind, **(clean_params or {})},
+        "solution": solution,
+        "answer_type": "manipulative",
+    }
+
+
 def _clampi(v: Any, lo: int, hi: int, default: int) -> int:
     try:
         n = int(v)
@@ -200,9 +225,19 @@ def _judge_sync(puzzle_type: str, question: str, solution: Any, answer: Any) -> 
 
 
 async def evaluate(puzzle_type: str, solution: Any, student_answer: Any,
-                   question: str = "") -> Dict[str, Any]:
-    """Semantically mark the student's answer. Never raises — falls back to a neutral
-    'try again' verdict so the tutor can still respond."""
+                   question: str = "", render: str = "") -> Dict[str, Any]:
+    """Mark the student's answer. Never raises — falls back to a neutral 'try again' verdict
+    so the tutor can still respond.
+
+    Manipulatives are marked DETERMINISTICALLY (exact comparison against a solution the
+    server derived from the same params it drew the puzzle from) — no model call, instant,
+    and it cannot disagree with what's on screen. Everything else is judged semantically by
+    the fast model, because "mitochondrion" ≈ "mitochondria" needs a language model.
+    """
+    if puzzle_type == "manipulative":
+        from app.services import manipulative_service
+        return manipulative_service.mark(render, solution, student_answer)
+
     import asyncio
     try:
         return await asyncio.to_thread(

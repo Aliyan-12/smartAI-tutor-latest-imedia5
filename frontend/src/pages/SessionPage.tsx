@@ -7,6 +7,7 @@ import ChatWindow from "../components/ChatWindow";
 import ChatInput from "../components/ChatInput";
 import ResourceViewer, { type ResourceSlide } from "../components/ResourceViewer";
 import PuzzlePlayer from "../components/PuzzlePlayer";
+import Celebration from "../components/puzzles/Celebration";
 import type { PuzzlePayload } from "../components/puzzles/types";
 import { sessionBus, type SessionBusEvent } from "../lib/sessionBus";
 import AssessmentMode from "../components/AssessmentMode";
@@ -14,6 +15,7 @@ import PostSessionScreen from "../components/PostSessionScreen";
 import { useSessionChannel } from "../hooks/useSessionChannel";
 import { useVoiceCapture } from "../hooks/useVoiceCapture";
 import { useAuth } from "../context/AuthContext";
+import { playCorrectSound, playWrongSound } from "../lib/sounds";
 import type { Assessment, ChatMessage, QuizOffer } from "../types";
 
 type SessionState = "loading" | "passcode" | "active" | "ended";
@@ -23,38 +25,6 @@ const SUBJECTS = [
   "Maths","Science","English","History","Geography",
   "Physics","Chemistry","Biology","Computer Science","French","Spanish",
 ];
-
-function playCorrectSound() {
-  try {
-    const ctx = new (window.AudioContext || (window as any).webkitAudioContext)();
-    [523.25, 659.25].forEach((freq, i) => {
-      const osc = ctx.createOscillator();
-      const gain = ctx.createGain();
-      osc.connect(gain); gain.connect(ctx.destination);
-      osc.type = "sine"; osc.frequency.value = freq;
-      const t = ctx.currentTime + i * 0.09;
-      gain.gain.setValueAtTime(0, t);
-      gain.gain.linearRampToValueAtTime(0.28, t + 0.02);
-      gain.gain.exponentialRampToValueAtTime(0.001, t + 0.38);
-      osc.start(t); osc.stop(t + 0.42);
-    });
-  } catch {}
-}
-
-function playWrongSound() {
-  try {
-    const ctx = new (window.AudioContext || (window as any).webkitAudioContext)();
-    const osc = ctx.createOscillator();
-    const gain = ctx.createGain();
-    osc.connect(gain); gain.connect(ctx.destination);
-    osc.type = "sawtooth";
-    osc.frequency.setValueAtTime(220, ctx.currentTime);
-    osc.frequency.exponentialRampToValueAtTime(110, ctx.currentTime + 0.25);
-    gain.gain.setValueAtTime(0.2, ctx.currentTime);
-    gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.3);
-    osc.start(ctx.currentTime); osc.stop(ctx.currentTime + 0.32);
-  } catch {}
-}
 
 const PHASES_20 = [
   { label: "Intro",    end: 2  },
@@ -166,9 +136,15 @@ export default function SessionPage() {
   const [toolResults, setToolResults] = useState<Array<{ tool: string; data: Record<string, unknown>; id: string }>>([]);
   // The resource/slide the AI is currently teaching from (drives the "learn" tab viewer).
   const [currentResource, setCurrentResource] = useState<ResourceSlide | null>(null);
-  // The interactive puzzle the AI has put on screen (overlays the slide while active).
+  // The interactive puzzle the AI has put on screen (replaces the slide while active).
   const [currentPuzzle, setCurrentPuzzle] = useState<PuzzlePayload | null>(null);
   const SLIDE_TOOLS = ["show_resource", "advance_lesson_slide", "retreat_lesson_slide"];
+
+  // The last puzzle verdict, and a tick that fires the confetti/chime. A counter, not a
+  // boolean: two correct answers in a row wouldn't change a boolean, so the second would
+  // silently celebrate nothing.
+  const [verdict, setVerdict] = useState<{ correct: boolean }>({ correct: false });
+  const [celebrateTick, setCelebrateTick] = useState(0);
 
   // Attachment / web-search opts for ChatInput
   const [webSearchEnabled, setWebSearchEnabled] = useState(false);
@@ -253,6 +229,12 @@ export default function SessionPage() {
         }
       } else if (tool === "clear_puzzle") {
         setCurrentPuzzle(null);
+      } else if (data.action === "evaluate" && typeof data.correct === "boolean") {
+        // A puzzle was just marked (any *_evaluator tool). This is the reward moment — the
+        // student gets confetti and a chime for a correct answer, a soft buzz otherwise.
+        // Bump a counter rather than set a flag: two correct answers in a row must both fire.
+        setVerdict({ correct: data.correct as boolean });
+        setCelebrateTick((n) => n + 1);
       } else if (tool === "pause_lesson") {
         // Server paused the lesson (e.g. inactivity auto-pause) — reflect it. Idempotent.
         if (!isPaused) {
@@ -1171,7 +1153,9 @@ export default function SessionPage() {
         ) : null}
         {!isPaused && learnTab === "learn" && (
           currentPuzzle ? (
-            <div style={{ flex: 1, minHeight: "70vh", display: "flex", flexDirection: "column" }}>
+            // No minHeight here: the puzzle should FILL the Learn body, not overflow it into a
+            // scroll. The interactive manipulatives size themselves to the space they're given.
+            <div style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column" }}>
               <PuzzlePlayer
                 key={currentPuzzle.instance_id || `${currentPuzzle.puzzle_type}:${currentPuzzle.prompt}`}
                 payload={currentPuzzle}
@@ -1379,24 +1363,6 @@ export default function SessionPage() {
     </>
   );
 
-  const avatarInner = (
-    <>
-      <div style={styles.avatarBox}>
-        <div style={styles.avatarPulse} className={voiceActive ? "avatar-pulse-anim" : ""}>
-          <img src="/images/aitutor 4 schools-robo.png" style={{ width: "100%", height: "100%", objectFit: "contain" }} alt="AI Tutor" />
-        </div>
-        <p style={styles.avatarCaption}>AI Tutor Avatar</p>
-        <p style={styles.avatarSub}>Coming Soon</p>
-      </div>
-      {voiceActive && (
-        <div style={styles.speakingBadge}>
-          <span style={styles.speakingDot} />
-          AI Tutor is speaking...
-        </div>
-      )}
-    </>
-  );
-
   const chatPanelInner = (
     <>
       <div style={styles.chatPanelHeader}>
@@ -1553,6 +1519,7 @@ export default function SessionPage() {
 
   return (
     <div style={styles.root}>
+      <Celebration trigger={celebrateTick} correct={verdict.correct} />
       <div style={{ ...styles.topBar, background: topBarBg, height: isSmall ? 46 : 52, padding: isSmall ? "0 10px" : "0 20px" }}>
         {/* LEFT — back + progress + title */}
         <div style={{ ...styles.topBarLeft, gap: isSmall ? 6 : 10 }}>
@@ -1671,103 +1638,65 @@ export default function SessionPage() {
 
       <div style={styles.panels}>
         {isMobile ? (
-          <>
-            {/* Compact avatar strip */}
+          // Single switching panel. The 110px avatar rail that used to sit on the left is gone:
+          // it showed a static PNG and a "Coming Soon" chip, and on a phone it was stealing a
+          // third of the width from the activity the student is actually meant to be doing.
+          <div style={{ flex: 1, display: "flex", flexDirection: "column", overflow: "hidden" }}>
+            {/* Mini panel switcher */}
             <div style={{
-              width: 110,
-              flexShrink: 0,
-              borderRight: "1px solid var(--border-color)",
-              background: "var(--bg-primary)",
               display: "flex",
-              flexDirection: "column",
-              alignItems: "center",
-              justifyContent: "center",
-              gap: 10,
-              padding: "14px 8px",
+              borderBottom: "2px solid var(--border-color)",
+              background: "var(--bg-secondary)",
+              flexShrink: 0,
             }}>
-              <div style={{
-                width: 72,
-                height: 72,
-                borderRadius: "50%",
-                background: "rgba(99,102,241,0.1)",
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-              }} className={voiceActive ? "avatar-pulse-anim" : ""}>
-                <img src="/images/aitutor 4 schools-robo.png" style={{ width: 34, height: 34, objectFit: "contain" }} alt="AI Tutor" />
-              </div>
-              <p style={{ fontSize: 10, fontWeight: 700, color: "#334155", textAlign: "center", margin: 0, lineHeight: 1.3 }}>
-                AI Tutor
-              </p>
-              <span style={{ fontSize: 9, background: "#fef3c7", color: "#92400e", borderRadius: 99, padding: "2px 7px", fontWeight: 600 }}>
-                Avatar
-              </span>
-              {voiceActive && (
-                <div style={{
-                  width: 8, height: 8, borderRadius: "50%",
-                  background: "var(--accent-blue, #3b82f6)",
-                  animation: "avatarPulse 1.2s ease-in-out infinite",
-                  flexShrink: 0,
-                }} />
-              )}
+              {([
+                { id: "chat", label: "💬 Chat" },
+                { id: "learn", label: "📖 Learn" },
+              ] as { id: "chat" | "learn"; label: string }[]).map((tab) => (
+                <button
+                  key={tab.id}
+                  style={{
+                    flex: 1,
+                    padding: "9px 0",
+                    border: "none",
+                    background: "transparent",
+                    fontSize: 12,
+                    fontWeight: 700,
+                    cursor: "pointer",
+                    color: mobilePanelView === tab.id ? "var(--accent-blue, #3b82f6)" : "var(--text-muted)",
+                    borderBottom: mobilePanelView === tab.id ? "2px solid var(--accent-blue, #3b82f6)" : "2px solid transparent",
+                    marginBottom: -2,
+                    transition: "color 0.15s, border-color 0.15s",
+                    fontFamily: "inherit",
+                  }}
+                  onClick={() => setMobilePanelView(tab.id)}
+                >
+                  {tab.label}
+                </button>
+              ))}
             </div>
 
-            {/* Switching content panel */}
-            <div style={{ flex: 1, display: "flex", flexDirection: "column", overflow: "hidden" }}>
-              {/* Mini panel switcher */}
-              <div style={{
-                display: "flex",
-                borderBottom: "2px solid var(--border-color)",
-                background: "var(--bg-secondary)",
-                flexShrink: 0,
-              }}>
-                {([
-                  { id: "chat", label: "💬 Chat" },
-                  { id: "learn", label: "📖 Learn" },
-                ] as { id: "chat" | "learn"; label: string }[]).map((tab) => (
-                  <button
-                    key={tab.id}
-                    style={{
-                      flex: 1,
-                      padding: "9px 0",
-                      border: "none",
-                      background: "transparent",
-                      fontSize: 12,
-                      fontWeight: 700,
-                      cursor: "pointer",
-                      color: mobilePanelView === tab.id ? "var(--accent-blue, #3b82f6)" : "var(--text-muted)",
-                      borderBottom: mobilePanelView === tab.id ? "2px solid var(--accent-blue, #3b82f6)" : "2px solid transparent",
-                      marginBottom: -2,
-                      transition: "color 0.15s, border-color 0.15s",
-                      fontFamily: "inherit",
-                    }}
-                    onClick={() => setMobilePanelView(tab.id)}
-                  >
-                    {tab.label}
-                  </button>
-                ))}
+            {/* Panel content */}
+            {mobilePanelView === "chat" ? (
+              <div style={{ ...styles.chatPanel, flex: 1 }}>
+                {chatPanelInner}
               </div>
-
-              {/* Panel content */}
-              {mobilePanelView === "chat" ? (
-                <div style={{ ...styles.chatPanel, flex: 1 }}>
-                  {chatPanelInner}
-                </div>
-              ) : (
-                <div style={{ ...styles.learnPanel, width: "auto", flex: 1, borderRight: "none" }}>
-                  {learnPanelInner}
-                </div>
-              )}
-            </div>
-          </>
+            ) : (
+              <div style={{ ...styles.learnPanel, width: "auto", flex: 1, borderRight: "none" }}>
+                {learnPanelInner}
+              </div>
+            )}
+          </div>
         ) : (
+          // TWO panels, not three. The middle "Avatar" panel was a placeholder — a dashed grey
+          // box with a static robot and a "Coming Soon" chip — and it was eating 30% of the
+          // screen while the Learn panel (slides, puzzles, the actual lesson) got 35%.
           <ResizablePanels
             panels={[
-              { id: "learn",  label: "Learn",  content: <div style={{ ...styles.learnPanel,  width: "100%", borderRight: "none" }}>{learnPanelInner}</div> },
-              { id: "avatar", label: "Avatar", content: <div style={{ ...styles.avatarPanel, width: "100%", borderRight: "none" }}>{avatarInner}</div> },
-              { id: "chat",   label: "Chat",   content: <div style={{ ...styles.chatPanel,   flex: 1 }}>{chatPanelInner}</div> },
+              { id: "learn", label: "Learn", content: <div style={{ ...styles.learnPanel, width: "100%", borderRight: "none" }}>{learnPanelInner}</div> },
+              { id: "chat",  label: "Chat",  content: <div style={{ ...styles.chatPanel,  flex: 1 }}>{chatPanelInner}</div> },
             ]}
-            initialWidths={[35, 30, 35]}
+            initialWidths={[70, 30]}
           />
         )}
       </div>
@@ -2093,76 +2022,8 @@ const styles: Record<string, React.CSSProperties> = {
     lineHeight: 1.6,
     maxWidth: 200,
   },
-  avatarPanel: {
-    width: "30%",
-    display: "flex",
-    flexDirection: "column",
-    alignItems: "center",
-    justifyContent: "center",
-    background: "var(--bg-primary)",
-    gap: 16,
-    padding: 20,
-  },
-  avatarBox: {
-    width: 300,
-    maxWidth: "100%",
-    height: 400,
-    background: "#f1f5f9",
-    borderRadius: 20,
-    display: "flex",
-    flexDirection: "column",
-    alignItems: "center",
-    justifyContent: "center",
-    gap: 8,
-    border: "2px dashed #cbd5e1",
-  },
-  avatarPulse: {
-    width: 100,
-    height: 100,
-    borderRadius: "50%",
-    background: "rgba(99,102,241,0.1)",
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "center",
-    animation: "avatarPulse 2.4s ease-in-out infinite",
-  },
-  avatarEmoji: {
-    fontSize: 52,
-  },
-  avatarCaption: {
-    fontSize: 15,
-    fontWeight: 700,
-    color: "#334155",
-    margin: "4px 0 0",
-  },
-  avatarSub: {
-    fontSize: 12,
-    color: "#94a3b8",
-    background: "#fef3c7",
-    borderRadius: 99,
-    padding: "2px 10px",
-    fontWeight: 600,
-  },
-  speakingBadge: {
-    display: "flex",
-    alignItems: "center",
-    gap: 7,
-    padding: "6px 14px",
-    background: "rgba(99,102,241,0.1)",
-    borderRadius: 99,
-    fontSize: 12,
-    fontWeight: 600,
-    color: "var(--accent-blue, var(--accent))",
-    border: "1px solid rgba(99,102,241,0.2)",
-  },
-  speakingDot: {
-    width: 8,
-    height: 8,
-    borderRadius: "50%",
-    background: "var(--accent-blue, var(--accent))",
-    display: "inline-block",
-    animation: "avatarPulse 1.2s ease-in-out infinite",
-  },
+  // (The avatar panel's styles lived here. Removed with the panel itself — it was a
+  // "Coming Soon" placeholder occupying 30% of the session screen.)
   chatPanel: {
     flex: 1,
     display: "flex",
