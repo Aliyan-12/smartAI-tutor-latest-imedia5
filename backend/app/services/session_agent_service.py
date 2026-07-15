@@ -1172,6 +1172,8 @@ WHEN IT'S TIME TO PRACTISE / QUIZ (ask in PUZZLE form, never plain text):
 - MARKING: when the [PUZZLE RESULT] arrives, call the MATCHING evaluator — labelling_evaluator / matching_evaluator / math_evaluator / graph_evaluator / manipulative_evaluator — and then, in ONE message, use ITS verdict to give warm feedback (praise what's right; a gentle hint for anything wrong, without revealing the answer). Never guess the mark yourself, and never state the verdict before you've called the evaluator.
 - AGE-APPROPRIATE: scale difficulty to the key stage + year group (see STUDENT PROFILE). The younger the student, the more of their practice should be HANDS-ON rather than typed — the LESSON STATE anchor tells you the style to use for the next puzzle; follow it. ONE focused puzzle per concept, then move on — don't spam.
 - If a generator returns an 'error', do NOT tell the student to look at anything — briefly try once more or ask the question another way.
+- ONE QUESTION NEEDS ONE PUZZLE: never invite an answer ("what shape is this?", "let's try one more, what about this one?") unless you have JUST called a generator this turn that succeeded and put it on screen. Want to give another go after marking? Call the generator FIRST, THEN speak — a question with nothing on screen leaves the student staring at a blank panel.
+- SAY WHAT'S ACTUALLY THERE, don't assume: you cannot SEE a generated image, so never describe its specific details as fact ("this shape has two long and two short sides"). Speak from the prompt you set and point them at the screen ("look at the shape on your screen and tap what it is"). For anything where exact visual details decide the answer (shapes, counts, positions), prefer a manipulative or diagram_math_puzzle whose picture the server draws exactly.
 - Never write a tool call as text or read out raw params; the visual just appears on screen.
 - ACTIONS, NOT NARRATION: if you say you're clearing/moving on, actually call clear_puzzle in the SAME turn (moving to a slide also clears it). Do the action — don't just describe it.
 
@@ -1641,8 +1643,11 @@ def _puzzle_state_lines(pstate: Optional[dict], next_style: str = "",
             "labelling_puzzle / matching_puzzle / math_puzzle / graph_puzzle — don't expect one "
             "to already be there.\n"
             + style_line
-            + "• NEVER tell the student to look at / name / solve / 'see' a puzzle unless a generator "
-            "tool just returned successfully (no 'error'). Otherwise there's nothing on screen."
+            + "• NEVER tell the student to look at / name / solve / 'see' a puzzle, and NEVER ask a "
+            "question that expects an answer (\"what shape is this?\", \"have a go at this one\", "
+            "\"what about THIS one?\"), unless a generator tool JUST returned successfully (no "
+            "'error') in THIS same reply. If you want to give another go, CALL the generator "
+            "first, then invite them — do not ask into thin air."
         )
     ptype = pstate.get("puzzle_type", "puzzle")
     prompt = pstate.get("prompt", "")
@@ -1656,7 +1661,10 @@ def _puzzle_state_lines(pstate: Optional[dict], next_style: str = "",
         return (
             f"Puzzle: a '{ptype}' puzzle is ON SCREEN now, asking: \"{prompt}\". Awaiting the "
             "student's answer (arrives as a [PUZZLE RESULT]). Do NOT show another puzzle or move "
-            "on — just invite them to have a go, then wait."
+            "on — just invite them to have a go, then wait. Refer to it by what is ACTUALLY on "
+            "screen (the prompt above); do NOT describe visual details you are only assuming — "
+            "you cannot see a generated image, so say \"look at the shape on your screen and tap "
+            "what it is\", not \"this one has two long sides and two short sides\"."
         )
     if status == "submitted":
         return (
@@ -1671,7 +1679,10 @@ def _puzzle_state_lines(pstate: Optional[dict], next_style: str = "",
             f"Puzzle: the '{ptype}' puzzle has ALREADY been marked"
             + (f" (score {score})" if score is not None else "")
             + ". It is DONE — do NOT evaluate or mention checking it again. Move on: teach the "
-            "next thing, set a NEW puzzle, or call clear_puzzle."
+            "next thing, set a NEW puzzle, or call clear_puzzle. If you want to give ANOTHER go, "
+            "you MUST call a generator NOW (this same reply) BEFORE inviting an answer — never "
+            "say \"let's try one more, what about this shape?\" without a fresh puzzle actually "
+            "on screen. This one's answer is spent; a new question needs a new puzzle."
         )
     return f"Puzzle: a '{ptype}' puzzle is on screen ({prompt!r})."
 

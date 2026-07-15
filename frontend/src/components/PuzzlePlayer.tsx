@@ -43,6 +43,9 @@ export default function PuzzlePlayer({
 
   const isExplanatory = payload.render === "explanatory_image";
   const isManipulative = MANIPULATIVE_RENDERS.has(payload.render);
+  // A plain interactive puzzle (math / graph): short content that should sit CENTRED in the
+  // panel, so the backdrop fills evenly top-and-bottom instead of leaving white space below.
+  const isInteractive = !isManipulative && !isExplanatory;
 
   // The server picks a backdrop per puzzle. Explanatory images (often a science photo/diagram)
   // stay on plain white so nothing competes with the picture; everything else gets its backdrop.
@@ -108,6 +111,7 @@ export default function PuzzlePlayer({
           display: "flex",
           flexDirection: "column",
           alignItems: isManipulative ? "stretch" : "center",
+          justifyContent: isInteractive ? "center" : "flex-start",
           gap: isManipulative ? 0 : 14,
         }}
       >

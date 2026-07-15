@@ -39,16 +39,18 @@ export default function LearnIdle() {
       display: "flex", alignItems: "center", justifyContent: "center",
       background: "linear-gradient(180deg, #ffffff 0%, #f4f7ff 100%)",
     }}>
-      {/* drifting maths shapes */}
+      {/* drifting maths shapes — animate `top` (relative to THIS panel) so they rise the whole
+          height from the bottom edge to above the top. `y: "115%"` was relative to each glyph's
+          own font-size, so they barely moved and bunched up in the middle. */}
       {floats.map((f, i) => (
         <motion.span
           key={i}
-          initial={{ y: "115%", opacity: 0, rotate: -12 }}
-          animate={{ y: "-120%", opacity: [0, 0.5, 0.5, 0], rotate: 12, x: f.drift }}
+          initial={{ top: "108%", opacity: 0, rotate: -12 }}
+          animate={{ top: "-18%", opacity: [0, 0.55, 0.55, 0], rotate: 12, x: f.drift }}
           transition={{ duration: f.dur, delay: f.delay, repeat: Infinity, ease: "linear" }}
           style={{
-            position: "absolute", left: `${f.left}%`, bottom: 0,
-            fontSize: f.size, fontWeight: 800, color: f.colour, opacity: 0.5,
+            position: "absolute", left: `${f.left}%`,
+            fontSize: f.size, fontWeight: 800, color: f.colour,
             userSelect: "none", pointerEvents: "none",
           }}
         >

@@ -99,6 +99,29 @@ def build_matching(items: List[Dict[str, str]], prompt: str = "") -> Dict[str, A
     }
 
 
+def _auto_numeric_distractors(ans: str) -> List[str]:
+    """When the AI forgets to supply wrong answers, synthesise plausible near-misses for a
+    plain WHOLE-NUMBER answer so the puzzle still shows tappable bubbles (options) rather than
+    a bare text box. Only fires for integers — algebraic / worded answers stay typed."""
+    raw = ans.strip()
+    try:
+        n = int(raw.replace(",", ""))
+    except ValueError:
+        return []
+    use_commas = "," in raw
+    fmt = (lambda v: f"{v:,}") if use_commas else str
+    out: List[str] = []
+    seen = {n}
+    for d in (1, -1, 2, -2, 10, -10, 3, -3, 5, -5):
+        c = n + d
+        if c >= 0 and c not in seen:
+            seen.add(c)
+            out.append(fmt(c))
+        if len(out) >= 3:
+            break
+    return out
+
+
 def build_math(question: str, answer: str, *, mode: str = "latex",
                latex: str = "", image_url: str = "",
                options: Optional[List[str]] = None) -> Dict[str, Any]:
@@ -115,6 +138,10 @@ def build_math(question: str, answer: str, *, mode: str = "latex",
         s = str(o).strip()
         if s and s.lower() != ans.lower() and s.lower() not in {x.lower() for x in opts}:
             opts.append(s)
+    # No usable distractors from the AI → try to build them ourselves so a numeric maths
+    # problem is STILL multiple-choice (the friendlier path for young students).
+    if not opts:
+        opts = _auto_numeric_distractors(ans)
     if opts:
         opts = opts[:3] + [ans]
         random.shuffle(opts)
