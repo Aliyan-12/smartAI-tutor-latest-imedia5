@@ -12,6 +12,7 @@ import TimesTableDash from "./puzzles/manipulatives/TimesTableDash";
 import FractionCanvas from "./puzzles/manipulatives/FractionCanvas";
 import DotArray from "./puzzles/manipulatives/DotArray";
 import CountingBubbles from "./puzzles/manipulatives/CountingBubbles";
+import PuzzleBackground, { bgTheme } from "./puzzles/backgrounds";
 
 /**
  * Renders a puzzle and reports the student's structured answer via onSubmit.
@@ -42,6 +43,12 @@ export default function PuzzlePlayer({
 
   const isExplanatory = payload.render === "explanatory_image";
   const isManipulative = MANIPULATIVE_RENDERS.has(payload.render);
+
+  // The server picks a backdrop per puzzle. Explanatory images (often a science photo/diagram)
+  // stay on plain white so nothing competes with the picture; everything else gets its backdrop.
+  const bgVariant = isExplanatory ? "plain" : ((payload.params.background as string) || "plain");
+  const dark = bgTheme(bgVariant) === "dark";
+  const promptColour = dark ? "rgba(255,255,255,0.92)" : "#334155";
 
   const body = () => {
     const p = { payload, onSubmit: handleSubmit, disabled: submitted };
@@ -89,9 +96,11 @@ export default function PuzzlePlayer({
       </div>
 
       {/* A manipulative owns the whole body: it sizes itself, and centring + 20px of padding is
-          exactly what used to shrink every puzzle down to a postage stamp in the middle. */}
+          exactly what used to shrink every puzzle down to a postage stamp in the middle.
+          `position: relative` so the backdrop can sit behind the content. */}
       <div
         style={{
+          position: "relative",
           flex: 1,
           minHeight: 0,
           overflow: isManipulative ? "hidden" : "auto",
@@ -102,20 +111,30 @@ export default function PuzzlePlayer({
           gap: isManipulative ? 0 : 14,
         }}
       >
+        <PuzzleBackground variant={bgVariant} />
+
+        {/* Everything real sits ABOVE the backdrop. */}
         <p style={{
-          fontSize: isManipulative ? 17 : 14, color: "#334155", textAlign: "center",
+          position: "relative", zIndex: 1,
+          fontSize: isManipulative ? 17 : 14, color: promptColour, textAlign: "center",
           margin: 0, padding: isManipulative ? "0 20px" : 0, fontWeight: 600, flexShrink: 0,
+          textShadow: dark ? "0 1px 3px rgba(0,0,0,0.5)" : "none",
         }}>
           {payload.prompt}
         </p>
 
-        {body()}
+        <div style={{ position: "relative", zIndex: 1, flex: isManipulative ? 1 : "0 0 auto",
+                      minHeight: 0, width: "100%", display: "flex", flexDirection: "column",
+                      alignItems: isManipulative ? "stretch" : "center", gap: isManipulative ? 0 : 14 }}>
+          {body()}
+        </div>
 
         {submitted && !isExplanatory && (
           <div style={{
+            position: "relative", zIndex: 1,
             margin: isManipulative ? "0 auto 14px" : "6px 0 0",
             padding: "8px 14px", borderRadius: 9, fontWeight: 700, fontSize: 14,
-            background: "#eff6ff", color: "#1d4ed8", flexShrink: 0,
+            background: dark ? "rgba(255,255,255,0.92)" : "#eff6ff", color: "#1d4ed8", flexShrink: 0,
           }}>
             Checking your answer…
           </div>

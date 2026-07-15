@@ -32,6 +32,25 @@ def _coerce_list(v: Any) -> List[dict]:
     return [x for x in v if isinstance(x, dict)] if isinstance(v, list) else []
 
 
+def _coerce_list_of_str(v: Any) -> List[str]:
+    """Distractors may arrive as a real list, a JSON array string '["10","14"]', or a plain
+    comma-separated string '10, 14, 21'. Normalise any of them to a list of strings."""
+    if isinstance(v, list):
+        return [str(x).strip() for x in v if str(x).strip()]
+    if isinstance(v, str):
+        s = v.strip()
+        if not s:
+            return []
+        try:
+            parsed = json.loads(s)
+            if isinstance(parsed, list):
+                return [str(x).strip() for x in parsed if str(x).strip()]
+        except Exception:
+            pass
+        return [part.strip() for part in s.split(",") if part.strip()]
+    return []
+
+
 def _coerce_dict(v: Any) -> dict:
     if isinstance(v, str):
         try:
@@ -157,7 +176,8 @@ def puzzle_tool_groups(ctx: ToolContext) -> dict:
 
     @tool
     async def math_puzzle(question: str, answer: str, mode: str = "latex",
-                          latex: str = "", image_prompt: str = "") -> dict:
+                          latex: str = "", image_prompt: str = "",
+                          distractors: Union[list, str] = "") -> dict:
         """
         Practice: pose a MATHS problem visually (never as plain chat text). Best for
         equations/arithmetic/algebra: mode="latex", give the problem in `latex`
@@ -165,15 +185,26 @@ def puzzle_tool_groups(ctx: ToolContext) -> dict:
         for a loose real-world illustration where the exact picture doesn't decide the
         answer — do NOT use it for "what fraction is shaded" or clocks (the image won't
         match your answer; use diagram_math_puzzle for those). `question` is the short
-        instruction; `answer` is the correct answer (kept private, used to mark). After
-        showing it, WAIT — on submit call math_evaluator. Not for graphs (use graph_puzzle).
-        Call SILENTLY.
+        instruction; `answer` is the correct answer (kept private, used to mark).
+
+        MULTIPLE CHOICE — prefer this for younger students (KS1-KS3): pass `distractors`, a
+        list of 2-3 PLAUSIBLE WRONG answers (e.g. answer="12", distractors=["10","14","21"]).
+        The student then TAPS one of four colourful bubbles instead of typing — far friendlier
+        for small children. Make the wrong answers tempting (common mistakes), not silly. You
+        supply only the wrong ones; the server adds the correct answer and shuffles them, so
+        never put the correct answer in `distractors`. Omit `distractors` to keep it typed
+        (fine for older students / open-ended answers).
+
+        After showing it, WAIT — on submit call math_evaluator. Not for graphs (use
+        graph_puzzle). Call SILENTLY.
         """
         image_url = ""
         if mode == "image" and image_prompt:
             image_url = await image_gen_service.generate_image(image_prompt) or ""
+        opts = distractors if isinstance(distractors, list) else _coerce_list_of_str(distractors)
         return await _persist_and_return(
-            puzzle_service.build_math(question, answer, mode=mode, latex=latex, image_url=image_url)
+            puzzle_service.build_math(question, answer, mode=mode, latex=latex,
+                                      image_url=image_url, options=opts)
         )
 
     @tool

@@ -1,40 +1,135 @@
 import { useState } from "react";
+import { motion, AnimatePresence } from "framer-motion";
 import { BlockMath } from "react-katex";
 import "katex/dist/katex.min.css";
 import type { InteractivePuzzleProps } from "./types";
-import { pBtn } from "./ui";
 
-/** A maths problem shown as crisp LaTeX (equations) or a generated image (visual
- *  concepts like fractions). Student types the answer; the server marks it. */
+/**
+ * A maths problem — shown as crisp LaTeX, or a generated image for loose visual concepts.
+ *
+ * The equation now sits on a bold card that pops in, and — when the server supplies options —
+ * the student TAPS one of four colourful answer bubbles instead of typing into a bare box.
+ * That's the friendlier path for younger children (the ask), and it's marked exactly the same
+ * way. If there are no options, it falls back to a nicely styled text input for older students.
+ *
+ * This puzzle rides a DARK background (mesh / bubbles), so everything here is light-on-dark.
+ */
+
+const BUBBLE_COLOURS = ["#2563eb", "#16a34a", "#f97316", "#a855f7", "#ec4899", "#0891b2"];
+
 export default function MathPuzzle({ payload, onSubmit, disabled }: InteractivePuzzleProps) {
   const mode = (payload.params.mode as string) || "latex";
   const latex = (payload.params.latex as string) || "";
   const image = (payload.params.image as string) || "";
+  const options = (payload.params.options as string[]) || [];
+
   const [val, setVal] = useState("");
+  const [picked, setPicked] = useState<string | null>(null);
+
+  const hasChoices = options.length > 0;
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 14, width: "100%" }}>
-      {mode === "image" && image ? (
-        <img src={image} alt="maths problem"
-          style={{ maxWidth: "100%", maxHeight: 300, objectFit: "contain", border: "1.5px solid #e2e8f0", borderRadius: 12, background: "#fff", padding: 8 }} />
-      ) : latex ? (
-        <div style={{ fontSize: 22, padding: "10px 18px", background: "#f8fafc", borderRadius: 12, border: "1.5px solid #e2e8f0", maxWidth: "100%", overflowX: "auto" }}>
-          <BlockMath math={latex} />
-        </div>
-      ) : null}
+    <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 22, width: "100%", padding: "6px 12px 0" }}>
+      {/* The problem card */}
+      <motion.div
+        initial={{ scale: 0.9, opacity: 0, y: 8 }}
+        animate={{ scale: 1, opacity: 1, y: 0 }}
+        transition={{ type: "spring", stiffness: 300, damping: 22 }}
+      >
+        {mode === "image" && image ? (
+          <img
+            src={image}
+            alt="maths problem"
+            style={{ maxWidth: "min(100%, 300px)", maxHeight: 210, objectFit: "contain", borderRadius: 16, background: "#fff", padding: 8 }}
+          />
+        ) : latex ? (
+          <div style={{
+            fontSize: 30, padding: "22px 34px", borderRadius: 18, color: "#0f172a",
+            background: "rgba(255,255,255,0.96)",
+            boxShadow: "0 10px 30px rgba(0,0,0,0.35)",
+            border: "1px solid rgba(255,255,255,0.6)",
+            maxWidth: "100%", overflowX: "auto",
+          }}>
+            <BlockMath math={latex} />
+          </div>
+        ) : null}
+      </motion.div>
 
-      <input
-        style={{ width: 200, padding: "10px 12px", border: "1.5px solid #e2e8f0", borderRadius: 8, fontSize: 17, fontWeight: 700, textAlign: "center", fontFamily: "inherit" }}
-        value={val}
-        onChange={(e) => setVal(e.target.value)}
-        onKeyDown={(e) => { if (e.key === "Enter" && val.trim()) onSubmit(val.trim()); }}
-        placeholder="Your answer"
-        autoFocus
-        disabled={disabled}
-      />
-      <button style={pBtn} onClick={() => onSubmit(val.trim())} disabled={disabled || !val.trim()}>
-        Check
-      </button>
+      {hasChoices ? (
+        <>
+          <div style={{
+            display: "grid", gridTemplateColumns: "1fr 1fr",
+            gap: 14, width: "100%", maxWidth: 460,
+          }}>
+            <AnimatePresence>
+              {options.map((opt, i) => {
+                const chosen = picked === opt;
+                const colour = BUBBLE_COLOURS[i % BUBBLE_COLOURS.length];
+                return (
+                  <motion.button
+                    key={opt}
+                    initial={{ scale: 0, opacity: 0 }}
+                    animate={{ scale: 1, opacity: 1 }}
+                    transition={{ type: "spring", stiffness: 420, damping: 22, delay: i * 0.06 }}
+                    whileTap={{ scale: 0.94 }}
+                    onClick={() => !disabled && setPicked(opt)}
+                    disabled={disabled}
+                    style={{
+                      minHeight: 66, borderRadius: 16, cursor: disabled ? "default" : "pointer",
+                      fontFamily: "inherit", fontSize: 22, fontWeight: 800,
+                      color: chosen ? "#fff" : colour,
+                      background: chosen ? colour : "rgba(255,255,255,0.96)",
+                      border: `3px solid ${colour}`,
+                      boxShadow: chosen ? `0 6px 18px ${colour}88` : "0 4px 0 rgba(0,0,0,0.18)",
+                      transition: "background .15s, color .15s, box-shadow .15s",
+                    }}
+                  >
+                    {opt}
+                  </motion.button>
+                );
+              })}
+            </AnimatePresence>
+          </div>
+
+          <CheckButton onClick={() => picked && onSubmit(picked)} disabled={disabled || !picked} />
+        </>
+      ) : (
+        <>
+          <input
+            style={{
+              width: 240, padding: "14px 16px", borderRadius: 14, fontSize: 22, fontWeight: 800,
+              textAlign: "center", fontFamily: "inherit", color: "#0f172a",
+              background: "rgba(255,255,255,0.96)", border: "3px solid rgba(255,255,255,0.7)",
+              outlineColor: "#2563eb",
+            }}
+            value={val}
+            onChange={(e) => setVal(e.target.value)}
+            onKeyDown={(e) => { if (e.key === "Enter" && val.trim()) onSubmit(val.trim()); }}
+            placeholder="Your answer"
+            autoFocus
+            disabled={disabled}
+          />
+          <CheckButton onClick={() => onSubmit(val.trim())} disabled={disabled || !val.trim()} />
+        </>
+      )}
     </div>
+  );
+}
+
+function CheckButton({ onClick, disabled }: { onClick: () => void; disabled?: boolean }) {
+  return (
+    <button
+      onClick={onClick}
+      disabled={disabled}
+      style={{
+        minHeight: 54, padding: "0 44px", fontSize: 19, fontWeight: 800, fontFamily: "inherit",
+        color: "#fff", border: "none", borderRadius: 14,
+        background: disabled ? "rgba(148,163,184,0.6)" : "#16a34a",
+        cursor: disabled ? "not-allowed" : "pointer",
+        boxShadow: disabled ? "none" : "0 4px 0 #15803d",
+      }}
+    >
+      Check
+    </button>
   );
 }
