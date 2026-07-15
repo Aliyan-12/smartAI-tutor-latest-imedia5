@@ -1581,6 +1581,33 @@ def _coerce_str(token) -> str:
     return str(token)
 
 
+# The tutor kept inviting the student to DO a puzzle and then ending its turn WITHOUT
+# generating one ("can you work out this missing number puzzle?" → blank panel → "where is
+# it?"). These detect that message shape so the turn handler can force a recovery generation.
+# STRONG imperatives ("have a go", "your turn") are invites on their own; the softer phrases
+# only count as an invite when the message is a question (ends with "?").
+_STRONG_INVITE_RE = _re.compile(
+    r"\b(have a go|give it a go|your turn|tap the|build (the|a|this)|put (these|them)|"
+    r"order (these|them)|see if you can|work (it|them|this|that) out)\b",
+    _re.IGNORECASE,
+)
+_QUESTION_INVITE_RE = _re.compile(
+    r"\b(can you (work|solve|build|count|order|figure|make)|which (number|one)|what number|"
+    r"how many|in order|solve (this|it|the|these)|try (this|one|the))\b",
+    _re.IGNORECASE,
+)
+
+
+def _invites_practice(text: str) -> bool:
+    """True when the tutor's message asks the student to DO/answer something. Used ONLY to
+    catch the case where it invited practice but never put a puzzle on screen — a false
+    positive just triggers one extra (harmless) generator turn."""
+    t = (text or "").strip()
+    if _STRONG_INVITE_RE.search(t):
+        return True
+    return "?" in t and bool(_QUESTION_INVITE_RE.search(t))
+
+
 def _build_quiz_ctx(topic: str, score: float, strong: list, weak: list) -> str:
     score_pct = round(score, 1)
     strong_str = ", ".join(strong) if strong else "none"
@@ -2173,76 +2200,132 @@ async def _run_turn(send, chat_id, user_id, *, saved_user_text, ai_content,
             _seen_norm.add(norm)
             return False
 
-        async for raw in gemini_service.stream_response_async(
-            hist_slice, ai_content, rag_chunks=rag_chunks,
-            system_prompt_override=session_system_prompt, tool_context=tool_context,
-            image_data=image_b64, image_mime=image_mime,
-            tool_groups=tool_groups_for_turn,
-        ):
-            token = _coerce_str(raw)
-            stripped = token.strip()
-            # Brief reasoning summary → thinking strip (never shown as answer text).
-            if stripped.startswith("[THINK:") and stripped.endswith("]"):
-                await _emit_thinking(send, thinking_steps, stripped[len("[THINK:"):-1])
-                continue
-            if stripped.startswith("[TOOL_RESULT:") and stripped.endswith("]"):
-                try:
-                    tr = json.loads(stripped[len("[TOOL_RESULT:"):-1])
-                    _tool = tr.get("tool", "")
-                    _data = tr.get("data", {}) or {}
-                    # Generators are named per type (explanatory_puzzle, math_puzzle, …) but
-                    # the frontend renders any `action:"show_puzzle"` payload through one
-                    # handler — normalise the WS `tool` field so it keeps working.
-                    _action = _data.get("action")
-                    _ws_tool = _tool
-                    if _action == "show_puzzle":
-                        _ws_tool = "show_puzzle"
-                    elif _action == "clear_puzzle":
-                        _ws_tool = "clear_puzzle"
-                    if _action in ("show_puzzle", "clear_puzzle"):
-                        logger.info(
-                            "WS → tool=%s (%s) render=%s error=%s",
-                            _ws_tool, _tool, _data.get("render"), _data.get("error"),
-                        )
-                    await send({"type": "tool", "tool": _ws_tool, "data": _data})
-                    # Friendly one-line "thinking" step for the tool just run.
-                    _label = _THINKING_LABELS.get(_tool)
-                    if _label:
-                        await _emit_thinking(send, thinking_steps, _label)
-                    # Puzzle XP earned this turn → surface it in the thinking strip (NOT in the
-                    # AI's reply text), so the student sees the reward without the tutor bragging.
-                    _xp = _data.get("xp_awarded")
-                    if isinstance(_xp, (int, float)) and _xp > 0:
-                        await _emit_thinking(send, thinking_steps, f"🌟 +{int(_xp)} XP earned")
-                    # end_lesson succeeded → GUARANTEE a real report exists (server-side,
-                    # from the actual session), then tell the client to open it. Immutable:
-                    # if the AI already called generate_session_report, this returns it.
-                    if _tool == "end_lesson" and _data.get("ended"):
-                        if appt_id:
-                            try:
-                                from app.services import lesson_service as _ls
-                                await _ls.ensure_report_for_appointment(db, appt_id)
-                                await db.commit()
-                            except Exception as _rep_err:  # noqa: BLE001
-                                logger.warning("ensure_report on end_lesson failed appt=%s: %s", appt_id, _rep_err)
-                        # Hold the "open your report" navigation until AFTER the closing
-                        # message has fully streamed — otherwise the report opens mid-sentence.
-                        _pending_ended_appt = appt_id
-                except Exception as _tr_err:
-                    logger.warning("Failed to forward TOOL_RESULT: %s", _tr_err)
-                continue
-            for sentence in segmenter.feed(token):
-                if _dup(sentence):
+        # True once a generator has actually put a puzzle on screen this turn (a show_puzzle
+        # with no error). The safety net below uses it to catch "invited practice but showed
+        # nothing" and force a recovery generation.
+        generator_shown_this_turn = False
+
+        async def _consume(content_for_call, *, with_image: bool):
+            nonlocal seq, generator_shown_this_turn, _pending_ended_appt
+            async for raw in gemini_service.stream_response_async(
+                hist_slice, content_for_call, rag_chunks=rag_chunks,
+                system_prompt_override=session_system_prompt, tool_context=tool_context,
+                image_data=(image_b64 if with_image else None), image_mime=image_mime,
+                tool_groups=tool_groups_for_turn,
+            ):
+                token = _coerce_str(raw)
+                stripped = token.strip()
+                # Brief reasoning summary → thinking strip (never shown as answer text).
+                if stripped.startswith("[THINK:") and stripped.endswith("]"):
+                    await _emit_thinking(send, thinking_steps, stripped[len("[THINK:"):-1])
                     continue
-                await stream_segment(send, seq, sentence, tts=tts, turn_id=turn_id)
-                full.append(sentence)
+                if stripped.startswith("[TOOL_RESULT:") and stripped.endswith("]"):
+                    try:
+                        tr = json.loads(stripped[len("[TOOL_RESULT:"):-1])
+                        _tool = tr.get("tool", "")
+                        _data = tr.get("data", {}) or {}
+                        # Generators are named per type (explanatory_puzzle, math_puzzle, …) but
+                        # the frontend renders any `action:"show_puzzle"` payload through one
+                        # handler — normalise the WS `tool` field so it keeps working.
+                        _action = _data.get("action")
+                        _ws_tool = _tool
+                        if _action == "show_puzzle":
+                            _ws_tool = "show_puzzle"
+                        elif _action == "clear_puzzle":
+                            _ws_tool = "clear_puzzle"
+                        if _action in ("show_puzzle", "clear_puzzle"):
+                            logger.info(
+                                "WS → tool=%s (%s) render=%s error=%s",
+                                _ws_tool, _tool, _data.get("render"), _data.get("error"),
+                            )
+                        # A puzzle actually reached the screen (not an error payload).
+                        if _action == "show_puzzle" and not _data.get("error"):
+                            generator_shown_this_turn = True
+                        await send({"type": "tool", "tool": _ws_tool, "data": _data})
+                        # Friendly one-line "thinking" step for the tool just run.
+                        _label = _THINKING_LABELS.get(_tool)
+                        if _label:
+                            await _emit_thinking(send, thinking_steps, _label)
+                        # Puzzle XP earned this turn → surface it in the thinking strip (NOT in
+                        # the AI's reply text), so the student sees the reward without bragging.
+                        _xp = _data.get("xp_awarded")
+                        if isinstance(_xp, (int, float)) and _xp > 0:
+                            await _emit_thinking(send, thinking_steps, f"🌟 +{int(_xp)} XP earned")
+                        # end_lesson succeeded → GUARANTEE a real report exists (server-side,
+                        # from the actual session), then tell the client to open it. Immutable:
+                        # if the AI already called generate_session_report, this returns it.
+                        if _tool == "end_lesson" and _data.get("ended"):
+                            if appt_id:
+                                try:
+                                    from app.services import lesson_service as _ls
+                                    await _ls.ensure_report_for_appointment(db, appt_id)
+                                    await db.commit()
+                                except Exception as _rep_err:  # noqa: BLE001
+                                    logger.warning("ensure_report on end_lesson failed appt=%s: %s", appt_id, _rep_err)
+                            # Hold the "open your report" navigation until AFTER the closing
+                            # message has fully streamed — otherwise it opens mid-sentence.
+                            _pending_ended_appt = appt_id
+                    except Exception as _tr_err:
+                        logger.warning("Failed to forward TOOL_RESULT: %s", _tr_err)
+                    continue
+                for sentence in segmenter.feed(token):
+                    if _dup(sentence):
+                        continue
+                    await stream_segment(send, seq, sentence, tts=tts, turn_id=turn_id)
+                    full.append(sentence)
+                    seq += 1
+
+            rem = segmenter.flush()
+            if rem and not _dup(rem):
+                await stream_segment(send, seq, rem, tts=tts, turn_id=turn_id)
+                full.append(rem)
                 seq += 1
 
-        remainder = segmenter.flush()
-        if remainder and not _dup(remainder):
-            await stream_segment(send, seq, remainder, tts=tts, turn_id=turn_id)
-            full.append(remainder)
-            seq += 1
+        await _consume(ai_content, with_image=True)
+
+        # ── STRUCTURAL SAFETY NET ─────────────────────────────────────────────────
+        # The tutor keeps inviting the student to do a puzzle and then ending the turn WITHOUT
+        # generating one — the student sees a blank panel and asks "where is it?". Prompt rules
+        # alone don't fully hold, so if it invited practice but no puzzle is on screen, run ONE
+        # forced recovery turn whose only job is to render the puzzle it just described. Guarded
+        # so it can't fire while wrapping up, and never loops (single attempt).
+        if (
+            not generator_shown_this_turn
+            and appt_id and tool_context is not None
+            and not _pending_ended_appt
+            and not _end_allowed and not _closing
+        ):
+            try:
+                from app.services import puzzle_service as _pzs2
+                _ps_after = await _pzs2.get_puzzle_state(db, appt_id)
+            except Exception:
+                _ps_after = None
+            _status_after = (_ps_after or {}).get("status")
+            _said = strip_display_markers("".join(full)).replace("[SLIDE_TRIGGER]", "").strip()
+            # Valid to invite when a puzzle IS already on screen (showing/submitted); only the
+            # "nothing on screen" case is the bug.
+            if _status_after not in ("showing", "submitted") and _invites_practice(_said):
+                logger.info(
+                    "SAFETY NET: invited practice with no puzzle on screen — forcing a generator "
+                    "turn (appt=%s)", appt_id,
+                )
+                _recovery = (
+                    "[SYSTEM — DO THIS NOW, silently] Your last message to the student was:\n"
+                    f"\"{_said[:400]}\"\n"
+                    "But you did NOT put a puzzle on their screen, so they can see nothing to do "
+                    "(they will ask 'where is it?'). Call the correct puzzle generator RIGHT NOW "
+                    "to show it — pick the tool that matches what you just asked: a manipulative "
+                    "for the topic (compare_numbers · order_numbers · place_value_counters · "
+                    "counting_bubbles · dot_array · times_table_dash · fraction_canvas · "
+                    "column_addition · number_grid_sums), or math_puzzle for a plain sum/"
+                    "subtraction (it shows tappable answer buttons). Then say ONE short sentence "
+                    "like 'It's on your screen now — have a go!'. Do NOT repeat your previous "
+                    "message and do NOT ask a different question."
+                )
+                try:
+                    await _consume(_recovery, with_image=False)
+                except Exception:
+                    logger.warning("safety-net recovery turn failed for appt %s", appt_id, exc_info=True)
 
         complete = "".join(full)
         clean = strip_display_markers(complete).replace("[SLIDE_TRIGGER]", "").strip()
