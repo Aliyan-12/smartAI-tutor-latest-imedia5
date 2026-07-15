@@ -177,7 +177,7 @@ def puzzle_tool_groups(ctx: ToolContext) -> dict:
     @tool
     async def math_puzzle(question: str, answer: str, mode: str = "latex",
                           latex: str = "", image_prompt: str = "",
-                          distractors: Union[list, str] = "") -> dict:
+                          distractors: str = "") -> dict:
         """
         Practice: pose a MATHS problem visually (never as plain chat text). Best for
         equations/arithmetic/algebra: mode="latex", give the problem in `latex`
@@ -187,13 +187,15 @@ def puzzle_tool_groups(ctx: ToolContext) -> dict:
         match your answer; use diagram_math_puzzle for those). `question` is the short
         instruction; `answer` is the correct answer (kept private, used to mark).
 
-        MULTIPLE CHOICE — prefer this for younger students (KS1-KS3): pass `distractors`, a
-        list of 2-3 PLAUSIBLE WRONG answers (e.g. answer="12", distractors=["10","14","21"]).
-        The student then TAPS one of four colourful bubbles instead of typing — far friendlier
-        for small children. Make the wrong answers tempting (common mistakes), not silly. You
-        supply only the wrong ones; the server adds the correct answer and shuffles them, so
-        never put the correct answer in `distractors`. Omit `distractors` to keep it typed
-        (fine for older students / open-ended answers).
+        MULTIPLE CHOICE — prefer this for younger students (KS1-KS3): pass `distractors` as a
+        short COMMA-SEPARATED STRING of 2-3 PLAUSIBLE WRONG answers
+        (e.g. answer="12", distractors="10, 14, 21"). The student then TAPS one of four
+        colourful bubbles instead of typing — far friendlier for small children. Make the
+        wrong answers tempting (common mistakes), not silly. You supply only the wrong ones;
+        the server adds the correct answer and shuffles them, so never put the correct answer
+        in `distractors`. Omit `distractors` to keep it typed (fine for older students /
+        open-ended answers); for a plain numeric answer the server still adds tappable options
+        automatically.
 
         After showing it, WAIT — on submit call math_evaluator. Not for graphs (use
         graph_puzzle). Call SILENTLY.
