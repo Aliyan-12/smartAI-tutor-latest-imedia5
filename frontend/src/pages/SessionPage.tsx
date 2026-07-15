@@ -5,6 +5,7 @@ import ResizablePanels from "../components/ResizablePanels";
 import { appointmentsApi, assessmentsApi, sessionsApi, gamificationApi, chatApi } from "../services/api";
 import ChatWindow from "../components/ChatWindow";
 import ChatInput from "../components/ChatInput";
+import QuickReplies from "../components/QuickReplies";
 import ResourceViewer, { type ResourceSlide } from "../components/ResourceViewer";
 import PuzzlePlayer from "../components/PuzzlePlayer";
 import LearnIdle from "../components/LearnIdle";
@@ -139,6 +140,8 @@ export default function SessionPage() {
   const [currentResource, setCurrentResource] = useState<ResourceSlide | null>(null);
   // The interactive puzzle the AI has put on screen (replaces the slide while active).
   const [currentPuzzle, setCurrentPuzzle] = useState<PuzzlePayload | null>(null);
+  // Tap-to-answer buttons the AI attached to its latest message (so students rarely type).
+  const [quickReplies, setQuickReplies] = useState<string[]>([]);
   const SLIDE_TOOLS = ["show_resource", "advance_lesson_slide", "retreat_lesson_slide"];
 
   // The last puzzle verdict, and a tick that fires the confetti/chime. A counter, not a
@@ -211,18 +214,25 @@ export default function SessionPage() {
     onTool: (tool, data) => {
       if (import.meta.env.DEV) console.debug("[session tool]", tool, data);
       if (tool === "generate_quiz") {
+        setQuickReplies([]); // a quiz replaces any pending tap-answers
         setQuizOffer({
           topic: (data.topic as string) || "",
           chat_session_id: sessionIdRef.current || "",
           assessment_id: data.assessment_id as number | undefined,
           questions: data.questions as QuizOffer["questions"],
         });
+      } else if (tool === "quick_replies") {
+        // Tap-to-answer buttons for the AI's current question (no puzzle/quiz needed).
+        if (!data.error && Array.isArray(data.options) && (data.options as string[]).length > 0) {
+          setQuickReplies((data.options as string[]).slice(0, 5));
+        }
       } else if (tool === "show_puzzle") {
         if (data.error) {
           console.warn("[show_puzzle] backend returned error — not rendering:", data.error, data.message);
         } else if (!data.render) {
           console.warn("[show_puzzle] missing render key — got:", data);
         } else {
+          setQuickReplies([]); // the puzzle is the thing to answer now
           setCurrentPuzzle(data as unknown as PuzzlePayload);
           setLearnTab("learn");
           // A puzzle needs the Learn panel — surface it (mobile shows one panel).
@@ -747,6 +757,8 @@ export default function SessionPage() {
 
   const sessionSend = useCallback(
     (text: string, sendOpts?: { imageData?: string; imageMime?: string; fileName?: string; webSearch?: boolean; research?: boolean }) => {
+      // Any reply (typed or a tapped quick-reply) consumes the pending tap-answers.
+      setQuickReplies([]);
       // The unified pipeline owns optimistic display, TTS sync, and commit.
       channel.sendMessage(text, {
         imageData: sendOpts?.imageData,
@@ -1490,6 +1502,11 @@ export default function SessionPage() {
       </div>
 
       <div style={styles.chatInputWrap}>
+        <QuickReplies
+          options={quickReplies}
+          disabled={isPaused}
+          onPick={(text) => sessionSend(text)}
+        />
         <ChatInput
           onSend={(text, opts) => sessionSend(text, opts)}
           streaming={busy}
