@@ -179,87 +179,6 @@ async def _count_appointment_assessments(
     return result.scalar_one() or 0
 
 
-async def generate_session_briefing(db: AsyncSession, appointment_id: int) -> dict:
-    """Generate and cache an AI session briefing for the pre-lesson page."""
-    import json as _json
-
-    result = await db.execute(
-        select(Appointment).where(Appointment.id == appointment_id)
-    )
-    appointment = result.scalar_one_or_none()
-    if not appointment:
-        return {}
-
-    # Return cached briefing if already generated
-    if appointment.ai_briefing:
-        try:
-            return _json.loads(appointment.ai_briefing)
-        except Exception:
-            pass
-
-    subject = appointment.subject or "General"
-    key_stage = appointment.key_stage or ""
-    title = appointment.title or subject
-    description = appointment.description or ""
-    duration = appointment.duration_minutes or 60
-
-    # Parse topics from description
-    topics_match = _re.search(r"Topics:\s*([^\n]+)", description)
-    topics_str = topics_match.group(1) if topics_match else ""
-    session_type_match = _re.search(r"Session type:\s*([^\n]+)", description)
-    session_type = session_type_match.group(1) if session_type_match else "General Tutoring"
-
-    prompt = f"""You are preparing a session briefing for a UK curriculum AI tutoring session.
-
-Session details:
-- Subject: {subject}
-- Key Stage: {key_stage}
-- Session Title: {title}
-- Session Type: {session_type}
-- Topics: {topics_str or subject}
-- Duration: {duration} minutes
-
-Generate a JSON briefing with exactly these fields:
-{{
-  "overview": "2-sentence friendly summary of what this session will cover and why it matters",
-  "objectives": ["learning objective 1", "learning objective 2", "learning objective 3"],
-  "key_terms": ["term1", "term2", "term3", "term4", "term5"],
-  "tip": "One practical study tip relevant to this topic/session type"
-}}
-
-Keep it concise, age-appropriate for {key_stage}, and curriculum-aligned. Return ONLY valid JSON."""
-
-    try:
-        raw = gemini_service.generate_response(
-            system_prompt="You are a UK curriculum expert. Always respond with valid JSON only.",
-            messages=[{"role": "user", "content": prompt}],
-            model=None,
-            stream=False,
-        )
-        # Strip markdown fences if present
-        raw = raw.strip()
-        if raw.startswith("```"):
-            raw = _re.sub(r"^```[a-z]*\n?", "", raw)
-            raw = _re.sub(r"\n?```$", "", raw)
-        briefing = _json.loads(raw.strip())
-    except Exception:
-        briefing = {
-            "overview": f"In this {duration}-minute session, you'll explore {topics_str or subject} at {key_stage} level.",
-            "objectives": [f"Understand core concepts in {subject}", "Build confidence with practice", "Complete session quiz"],
-            "key_terms": [],
-            "tip": "Have a pencil and paper ready for notes and working.",
-        }
-
-    # Cache to DB
-    try:
-        appointment.ai_briefing = _json.dumps(briefing)
-        await db.commit()
-    except Exception:
-        await db.rollback()
-
-    return briefing
-
-
 def _parse_unit_names(description: str) -> list[str]:
     """Extract unit names from 'Topics: X, Y, Z' in appointment description."""
     if not description:
@@ -1359,7 +1278,13 @@ Return ONLY valid JSON with exactly these 5 fields:
 Be age-appropriate for {key_stage}. Return ONLY valid JSON, no markdown."""
 
     try:
-        raw = gemini_service.generate_response(
+        # Run the (synchronous, ~10s) Gemini call in a worker THREAD, not inline. Called
+        # directly here it blocked the asyncio event loop for the whole generation, so a student
+        # clicking "Start My Lesson" while the briefing was still loading had their POST /join
+        # request stuck behind it — the reported "the button doesn't work while the briefing
+        # loads". Off-loading it keeps the loop free to serve /join immediately.
+        raw = await asyncio.to_thread(
+            gemini_service.generate_response,
             system_prompt="You are a UK curriculum expert. Respond with valid JSON only.",
             messages=[{"role": "user", "content": prompt}],
             model=None,
