@@ -1106,6 +1106,14 @@ WHEN IT'S TIME TO PRACTISE / QUIZ (ask in PUZZLE form, never plain text):
 - Never write a tool call as text or read out raw params; the visual just appears on screen.
 - ACTIONS, NOT NARRATION: if you say you're clearing/moving on, actually call clear_puzzle in the SAME turn (moving to a slide also clears it). Do the action — don't just describe it.
 
+MINIMISE TYPING — TAP, DON'T TYPE (CRITICAL for KS1/KS2/KS3):
+Young students should almost NEVER have to type. Every time you would make the student type a reply, give them something to TAP instead:
+- A practice/maths question → a PUZZLE (manipulative_puzzle / math_puzzle / …), as above.
+- Any OTHER short question — a recall/concept question ("What do we use to tell the time?"), a preference, or a comprehension check — call quick_replies with 2-4 tap options separated by a PIPE: the correct answer plus plausible wrong ones (e.g. "A clock | A ruler | A book"). Write the question as normal text FIRST, then call quick_replies silently; the buttons appear under your message and the student's tap comes back as their reply.
+- DON'T STALL FOR ACKNOWLEDGEMENTS. Do NOT stop and wait for "ok", "yes", "ready", "shall we continue" just to move on — a KS1 child cannot type that easily and it breaks the flow. Either simply CONTINUE teaching the next point, or, if you genuinely want a go-ahead, call quick_replies("Yes, let's go! | Not yet") so it's one tap. Never end a turn asking a bare "Ready?" with nothing to tap.
+- KEY-STAGE DIAL: KS1/KS2/KS3 = tap-only (puzzles, quick_replies, quizzes) — treat typed input as a last resort. KS4/KS5 = keep manual typing minimal too (aim for only a handful of typed exchanges per lesson); still prefer taps, puzzles and quizzes, and use quick_replies for quick checks. Voice answers are always fine at any stage.
+- quick_replies is NOT for a maths practice question that has a proper puzzle — use the puzzle there. It's for the spoken/recall/acknowledgement questions that would otherwise force typing.
+
 END-OF-SESSION REPORT:
 - After delivering the final session summary/review (the last phase), call the generate_session_report tool.
   generate_session_report(
@@ -1455,6 +1463,7 @@ async def stream_segment(send, seq: int, sentence: str, *, tts: bool, turn_id: s
 
 _TURN_TIMEOUT_S = 150
 _WATCHDOG_TICK_S = 20   # how often the per-session watchdog checks the lesson clock
+_IDLE_SUGGEST_S = 120   # 2 min of silence → silently surface tap-answer suggestions (no chat pill)
 _IDLE_CHECK_S = 300     # 5 min of student silence → a short "are you still there?" check-in
 _IDLE_PAUSE_S = 420     # 7 min total (2 min after the check-in) → announce + auto-pause
 _active_ws: dict = {}
@@ -1531,6 +1540,14 @@ def _invites_practice(text: str) -> bool:
     if _STRONG_INVITE_RE.search(t):
         return True
     return "?" in t and bool(_QUESTION_INVITE_RE.search(t))
+
+
+def _expects_reply(text: str) -> bool:
+    """True when the tutor's message ends by asking the student a question. Used (for KS1-KS3)
+    to catch 'asked something but gave nothing to tap' so we can attach quick-reply buttons —
+    a young child should not have to type. Deliberately tight (ends with '?') to avoid firing
+    on statements."""
+    return (text or "").rstrip().endswith("?")
 
 
 def _build_quiz_ctx(topic: str, score: float, strong: list, weak: list) -> str:
@@ -1795,18 +1812,28 @@ async def build_lesson_state_anchor(
     _ks_norm = ""
     if appointment is not None:
         _ks_norm = (getattr(appointment, "key_stage", "") or "").upper().replace(" ", "")
-    if _ks_norm in ("KS1", "KS2"):
+    if _ks_norm in ("KS1", "KS2", "KS3"):
         lines.append(
-            "⛔ KS1/KS2 — PUZZLE-ONLY (ABSOLUTE): this child CANNOT type answers. EVERY practice "
-            "or check question MUST be a tappable puzzle — NEVER a maths question written in the "
-            "chat. Before you write ANY question that expects an answer ('what is 19 − 3?', "
-            "'which is bigger?', 'put these in order', 'what number is 6 tens and 0 ones?'), you "
-            "MUST have called a generator THIS turn: manipulative_puzzle for the topic "
-            "(compare_numbers · order_numbers · place_value_counters · counting_bubbles · "
-            "dot_array · times_table_dash · fraction_canvas · column_addition · number_grid_sums), "
-            "or math_puzzle for any other quick sum/subtraction (it shows tappable answer "
-            "buttons). If you catch yourself about to type a question with no puzzle on screen, "
-            "STOP and call the generator instead. Plain-text maths questions are NOT allowed here."
+            "⛔ KS1–KS3 — TAP, DON'T TYPE (ABSOLUTE): this student should almost never type. "
+            "EVERYTHING you ask must give them something to TAP:\n"
+            "  • a maths PRACTICE question → a tappable PUZZLE (manipulative_puzzle for the topic "
+            "— compare_numbers · order_numbers · place_value_counters · counting_bubbles · "
+            "dot_array · times_table_dash · fraction_canvas · column_addition · number_grid_sums — "
+            "or math_puzzle for a plain sum). Never a maths question typed in chat.\n"
+            "  • ANY OTHER short question (recall/concept like 'what do we use to tell the time?', "
+            "a check, a preference) → call quick_replies with 2-4 PIPE-separated tap options "
+            "(right answer + plausible wrong ones, e.g. \"A clock | A ruler | A book\").\n"
+            "  • a go-ahead ('ready?', 'shall we continue?') → do NOT stall for a typed 'ok'; "
+            "either just continue teaching, or call quick_replies(\"Yes, let's go! | Not yet\").\n"
+            "Before you end a turn having asked ANYTHING that expects a reply, make sure a puzzle "
+            "or quick_replies is on screen for it. If you catch yourself about to leave a bare "
+            "typed question, STOP and add a puzzle or quick_replies."
+        )
+    elif _ks_norm in ("KS4", "KS5"):
+        lines.append(
+            "🔵 KS4–KS5 — KEEP TYPING MINIMAL: a few typed exchanges per lesson is fine, but "
+            "still prefer TAPS. Use puzzles/quizzes for practice and quick_replies for short "
+            "recall/checks rather than making the student type every answer."
         )
     if available_actions:
         lines.append(
@@ -2129,9 +2156,12 @@ async def _run_turn(send, chat_id, user_id, *, saved_user_text, ai_content,
         # with no error). The safety net below uses it to catch "invited practice but showed
         # nothing" and force a recovery generation.
         generator_shown_this_turn = False
+        # True once the AI attached tap-to-answer quick replies this turn (so the student can
+        # answer without typing). Used by the "don't force typing" safety net below.
+        quick_replies_shown_this_turn = False
 
         async def _consume(content_for_call, *, with_image: bool):
-            nonlocal seq, generator_shown_this_turn, _pending_ended_appt
+            nonlocal seq, generator_shown_this_turn, quick_replies_shown_this_turn, _pending_ended_appt
             async for raw in gemini_service.stream_response_async(
                 hist_slice, content_for_call, rag_chunks=rag_chunks,
                 system_prompt_override=session_system_prompt, tool_context=tool_context,
@@ -2166,6 +2196,9 @@ async def _run_turn(send, chat_id, user_id, *, saved_user_text, ai_content,
                         # A puzzle actually reached the screen (not an error payload).
                         if _action == "show_puzzle" and not _data.get("error"):
                             generator_shown_this_turn = True
+                        # Tap-to-answer buttons were attached (student won't have to type).
+                        if _action == "quick_replies" and not _data.get("error"):
+                            quick_replies_shown_this_turn = True
                         await send({"type": "tool", "tool": _ws_tool, "data": _data})
                         # Friendly one-line "thinking" step for the tool just run.
                         _label = _THINKING_LABELS.get(_tool)
@@ -2227,30 +2260,55 @@ async def _run_turn(send, chat_id, user_id, *, saved_user_text, ai_content,
                 _ps_after = None
             _status_after = (_ps_after or {}).get("status")
             _said = strip_display_markers("".join(full)).replace("[SLIDE_TRIGGER]", "").strip()
+            _ks_norm2 = (getattr(tool_context, "key_stage", "") or "").upper().replace(" ", "")
+            _minimal_typing = _ks_norm2 in ("KS1", "KS2", "KS3")
             # Valid to invite when a puzzle IS already on screen (showing/submitted); only the
-            # "nothing on screen" case is the bug.
-            if _status_after not in ("showing", "submitted") and _invites_practice(_said):
-                logger.info(
-                    "SAFETY NET: invited practice with no puzzle on screen — forcing a generator "
-                    "turn (appt=%s)", appt_id,
-                )
-                _recovery = (
-                    "[SYSTEM — DO THIS NOW, silently] Your last message to the student was:\n"
-                    f"\"{_said[:400]}\"\n"
-                    "But you did NOT put a puzzle on their screen, so they can see nothing to do "
-                    "(they will ask 'where is it?'). Call the correct puzzle generator RIGHT NOW "
-                    "to show it — pick the tool that matches what you just asked: a manipulative "
-                    "for the topic (compare_numbers · order_numbers · place_value_counters · "
-                    "counting_bubbles · dot_array · times_table_dash · fraction_canvas · "
-                    "column_addition · number_grid_sums), or math_puzzle for a plain sum/"
-                    "subtraction (it shows tappable answer buttons). Then say ONE short sentence "
-                    "like 'It's on your screen now — have a go!'. Do NOT repeat your previous "
-                    "message and do NOT ask a different question."
-                )
-                try:
-                    await _consume(_recovery, with_image=False)
-                except Exception:
-                    logger.warning("safety-net recovery turn failed for appt %s", appt_id, exc_info=True)
+            # "nothing on screen" case needs recovery.
+            if _status_after not in ("showing", "submitted"):
+                if _invites_practice(_said):
+                    logger.info(
+                        "SAFETY NET: invited practice with no puzzle on screen — forcing a "
+                        "generator turn (appt=%s)", appt_id,
+                    )
+                    _recovery = (
+                        "[SYSTEM — DO THIS NOW, silently] Your last message to the student was:\n"
+                        f"\"{_said[:400]}\"\n"
+                        "But you did NOT put a puzzle on their screen, so they can see nothing to "
+                        "do (they will ask 'where is it?'). Call the correct puzzle generator "
+                        "RIGHT NOW to show it — pick the tool that matches what you just asked: a "
+                        "manipulative for the topic (compare_numbers · order_numbers · "
+                        "place_value_counters · counting_bubbles · dot_array · times_table_dash · "
+                        "fraction_canvas · column_addition · number_grid_sums), or math_puzzle "
+                        "for a plain sum/subtraction (it shows tappable answer buttons). Then say "
+                        "ONE short sentence like 'It's on your screen now — have a go!'. Do NOT "
+                        "repeat your previous message and do NOT ask a different question."
+                    )
+                    try:
+                        await _consume(_recovery, with_image=False)
+                    except Exception:
+                        logger.warning("safety-net recovery turn failed for appt %s", appt_id, exc_info=True)
+                elif _minimal_typing and not quick_replies_shown_this_turn and _expects_reply(_said):
+                    # KS1-KS3 asked a plain question with nothing to tap — a young child should
+                    # not have to type. Force tap-to-answer buttons (or a puzzle).
+                    logger.info(
+                        "SAFETY NET: KS1-KS3 question with no tap options — forcing quick_replies "
+                        "(appt=%s)", appt_id,
+                    )
+                    _recovery = (
+                        "[SYSTEM — DO THIS NOW, silently] Your last message asked the student a "
+                        f"question:\n\"{_said[:400]}\"\n"
+                        "This is a KS1-KS3 lesson: the student must NOT have to type. If this is "
+                        "really a maths practice question, set the matching PUZZLE now. Otherwise "
+                        "call quick_replies NOW with 2-4 tap options (PIPE-separated) that answer "
+                        "YOUR question — the correct answer plus plausible wrong ones (e.g. "
+                        "\"A clock | A ruler | A book\"), or for a yes/no / 'ready?' use "
+                        "\"Yes, let's go! | Not yet\". Do NOT repeat your message and do NOT ask "
+                        "a different question — just add the buttons."
+                    )
+                    try:
+                        await _consume(_recovery, with_image=False)
+                    except Exception:
+                        logger.warning("quick-reply recovery turn failed for appt %s", appt_id, exc_info=True)
 
         complete = "".join(full)
         clean = strip_display_markers(complete).replace("[SLIDE_TRIGGER]", "").strip()
@@ -2736,6 +2794,86 @@ async def _guard_turn(send, coro):
         await send({"type": "turn_end", "message_id": None, "full_text": ""})
 
 
+async def _gen_idle_options(last_ai_message: str, key_stage: str = "") -> list:
+    """Ask a fast model for 2-4 SHORT tap-reply buttons a stuck student could pick, based on the
+    tutor's last message. Returns [] on any failure (the caller then uses generic chips). The
+    Gemini call is synchronous, so it runs in a worker thread to keep the event loop free."""
+    import json as _json
+    prompt = (
+        f"A student in a UK {key_stage or 'primary'} lesson has gone quiet and may not know how "
+        "to reply. Here is the tutor's last message to them:\n"
+        f"\"\"\"{(last_ai_message or '')[:800]}\"\"\"\n\n"
+        "Suggest 2-4 SHORT tap-reply buttons the student could pick to respond. If the tutor "
+        "asked a question or a riddle, include the likely answers (with the correct one); if the "
+        "tutor explained something, use natural replies like a guess plus \"I'm not sure\" or "
+        "\"Tell me more\". Keep each button to a few words, age-appropriate.\n"
+        "Return ONLY a JSON array of strings, e.g. [\"A clock\",\"A ruler\",\"I'm not sure\"]."
+    )
+    try:
+        raw = await asyncio.to_thread(
+            gemini_service.generate_response,
+            system_prompt="You suggest short, friendly tap-reply buttons. Reply with a JSON array of strings only.",
+            messages=[{"role": "user", "content": prompt}],
+            model=None, stream=False,
+        )
+        if isinstance(raw, list):
+            raw = "".join(str(x) for x in raw)
+        raw = (raw or "").strip()
+        if raw.startswith("```"):
+            raw = _re.sub(r"^```[a-z]*\n?", "", raw)
+            raw = _re.sub(r"\n?```$", "", raw)
+        arr = _json.loads(raw)
+        if isinstance(arr, list):
+            out, seen = [], set()
+            for x in arr:
+                s = str(x).strip()
+                if s and s.lower() not in seen:
+                    seen.add(s.lower())
+                    out.append(s)
+            return out[:5]
+    except Exception as e:  # noqa: BLE001
+        logger.warning("idle option generation failed: %s", e)
+    return []
+
+
+async def _suggest_idle_quick_replies(send, chat_id: int, appt_id: int) -> None:
+    """Silently surface 2-4 tap-answer suggestions when a student has gone quiet (~2 min), based
+    on the tutor's LAST message — so a stuck student can see what they might reply. Emits ONLY a
+    quick_replies frame (NO chat message, NO event pill). Best-effort: never raises."""
+    try:
+        async with async_session_factory() as db:
+            # A puzzle on screen IS the thing to do — don't distract with chat chips.
+            try:
+                from app.services import puzzle_service as _pzs
+                ps = await _pzs.get_puzzle_state(db, appt_id)
+            except Exception:
+                ps = None
+            if (ps or {}).get("status") in ("showing", "submitted"):
+                return
+            msgs = await chat_service.get_chat_history(db, chat_id)
+            last_ai = next((m.content for m in reversed(msgs)
+                            if m.role == "assistant" and (m.content or "").strip()), "")
+            if not last_ai.strip():
+                return
+            key_stage = ""
+            try:
+                appt = await _load_appointment(db, appt_id)
+                key_stage = getattr(appt, "key_stage", "") or ""
+            except Exception:
+                pass
+
+        opts = await _gen_idle_options(last_ai, key_stage)
+        if len(opts) < 2:
+            opts = ["I'm not sure 🤔", "Can you explain again?", "Yes, let's keep going"]
+        await send({
+            "type": "tool", "tool": "quick_replies",
+            "data": {"action": "quick_replies", "options": opts[:5], "resurfaced": True},
+        })
+        logger.info("idle quick_replies surfaced appt=%s opts=%s", appt_id, opts[:5])
+    except Exception as e:  # noqa: BLE001
+        logger.warning("idle quick_replies failed appt=%s: %s", appt_id, e)
+
+
 async def run_session_ws(websocket: WebSocket) -> None:
     """Full session-chat WebSocket handler (auth + turn loop). The router delegates here."""
     await websocket.accept()
@@ -2771,6 +2909,7 @@ async def run_session_ws(websocket: WebSocket) -> None:
     timeout_fired = False
     last_activity = time.monotonic()  # last genuine student action (for idle detection)
     idle_stage = 0                    # 0=active · 1=checked-in · 2=auto-paused
+    idle_suggested = False            # fired the silent ~2-min "here are some tap answers" nudge
 
     async def send(d: dict) -> None:
         try:
@@ -2838,11 +2977,12 @@ async def run_session_ws(websocket: WebSocket) -> None:
         def _dispatch(m: str, d: dict) -> None:
             """Route an event to its bucket. AI_REACTIVE → a turn (queued if busy);
             SIDE_EFFECT → a quick background task; TELEMETRY handled by the loop."""
-            nonlocal pending_event, last_activity, idle_stage
+            nonlocal pending_event, last_activity, idle_stage, idle_suggested
             # A genuine student action resets the idle clock + restarts the idle cycle.
             if m in ("user_message", "user_audio", "puzzle_result", "quiz_result"):
                 last_activity = time.monotonic()
                 idle_stage = 0
+                idle_suggested = False
             if m in _AI_HANDLERS:
                 logger.info("EVENT in kind=%s bucket=AI_REACTIVE appt=%s user=%s", m, appt_id, user_id)
                 if current_turn and not current_turn.done():
@@ -2856,7 +2996,7 @@ async def run_session_ws(websocket: WebSocket) -> None:
 
         # ── per-session watchdog: soft `lesson.timeout` when the clock runs out ──
         async def _watchdog() -> None:
-            nonlocal timeout_fired, idle_stage
+            nonlocal timeout_fired, idle_stage, idle_suggested
             from app.services import session_state_service as _sss
             from app.schemas.session_events import lesson_timeout_frame, EVENT_LESSON_TIMEOUT
             while True:
@@ -2888,6 +3028,15 @@ async def run_session_ws(websocket: WebSocket) -> None:
                     # ── idle staleness (don't fire while the AI is still responding) ──
                     if current_turn and not current_turn.done():
                         continue
+                    # ~2 min idle → SILENTLY surface tap-answer suggestions (no chat message, no
+                    # pill), so a stuck student sees what they could reply. Fires once per idle
+                    # period; a real action resets it. Runs as its own task so a slow LLM call
+                    # can't hold up the watchdog's time-up check.
+                    if not idle_suggested and idle_secs >= _IDLE_SUGGEST_S:
+                        idle_suggested = True
+                        logger.info("watchdog: student idle %.0fs → suggest quick replies appt=%s",
+                                    idle_secs, appt_id)
+                        asyncio.create_task(_suggest_idle_quick_replies(send, chat_id, appt_id))
                     if idle_stage == 0 and idle_secs >= _IDLE_CHECK_S:
                         idle_stage = 1
                         logger.info("watchdog: student idle %.0fs → check-in appt=%s", idle_secs, appt_id)

@@ -51,6 +51,28 @@ def _coerce_list_of_str(v: Any) -> List[str]:
     return []
 
 
+def _parse_quick_options(v: Any) -> List[str]:
+    """Parse quick-reply button labels. Prefer a JSON array or a PIPE-separated string so a
+    label may itself contain a comma ("Yes, let's go!"); fall back to comma-splitting only
+    when there's no pipe."""
+    if isinstance(v, list):
+        return [str(x).strip() for x in v if str(x).strip()]
+    if not isinstance(v, str):
+        return []
+    s = v.strip()
+    if not s:
+        return []
+    if s.startswith("["):
+        try:
+            arr = json.loads(s)
+            if isinstance(arr, list):
+                return [str(x).strip() for x in arr if str(x).strip()]
+        except Exception:
+            pass
+    sep = "|" if "|" in s else ","
+    return [p.strip() for p in s.split(sep) if p.strip()]
+
+
 def _coerce_dict(v: Any) -> dict:
     if isinstance(v, str):
         try:
@@ -393,6 +415,39 @@ def puzzle_tool_groups(ctx: ToolContext) -> dict:
             logger.warning("clear puzzle_state failed: %s", e)
         return {"action": "clear_puzzle"}
 
+    @tool
+    async def quick_replies(options: str) -> dict:
+        """
+        Attach 2-4 TAPPABLE quick-reply buttons under your message, so the student can ANSWER
+        or ACKNOWLEDGE with ONE TAP instead of typing. Use this EVERY time you ask a short
+        question or want a go-ahead and there is NO puzzle/quiz on screen — especially for
+        younger students (KS1-KS3), who should almost never have to type. It is NOT a puzzle
+        (no XP, no marking): it's just a friendlier way to collect a short reply.
+
+        `options` is a short string of the button labels SEPARATED BY A PIPE "|" (use a pipe,
+        NOT a comma, so a label can itself contain a comma):
+          • a recall/concept question → the CORRECT answer plus plausible wrong ones, e.g.
+            "A clock | A ruler | A book"     (for "What do we use to tell the time?")
+          • a yes/no or a go-ahead      → "Yes, let's go! | Not yet"
+        Keep each button to a few words; the student's tap is sent back as their reply.
+        Write your question as NORMAL text first, then call this SILENTLY — the buttons appear
+        beneath your message. Do NOT read the buttons out loud. If the question is really a
+        maths practice question, prefer a puzzle (manipulative_puzzle / math_puzzle) instead.
+        """
+        opts = _parse_quick_options(options)
+        seen, clean = set(), []
+        for o in opts:
+            k = o.lower()
+            if o and k not in seen:
+                seen.add(k)
+                clean.append(o)
+        clean = clean[:5]
+        if len(clean) < 2:
+            return {"action": "quick_replies", "error": "need_options",
+                    "message": "Pass at least 2 tap options separated by a pipe, e.g. "
+                               "\"A clock | A ruler | A book\"."}
+        return {"action": "quick_replies", "options": clean}
+
     # ── Evaluators — read the on-screen puzzle's (server-only) solution + the student's
     #    submitted answer, and mark it semantically. Return the verdict for you to NARRATE.
     async def _evaluate(expected_type: str) -> dict:
@@ -477,7 +532,7 @@ def puzzle_tool_groups(ctx: ToolContext) -> dict:
 
     puzzles = [
         explanatory_puzzle, labelling_puzzle, matching_puzzle, math_puzzle,
-        diagram_math_puzzle, graph_puzzle, clear_puzzle,
+        diagram_math_puzzle, graph_puzzle, clear_puzzle, quick_replies,
         labelling_evaluator, matching_evaluator, math_evaluator, graph_evaluator,
     ]
     # KS5 never gets manipulatives — an A-Level student does not want counters, and an
