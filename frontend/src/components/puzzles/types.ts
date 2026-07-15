@@ -21,7 +21,8 @@ export type PuzzleRender =
   | "fraction_canvas"
   | "dot_array"
   | "counting_bubbles"
-  | "compare_numbers";
+  | "compare_numbers"
+  | "order_numbers";
 
 export interface PuzzlePayload {
   render: PuzzleRender;

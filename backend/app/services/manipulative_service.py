@@ -628,6 +628,64 @@ def _mark_compare_numbers(solution: Any, answer: Any) -> Dict[str, Any]:
                     "pointy end at the smaller. Have another go.")
 
 
+# ── 9. order_numbers ───────────────────────────────────────────────────────────────
+# Scrambled number cards the child TAPS into order (smallest→biggest or biggest→smallest).
+# Params: {"numbers": [45, 12, 51]}. Replaces "put these in order" asked in plain chat text.
+
+def _build_order_numbers(p: dict, key_stage: Optional[str] = None) -> Tuple[dict, Any, str, str]:
+    raw = p.get("numbers") or p.get("values") or p.get("nums") or p.get("list") or []
+    if isinstance(raw, (int, str)):
+        raw = [raw]
+    parsed = [n for n in (_as_int(x) for x in raw) if n is not None]
+    # Distinct only — ordering with a repeated value makes "which slot" ambiguous to mark.
+    seen, nums = set(), []
+    for n in parsed:
+        if n not in seen:
+            seen.add(n)
+            nums.append(n)
+    nums = nums[:5]
+    if len(nums) < 3:
+        raise ParamError(
+            "Missing 'numbers'. Pass 3-5 DIFFERENT numbers to put in order, sized to the lesson's "
+            "range, e.g. {\"numbers\": [45, 12, 51]}. There is no default."
+        )
+    for n in nums:
+        _check_ceiling(n, key_stage, "number")
+
+    rng = _rng()
+    direction = str(p.get("direction", p.get("order", ""))).lower()
+    if direction not in ("asc", "desc"):
+        direction = rng.choice(["asc", "desc"])
+    ordered = sorted(nums, reverse=(direction == "desc"))
+    # Present them scrambled — never already in the answer order.
+    shown = nums[:]
+    for _ in range(8):
+        rng.shuffle(shown)
+        if shown != ordered:
+            break
+    word = "smallest to biggest" if direction == "asc" else "biggest to smallest"
+    prompt = rng.choice([
+        f"Put these numbers in order, from {word}. Tap them one by one, then press Check.",
+        f"Tap the numbers in order — {word} — then press Check.",
+    ])
+    clean = {"shown": shown, "direction": direction}
+    return clean, {"order": ordered}, prompt, "Put them in order"
+
+
+def _mark_order_numbers(solution: Any, answer: Any) -> Dict[str, Any]:
+    sol = solution.get("order") if isinstance(solution, dict) else None
+    want = [_as_int(x) for x in (sol or [])]
+    got_raw = answer.get("order") if isinstance(answer, dict) else answer
+    got = [_as_int(x) for x in got_raw] if isinstance(got_raw, (list, tuple)) else []
+    if want and got == want:
+        return _verdict(True, 10, "Perfect — that's exactly the right order!")
+    if not got:
+        return _verdict(False, 0, "Tap the numbers one at a time to put them in order, then Check.")
+    right = sum(1 for i, w in enumerate(want) if i < len(got) and got[i] == w)
+    return _verdict(False, _score_from_ratio(right, len(want)),
+                    "Not quite — compare the TENS first, then line them up in order. Have another go.")
+
+
 # ── Registry ─────────────────────────────────────────────────────────────────────
 
 BuildFn = Callable[[dict, Optional[str]], Tuple[dict, Any, str, str]]
@@ -665,6 +723,10 @@ MANIPULATIVES: Dict[str, Dict[str, Any]] = {
     "compare_numbers": {
         "key_stages": ["KS1", "KS2", "KS3"],
         "build": _build_compare_numbers, "mark": _mark_compare_numbers,
+    },
+    "order_numbers": {
+        "key_stages": ["KS1", "KS2", "KS3"],
+        "build": _build_order_numbers, "mark": _mark_order_numbers,
     },
 }
 

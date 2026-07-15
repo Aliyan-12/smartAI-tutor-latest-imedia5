@@ -13,6 +13,7 @@ import FractionCanvas from "./puzzles/manipulatives/FractionCanvas";
 import DotArray from "./puzzles/manipulatives/DotArray";
 import CountingBubbles from "./puzzles/manipulatives/CountingBubbles";
 import CompareNumbers from "./puzzles/manipulatives/CompareNumbers";
+import OrderNumbers from "./puzzles/manipulatives/OrderNumbers";
 import PuzzleBackground, { bgTheme } from "./puzzles/backgrounds";
 
 /**
@@ -29,7 +30,7 @@ const TYPE_LABEL: Record<string, string> = {
 const MANIPULATIVE_RENDERS = new Set([
   "place_value_counters", "column_addition", "number_grid_sums",
   "times_table_dash", "fraction_canvas", "dot_array", "counting_bubbles",
-  "compare_numbers",
+  "compare_numbers", "order_numbers",
 ]);
 
 export default function PuzzlePlayer({
@@ -84,6 +85,8 @@ export default function PuzzlePlayer({
         return <CountingBubbles {...p} />;
       case "compare_numbers":
         return <CompareNumbers {...p} />;
+      case "order_numbers":
+        return <OrderNumbers {...p} />;
       default:
         return (
           <p style={{ color: "#94a3b8", fontSize: 13, textAlign: "center" }}>

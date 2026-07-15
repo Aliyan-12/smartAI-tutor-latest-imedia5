@@ -330,9 +330,13 @@ def puzzle_tool_groups(ctx: ToolContext) -> dict:
           • kind="compare_numbers", params {"left": 29, "right": 92}
               Two number cards; the student TAPS the bigger (or smaller) number and submits.
               USE THIS instead of ever typing "which number is bigger, 29 or 92?" into the chat.
-              For comparing/ordering numbers. (At KS1/KS2 it's tap-the-number only; the <, =, >
-              sign version is added automatically for KS3+ — you don't choose, the server does.
-              For KS1/KS2 pass two DIFFERENT numbers.)
+              For COMPARING two numbers. (At KS1/KS2 it's tap-the-number only; the <, =, > sign
+              version is added automatically for KS3+ — the server chooses. Pass two DIFFERENT
+              numbers for KS1/KS2.)
+          • kind="order_numbers", params {"numbers": [45, 12, 51]}
+              Scrambled number cards the student taps into order. USE THIS instead of ever typing
+              "put these in order: 45, 12, 51" into the chat. For ORDERING/sequencing numbers.
+              Pass 3-5 DIFFERENT numbers.
 
         After showing it, invite them to have a go and WAIT — on submit call
         manipulative_evaluator. Call SILENTLY.

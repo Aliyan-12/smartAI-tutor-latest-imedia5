@@ -1168,13 +1168,15 @@ WHEN IT'S TIME TO PRACTISE / QUIZ (ask in PUZZLE form, never plain text):
   • diagram_math_puzzle — a DETERMINISTIC drawn diagram whose answer the SERVER computes, so it is ALWAYS right. USE THIS (never a generated image) for anything where the EXACT picture decides the answer: fractions (concept "fraction", with a total and a shaded count), telling the time (concept "clock", with an hour and a minute), and reading a length off a ruler (concept "ruler", with a length in cm and the object's name). A generated photo cannot render exact counts, hand positions or ruler scales, so its answer would be wrong — that is why the ruler and fraction answers got marked wrong before. You do NOT supply the answer for these — the server derives it from the numbers you give.
   • manipulative_puzzle — a HANDS-ON activity the student plays with (taps, drags, colours) instead of typing: place_value_counters · column_addition · number_grid_sums · times_table_dash · fraction_canvas · dot_array · counting_bubbles · compare_numbers. THE BEST practice tool for younger students. You pass ONLY the kind + its params ({{"target": 3471}}) — never a question, never an answer; the server writes both, so it cannot contradict itself. Mark it with manipulative_evaluator.
     MATCH THE ACTIVITY TO THIS LESSON'S TOPIC (in STUDENT PROFILE / LESSON STATE) — the student never asks for a puzzle, YOU pick it for the topic you're teaching, and every practice moment gets one (never a plain-text maths question). By topic:
-      – comparing / ordering numbers (bigger, smaller, greater/less than) → compare_numbers {{"left": 29, "right": 92}} (KS1/KS2 tap the number, pass two DIFFERENT numbers; the <, >, = version auto-appears at KS3+)
-      – place value / tens & ones / expanded form / "build a number" → place_value_counters {{"target": 72}}
+      – comparing two numbers (which is bigger / smaller) → compare_numbers {{"left": 29, "right": 92}} (KS1/KS2 tap the number, pass two DIFFERENT numbers; the <, >, = version auto-appears at KS3+)
+      – ordering / sequencing numbers ("put these in order") → order_numbers {{"numbers": [45, 12, 51]}} (3-5 DIFFERENT numbers)
+      – place value / tens & ones / expanded form / "build a number" / "what number is 6 tens and 0 ones" → place_value_counters {{"target": 60}}
       – counting within 10/20 → counting_bubbles {{"count": 7, "item": "apples"}}
       – times tables / multiplication facts → times_table_dash {{"table": 8}}   ·   arrays / "rows of" / square numbers → dot_array {{"rows": 4, "cols": 4}}
       – fractions (halves, quarters, parts of a shape) → fraction_canvas {{"denominator": 4, "shaded": 3}}
       – column addition / adding with carrying → column_addition {{"addends": [24, 38]}}   ·   number bonds / missing-number grids → number_grid_sums
-    Size every number to the topic's range (a "within 100" lesson stays under 100). If no manipulative fits the topic (worded problems, algebra, graphs), use math_puzzle / graph_puzzle — still a puzzle, never plain text.
+      – any other quick arithmetic (a subtraction like 19 − 3, a single sum, "what is …?") → math_puzzle — it shows tappable answer buttons for a numeric answer, so it's a puzzle too, NOT plain text.
+    Size every number to the topic's range (a "within 100" lesson stays under 100). If no manipulative fits (worded problems, algebra, graphs), use math_puzzle / graph_puzzle — still a puzzle, never plain text.
   • graph_puzzle — a real matplotlib graph + a question (coordinates, straight lines, quadratics, trig — mostly KS4/KS5).
 - You supply the pedagogy (the labels + image prompts, the correct answer, the graph spec); the tool draws it and keeps the answer private.
 - MARKING: when the [PUZZLE RESULT] arrives, call the MATCHING evaluator — labelling_evaluator / matching_evaluator / math_evaluator / graph_evaluator / manipulative_evaluator — and then, in ONE message, use ITS verdict to give warm feedback (praise what's right; a gentle hint for anything wrong, without revealing the answer). Never guess the mark yourself, and never state the verdict before you've called the evaluator.
@@ -1832,6 +1834,28 @@ async def build_lesson_state_anchor(
         logger.warning("puzzle-mix anchor failed for appt %s", appt_id, exc_info=True)
 
     lines.append(_puzzle_state_lines(pstate, next_style, next_kind))
+
+    # KS1/KS2 — the SOLID puzzle-only rule, at maximum recency. A 5-7 year old cannot read a
+    # chat question and type an answer, yet the tutor kept doing exactly that ("what is 19 − 3?",
+    # "which is bigger, 29 or 92?", "put these in order: 45, 12, 51", "what number is 6 tens and
+    # 0 ones?"). Stated here as an absolute, most-recent prohibition so the model can't talk
+    # itself out of it — every practice/check question MUST be a tappable puzzle.
+    _ks_norm = ""
+    if appointment is not None:
+        _ks_norm = (getattr(appointment, "key_stage", "") or "").upper().replace(" ", "")
+    if _ks_norm in ("KS1", "KS2"):
+        lines.append(
+            "⛔ KS1/KS2 — PUZZLE-ONLY (ABSOLUTE): this child CANNOT type answers. EVERY practice "
+            "or check question MUST be a tappable puzzle — NEVER a maths question written in the "
+            "chat. Before you write ANY question that expects an answer ('what is 19 − 3?', "
+            "'which is bigger?', 'put these in order', 'what number is 6 tens and 0 ones?'), you "
+            "MUST have called a generator THIS turn: manipulative_puzzle for the topic "
+            "(compare_numbers · order_numbers · place_value_counters · counting_bubbles · "
+            "dot_array · times_table_dash · fraction_canvas · column_addition · number_grid_sums), "
+            "or math_puzzle for any other quick sum/subtraction (it shows tappable answer "
+            "buttons). If you catch yourself about to type a question with no puzzle on screen, "
+            "STOP and call the generator instead. Plain-text maths questions are NOT allowed here."
+        )
     if available_actions:
         lines.append(
             f"🛠 AVAILABLE ACTIONS THIS TURN: {available_actions}. "
