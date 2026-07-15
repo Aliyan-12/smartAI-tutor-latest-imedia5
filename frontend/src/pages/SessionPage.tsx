@@ -7,6 +7,7 @@ import ChatWindow from "../components/ChatWindow";
 import ChatInput from "../components/ChatInput";
 import ResourceViewer, { type ResourceSlide } from "../components/ResourceViewer";
 import PuzzlePlayer from "../components/PuzzlePlayer";
+import LearnIdle from "../components/LearnIdle";
 import Celebration from "../components/puzzles/Celebration";
 import type { PuzzlePayload } from "../components/puzzles/types";
 import { sessionBus, type SessionBusEvent } from "../lib/sessionBus";
@@ -1169,18 +1170,7 @@ export default function SessionPage() {
               <ResourceViewer slide={currentResource} />
             </div>
           ) : (
-            <div style={{
-              display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center",
-              height: "100%", textAlign: "center", padding: 24, color: "var(--text-muted, #64748b)",
-            }}>
-              <span style={{ fontSize: 44, marginBottom: 12 }}>📊</span>
-              <p style={{ margin: 0, fontSize: 14, fontWeight: 700, color: "var(--text-primary, #1a1a1a)" }}>
-                Slides will appear here
-              </p>
-              <p style={{ margin: "6px 0 0", fontSize: 12 }}>
-                Your AI tutor's lesson slides will show up in this panel as you learn.
-              </p>
-            </div>
+            <LearnIdle />
           )
         )}
 

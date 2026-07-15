@@ -31,6 +31,19 @@ from app.services import image_gen_service, graph_service
 logger = logging.getLogger(__name__)
 
 
+# ── Backdrops ────────────────────────────────────────────────────────────────────
+# Every puzzle box gets one of these behind it, chosen at random per puzzle so it never looks
+# the same twice (frontend renders them from components/puzzles/backgrounds). Split by theme:
+# the LIGHT ones sit behind the light-themed manipulatives; the DARK ones are for the math
+# puzzle, which is drawn light-on-dark like the Synthesis screens.
+_LIGHT_BACKGROUNDS = ["aurora", "blueprint", "paper"]
+_DARK_BACKGROUNDS = ["mesh", "bubbles"]
+
+
+def pick_background(dark: bool = False) -> str:
+    return random.choice(_DARK_BACKGROUNDS if dark else _LIGHT_BACKGROUNDS)
+
+
 # ── Builders ─────────────────────────────────────────────────────────────────────
 # Each returns a full payload INCLUDING `solution` + `puzzle_type`. The tool persists
 # the whole thing, then strips `solution` before handing the client payload to the model.
@@ -86,19 +99,66 @@ def build_matching(items: List[Dict[str, str]], prompt: str = "") -> Dict[str, A
     }
 
 
+def _auto_numeric_distractors(ans: str) -> List[str]:
+    """When the AI forgets to supply wrong answers, synthesise plausible near-misses for a
+    plain WHOLE-NUMBER answer so the puzzle still shows tappable bubbles (options) rather than
+    a bare text box. Only fires for integers — algebraic / worded answers stay typed."""
+    raw = ans.strip()
+    try:
+        n = int(raw.replace(",", ""))
+    except ValueError:
+        return []
+    use_commas = "," in raw
+    fmt = (lambda v: f"{v:,}") if use_commas else str
+    out: List[str] = []
+    seen = {n}
+    for d in (1, -1, 2, -2, 10, -10, 3, -3, 5, -5):
+        c = n + d
+        if c >= 0 and c not in seen:
+            seen.add(c)
+            out.append(fmt(c))
+        if len(out) >= 3:
+            break
+    return out
+
+
 def build_math(question: str, answer: str, *, mode: str = "latex",
-               latex: str = "", image_url: str = "") -> Dict[str, Any]:
+               latex: str = "", image_url: str = "",
+               options: Optional[List[str]] = None) -> Dict[str, Any]:
     mode = mode if mode in ("latex", "image") else "latex"
     if mode == "image" and not image_url:
         mode = "latex"
+
+    # Multiple-choice: the AI gives wrong answers, the server builds the option set. Building it
+    # HERE (not trusting the AI's list) guarantees the correct answer is always present exactly
+    # once and its position is shuffled — so a student can't learn "it's always the 2nd bubble".
+    opts: List[str] = []
+    ans = str(answer).strip()
+    for o in (options or []):
+        s = str(o).strip()
+        if s and s.lower() != ans.lower() and s.lower() not in {x.lower() for x in opts}:
+            opts.append(s)
+    # No usable distractors from the AI → try to build them ourselves so a numeric maths
+    # problem is STILL multiple-choice (the friendlier path for young students).
+    if not opts:
+        opts = _auto_numeric_distractors(ans)
+    if opts:
+        opts = opts[:3] + [ans]
+        random.shuffle(opts)
+
     return {
         "render": "math",
         "puzzle_type": "math",
         "title": "Have a go",
         "prompt": question or "Solve it.",
-        "params": {"mode": mode, "latex": latex or "", "image": image_url or ""},
-        "solution": str(answer),
-        "answer_type": "text",
+        "params": {
+            "mode": mode, "latex": latex or "", "image": image_url or "",
+            "options": opts,                       # non-empty → the client shows tappable bubbles
+            "background": pick_background(dark=True),
+        },
+        "solution": ans,
+        # "choice" is only a hint to the UI (bubbles vs typing); marking is the same either way.
+        "answer_type": "choice" if opts else "text",
     }
 
 
@@ -108,7 +168,7 @@ def build_graph(question: str, answer: str, image_url: str) -> Dict[str, Any]:
         "puzzle_type": "graph",
         "title": "Read the graph",
         "prompt": question or "Answer from the graph.",
-        "params": {"image": image_url},
+        "params": {"image": image_url, "background": pick_background(dark=False)},
         "solution": str(answer),
         "answer_type": "text",
     }
@@ -129,7 +189,8 @@ def build_manipulative(kind: str, clean_params: Dict[str, Any], solution: Any,
         "puzzle_type": "manipulative",
         "title": title or "Have a go",
         "prompt": prompt or "",
-        "params": {"kind": kind, **(clean_params or {})},
+        "params": {"kind": kind, "background": pick_background(dark=False),
+                   **(clean_params or {})},
         "solution": solution,
         "answer_type": "manipulative",
     }
