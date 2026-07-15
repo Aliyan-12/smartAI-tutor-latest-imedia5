@@ -190,6 +190,21 @@ def _parse_unit_names(description: str) -> list[str]:
     return [u.strip() for u in raw.split(",") if u.strip()]
 
 
+def _lesson_topic_text(appointment) -> str:
+    """All the words that describe what THIS lesson is about — title, subject and the parsed
+    'Topics:' units — as one lowercase string. Used to decide which manipulative (if any) fits
+    the topic, so a fractions lesson gets the fraction canvas and never counting bubbles."""
+    if appointment is None:
+        return ""
+    parts: list[str] = []
+    for attr in ("title", "subject"):
+        v = getattr(appointment, attr, None)
+        if v:
+            parts.append(str(v))
+    parts.extend(_parse_unit_names(getattr(appointment, "description", "") or ""))
+    return " ".join(parts).strip()
+
+
 async def _fetch_unit_kb_content_rag(
     db: AsyncSession,
     unit_names: list[str],
@@ -1462,8 +1477,9 @@ async def stream_segment(send, seq: int, sentence: str, *, tts: bool, turn_id: s
 # ===========================================================================
 
 _TURN_TIMEOUT_S = 150
-_WATCHDOG_TICK_S = 20   # how often the per-session watchdog checks the lesson clock
-_IDLE_SUGGEST_S = 120   # 2 min of silence → silently surface tap-answer suggestions (no chat pill)
+_WATCHDOG_TICK_S = 15   # how often the per-session watchdog checks the lesson clock (also the
+                        # idle-suggestion granularity — keep ≤ _IDLE_SUGGEST_S so 30s is actually hit)
+_IDLE_SUGGEST_S = 30    # ~30s of silence → silently surface tap-answer suggestions (no chat pill)
 _IDLE_CHECK_S = 300     # 5 min of student silence → a short "are you still there?" check-in
 _IDLE_PAUSE_S = 420     # 7 min total (2 min after the check-in) → announce + auto-pause
 _active_ws: dict = {}
@@ -1612,8 +1628,12 @@ def _puzzle_state_lines(pstate: Optional[dict], next_style: str = "",
                 )
         elif next_style == "classic":
             style_line = (
-                "• 🧩 NEXT PUZZLE STYLE: CLASSIC. Use math_puzzle / graph_puzzle this time "
-                "(keep the hands-on activities for their share of the practice).\n"
+                "• 🧩 NEXT PUZZLE STYLE: CLASSIC (no hands-on manipulative fits THIS topic, or "
+                "it's this student's turn for a classic one). Use a NON-manipulative puzzle — "
+                "prefer a still-tappable one where the topic allows (diagram_math_puzzle e.g. a "
+                "clock/ruler/shape, labelling_puzzle, matching_puzzle) and fall back to "
+                "math_puzzle / graph_puzzle otherwise. Don't force a manipulative that doesn't "
+                "match the topic.\n"
             )
         return (
             "Puzzle: NONE on screen right now.\n"
@@ -1793,12 +1813,17 @@ async def build_lesson_state_anchor(
             _mix = await manipulative_service.get_mix(db, appt_id)
             next_style = manipulative_service.next_puzzle_style(_ks, _mix)
             if next_style == "manipulative":
-                # The SERVER picks the activity, at random and never the one just used. Left to
-                # itself the model runs the same sequence every lesson (counting → counters →
-                # …), because the tool's docstring lists them in an order and the model follows
-                # it. Choosing here is the only thing that actually varies the order.
+                # A manipulative is only a good fit when its SUBJECT matches the lesson topic —
+                # a fractions lesson must show the fraction canvas, never counting bubbles. Pick
+                # the topic-matching kind first; only when NOTHING matches do we fall back to a
+                # free/varied choice, and if even the topic is silent we flip to a classic puzzle
+                # (math_puzzle / diagram_math_puzzle) rather than force a mismatched manipulative.
                 _hist = await manipulative_service.get_history(db, appt_id)
-                next_kind = manipulative_service.suggest_kind(_ks, _hist)
+                _topic = _lesson_topic_text(appointment)
+                next_kind = manipulative_service.pick_topic_kind(_topic, _ks, _hist)
+                if not next_kind:
+                    # No manipulative fits this topic → don't force one; use another puzzle type.
+                    next_style = "classic"
     except Exception:
         logger.warning("puzzle-mix anchor failed for appt %s", appt_id, exc_info=True)
 
@@ -1816,10 +1841,13 @@ async def build_lesson_state_anchor(
         lines.append(
             "⛔ KS1–KS3 — TAP, DON'T TYPE (ABSOLUTE): this student should almost never type. "
             "EVERYTHING you ask must give them something to TAP:\n"
-            "  • a maths PRACTICE question → a tappable PUZZLE (manipulative_puzzle for the topic "
-            "— compare_numbers · order_numbers · place_value_counters · counting_bubbles · "
-            "dot_array · times_table_dash · fraction_canvas · column_addition · number_grid_sums — "
-            "or math_puzzle for a plain sum). Never a maths question typed in chat.\n"
+            "  • a maths PRACTICE question → a tappable PUZZLE. Use manipulative_puzzle ONLY when "
+            "its kind matches the topic (compare_numbers · order_numbers · place_value_counters · "
+            "counting_bubbles · dot_array · times_table_dash · fraction_canvas · column_addition · "
+            "number_grid_sums — the NEXT PUZZLE line tells you which fits). When none fits the "
+            "topic (e.g. time, shape, money), use another TAPPABLE puzzle — diagram_math_puzzle "
+            "(clock/ruler/shape), labelling_puzzle, matching_puzzle — or math_puzzle for a plain "
+            "sum. Never a maths question typed in chat.\n"
             "  • ANY OTHER short question (recall/concept like 'what do we use to tell the time?', "
             "a check, a preference) → call quick_replies with 2-4 PIPE-separated tap options "
             "(right answer + plausible wrong ones, e.g. \"A clock | A ruler | A book\").\n"
@@ -2803,10 +2831,14 @@ async def _gen_idle_options(last_ai_message: str, key_stage: str = "") -> list:
         f"A student in a UK {key_stage or 'primary'} lesson has gone quiet and may not know how "
         "to reply. Here is the tutor's last message to them:\n"
         f"\"\"\"{(last_ai_message or '')[:800]}\"\"\"\n\n"
-        "Suggest 2-4 SHORT tap-reply buttons the student could pick to respond. If the tutor "
-        "asked a question or a riddle, include the likely answers (with the correct one); if the "
-        "tutor explained something, use natural replies like a guess plus \"I'm not sure\" or "
-        "\"Tell me more\". Keep each button to a few words, age-appropriate.\n"
+        "Suggest 2-4 SHORT tap-reply buttons the student could pick to respond. Match them to what "
+        "the tutor just said:\n"
+        "- asked a question or a riddle → the likely answers (include the correct one);\n"
+        "- asked to move on / continue / a yes-no or 'ready?' (a go-ahead) → confirmation replies "
+        "like \"Yes, let's go!\" and \"Not yet\";\n"
+        "- explained something → natural replies like a guess plus \"I'm not sure\" or "
+        "\"Tell me more\".\n"
+        "Keep each button to a few words, age-appropriate.\n"
         "Return ONLY a JSON array of strings, e.g. [\"A clock\",\"A ruler\",\"I'm not sure\"]."
     )
     try:
@@ -2837,39 +2869,49 @@ async def _gen_idle_options(last_ai_message: str, key_stage: str = "") -> list:
 
 
 async def _suggest_idle_quick_replies(send, chat_id: int, appt_id: int) -> None:
-    """Silently surface 2-4 tap-answer suggestions when a student has gone quiet (~2 min), based
-    on the tutor's LAST message — so a stuck student can see what they might reply. Emits ONLY a
-    quick_replies frame (NO chat message, NO event pill). Best-effort: never raises."""
+    """Silently surface 2-4 tap-answer suggestions when a student has gone quiet, so a stuck
+    student ALWAYS has something to tap — no matter what's on screen. This fires in EVERY lesson
+    state: after an AI message, but equally while a puzzle or quiz is up (→ hint/help chips) and
+    after a pause/resume. It NEVER returns without emitting something (that silent early-return
+    was the "the idle event fires but nothing appears" bug). Emits ONLY a quick_replies frame
+    (NO chat message, NO event pill). Best-effort: never raises."""
     try:
+        puzzle_up = False
+        last_ai = ""
+        key_stage = ""
         async with async_session_factory() as db:
-            # A puzzle on screen IS the thing to do — don't distract with chat chips.
             try:
                 from app.services import puzzle_service as _pzs
                 ps = await _pzs.get_puzzle_state(db, appt_id)
+                puzzle_up = (ps or {}).get("status") in ("showing", "submitted")
             except Exception:
-                ps = None
-            if (ps or {}).get("status") in ("showing", "submitted"):
-                return
-            msgs = await chat_service.get_chat_history(db, chat_id)
-            last_ai = next((m.content for m in reversed(msgs)
-                            if m.role == "assistant" and (m.content or "").strip()), "")
-            if not last_ai.strip():
-                return
-            key_stage = ""
+                pass
+            try:
+                msgs = await chat_service.get_chat_history(db, chat_id)
+                last_ai = next((m.content for m in reversed(msgs)
+                                if m.role == "assistant" and (m.content or "").strip()), "")
+            except Exception:
+                pass
             try:
                 appt = await _load_appointment(db, appt_id)
                 key_stage = getattr(appt, "key_stage", "") or ""
             except Exception:
                 pass
 
-        opts = await _gen_idle_options(last_ai, key_stage)
-        if len(opts) < 2:
-            opts = ["I'm not sure 🤔", "Can you explain again?", "Yes, let's keep going"]
+        if puzzle_up:
+            # There's an activity on screen the student is stuck on — offer ways to get unstuck
+            # rather than chat replies (tapping any of these nudges the AI to help).
+            opts = ["I need a hint 💡", "This is tricky", "Show me how", "Skip this one"]
+        else:
+            opts = await _gen_idle_options(last_ai, key_stage) if last_ai.strip() else []
+            if len(opts) < 2:
+                opts = ["I'm not sure 🤔", "Can you explain again?", "What do I do next?"]
         await send({
             "type": "tool", "tool": "quick_replies",
             "data": {"action": "quick_replies", "options": opts[:5], "resurfaced": True},
         })
-        logger.info("idle quick_replies surfaced appt=%s opts=%s", appt_id, opts[:5])
+        logger.info("idle quick_replies surfaced appt=%s puzzle_up=%s opts=%s",
+                    appt_id, puzzle_up, opts[:5])
     except Exception as e:  # noqa: BLE001
         logger.warning("idle quick_replies failed appt=%s: %s", appt_id, e)
 
@@ -2978,8 +3020,9 @@ async def run_session_ws(websocket: WebSocket) -> None:
             """Route an event to its bucket. AI_REACTIVE → a turn (queued if busy);
             SIDE_EFFECT → a quick background task; TELEMETRY handled by the loop."""
             nonlocal pending_event, last_activity, idle_stage, idle_suggested
-            # A genuine student action resets the idle clock + restarts the idle cycle.
-            if m in ("user_message", "user_audio", "puzzle_result", "quiz_result"):
+            # A genuine student action — or coming back from a pause — resets the idle clock and
+            # restarts the idle cycle, so the tap-answer suggestions re-arm after every resume.
+            if m in ("user_message", "user_audio", "puzzle_result", "quiz_result", "lesson_resume"):
                 last_activity = time.monotonic()
                 idle_stage = 0
                 idle_suggested = False

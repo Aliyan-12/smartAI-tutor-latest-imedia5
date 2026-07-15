@@ -877,3 +877,60 @@ def suggest_kind(key_stage: Optional[str], history: Optional[List[str]] = None) 
     fewest = min(hist.count(k) for k in pool)
     least_used = [k for k in pool if hist.count(k) == fewest]
     return _rng().choice(least_used)
+
+
+# ── Topic matching — use a manipulative ONLY when it fits the lesson topic ──────────
+# A manipulative that doesn't match the topic is worse than a normal puzzle (a fractions
+# lesson should never show counting bubbles). These keywords decide which manipulative(s)
+# genuinely fit a topic; if none fit, the caller steers the AI to other puzzle types.
+_TOPIC_KEYWORDS: Dict[str, List[str]] = {
+    "fraction_canvas": ["fraction", "half", "halves", "quarter", "third", "numerator",
+                        "denominator", "equal part", "parts of a", "parts of the"],
+    "place_value_counters": ["place value", "tens and ones", "tens & ones", "ones and tens",
+                             "expanded form", "partition", "digit value", "hundreds and tens",
+                             "hundreds, tens", "regroup"],
+    "compare_numbers": ["compare", "comparing", "greater than", "less than", "bigger",
+                        "smaller", "more than", "fewer than", "greater or less"],
+    "order_numbers": ["order", "ordering", "sequenc", "smallest to", "largest to", "biggest to",
+                      "ascending", "descending", "put in order"],
+    "times_table_dash": ["times table", "times-table", "multiplication table", "multiply",
+                         "multiplication fact", "x table"],
+    "dot_array": ["array", "square number", "rows of", "repeated addition", "grouping",
+                  "multiplication and", "multiplication &", "multiplication/"],
+    "column_addition": ["column addition", "column method", "adding", "addition", "carrying",
+                        "add ", "sum of", "adding numbers"],
+    "number_grid_sums": ["number bond", "missing number", "magic square", "mental maths",
+                         "number grid"],
+    "counting_bubbles": ["counting", "count to", "count the", "count in", "how many",
+                         "one more", "one less"],
+}
+
+
+def topic_manipulatives(topic: Optional[str], key_stage: Optional[str]) -> List[str]:
+    """The manipulative kind(s) whose subject genuinely matches this lesson topic, restricted
+    to those allowed at the key stage. Empty when NO manipulative fits — the caller then uses a
+    different puzzle type instead of forcing a mismatched manipulative."""
+    t = (topic or "").lower()
+    if not t:
+        return []
+    allowed = set(allowed_kinds(key_stage))
+    return [k for k, kws in _TOPIC_KEYWORDS.items()
+            if k in allowed and any(kw in t for kw in kws)]
+
+
+def pick_topic_kind(topic: Optional[str], key_stage: Optional[str],
+                    history: Optional[List[str]] = None) -> str:
+    """The manipulative to use for THIS topic: the topic-matching kind, and when several match
+    (e.g. multiplication → times_table_dash + dot_array) the least-used / not-just-used one for
+    variety. Returns "" when NO manipulative matches the topic (→ use another puzzle type)."""
+    matches = topic_manipulatives(topic, key_stage)
+    if not matches:
+        return ""
+    if len(matches) == 1:
+        return matches[0]
+    hist = list(history or [])
+    recent = hist[-1] if hist else None
+    pool = [k for k in matches if k != recent] or matches
+    fewest = min(hist.count(k) for k in pool)
+    least = [k for k in pool if hist.count(k) == fewest]
+    return _rng().choice(least)
