@@ -327,6 +327,12 @@ def puzzle_tool_groups(ctx: ToolContext) -> dict:
               and square numbers.
           • kind="counting_bubbles", params {"count": 7, "item": "apples"}
               Tap each object and count them. KS1 counting. count 1-20.
+          • kind="compare_numbers", params {"left": 29, "right": 92}
+              Two number cards; the student TAPS the bigger (or smaller) number and submits.
+              USE THIS instead of ever typing "which number is bigger, 29 or 92?" into the chat.
+              For comparing/ordering numbers. (At KS1/KS2 it's tap-the-number only; the <, =, >
+              sign version is added automatically for KS3+ — you don't choose, the server does.
+              For KS1/KS2 pass two DIFFERENT numbers.)
 
         After showing it, invite them to have a go and WAIT — on submit call
         manipulative_evaluator. Call SILENTLY.
@@ -421,8 +427,22 @@ def puzzle_tool_groups(ctx: ToolContext) -> dict:
             logger.warning("puzzle XP award failed: %s", e)
         logger.info("PUZZLE evaluated type=%s score=%s correct=%s xp=%s",
                     ps.get("puzzle_type"), verdict.get("score"), verdict.get("correct"), xp_awarded)
-        return {"action": "evaluate", "puzzle_type": ps.get("puzzle_type"),
-                "xp_awarded": xp_awarded, **verdict}
+        return {
+            "action": "evaluate", "puzzle_type": ps.get("puzzle_type"),
+            "xp_awarded": xp_awarded,
+            # STRICT — read before you narrate. This puzzle is now spent; the one on screen is
+            # the OLD one. If you are about to say "let's try one more / can you build 47 / what
+            # about this one?", you MUST call a puzzle generator (manipulative_puzzle /
+            # math_puzzle / diagram_math_puzzle / …) in THIS SAME reply FIRST — that call
+            # clears the old puzzle and shows the new one. NEVER ask the student to build or
+            # solve a new problem without generating its puzzle in the same turn, or they'll be
+            # looking at the finished puzzle and see nothing new (they told us "I don't see it").
+            # Only-praising-and-stopping is fine; asking-for-a-new-answer-without-generating is not.
+            "next_step": ("Puzzle marked and spent. To give another go, CALL a generator this "
+                          "turn BEFORE inviting an answer — generating clears the old puzzle and "
+                          "shows the new one. Do NOT ask for a new answer without a new puzzle."),
+            **verdict,
+        }
 
     @tool
     async def labelling_evaluator() -> dict:

@@ -512,6 +512,122 @@ def _mark_counting(solution: Any, answer: Any) -> Dict[str, Any]:
     return _verdict(False, 0, f"Not quite — try counting again slowly, there are {hint} than that.")
 
 
+# ── 8. compare_numbers ─────────────────────────────────────────────────────────────
+# Two big number cards. The child taps the BIGGER (or SMALLER) one, or drops the right
+# <, = or > sign between them. Params: {"left": 29, "right": 92}. This replaces the AI asking
+# "which number is bigger, 29 or 92?" in plain chat text — now it's a tappable puzzle.
+# Comparing / ordering numbers is a core KS1–KS3 place-value skill.
+
+_COMPARE_THEMES = [
+    ("#3b82f6", "#ec4899"),  # blue / pink
+    ("#22c55e", "#f97316"),  # green / orange
+    ("#a855f7", "#06b6d4"),  # purple / cyan
+    ("#f43f5e", "#14b8a6"),  # rose / teal
+    ("#eab308", "#8b5cf6"),  # amber / violet
+]
+
+# Accept sign-ish student answers however they arrive (a tapped glyph, or a word).
+_SIGN_WORDS = {
+    ">": ">", "greater": ">", "more": ">", "bigger": ">", "gt": ">", "greater than": ">",
+    "<": "<", "less": "<", "fewer": "<", "smaller": "<", "lt": "<", "less than": "<",
+    "=": "=", "equal": "=", "equals": "=", "same": "=", "eq": "=", "equal to": "=",
+}
+
+
+def _build_compare_numbers(p: dict, key_stage: Optional[str] = None) -> Tuple[dict, Any, str, str]:
+    left = _require_int(
+        p, ("left", "a", "first", "number_a", "n1", "x"), 0, 1_000_000,
+        "It's the first number to compare — size it to the lesson's range "
+        "('within 100' means up to 99).",
+    )
+    right = _require_int(
+        p, ("right", "b", "second", "number_b", "n2", "y"), 0, 1_000_000,
+        "It's the second number to compare — size it to the lesson's range "
+        "('within 100' means up to 99).",
+    )
+    _check_ceiling(left, key_stage, "number")
+    _check_ceiling(right, key_stage, "number")
+
+    rng = _rng()
+    # The <, =, > sign question is an ABSTRACTION that only lands once children have met the
+    # notation — so it's KS3-and-up only. Younger students (KS1/KS2) just tap the bigger or the
+    # smaller number; no signs. Within the allowed styles there's still lots of variety (bias
+    # toward bigger/smaller, several phrasings each, a fresh colour theme).
+    allow_sign = _norm_ks(key_stage) in ("KS3", "KS4", "KS5")
+    if left == right:
+        if not allow_sign:
+            raise ParamError(
+                "The two numbers are equal, so 'which is bigger/smaller?' has no answer. Pass two "
+                "DIFFERENT numbers for a KS1/KS2 comparison."
+            )
+        mode = "sign"
+    else:
+        styles = ["bigger", "bigger", "smaller", "smaller"]
+        if allow_sign:
+            styles += ["sign", "sign"]
+        mode = rng.choice(styles)
+    if mode == "bigger":
+        answer = str(max(left, right))
+        prompt = rng.choice([
+            "Which number is BIGGER? Tap it, then press Check.",
+            "Tap the number that is GREATER, then press Check.",
+            "Which of these two is the bigger number? Tap it and check.",
+        ])
+        title = "Which is bigger?"
+    elif mode == "smaller":
+        answer = str(min(left, right))
+        prompt = rng.choice([
+            "Which number is SMALLER? Tap it, then press Check.",
+            "Tap the number that is LESS, then press Check.",
+            "Which of these two is the smaller number? Tap it and check.",
+        ])
+        title = "Which is smaller?"
+    else:
+        answer = ">" if left > right else ("<" if left < right else "=")
+        prompt = rng.choice([
+            "Which sign goes in the middle? Tap <, = or >, then press Check.",
+            "Put the right sign between the two numbers — tap <, = or >, then Check.",
+        ])
+        title = "Put in the sign"
+
+    theme = rng.choice(_COMPARE_THEMES)
+    clean = {
+        "left": left, "right": right, "mode": mode,
+        "signs": ["<", "=", ">"], "colours": list(theme),
+    }
+    solution = {"mode": mode, "answer": answer}
+    return clean, solution, prompt, title
+
+
+def _mark_compare_numbers(solution: Any, answer: Any) -> Dict[str, Any]:
+    sol = solution if isinstance(solution, dict) else {}
+    mode = sol.get("mode")
+    want = str(sol.get("answer", "")).strip()
+    got = answer
+    if isinstance(got, dict):
+        got = got.get("choice", got.get("answer", got.get("value", got.get("sign", ""))))
+    got = str(got).strip()
+
+    if mode in ("bigger", "smaller"):
+        gi, wi = _as_int(got), _as_int(want)
+        if gi is None:
+            return _verdict(False, 0, "Tap one of the numbers, then press Check.")
+        if gi == wi:
+            word = "bigger" if mode == "bigger" else "smaller"
+            return _verdict(True, 10, f"That's right — {want} is the {word} number!")
+        return _verdict(False, 0,
+                        "Not quite — compare the TENS first: the number with more tens is the "
+                        "bigger one. Have another look.")
+
+    # sign mode
+    g = _SIGN_WORDS.get(got.lower(), got)
+    if g == want:
+        return _verdict(True, 10, "Exactly — the wide open end always faces the bigger number.")
+    return _verdict(False, 0,
+                    "Not quite — the wide open end of < or > points at the BIGGER number and the "
+                    "pointy end at the smaller. Have another go.")
+
+
 # ── Registry ─────────────────────────────────────────────────────────────────────
 
 BuildFn = Callable[[dict, Optional[str]], Tuple[dict, Any, str, str]]
@@ -545,6 +661,10 @@ MANIPULATIVES: Dict[str, Dict[str, Any]] = {
     "counting_bubbles": {
         "key_stages": ["KS1", "KS2"],
         "build": _build_counting, "mark": _mark_counting,
+    },
+    "compare_numbers": {
+        "key_stages": ["KS1", "KS2", "KS3"],
+        "build": _build_compare_numbers, "mark": _mark_compare_numbers,
     },
 }
 

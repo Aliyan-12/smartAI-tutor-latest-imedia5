@@ -20,7 +20,8 @@ export type PuzzleRender =
   | "times_table_dash"
   | "fraction_canvas"
   | "dot_array"
-  | "counting_bubbles";
+  | "counting_bubbles"
+  | "compare_numbers";
 
 export interface PuzzlePayload {
   render: PuzzleRender;
