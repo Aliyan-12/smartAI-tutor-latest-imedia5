@@ -205,6 +205,29 @@ def _lesson_topic_text(appointment) -> str:
     return " ".join(parts).strip()
 
 
+def _text_from_llm_parts(raw) -> str:
+    """Flatten a `gemini_service.generate_response(stream=False)` result to plain TEXT.
+
+    With thought summaries on, that call returns a LIST of content parts — thinking dicts
+    ({'type':'thinking',...}) plus text dicts ({'type':'text','text':...}). str()-ing the whole
+    list yields non-JSON (e.g. "{'type': 'thinking', ...}"), which silently broke every caller
+    that then json.loads()-ed it (briefing + idle chips). Keep ONLY the text parts."""
+    if isinstance(raw, str):
+        return raw
+    if isinstance(raw, list):
+        texts = []
+        for x in raw:
+            if isinstance(x, dict):
+                if x.get("type") == "thinking":
+                    continue
+                if x.get("text"):
+                    texts.append(str(x["text"]))
+            elif isinstance(x, str):
+                texts.append(x)
+        return "".join(texts)
+    return str(raw or "")
+
+
 async def _fetch_unit_kb_content_rag(
     db: AsyncSession,
     unit_names: list[str],
@@ -1313,11 +1336,10 @@ Be age-appropriate for {key_stage}. Return ONLY valid JSON, no markdown."""
             model=None,
             stream=False,
         )
-        # generate_response can hand back a list of content parts (multi-part responses) —
-        # join them before string ops so this never raises 'list has no attribute strip'.
-        if isinstance(raw, list):
-            raw = "".join(str(x) for x in raw)
-        raw = (raw or "").strip()
+        # generate_response hands back a list of content parts (thinking + text) — keep only the
+        # TEXT before string ops, or json.loads gets the stringified dicts and always fails (which
+        # silently forced the generic fallback briefing every time).
+        raw = _text_from_llm_parts(raw).strip()
         if raw.startswith("```"):
             raw = _re.sub(r"^```[a-z]*\n?", "", raw)
             raw = _re.sub(r"\n?```$", "", raw)
@@ -2822,25 +2844,40 @@ async def _guard_turn(send, coro):
         await send({"type": "turn_end", "message_id": None, "full_text": ""})
 
 
-async def _gen_idle_options(last_ai_message: str, key_stage: str = "") -> list:
-    """Ask a fast model for 2-4 SHORT tap-reply buttons a stuck student could pick, based on the
-    tutor's last message. Returns [] on any failure (the caller then uses generic chips). The
-    Gemini call is synchronous, so it runs in a worker thread to keep the event loop free."""
+async def _gen_idle_options(last_ai_message: str, key_stage: str = "",
+                            puzzle_prompt: str = "") -> list:
+    """Ask a fast model for 2-4 SHORT tap-reply buttons a stuck student could pick — ALWAYS
+    generated from the live context so they read as real and intelligent, never a canned list.
+    When a puzzle/quiz is on screen (`puzzle_prompt`), the buttons are about THAT activity
+    (a guess at its answer, or asking for help); otherwise they respond to the tutor's last
+    message. Returns [] only on model failure (the caller then uses a minimal static fallback).
+    The Gemini call is synchronous, so it runs in a worker thread to keep the event loop free."""
     import json as _json
-    prompt = (
-        f"A student in a UK {key_stage or 'primary'} lesson has gone quiet and may not know how "
-        "to reply. Here is the tutor's last message to them:\n"
-        f"\"\"\"{(last_ai_message or '')[:800]}\"\"\"\n\n"
-        "Suggest 2-4 SHORT tap-reply buttons the student could pick to respond. Match them to what "
-        "the tutor just said:\n"
-        "- asked a question or a riddle → the likely answers (include the correct one);\n"
-        "- asked to move on / continue / a yes-no or 'ready?' (a go-ahead) → confirmation replies "
-        "like \"Yes, let's go!\" and \"Not yet\";\n"
-        "- explained something → natural replies like a guess plus \"I'm not sure\" or "
-        "\"Tell me more\".\n"
-        "Keep each button to a few words, age-appropriate.\n"
-        "Return ONLY a JSON array of strings, e.g. [\"A clock\",\"A ruler\",\"I'm not sure\"]."
-    )
+    if puzzle_prompt.strip():
+        prompt = (
+            f"A student in a UK {key_stage or 'primary'} lesson is stuck on this activity on "
+            f"their screen and has gone quiet:\n\"\"\"{puzzle_prompt[:400]}\"\"\"\n\n"
+            "Suggest 2-4 SHORT tap-reply buttons they could pick to make progress or get unstuck, "
+            "SPECIFIC to this activity — e.g. a sensible guess at the answer, checking a key word "
+            "it uses, or asking for help (\"I need a hint\", \"This is tricky\", \"Show me an "
+            "example\"). Keep each to a few words, age-appropriate.\n"
+            "Return ONLY a JSON array of strings, e.g. [\"Is it 3 out of 4?\",\"I need a hint\"]."
+        )
+    else:
+        prompt = (
+            f"A student in a UK {key_stage or 'primary'} lesson has gone quiet and may not know how "
+            "to reply. Here is the tutor's last message to them:\n"
+            f"\"\"\"{(last_ai_message or '')[:800]}\"\"\"\n\n"
+            "Suggest 2-4 SHORT tap-reply buttons the student could pick to respond. Match them to "
+            "what the tutor just said:\n"
+            "- asked a question or a riddle → the likely answers (include the correct one);\n"
+            "- asked to move on / continue / a yes-no or 'ready?' (a go-ahead) → confirmation "
+            "replies like \"Yes, let's go!\" and \"Not yet\";\n"
+            "- explained something → natural replies like a guess plus \"I'm not sure\" or "
+            "\"Tell me more\".\n"
+            "Keep each button to a few words, age-appropriate.\n"
+            "Return ONLY a JSON array of strings, e.g. [\"A clock\",\"A ruler\",\"I'm not sure\"]."
+        )
     try:
         raw = await asyncio.to_thread(
             gemini_service.generate_response,
@@ -2848,9 +2885,10 @@ async def _gen_idle_options(last_ai_message: str, key_stage: str = "") -> list:
             messages=[{"role": "user", "content": prompt}],
             model=None, stream=False,
         )
-        if isinstance(raw, list):
-            raw = "".join(str(x) for x in raw)
-        raw = (raw or "").strip()
+        # stream=False returns a list of content PARTS (thinking + text) when thought summaries
+        # are on. Keep ONLY the text parts — str()-ing the raw dicts yields non-JSON and the
+        # parse below always failed (silently falling back to the static chips).
+        raw = _text_from_llm_parts(raw).strip()
         if raw.startswith("```"):
             raw = _re.sub(r"^```[a-z]*\n?", "", raw)
             raw = _re.sub(r"\n?```$", "", raw)
@@ -2877,13 +2915,16 @@ async def _suggest_idle_quick_replies(send, chat_id: int, appt_id: int) -> None:
     (NO chat message, NO event pill). Best-effort: never raises."""
     try:
         puzzle_up = False
+        puzzle_prompt = ""
         last_ai = ""
         key_stage = ""
         async with async_session_factory() as db:
             try:
                 from app.services import puzzle_service as _pzs
                 ps = await _pzs.get_puzzle_state(db, appt_id)
-                puzzle_up = (ps or {}).get("status") in ("showing", "submitted")
+                if (ps or {}).get("status") in ("showing", "submitted"):
+                    puzzle_up = True
+                    puzzle_prompt = (ps or {}).get("prompt") or ""
             except Exception:
                 pass
             try:
@@ -2898,10 +2939,13 @@ async def _suggest_idle_quick_replies(send, chat_id: int, appt_id: int) -> None:
             except Exception:
                 pass
 
+        # ALWAYS generate the chips from live context (the puzzle's prompt when one's on screen,
+        # otherwise the tutor's last message) so they read as real and intelligent. The static
+        # lists below are a last resort ONLY if the model call fails — never the normal path.
         if puzzle_up:
-            # There's an activity on screen the student is stuck on — offer ways to get unstuck
-            # rather than chat replies (tapping any of these nudges the AI to help).
-            opts = ["I need a hint 💡", "This is tricky", "Show me how", "Skip this one"]
+            opts = await _gen_idle_options("", key_stage, puzzle_prompt=puzzle_prompt)
+            if len(opts) < 2:
+                opts = ["I need a hint 💡", "This is tricky", "Show me an example"]
         else:
             opts = await _gen_idle_options(last_ai, key_stage) if last_ai.strip() else []
             if len(opts) < 2:
