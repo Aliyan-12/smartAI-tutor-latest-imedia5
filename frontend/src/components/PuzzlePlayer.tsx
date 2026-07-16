@@ -55,6 +55,9 @@ export default function PuzzlePlayer({
   const bgVariant = isExplanatory ? "plain" : ((payload.params.background as string) || "plain");
   const dark = bgTheme(bgVariant) === "dark";
   const promptColour = dark ? "rgba(255,255,255,0.92)" : "#334155";
+  // The whole panel takes the puzzle's base colour, so even if the backdrop SVG doesn't reach the
+  // very bottom the area is never bare white under a dark puzzle (the reported white strip).
+  const baseBg = dark ? "#061521" : "#fff";
 
   const body = () => {
     const p = { payload, onSubmit: handleSubmit, disabled: submitted };
@@ -97,8 +100,8 @@ export default function PuzzlePlayer({
   };
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", height: "100%", minHeight: 0, background: "#fff" }}>
-      <div style={{ padding: "10px 14px", borderBottom: "1px solid #e2e8f0", flexShrink: 0, display: "flex", alignItems: "center", gap: 8 }}>
+    <div style={{ display: "flex", flexDirection: "column", height: "100%", flex: 1, minHeight: 0, background: baseBg }}>
+      <div style={{ padding: "10px 14px", borderBottom: "1px solid #e2e8f0", flexShrink: 0, display: "flex", alignItems: "center", gap: 8, background: "#fff" }}>
         <span style={{ fontSize: 11, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.04em", color: "#7c3aed", background: "rgba(124,58,237,0.1)", padding: "3px 8px", borderRadius: 6 }}>
           {TYPE_LABEL[payload.puzzle_type] || "Puzzle"}
         </span>
@@ -120,6 +123,7 @@ export default function PuzzlePlayer({
           alignItems: isManipulative ? "stretch" : "center",
           justifyContent: isInteractive ? "center" : "flex-start",
           gap: isManipulative ? 0 : 14,
+          background: baseBg,
         }}
       >
         <PuzzleBackground variant={bgVariant} />

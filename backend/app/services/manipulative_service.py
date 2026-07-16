@@ -806,6 +806,46 @@ def next_puzzle_style(key_stage: Optional[str], mix: Optional[dict]) -> str:
     return "manipulative" if manip / (manip + classic + 1) < target else "classic"
 
 
+# How strongly each key stage leans toward hands-on manipulatives WITHIN the mix (only applies
+# to topics that HAVE a matching manipulative — younger students get more, but never all-or-none
+# so the lesson always varies between hands-on and classic puzzles).
+_MIX_LEAN = {"KS1": 0.6, "KS2": 0.6, "KS3": 0.5, "KS4": 0.4, "KS5": 0.0}
+_MAX_RUN = 3   # never more than this many of the SAME style in a row → the order stays varied
+
+
+def next_style_mixed(key_stage: Optional[str], style_seq: Optional[List[str]],
+                     has_topic_manip: bool) -> str:
+    """The NEXT puzzle style for a genuinely MIXED, non-repeating lesson.
+
+    The rule the user asked for: when the topic HAS a matching manipulative, weave manipulatives
+    and classic puzzles together in a random, varied order (e.g. 1 classic, 3 hands-on, 2 classic,
+    1 hands-on…) — never a fixed alternation and never a long run of one kind. When the topic has
+    NO manipulative (or the key stage gets none), always "classic" so we never force a mismatched
+    hands-on activity.
+
+    `style_seq` is the recent history of shown styles ("manipulative"/"classic"); we cap the
+    current run at _MAX_RUN and otherwise pick at random, leaning by key stage.
+    """
+    if not has_topic_manip or not manipulatives_enabled(key_stage):
+        return "classic"
+    lean = _MIX_LEAN.get(_norm_ks(key_stage), 0.5)
+    seq = [s for s in (style_seq or []) if s in ("manipulative", "classic")]
+
+    # length of the current same-style streak
+    run, last = 0, (seq[-1] if seq else None)
+    for s in reversed(seq):
+        if s == last:
+            run += 1
+        else:
+            break
+    other = "classic" if last == "manipulative" else "manipulative"
+    if last and run >= _MAX_RUN:
+        return other                         # hard switch — the run is long enough
+    if last and run == _MAX_RUN - 1:
+        return other if _rng().random() < 0.8 else last   # strongly bias a switch
+    return "manipulative" if _rng().random() < lean else "classic"
+
+
 async def _load_plan(db: AsyncSession, appointment_id: int):
     from app.models.lesson_plan import LessonPlan
     return (await db.execute(
@@ -840,6 +880,11 @@ async def bump_mix(db: AsyncSession, appointment_id: int, style: str,
     mix[key] = int(mix.get(key, 0) or 0) + 1
     state["puzzle_mix"] = mix
 
+    # The ORDER of styles shown, so the mixed chooser can keep runs short and the order varied.
+    seq = list(state.get("style_seq") or [])
+    seq.append(key)
+    state["style_seq"] = seq[-12:]
+
     if kind:
         history = list(state.get("manip_history") or [])
         history.append(kind)
@@ -854,6 +899,14 @@ async def get_history(db: AsyncSession, appointment_id: int) -> List[str]:
     if plan is None or not plan.session_state:
         return []
     return list(plan.session_state.get("manip_history") or [])
+
+
+async def get_style_seq(db: AsyncSession, appointment_id: int) -> List[str]:
+    """The recent sequence of shown puzzle styles ("manipulative"/"classic") for the mixed chooser."""
+    plan = await _load_plan(db, appointment_id)
+    if plan is None or not plan.session_state:
+        return []
+    return list(plan.session_state.get("style_seq") or [])
 
 
 def suggest_kind(key_stage: Optional[str], history: Optional[List[str]] = None) -> str:

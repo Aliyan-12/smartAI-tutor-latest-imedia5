@@ -1637,29 +1637,34 @@ def _puzzle_state_lines(pstate: Optional[dict], next_style: str = "",
         style_line = ""
         if next_style == "manipulative":
             style_line = (
-                "• 🧩 NEXT PUZZLE STYLE: HANDS-ON. Use manipulative_puzzle — this student's age "
-                "learns by doing, not by typing.\n"
+                "• 🧩 NEXT PRACTICE PUZZLE = HANDS-ON MANIPULATIVE. For the next practice question "
+                "you MUST call manipulative_puzzle"
+                + (f" with kind=\"{next_kind}\"" if next_kind else "")
+                + " — NOT diagram_math_puzzle, NOT math_puzzle, NOT explanatory_puzzle. We are "
+                "deliberately alternating hands-on and classic puzzles so the lesson stays varied; "
+                "this one is the hands-on turn.\n"
             )
             if next_kind:
                 style_line += (
-                    f"• 🎲 USE kind=\"{next_kind}\" for it. This is chosen fresh each time so the "
-                    "student can't predict what's coming — do NOT default to the same activity "
-                    "you used last time. Override it ONLY if this kind genuinely cannot carry "
-                    "the concept you're teaching right now (e.g. a fractions lesson can't use "
-                    "times_table_dash); in that case pick the closest kind that can.\n"
+                    f"• 🎲 kind=\"{next_kind}\" is chosen fresh server-side each time so the order "
+                    "never repeats — do NOT swap it for a different kind or a diagram just because "
+                    "the diagram feels familiar. Override ONLY if this kind genuinely cannot carry "
+                    "the concept right now.\n"
                 )
         elif next_style == "classic":
             style_line = (
-                "• 🧩 NEXT PUZZLE STYLE: CLASSIC (no hands-on manipulative fits THIS topic, or "
-                "it's this student's turn for a classic one). Use a NON-manipulative puzzle — "
-                "prefer a still-tappable one where the topic allows (diagram_math_puzzle e.g. a "
-                "clock/ruler/shape, labelling_puzzle, matching_puzzle) and fall back to "
-                "math_puzzle / graph_puzzle otherwise. Don't force a manipulative that doesn't "
-                "match the topic.\n"
+                "• 🧩 NEXT PRACTICE PUZZLE = CLASSIC (this is the classic turn in the mix, or no "
+                "hands-on manipulative fits this topic). Use a NON-manipulative puzzle — do NOT call "
+                "manipulative_puzzle for it. Prefer a still-tappable one where the topic allows "
+                "(diagram_math_puzzle for a fraction/clock/ruler/shape, labelling_puzzle, "
+                "matching_puzzle) and fall back to math_puzzle / graph_puzzle otherwise.\n"
             )
         return (
             "Puzzle: NONE on screen right now.\n"
-            "• To EXPLAIN a concept (teaching, or a student who's stuck) call explanatory_puzzle.\n"
+            "• To EXPLAIN a concept, call explanatory_puzzle — BUT for a worked example that shows "
+            "an exact fraction / clock time / count, use diagram_math_puzzle(display_only=True) "
+            "instead: explanatory_puzzle's AI-drawn image gets exact counts wrong (a '2/6' bar "
+            "came out as 1/5), while the diagram is drawn precisely and its caption always matches.\n"
             "• To PRACTISE/QUIZ, generate the fitting puzzle yourself — manipulative_puzzle / "
             "labelling_puzzle / matching_puzzle / math_puzzle / graph_puzzle — don't expect one "
             "to already be there.\n"
@@ -1823,29 +1828,26 @@ async def build_lesson_state_anchor(
         except Exception:
             pass
 
-    # Which style the NEXT puzzle should be, from the running age quota (KS1/KS2 100% hands-on,
-    # KS3 60%, KS4 30%, KS5 0%). Computed server-side from what's actually been shown so far,
-    # so the ratio is achieved rather than left to the model's judgement.
+    # Which style the NEXT puzzle should be. A lesson whose topic HAS a matching manipulative
+    # gets a genuinely MIXED, non-repeating order (some hands-on, some classic — never all of
+    # one); a topic with none gets classic only. Computed server-side from what's been shown so
+    # far so the order is actually varied rather than left to the model (which otherwise reaches
+    # for the same diagram every time).
     next_style = ""
     next_kind = ""
     try:
         from app.services import manipulative_service
         _ks = getattr(appointment, "key_stage", None) if appointment is not None else None
         if manipulative_service.manipulatives_enabled(_ks):
-            _mix = await manipulative_service.get_mix(db, appt_id)
-            next_style = manipulative_service.next_puzzle_style(_ks, _mix)
+            _topic = _lesson_topic_text(appointment)
+            _hist = await manipulative_service.get_history(db, appt_id)
+            # Which hands-on kind (if any) actually fits this topic — fractions → fraction_canvas,
+            # etc. Empty means NO manipulative suits the topic → we never show one (classic only).
+            _topic_kind = manipulative_service.pick_topic_kind(_topic, _ks, _hist)
+            _seq = await manipulative_service.get_style_seq(db, appt_id)
+            next_style = manipulative_service.next_style_mixed(_ks, _seq, has_topic_manip=bool(_topic_kind))
             if next_style == "manipulative":
-                # A manipulative is only a good fit when its SUBJECT matches the lesson topic —
-                # a fractions lesson must show the fraction canvas, never counting bubbles. Pick
-                # the topic-matching kind first; only when NOTHING matches do we fall back to a
-                # free/varied choice, and if even the topic is silent we flip to a classic puzzle
-                # (math_puzzle / diagram_math_puzzle) rather than force a mismatched manipulative.
-                _hist = await manipulative_service.get_history(db, appt_id)
-                _topic = _lesson_topic_text(appointment)
-                next_kind = manipulative_service.pick_topic_kind(_topic, _ks, _hist)
-                if not next_kind:
-                    # No manipulative fits this topic → don't force one; use another puzzle type.
-                    next_style = "classic"
+                next_kind = _topic_kind
     except Exception:
         logger.warning("puzzle-mix anchor failed for appt %s", appt_id, exc_info=True)
 

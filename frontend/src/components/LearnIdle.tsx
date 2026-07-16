@@ -41,13 +41,20 @@ export default function LearnIdle() {
     }}>
       {/* drifting maths shapes — animate `top` (relative to THIS panel) so they rise the whole
           height from the bottom edge to above the top. `y: "115%"` was relative to each glyph's
-          own font-size, so they barely moved and bunched up in the middle. */}
+          own font-size, so they barely moved and bunched up in the middle. The opacity uses
+          `times` so each shape is already VISIBLE just above the bottom edge (fades in within the
+          first 10% of the climb) — otherwise the even-spaced fade left them invisible until the
+          middle, which looked like they were spawning from a line across the centre. */}
       {floats.map((f, i) => (
         <motion.span
           key={i}
           initial={{ top: "108%", opacity: 0, rotate: -12 }}
           animate={{ top: "-18%", opacity: [0, 0.55, 0.55, 0], rotate: 12, x: f.drift }}
-          transition={{ duration: f.dur, delay: f.delay, repeat: Infinity, ease: "linear" }}
+          transition={{
+            duration: f.dur, delay: f.delay, repeat: Infinity, ease: "linear",
+            opacity: { duration: f.dur, delay: f.delay, repeat: Infinity, ease: "linear",
+                       times: [0, 0.1, 0.85, 1] },
+          }}
           style={{
             position: "absolute", left: `${f.left}%`,
             fontSize: f.size, fontWeight: 800, color: f.colour,

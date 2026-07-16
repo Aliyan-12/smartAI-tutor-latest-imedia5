@@ -233,30 +233,47 @@ def puzzle_tool_groups(ctx: ToolContext) -> dict:
 
     @tool
     async def diagram_math_puzzle(concept: str, params: Union[dict, str] = "",
-                                  question: str = "") -> dict:
+                                  question: str = "", display_only: bool = False) -> dict:
         """
-        Practice: a DETERMINISTIC maths diagram where the answer must EXACTLY match the
-        picture — the server draws it precisely AND computes the answer, so it's ALWAYS
-        right (unlike a generated image, which can't render exact counts/positions).
-        USE THIS (not math_puzzle/image) for:
+        A DETERMINISTIC maths diagram where the picture and the answer are computed by the
+        server from the SAME params, so they can NEVER disagree (unlike a generated image,
+        which can't render exact counts/positions — that is why a generated "2/6" bar can come
+        out looking like 1/5).
+        USE THIS (not explanatory_puzzle, not math_puzzle/image) for ANYTHING showing an exact
+        fraction, count, clock time or measured length — both when TEACHING and when practising:
           • concept="fraction", params {"total": 8, "shaded": 1}  → a circle with that many
             equal parts, that many shaded; answer is derived (e.g. "1/8").
           • concept="clock", params {"hour": 3, "minute": 0}      → an analogue clock;
             answer derived (e.g. "3 o'clock", or "half past 3" for minute 30).
           • concept="ruler", params {"length_cm": 8, "object": "pencil"} → an object drawn
             against a cm ruler; answer derived (e.g. "8 cm"). Use for measuring length.
-        Do NOT pass your own answer — the server owns it. After showing it, invite a go and
-        WAIT; on submit call math_evaluator. Call SILENTLY.
+
+        display_only=True → a WORKED-EXAMPLE picture for TEACHING: the diagram is shown with a
+        server-written caption that states the answer, and there is NOTHING for the student to
+        submit (do not wait for an answer, just keep teaching from it). Use this for "here is a
+        worked example, look at the shape" moments — NEVER explanatory_puzzle for an exact
+        fraction/clock/count, because its AI-drawn image gets the counts wrong.
+        display_only=False (default) → PRACTICE: invite a go and WAIT; on submit call
+        math_evaluator.
+
+        Do NOT pass your own answer — the server owns it. Call SILENTLY.
         """
         p = _coerce_dict(params)
         clean, answer, default_q = puzzle_service.diagram_math_spec(concept, p)
         if not answer:
             return {"action": "show_puzzle", "error": "bad_concept",
-                    "message": "Use concept 'fraction' or 'clock' for a diagram maths puzzle."}
+                    "message": "Use concept 'fraction', 'clock' or 'ruler' for a diagram maths puzzle."}
         url = await graph_service.generate_math_diagram(concept, clean)
         if not url:
             return {"action": "show_puzzle", "error": "render_failed",
                     "message": "Couldn't draw that — ask the question another way."}
+        if display_only:
+            # A teaching diagram (no answer to submit). Caption is derived from the SAME params
+            # as the picture, so what's written under it always matches what's drawn.
+            caption = question.strip() or puzzle_service.diagram_example_caption(concept, clean, answer)
+            return await _persist_and_return(
+                puzzle_service.build_explanatory(url, caption, title="")
+            )
         return await _persist_and_return(
             puzzle_service.build_math(question or default_q, answer, mode="image", image_url=url)
         )
