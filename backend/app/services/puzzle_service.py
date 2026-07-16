@@ -18,6 +18,7 @@ Puzzle types (render key):
 import json
 import logging
 import random
+import re
 import uuid
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
@@ -122,20 +123,71 @@ def _auto_numeric_distractors(ans: str) -> List[str]:
     return out
 
 
+# LaTeX commands the model routinely emits with the leading backslash lost — the classic
+# failure is "\frac34" arriving as "frac34", which KaTeX then renders as the literal word.
+_LATEX_CMDS = ("dfrac", "tfrac", "frac", "sqrt", "times", "div", "cdot", "pm", "mp",
+               "leq", "geq", "neq", "approx", "ldots", "cdots", "angle", "overline")
+
+
+def _latexish_to_plain(s: str) -> str:
+    """Turn simple LaTeX into plain reading text for places that are NOT rendered by KaTeX — the
+    question line and the tappable answer bubbles. The model sometimes writes options/answers as
+    "\\frac{3}{5}" or wraps the question in "\\(…\\)"; those show up as the raw string on a plain
+    button. Fractions become "3/5", common operators become their symbols, math delimiters are
+    dropped. (The main equation card still gets real LaTeX via _repair_latex.)"""
+    if not s:
+        return s
+    t = str(s)
+    t = re.sub(r"\\[dt]?frac\s*\{([^{}]*)\}\s*\{([^{}]*)\}", r"\1/\2", t)   # \frac{3}{5} → 3/5
+    t = re.sub(r"\\[dt]?frac\s*(\d)\s*(\d)", r"\1/\2", t)                    # \frac35 → 3/5
+    for a, b in (("\\times", "×"), ("\\div", "÷"), ("\\cdot", "·"),
+                 ("\\leq", "≤"), ("\\geq", "≥"), ("\\neq", "≠"),
+                 ("\\pm", "±"), ("\\degree", "°"), ("\\circ", "°")):
+        t = t.replace(a, b)
+    for d in ("\\(", "\\)", "\\[", "\\]"):
+        t = t.replace(d, "")
+    t = re.sub(r"\$+", "", t)
+    return re.sub(r"\s+", " ", t).strip()
+
+
+def _repair_latex(s: str) -> str:
+    """Best-effort repair of LaTeX the model mangled, so the student never sees raw "frac34".
+    Strips stray math delimiters ($…$, \\(…\\)) that BlockMath doesn't want, and re-adds the
+    backslash on known commands where it was dropped (only when it isn't already there and the
+    command isn't part of a plain word like 'fractions')."""
+    if not s:
+        return s
+    t = s.strip()
+    for a, b in (("$$", "$$"), ("\\[", "\\]"), ("\\(", "\\)"), ("$", "$")):
+        if t.startswith(a) and t.endswith(b) and len(t) > len(a) + len(b):
+            t = t[len(a):len(t) - len(b)].strip()
+            break
+    for cmd in _LATEX_CMDS:
+        # add a backslash before the command when it's not already backslashed and not glued to
+        # surrounding letters (so 'frac34'/'frac{3}{4}' are fixed but 'fractions' is left alone).
+        t = re.sub(rf"(?<!\\)(?<![A-Za-z]){cmd}(?![A-Za-z])", "\\\\" + cmd, t)
+    return t
+
+
 def build_math(question: str, answer: str, *, mode: str = "latex",
                latex: str = "", image_url: str = "",
                options: Optional[List[str]] = None) -> Dict[str, Any]:
     mode = mode if mode in ("latex", "image") else "latex"
     if mode == "image" and not image_url:
         mode = "latex"
+    latex = _repair_latex(latex)
+    # The question line and the answer bubbles are plain text (not KaTeX), so any LaTeX the model
+    # slipped into them ("\frac{3}{5}", "\(\frac{2}{3}\)") must be turned into readable text or it
+    # shows up raw on the button / in the prompt.
+    question = _latexish_to_plain(question)
 
     # Multiple-choice: the AI gives wrong answers, the server builds the option set. Building it
     # HERE (not trusting the AI's list) guarantees the correct answer is always present exactly
     # once and its position is shuffled — so a student can't learn "it's always the 2nd bubble".
     opts: List[str] = []
-    ans = str(answer).strip()
+    ans = _latexish_to_plain(str(answer).strip())
     for o in (options or []):
-        s = str(o).strip()
+        s = _latexish_to_plain(str(o).strip())
         if s and s.lower() != ans.lower() and s.lower() not in {x.lower() for x in opts}:
             opts.append(s)
     # No usable distractors from the AI → try to build them ourselves so a numeric maths
@@ -233,6 +285,23 @@ def diagram_math_spec(concept: str, params: Optional[dict]) -> tuple:
         return ({"length_cm": length, "start": start, "object": obj}, f"{length} cm",
                 f"How long is the {obj}? Give your answer in centimetres (cm).")
     return ({}, "", "")
+
+
+def diagram_example_caption(concept: str, clean: dict, answer: str) -> str:
+    """A short caption for a DISPLAY-ONLY worked-example diagram, written from the SAME clamped
+    params the picture was drawn from — so the words under the diagram always match the drawing
+    (this is what a free-typed AI caption failed to guarantee, e.g. '2/6' over a 1/5 bar)."""
+    c = (concept or "").strip().lower()
+    if c == "fraction":
+        total = clean.get("total")
+        shaded = clean.get("shaded")
+        return f"{shaded} out of {total} equal parts are shaded — that is {answer}."
+    if c == "clock":
+        return f"The clock shows {answer}."
+    if c == "ruler":
+        obj = clean.get("object", "object")
+        return f"The {obj} measures {answer}."
+    return f"This shows {answer}."
 
 
 def _client_payload(full: Dict[str, Any]) -> Dict[str, Any]:
