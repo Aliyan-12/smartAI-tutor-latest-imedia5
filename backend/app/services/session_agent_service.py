@@ -1864,12 +1864,14 @@ async def build_lesson_state_anchor(
     try:
         from app.services import manipulative_service
         _ks = getattr(appointment, "key_stage", None) if appointment is not None else None
-        if manipulative_service.manipulatives_enabled(_ks):
+        _subj = getattr(appointment, "subject", None) if appointment is not None else None
+        if manipulative_service.manipulatives_enabled(_ks, _subj):
             _topic = _lesson_topic_text(appointment)
             _hist = await manipulative_service.get_history(db, appt_id)
-            # Which hands-on kind (if any) actually fits this topic — fractions → fraction_canvas,
-            # etc. Empty means NO manipulative suits the topic → we never show one (classic only).
-            _topic_kind = manipulative_service.pick_topic_kind(_topic, _ks, _hist)
+            # Which hands-on kind (if any) actually fits this topic AND subject — fractions →
+            # fraction_canvas, atomic structure → atom_builder. Empty means nothing suits the
+            # topic → we never force one (classic puzzles only).
+            _topic_kind = manipulative_service.pick_topic_kind(_topic, _ks, _hist, _subj)
             _seq = await manipulative_service.get_style_seq(db, appt_id)
             next_style = manipulative_service.next_style_mixed(_ks, _seq, has_topic_manip=bool(_topic_kind))
             if next_style == "manipulative":

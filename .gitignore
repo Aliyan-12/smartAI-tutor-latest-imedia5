@@ -26,3 +26,6 @@ htmlcov/
 
 backend/test_*.py
 backend/verify_*.py
+
+# Local scratch notepad — puzzle inventory for manual testing (not for the repo)
+PUZZLES.md

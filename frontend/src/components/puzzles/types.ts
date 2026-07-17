@@ -14,6 +14,7 @@ export type PuzzleRender =
   // ── Deterministic manipulatives: the AI passes params only; the SERVER derives the
   //    question AND the answer from them, and marks by exact comparison. The render key IS
   //    the kind (see backend manipulative_service.MANIPULATIVES). ──
+  //    Maths — foundational
   | "place_value_counters"
   | "column_addition"
   | "number_grid_sums"
@@ -22,7 +23,23 @@ export type PuzzleRender =
   | "dot_array"
   | "counting_bubbles"
   | "compare_numbers"
-  | "order_numbers";
+  | "order_numbers"
+  | "clock_hands"
+  | "money_coins"
+  | "number_line_jump"
+  | "coordinate_plot"
+  //    Maths — advanced (KS3-KS5 get hands-on at their level, never counters)
+  | "equation_balance"
+  | "algebra_tiles"
+  //    Science — universal shapes, server-owned content banks
+  | "sorting_bins"
+  | "sequence_order"
+  //    Science — Chemistry / Physics / Biology
+  | "atom_builder"
+  | "balance_equation"
+  | "ph_scale"
+  | "force_arrows"
+  | "punnett_square";
 
 export interface PuzzlePayload {
   render: PuzzleRender;
