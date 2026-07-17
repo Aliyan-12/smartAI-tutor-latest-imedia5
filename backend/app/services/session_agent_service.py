@@ -940,13 +940,39 @@ ALWAYS use this content as your PRIMARY teaching source when it is present.
         logger.warning("has_slides check failed for appt %s", appointment_id, exc_info=True)
         has_slides = False
 
+    # ONLY the slide PACE changes with lesson length — how fast to work through the deck and how
+    # much of it to teach. A 20-minute lesson spent narrating every slide never reaches the
+    # practice the student came for, so short lessons cover only the main-concept slides and skip
+    # the filler; long lessons keep the full one-slide-per-turn treatment. Puzzle behaviour is
+    # DELIBERATELY NOT part of this — it's the same in every mode (see puzzle_rhythm below).
+    if duration_minutes <= 25:
+        pace_block = (
+            f"- ⚡ SLIDE PACE — SHORT LESSON ({duration_minutes} min): TEACH THE SLIDES FAST. Cover ONLY the slides that carry a MAIN CONCEPT (a definition, a rule, a key idea). Slides that are just extra examples, filler, decoration or a recap: advance straight past them WITHOUT teaching them — you MAY call advance_lesson_slide several times in one turn to reach the next real concept. Keep each concept slide to 2-3 punchy sentences. Depth is NOT the goal — one clear pass over the key ideas."
+        )
+    elif duration_minutes <= 45:
+        pace_block = (
+            f"- ⚡ SLIDE PACE — CORE LESSON ({duration_minutes} min): teach ONLY the slides that carry a MAIN TOPIC or CONCEPT — properly, but briskly. Skip past pure filler/extra-example slides (you MAY advance more than one slide in a turn to reach the next real concept)."
+        )
+    else:
+        pace_block = (
+            f"- SLIDE PACE — FULL LESSON ({duration_minutes} min): teach at full depth, ONE SLIDE PER TURN (teaching is sequential). Cover the current slide fully, then move on. Never race forward several slides in a single reply."
+        )
+
+    # The puzzle rhythm is IDENTICAL in every lesson length — only the slide pace above differs.
+    # Slides are the teaching backbone; puzzles are how the student actually practises, so they
+    # go BETWEEN the concepts and continue AFTER the deck is finished, in every mode.
+    puzzle_rhythm = (
+        "- 🧩 PUZZLES BETWEEN AND AFTER — THE SAME IN EVERY LESSON LENGTH (this does NOT change with the pace above): after EACH main concept you teach, set a PRACTICE PUZZLE before moving on to the next concept — slides and puzzles ALTERNATE, they are not two separate halves of the lesson. When the deck is finished (or there are no more concept slides), KEEP GOING with practice puzzles on what you taught — the lesson does not stop being interactive once the slides run out. Then the quiz near the end. Never teach the whole deck first and only then start practising."
+    )
+
     if has_slides:
-        slides_block = """TEACHING SLIDES — TEACH FROM THE ON-SCREEN RESOURCES (IMPORTANT):
+        slides_block = f"""TEACHING SLIDES — TEACH FROM THE ON-SCREEN RESOURCES (IMPORTANT):
 - This lesson has real teaching slides shown on the student's screen. You MUST teach STRICTLY in slide order (slide 1, then 2, then 3…), one slide per concept, never out of order.
 - The CURRENT slide is ALWAYS shown to you each turn in an "ON-SCREEN SLIDE N of M" block, and the student is already looking at it. Teach THAT slide's content this turn — never teach ahead of the slide on screen.
 - FIRST TEACHING TURN: slide 1 is already on screen. Introduce the lesson using that slide's content. Do NOT call advance_lesson_slide on the first turn (that would skip slide 1). Do not narrate two slides in one turn.
-- ONE SLIDE PER TURN (teaching is sequential). Cover the current slide, ask at most one short check question tied to THAT slide, and wait. Never race forward several slides in a single reply.
-- MOVING ON: only when the student has engaged with the current slide (answered its question, or clearly signalled "got it / next / ok"), call advance_lesson_slide() ONCE *first*, then teach the new slide_content it returns. Each forward step = exactly one slide.
+{pace_block}
+{puzzle_rhythm}
+- MOVING ON: once the student has engaged with the current concept slide (answered its question or its puzzle, or clearly signalled "got it / next / ok"), call advance_lesson_slide() *first*, then teach the new slide_content it returns. (On a SHORT/CORE lesson you do NOT need to wait for engagement on a filler slide — just advance past it.)
 - GOING BACK: if the student is confused or answers wrong, call retreat_lesson_slide() ONCE *first*, then re-teach that earlier slide_content more simply before advancing again.
 - JUMPING: use show_resource ONLY when the student explicitly asks to see a specific slide ("show me the touch slide") — it may skip directly to that slide. Never use it to race forward during normal teaching.
 - Each slide tool returns "slide_content" — the exact text on the slide now showing. ALWAYS base that turn's explanation on that exact slide_content and nothing further ahead.
