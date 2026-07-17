@@ -14,6 +14,19 @@ import DotArray from "./puzzles/manipulatives/DotArray";
 import CountingBubbles from "./puzzles/manipulatives/CountingBubbles";
 import CompareNumbers from "./puzzles/manipulatives/CompareNumbers";
 import OrderNumbers from "./puzzles/manipulatives/OrderNumbers";
+import ClockHands from "./puzzles/manipulatives/ClockHands";
+import MoneyCoins from "./puzzles/manipulatives/MoneyCoins";
+import NumberLineJump from "./puzzles/manipulatives/NumberLineJump";
+import CoordinatePlot from "./puzzles/manipulatives/CoordinatePlot";
+import EquationBalance from "./puzzles/manipulatives/EquationBalance";
+import AlgebraTiles from "./puzzles/manipulatives/AlgebraTiles";
+import SortingBins from "./puzzles/manipulatives/SortingBins";
+import SequenceOrder from "./puzzles/manipulatives/SequenceOrder";
+import AtomBuilder from "./puzzles/manipulatives/AtomBuilder";
+import BalanceEquation from "./puzzles/manipulatives/BalanceEquation";
+import PhScale from "./puzzles/manipulatives/PhScale";
+import ForceArrows from "./puzzles/manipulatives/ForceArrows";
+import PunnettSquare from "./puzzles/manipulatives/PunnettSquare";
 import PuzzleBackground, { bgTheme } from "./puzzles/backgrounds";
 
 /**
@@ -28,9 +41,16 @@ const TYPE_LABEL: Record<string, string> = {
 
 /** The hands-on activities lay themselves out and need the whole panel — no centring, no padding. */
 const MANIPULATIVE_RENDERS = new Set([
+  // maths — foundational
   "place_value_counters", "column_addition", "number_grid_sums",
   "times_table_dash", "fraction_canvas", "dot_array", "counting_bubbles",
-  "compare_numbers", "order_numbers",
+  "compare_numbers", "order_numbers", "clock_hands", "money_coins",
+  "number_line_jump", "coordinate_plot",
+  // maths — advanced
+  "equation_balance", "algebra_tiles",
+  // science
+  "sorting_bins", "sequence_order", "atom_builder", "balance_equation",
+  "ph_scale", "force_arrows", "punnett_square",
 ]);
 
 export default function PuzzlePlayer({
@@ -90,6 +110,32 @@ export default function PuzzlePlayer({
         return <CompareNumbers {...p} />;
       case "order_numbers":
         return <OrderNumbers {...p} />;
+      case "clock_hands":
+        return <ClockHands {...p} />;
+      case "money_coins":
+        return <MoneyCoins {...p} />;
+      case "number_line_jump":
+        return <NumberLineJump {...p} />;
+      case "coordinate_plot":
+        return <CoordinatePlot {...p} />;
+      case "equation_balance":
+        return <EquationBalance {...p} />;
+      case "algebra_tiles":
+        return <AlgebraTiles {...p} />;
+      case "sorting_bins":
+        return <SortingBins {...p} />;
+      case "sequence_order":
+        return <SequenceOrder {...p} />;
+      case "atom_builder":
+        return <AtomBuilder {...p} />;
+      case "balance_equation":
+        return <BalanceEquation {...p} />;
+      case "ph_scale":
+        return <PhScale {...p} />;
+      case "force_arrows":
+        return <ForceArrows {...p} />;
+      case "punnett_square":
+        return <PunnettSquare {...p} />;
       default:
         return (
           <p style={{ color: "#94a3b8", fontSize: 13, textAlign: "center" }}>

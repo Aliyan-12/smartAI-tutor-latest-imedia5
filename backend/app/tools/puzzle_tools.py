@@ -378,19 +378,77 @@ def puzzle_tool_groups(ctx: ToolContext) -> dict:
               Scrambled number cards the student taps into order. USE THIS instead of ever typing
               "put these in order: 45, 12, 51" into the chat. For ORDERING/sequencing numbers.
               Pass 3-5 DIFFERENT numbers.
+          • kind="clock_hands", params {"hour": 3, "minute": 30}
+              An analogue clock whose hands the student DRAGS to show a time. USE THIS for the
+              Time topic instead of ever typing "what time is it?" into the chat. KS1: minutes
+              must be 0/15/30/45. KS2: any multiple of 5.
+          • kind="money_coins", params {"amount_p": 47}
+              Real UK coins the student taps to make an amount. amount_p is IN PENCE. Marked on
+              the TOTAL, so any correct combination counts. For money/change/shopping.
+          • kind="number_line_jump", params {"start": 3, "step": 2, "jumps": 4,
+              "direction": "forward"|"back"}
+              Hops along a number line; the student taps where they land. For counting on/back,
+              skip counting, and adding/subtracting on a line.
+          • kind="coordinate_plot", params {"x": 3, "y": 4}
+              The student taps a point on a grid. KS2 gets 0-10; KS3+ gets four quadrants (-6..6).
+
+        ── ADVANCED MATHS (KS3-KS5 — hands-on at THEIR level, never counters) ──
+          • kind="equation_balance", params {"a": 3, "b": 2, "c": 11}   → solves ax + b = c
+              A balance beam that tips in real time as the student slides x. (c − b) MUST divide
+              exactly by a. For solving linear equations / inverse operations.
+          • kind="algebra_tiles", params {"b": 5, "c": 6}               → x² + bx + c
+              An area model the student sizes to factorise the quadratic. b and c must factorise
+              into two POSITIVE whole numbers. For factorising/expanding brackets.
+
+        ── SCIENCE (KS1-KS5) ──
+        These take a `set`/named subject value, NOT items you invent: the SERVER owns the
+        science content and the answers, so you cannot get the science wrong. If you pass a set
+        that doesn't exist or doesn't suit the key stage, the error lists the valid ones.
+          • kind="sorting_bins", params {"set": "living_nonliving"}
+              Items the student sorts into labelled groups. THE most reusable science activity.
+              Sets: living_nonliving · materials · solid_liquid_gas · magnetic_nonmagnetic ·
+              conductors_insulators · herbivore_carnivore_omnivore · vertebrates_invertebrates ·
+              renewable_nonrenewable · acids_alkalis · metals_nonmetals ·
+              elements_compounds_mixtures · prokaryote_eukaryote · plant_animal_cell
+          • kind="sequence_order", params {"set": "water_cycle"}
+              Stages the student taps into the right order.
+              Sets: butterfly_life_cycle · frog_life_cycle · plant_life_cycle · food_chain ·
+              water_cycle · planets · scientific_method · digestion · blood_circulation ·
+              mitosis · rock_cycle
+          • kind="atom_builder", params {"element": "carbon"}     (first 20 elements)
+              The student adds protons/neutrons/electrons and the shells fill live. The server
+              varies the ask between a neutral atom, an isotope and (KS4/KS5) an ion.
+          • kind="balance_equation", params {"equation": "CH4 + O2 -> CO2 + H2O"}
+              The student sets the coefficients while a live atom tally shows each side. Write
+              formulae ONLY (no coefficients) — the server works out the balance itself, so any
+              sensible equation works, not a fixed list.
+          • kind="ph_scale", params {"substance": "lemon_juice"}
+              The student slides a marker to the substance's pH.
+          • kind="force_arrows", params {"left": 30, "right": 50}   (newtons)
+              Two force arrows on a box; the student gives the resultant's size and direction.
+              Pass equal forces to teach BALANCED forces.
+          • kind="punnett_square", params {"parent1": "Bb", "parent2": "Bb", "trait": "brown eyes"}
+              A genetic cross the student fills in. Both parents must use the SAME letter.
 
         After showing it, invite them to have a go and WAIT — on submit call
         manipulative_evaluator. Call SILENTLY.
         """
         k = (kind or "").strip().lower()
-        if not manipulative_service.manipulatives_enabled(ctx.key_stage):
+        available = manipulative_service.allowed_kinds(ctx.key_stage, ctx.subject)
+        if not available:
             return {"action": "show_puzzle", "error": "not_for_key_stage",
-                    "message": "Manipulatives aren't used at this key stage — set a "
-                               "math_puzzle or graph_puzzle instead."}
+                    "message": f"There's no hands-on activity for {ctx.subject} at "
+                               f"{ctx.key_stage} — set a math_puzzle or graph_puzzle instead."}
         if k not in manipulative_service.MANIPULATIVES:
             return {"action": "show_puzzle", "error": "bad_kind",
-                    "message": f"Unknown kind {kind!r}. Choose one of: "
-                               f"{', '.join(manipulative_service.KINDS)}."}
+                    "message": f"Unknown kind {kind!r}. For {ctx.subject} at {ctx.key_stage} "
+                               f"choose one of: {', '.join(available)}."}
+        # Right kind, wrong audience — e.g. counting_bubbles in a KS4 lesson, or an atom builder
+        # in a Maths lesson. Say so plainly so the model re-picks instead of guessing again.
+        if k not in available:
+            return {"action": "show_puzzle", "error": "not_for_key_stage",
+                    "message": f"{k!r} isn't suitable for {ctx.subject} at {ctx.key_stage}. "
+                               f"Choose one of: {', '.join(available)}."}
 
         try:
             clean, solution, prompt, title = manipulative_service.build_spec(
@@ -407,7 +465,7 @@ def puzzle_tool_groups(ctx: ToolContext) -> dict:
         if solution is None:
             return {"action": "show_puzzle", "error": "bad_kind",
                     "message": f"Unknown kind {kind!r}. Choose one of: "
-                               f"{', '.join(manipulative_service.KINDS)}."}
+                               f"{', '.join(available)}."}
         full = puzzle_service.build_manipulative(k, clean, solution, prompt, title)
         return await _persist_and_return(full)
 
@@ -552,8 +610,11 @@ def puzzle_tool_groups(ctx: ToolContext) -> dict:
         diagram_math_puzzle, graph_puzzle, clear_puzzle, quick_replies,
         labelling_evaluator, matching_evaluator, math_evaluator, graph_evaluator,
     ]
-    # KS5 never gets manipulatives — an A-Level student does not want counters, and an
-    # unbound tool is a harder guarantee than an instruction the model can talk itself out of.
-    if manipulative_service.manipulatives_enabled(ctx.key_stage):
+    # Bind the hands-on tools only when this subject + key stage actually HAS activities (an
+    # unbound tool is a harder guarantee than an instruction the model can talk itself out of).
+    # This is no longer "KS5 gets none": an A-Level student still gets hands-on work, just at
+    # their level — a Punnett square or algebra tiles, never counters, because level is enforced
+    # per registry entry.
+    if manipulative_service.manipulatives_enabled(ctx.key_stage, ctx.subject):
         puzzles += [manipulative_puzzle, manipulative_evaluator]
     return {"puzzles": puzzles}
