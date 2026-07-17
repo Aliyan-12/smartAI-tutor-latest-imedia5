@@ -1525,9 +1525,9 @@ async def stream_segment(send, seq: int, sentence: str, *, tts: bool, turn_id: s
 # ===========================================================================
 
 _TURN_TIMEOUT_S = 150
-_WATCHDOG_TICK_S = 15   # how often the per-session watchdog checks the lesson clock (also the
-                        # idle-suggestion granularity — keep ≤ _IDLE_SUGGEST_S so 30s is actually hit)
-_IDLE_SUGGEST_S = 30    # ~30s of silence → silently surface tap-answer suggestions (no chat pill)
+_WATCHDOG_TICK_S = 3    # how often the per-session watchdog checks the lesson clock (also the
+                        # idle-suggestion granularity — keep ≤ _IDLE_SUGGEST_S so 5s is actually hit)
+_IDLE_SUGGEST_S = 5     # ~5s of silence → silently surface tap-answer suggestions (no chat pill)
 _IDLE_CHECK_S = 300     # 5 min of student silence → a short "are you still there?" check-in
 _IDLE_PAUSE_S = 420     # 7 min total (2 min after the check-in) → announce + auto-pause
 _active_ws: dict = {}
@@ -3100,6 +3100,14 @@ async def run_session_ws(websocket: WebSocket) -> None:
                 last_activity = time.monotonic()
                 idle_stage = 0
                 idle_suggested = False
+            # On RESUME the tutor hasn't said anything new, so don't make the returning student
+            # wait even the 5s — surface the tap suggestions immediately. Mark them as already
+            # suggested so the watchdog doesn't fire a duplicate a few seconds later. (The Gemini
+            # call inside naturally lands after the fast resume_lesson frame, so the UI is already
+            # un-paused by the time the chips arrive.)
+            if m == "lesson_resume" and appt_id is not None:
+                idle_suggested = True
+                asyncio.create_task(_suggest_idle_quick_replies(send, chat_id, appt_id))
             if m in _AI_HANDLERS:
                 logger.info("EVENT in kind=%s bucket=AI_REACTIVE appt=%s user=%s", m, appt_id, user_id)
                 if current_turn and not current_turn.done():
@@ -3145,10 +3153,11 @@ async def run_session_ws(websocket: WebSocket) -> None:
                     # ── idle staleness (don't fire while the AI is still responding) ──
                     if current_turn and not current_turn.done():
                         continue
-                    # ~2 min idle → SILENTLY surface tap-answer suggestions (no chat message, no
-                    # pill), so a stuck student sees what they could reply. Fires once per idle
-                    # period; a real action resets it. Runs as its own task so a slow LLM call
-                    # can't hold up the watchdog's time-up check.
+                    # ~5s idle → SILENTLY surface tap-answer suggestions (no chat message, no
+                    # pill), so a student who's unsure sees what they could reply — at most ~5s
+                    # after the tutor's last response. Fires once per idle period; a real action
+                    # resets it. Runs as its own task so a slow LLM call can't hold up the
+                    # watchdog's time-up check.
                     if not idle_suggested and idle_secs >= _IDLE_SUGGEST_S:
                         idle_suggested = True
                         logger.info("watchdog: student idle %.0fs → suggest quick replies appt=%s",
