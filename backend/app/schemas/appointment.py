@@ -16,6 +16,10 @@ class AppointmentCreate(BaseModel):
     passcode: Optional[str] = Field(None, max_length=16)
     notes: Optional[str] = None
     learn_mode: str = Field(default="ai_recommended")
+    # Optional Resource-Hub subtopic (an rh_topics row within the chosen unit/topic). Empty =
+    # start from the beginning of the topic. Carried through to the LessonPlan.subtopic so the
+    # session, its RAG scope and the manipulative topic-matcher can focus on it.
+    subtopic: Optional[str] = Field(None, max_length=300)
 
 
 class AppointmentStatusUpdate(BaseModel):

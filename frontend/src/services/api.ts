@@ -840,7 +840,7 @@ export const appointmentsApi = {
     student_id: number; teacher_id: number; subject: string; key_stage: string;
     title: string; scheduled_at: string; duration_minutes?: number;
     description?: string; payment_amount?: number; passcode?: string;
-    learn_mode?: string;
+    learn_mode?: string; subtopic?: string;
   }) {
     const res = await fetch(`${API_BASE}/appointments/book`, {
       method: "POST",

@@ -4,81 +4,72 @@ import type { InteractivePuzzleProps } from "../types";
 import { Stage, CheckBar, BAND, Stepper } from "./Shell";
 
 /**
- * ForceArrows — two forces drawn TO SCALE on a box; the student gives the resultant.
+ * ForceArrows — two forces drawn TO SCALE on a box, EACH in its own direction; the student gives
+ * the resultant.
  *
- * Arrow length is proportional to the force, so "which is bigger" is visible before any
- * arithmetic. When the two forces are equal the box sits still and the resultant is 0 N —
- * which is how balanced forces should be taught.
+ * Force A is drawn on the upper rope, force B on the lower one, and each arrow emanates from the
+ * box pointing the way that force actually acts. Arrowheads use `orient="auto"` on a single
+ * right-pointing shape, so the head follows the LINE's direction — that's the fix for the old bug
+ * where a left force still rendered a right-pointing head (a left-drawn head + orient="auto"
+ * flipped 180°), which made both forces look rightward while the tutor was subtracting.
+ *
+ * Because each arrow shows its true direction, the picture matches the physics: same-direction
+ * forces visibly point the same way (ADD), opposite forces point apart (SUBTRACT).
  */
 export default function ForceArrows({ payload, onSubmit, disabled }: InteractivePuzzleProps) {
-  const left = (payload.params.left as number) ?? 0;
-  const right = (payload.params.right as number) ?? 0;
-  const max = (payload.params.max as number) || Math.max(left, right, 1);
+  const a = (payload.params.a as number) ?? 0;
+  const b = (payload.params.b as number) ?? 0;
+  const aDir = ((payload.params.a_dir as string) || "right") === "left" ? "left" : "right";
+  const bDir = ((payload.params.b_dir as string) || "left") === "left" ? "left" : "right";
+  const max = (payload.params.max as number) || Math.max(a, b, 1);
 
   const [magnitude, setMagnitude] = useState(0);
   const [direction, setDirection] = useState<string>("");
 
-  const scale = (v: number) => 24 + (v / max) * 96;   // px, always visible even at small N
+  const W = 460, H = 168, cx = 230, cy = 74, boxW = 56, boxH = 56;
+  const boxL = cx - boxW / 2, boxR = cx + boxW / 2;
+  const len = (v: number) => 30 + (v / max) * 104;   // px, always visible even for small N
 
-  const dirBtn = (value: string, label: string) => {
-    const on = direction === value;
+  const arrow = (mag: number, dir: "left" | "right", yOff: number, colour: string,
+                 headId: string, key: string) => {
+    if (mag <= 0) return null;
+    const y = cy + yOff;
+    const startX = dir === "right" ? boxR : boxL;         // tail at the box edge
+    const endX = dir === "right" ? boxR + len(mag) : boxL - len(mag);   // head out in `dir`
     return (
-      <button
-        key={value}
-        onClick={() => !disabled && setDirection(value)}
-        disabled={disabled}
-        style={{
-          minHeight: 50, padding: "0 18px", borderRadius: 12, fontFamily: "inherit",
-          fontSize: 15, fontWeight: 800, cursor: disabled ? "default" : "pointer",
-          color: on ? "#fff" : BAND.ink,
-          background: on ? BAND.blue : "#fff",
-          border: `2px solid ${on ? BAND.blue : BAND.line}`,
-        }}
-      >
-        {label}
-      </button>
+      <g key={key}>
+        <line x1={startX} y1={y} x2={endX} y2={y} stroke={colour} strokeWidth="6"
+              markerEnd={`url(#${headId})`} strokeLinecap="round" />
+        <text x={(startX + endX) / 2} y={y - 11} textAnchor="middle"
+              fontSize="15" fontWeight="800" fill={colour}>{mag} N</text>
+      </g>
     );
   };
 
   return (
     <>
       <Stage style={{ gap: 20 }}>
-        {/* the box and its forces, drawn to scale */}
         <div style={{ display: "flex", alignItems: "center", justifyContent: "center", width: "100%" }}>
-          <svg width="440" height="150" viewBox="0 0 440 150">
+          <svg width={W} height={H} viewBox={`0 0 ${W} ${H}`} style={{ maxWidth: "100%" }}>
             <defs>
-              <marker id="fa-head-l" markerWidth="7" markerHeight="7" refX="6" refY="3.5" orient="auto">
-                <polygon points="7 0, 7 7, 0 3.5" fill={BAND.orange} />
+              {/* one right-pointing head shape per colour; orient="auto" rotates it to the line */}
+              <marker id="fa-head-a" markerWidth="8" markerHeight="8" refX="6.5" refY="4" orient="auto">
+                <polygon points="0 0, 8 4, 0 8" fill={BAND.orange} />
               </marker>
-              <marker id="fa-head-r" markerWidth="7" markerHeight="7" refX="1" refY="3.5" orient="auto">
-                <polygon points="0 0, 0 7, 7 3.5" fill={BAND.green} />
+              <marker id="fa-head-b" markerWidth="8" markerHeight="8" refX="6.5" refY="4" orient="auto">
+                <polygon points="0 0, 8 4, 0 8" fill={BAND.green} />
               </marker>
             </defs>
 
             {/* ground */}
-            <line x1="20" y1="112" x2="420" y2="112" stroke="#cbd5e1" strokeWidth="2" />
+            <line x1="16" y1={cy + boxH / 2 + 6} x2={W - 16} y2={cy + boxH / 2 + 6}
+                  stroke="#cbd5e1" strokeWidth="2" />
             {/* the box */}
-            <rect x="190" y="60" width="60" height="52" rx="7" fill="rgba(37,99,235,0.12)"
-                  stroke={BAND.blue} strokeWidth="2.5" />
+            <rect x={boxL} y={cy - boxH / 2} width={boxW} height={boxH} rx="7"
+                  fill="rgba(37,99,235,0.12)" stroke={BAND.blue} strokeWidth="2.5" />
 
-            {/* left force */}
-            {left > 0 && (
-              <>
-                <line x1="188" y1="86" x2={188 - scale(left)} y2="86" stroke={BAND.orange}
-                      strokeWidth="5" markerEnd="url(#fa-head-l)" strokeLinecap="round" />
-                <text x={188 - scale(left) / 2} y="72" textAnchor="middle"
-                      fontSize="15" fontWeight="800" fill={BAND.orange}>{left} N</text>
-              </>
-            )}
-            {/* right force */}
-            {right > 0 && (
-              <>
-                <line x1="252" y1="86" x2={252 + scale(right)} y2="86" stroke={BAND.green}
-                      strokeWidth="5" markerEnd="url(#fa-head-r)" strokeLinecap="round" />
-                <text x={252 + scale(right) / 2} y="72" textAnchor="middle"
-                      fontSize="15" fontWeight="800" fill={BAND.green}>{right} N</text>
-              </>
-            )}
+            {arrow(a, aDir, -13, BAND.orange, "fa-head-a", "A")}
+            {arrow(b, bDir, 13, BAND.green, "fa-head-b", "B")}
           </svg>
         </div>
 
@@ -93,9 +84,25 @@ export default function ForceArrows({ payload, onSubmit, disabled }: Interactive
           <Stepper sign="+" disabled={disabled || magnitude >= max * 2} onClick={() => setMagnitude((m) => m + 5)} />
         </div>
         <div style={{ display: "flex", gap: 10, flexWrap: "wrap", justifyContent: "center" }}>
-          {dirBtn("left", "← Left")}
-          {dirBtn("balanced", "Balanced (0 N)")}
-          {dirBtn("right", "Right →")}
+          {([["left", "← Left"], ["balanced", "Balanced (0 N)"], ["right", "Right →"]] as const).map(([value, label]) => {
+            const on = direction === value;
+            return (
+              <button
+                key={value}
+                onClick={() => !disabled && setDirection(value)}
+                disabled={disabled}
+                style={{
+                  minHeight: 50, padding: "0 18px", borderRadius: 12, fontFamily: "inherit",
+                  fontSize: 15, fontWeight: 800, cursor: disabled ? "default" : "pointer",
+                  color: on ? "#fff" : BAND.ink,
+                  background: on ? BAND.blue : "#fff",
+                  border: `2px solid ${on ? BAND.blue : BAND.line}`,
+                }}
+              >
+                {label}
+              </button>
+            );
+          })}
         </div>
       </Stage>
 

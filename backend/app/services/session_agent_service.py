@@ -191,17 +191,22 @@ def _parse_unit_names(description: str) -> list[str]:
 
 
 def _lesson_topic_text(appointment) -> str:
-    """All the words that describe what THIS lesson is about — title, subject and the parsed
-    'Topics:' units — as one lowercase string. Used to decide which manipulative (if any) fits
-    the topic, so a fractions lesson gets the fraction canvas and never counting bubbles."""
+    """All the words that describe what THIS lesson is about — title, subject, the parsed
+    'Topics:' units AND the chosen 'Subtopic:' — as one string. Used to decide which manipulative
+    (if any) fits the topic, so a fractions lesson gets the fraction canvas and never counting
+    bubbles; including the subtopic sharpens the match (e.g. subtopic 'Aerobic respiration')."""
     if appointment is None:
         return ""
+    desc = getattr(appointment, "description", "") or ""
     parts: list[str] = []
     for attr in ("title", "subject"):
         v = getattr(appointment, attr, None)
         if v:
             parts.append(str(v))
-    parts.extend(_parse_unit_names(getattr(appointment, "description", "") or ""))
+    parts.extend(_parse_unit_names(desc))
+    _sub = _re.search(r"Subtopic:\s*([^\n]+)", desc, _re.IGNORECASE)
+    if _sub:
+        parts.append(_sub.group(1).strip())
     return " ".join(parts).strip()
 
 
@@ -483,9 +488,24 @@ async def build_session_system_prompt(
 
     topics_str = "\n".join(f"  • {t}" for t in topics_list) if topics_list else "  • General session topic (no specific units pre-selected)"
 
-    # Strip the Topics/Session type lines from description so only actual notes remain
+    # The optional Resource-Hub SUBTOPIC the student chose. When present the tutor jumps straight
+    # to it; when absent the lesson starts at the beginning of the topic.
+    _sub_match = _re.search(r"Subtopic:\s*([^\n]+)", description, _re.IGNORECASE)
+    subtopic_str = _sub_match.group(1).strip() if _sub_match else ""
+    if subtopic_str:
+        topics_str += (
+            f"\n\n  🎯 START AT THIS SUBTOPIC: \"{subtopic_str}\". Begin the lesson HERE, not at "
+            "the start of the topic — teach this subtopic (and what naturally follows it) rather "
+            "than re-covering everything before it. Only recap earlier ideas briefly if the "
+            "student clearly needs them for this subtopic."
+        )
+    else:
+        topics_str += "\n\n  (No subtopic chosen — start from the BEGINNING of the topic.)"
+
+    # Strip the Topics/Session type/Subtopic lines from description so only actual notes remain
     tutor_notes = _re.sub(r"Topics?:\s*[^\n]+\n?", "", description, flags=_re.IGNORECASE)
-    tutor_notes = _re.sub(r"Session type:\s*[^\n]+\n?", "", tutor_notes, flags=_re.IGNORECASE).strip()
+    tutor_notes = _re.sub(r"Session type:\s*[^\n]+\n?", "", tutor_notes, flags=_re.IGNORECASE)
+    tutor_notes = _re.sub(r"Subtopic:\s*[^\n]+\n?", "", tutor_notes, flags=_re.IGNORECASE).strip()
     tutor_notes = tutor_notes if tutor_notes else "None"
 
     # Map session type to specific AI behaviour instructions

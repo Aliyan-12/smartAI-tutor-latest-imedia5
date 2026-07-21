@@ -9,6 +9,7 @@ import {
 import Sidebar from "../components/Sidebar";
 import { useAuth } from "../context/AuthContext";
 import { gamificationApi, assignmentsApi, appointmentsApi, curriculumApi, settingsApi } from "../services/api";
+import type { HubTopic } from "../services/api";
 import type { HubSubject } from "../services/api";
 import type { StudentProfile, MyAssignment } from "../types";
 
@@ -56,6 +57,40 @@ function getAvailableDurations(studentKeyStage: string): number[] {
   }
   if (studentKeyStage === "KS3") return [20, 40, 60];
   return [20, 40, 60, 90]; // GCSE, A-Level, Degree
+}
+
+// ── Goal × session-length rules ──────────────────────────────────────────────
+// Not every goal fits every time slot (a 20-min "Learn from Scratch" can't teach a topic).
+// This is INDEPENDENT of the key-stage gate above — a slot is offered only when BOTH allow it.
+//   "full"    → normal, full lesson for that goal
+//   "limited" → allowed but a reduced scope (a short note is shown, e.g. "Quiz only")
+//   "blocked" → not allowed for this goal (disabled, with the reason on hover/aria)
+type DurationRule = { state: "full" | "limited" | "blocked"; note?: string; reason?: string };
+
+function goalDurationRule(goal: GoalId, mins: number): DurationRule {
+  if (mins !== 20) return { state: "full" };   // 40/60/90 work for every goal
+  switch (goal) {
+    case "learn_scratch":
+      return { state: "blocked", reason: "Learn from Scratch needs at least a 40-minute lesson to teach a topic properly." };
+    case "homework":   // Practice & Improve
+      return { state: "limited", note: "Quiz only" };
+    case "catch_up":
+      return { state: "limited", note: "Quick recap" };
+    default:           // Exam Revision
+      return { state: "full" };
+  }
+}
+
+// Deep Learning (60) is the recommended length for learning a topic from scratch; the balanced
+// Core Learning (40) is the default for the other goals.
+function recommendedDuration(goal: GoalId): number {
+  return goal === "learn_scratch" ? 60 : 40;
+}
+
+// A slot is offered when the key stage allows it AND the goal doesn't block it.
+function isDurationAllowed(goal: GoalId, mins: number, studentKeyStage: string): boolean {
+  return getAvailableDurations(studentKeyStage).includes(mins)
+    && goalDurationRule(goal, mins).state !== "blocked";
 }
 
 function durationLabel(mins: number): string {
@@ -259,6 +294,10 @@ export default function LessonSetupPage() {
   const [yearGroup, setYearGroup] = useState("");
   const [subjectId, setSubjectId] = useState<number | null>(null);
   const [selectedTopics, setSelectedTopics] = useState<string[]>([]);
+  // Subtopic (Resource Hub "topic") within the chosen topic/unit — OPTIONAL. Offered only when a
+  // SINGLE topic is selected (subtopics belong to one unit). Empty = start from the beginning.
+  const [subtopicOptions, setSubtopicOptions] = useState<HubTopic[]>([]);
+  const [selectedSubtopic, setSelectedSubtopic] = useState<string>("");
   const [goal, setGoal] = useState<GoalId>(locationState.goal ?? "learn_scratch");
   const [learnMode, setLearnMode] = useState<LearnMode>("ai_recommended");
   const [duration, setDuration] = useState<number>(40);
@@ -367,6 +406,33 @@ export default function LessonSetupPage() {
       .catch(() => setKbUnits([]));
   }, [subjectId, keyStage, yearGroup]);
 
+  // Load the subtopics for the chosen topic. Subtopics belong to ONE unit, so they're only
+  // offered when EXACTLY ONE topic is selected; otherwise the picker is hidden and any previous
+  // choice is cleared. A blank choice means "start from the beginning of the topic".
+  useEffect(() => {
+    if (selectedTopics.length !== 1) {
+      setSubtopicOptions([]);
+      setSelectedSubtopic("");
+      return;
+    }
+    const unit = kbUnits.find((u) => u.unit_name === selectedTopics[0]);
+    if (!unit) {
+      setSubtopicOptions([]);
+      setSelectedSubtopic("");
+      return;
+    }
+    let cancelled = false;
+    curriculumApi.getTopics(unit.id)
+      .then((data) => {
+        if (cancelled) return;
+        setSubtopicOptions(data.topics ?? []);
+        // Drop a stale subtopic that isn't in the new unit's list.
+        setSelectedSubtopic((cur) => ((data.topics ?? []).some((t) => t.title === cur) ? cur : ""));
+      })
+      .catch(() => { if (!cancelled) setSubtopicOptions([]); });
+    return () => { cancelled = true; };
+  }, [selectedTopics, kbUnits]);
+
   // Close topic dropdown on outside click
   useEffect(() => {
     if (!topicDropdownOpen) return;
@@ -413,6 +479,21 @@ export default function LessonSetupPage() {
       })
       .catch(() => {});
   }, []);
+
+  // Keep the chosen length valid for the chosen goal. Switching to a goal that blocks the
+  // current slot (e.g. Learn from Scratch while 20 min is selected) snaps to that goal's
+  // recommended length if it's available, otherwise the first allowed slot — so the form never
+  // sits on a disabled combination.
+  useEffect(() => {
+    if (isDurationAllowed(goal, duration, studentKeyStage)) return;
+    const rec = recommendedDuration(goal);
+    if (isDurationAllowed(goal, rec, studentKeyStage)) {
+      setDuration(rec);
+      return;
+    }
+    const firstOk = [20, 40, 60, 90].find((m) => isDurationAllowed(goal, m, studentKeyStage));
+    if (firstOk) setDuration(firstOk);
+  }, [goal, duration, studentKeyStage]);
 
   // Fetch pending assignments for "From your teacher" panel
   useEffect(() => {
@@ -491,12 +572,15 @@ export default function LessonSetupPage() {
 
     const sessionType = goalToSessionType(goal);
     const topicsStr = selectedTopics.join(", ");
+    // Only a single-topic lesson can carry a subtopic (see the subtopic effect).
+    const subtopic = selectedTopics.length === 1 ? selectedSubtopic.trim() : "";
     const titleStr = `${sessionType} - ${subject}: ${selectedTopics[0] ?? subject}`;
     const descParts = [
       `Topics: ${topicsStr}`,
       `Session type: ${sessionType}`,
       `Learning mode: ${learnMode}`,
     ];
+    if (subtopic) descParts.push(`Subtopic: ${subtopic}`);
     if (yearGroup) descParts.push(`Year group: ${yearGroup}`);
     if (extraDetails.trim()) descParts.push(extraDetails.trim());
 
@@ -510,6 +594,7 @@ export default function LessonSetupPage() {
         scheduled_at: new Date().toISOString(),
         duration_minutes: duration,
         description: descParts.join("\n"),
+        subtopic: subtopic || undefined,
         learn_mode: learnMode,
         passcode: requirePasscode && bookingPasscode.trim() ? bookingPasscode.trim() : undefined,
       }) as { id: number };
@@ -988,6 +1073,45 @@ export default function LessonSetupPage() {
                       </div>
                     )}
 
+                    {/* Subtopic (optional) — only when a SINGLE topic is chosen and it has
+                        subtopics. Blank = start from the beginning of the topic. */}
+                    {selectedTopics.length === 1 && subtopicOptions.length > 0 && (
+                      <div style={{ marginTop: 10 }}>
+                        <label style={{ ...s.label, display: "flex", alignItems: "center", gap: 6 }}>
+                          Subtopic
+                          <span style={{ fontWeight: 400, color: "#64748b" }}>· recommended, optional</span>
+                        </label>
+                        <div style={{ position: "relative" }}>
+                          <select
+                            value={selectedSubtopic}
+                            onChange={(e) => setSelectedSubtopic(e.target.value)}
+                            style={{
+                              width: "100%", padding: "10px 36px 10px 12px", appearance: "none",
+                              border: `1.5px solid ${selectedSubtopic ? "#1a73e8" : "#e2e8f0"}`,
+                              borderRadius: 8, background: "#fff", cursor: "pointer",
+                              fontSize: 14, fontFamily: "inherit",
+                              color: selectedSubtopic ? "#0f172a" : "#475569",
+                            }}
+                          >
+                            <option value="">Start from the beginning of the topic</option>
+                            {subtopicOptions.map((st) => (
+                              <option key={st.id} value={st.title}>{st.title}</option>
+                            ))}
+                          </select>
+                          <ChevronDown
+                            size={15}
+                            style={{
+                              position: "absolute", right: 12, top: "50%",
+                              transform: "translateY(-50%)", color: "#64748b", pointerEvents: "none",
+                            }}
+                          />
+                        </div>
+                        <p style={{ margin: "6px 2px 0", fontSize: 11.5, color: "#94a3b8", lineHeight: 1.4 }}>
+                          Pick a subtopic to jump straight to it, or leave it to begin at the start of the topic.
+                        </p>
+                      </div>
+                    )}
+
                     {/* Warning: selected unit(s) have no Resource Hub material.
                         The session can still start — the AI uses general knowledge. */}
                     {topicsWithoutResources.length > 0 && (
@@ -1099,8 +1223,13 @@ export default function LessonSetupPage() {
                 <div className="lsp-dur-grid">
                   {([20, 40, 60, 90] as number[]).map((mins) => {
                     const cfg = SESSION_TYPE_CONFIG[mins];
-                    const available = getAvailableDurations(studentKeyStage);
-                    const isAvailable = available.includes(mins);
+                    const ksAllows = getAvailableDurations(studentKeyStage).includes(mins);
+                    const rule = goalDurationRule(goal, mins);
+                    const isAvailable = ksAllows && rule.state !== "blocked";
+                    const isRecommended = mins === recommendedDuration(goal) && isAvailable;
+                    const reason = !ksAllows
+                      ? "Available for GCSE/A-Level and above."
+                      : rule.state === "blocked" ? rule.reason : undefined;
                     return (
                       <button
                         key={mins}
@@ -1108,13 +1237,22 @@ export default function LessonSetupPage() {
                         className={`lsp-dur-card${duration === mins ? " active" : ""}`}
                         disabled={!isAvailable}
                         onClick={() => isAvailable && setDuration(mins)}
-                        title={!isAvailable ? `Available for GCSE/A-Level and above` : undefined}
+                        title={reason}
+                        aria-label={reason ? `${cfg.label} — ${reason}` : cfg.label}
                       >
-                        {cfg.recommended && <span className="lsp-dur-badge">Recommended</span>}
+                        {isRecommended && <span className="lsp-dur-badge">Recommended</span>}
+                        {isAvailable && rule.state === "limited" && rule.note && (
+                          <span className="lsp-dur-badge" style={{ background: "#f59e0b" }}>{rule.note}</span>
+                        )}
                         <span className="lsp-dur-emoji">{cfg.emoji}</span>
                         <span className="lsp-dur-label">{cfg.label}</span>
                         <span className="lsp-dur-sub">{cfg.sublabel}</span>
                         <span className="lsp-dur-desc">{cfg.desc}</span>
+                        {!isAvailable && reason && (
+                          <span className="lsp-dur-desc" style={{ color: "#ef4444", fontWeight: 600, marginTop: 4 }}>
+                            {reason}
+                          </span>
+                        )}
                       </button>
                     );
                   })}

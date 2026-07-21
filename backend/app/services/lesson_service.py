@@ -884,9 +884,15 @@ def generate_plan_blocks(
     return {"steps": steps, "learn_mode": mode, "goal": goal, "total_duration_minutes": duration_minutes}
 
 
-async def auto_create_lesson_plan(db: AsyncSession, appointment, student_id: int) -> None:
+async def auto_create_lesson_plan(db: AsyncSession, appointment, student_id: int,
+                                  subtopic: Optional[str] = None) -> None:
     """Automatically create (or update) a LessonPlan with structured plan_blocks
-    for a student self-booked AI session. Called non-fatally from /book."""
+    for a student self-booked AI session. Called non-fatally from /book.
+
+    `subtopic` is the Resource-Hub subtopic the student picked (or None to start from the top of
+    the topic). It's stored on LessonPlan.subtopic so the session prompt, the RAG scope and the
+    manipulative topic-matcher can all focus on it. Falls back to a "Subtopic:" line in the
+    appointment description so an older client that only embeds it there still works."""
     desc = appointment.description or ""
     type_match = re.search(r"Session type:\s*([^\n]+)", desc, re.IGNORECASE)
     session_type = type_match.group(1).strip() if type_match else "General Tutoring"
@@ -899,6 +905,14 @@ async def auto_create_lesson_plan(db: AsyncSession, appointment, student_id: int
 
     topics_match = re.search(r"Topics?:\s*([^\n]+)", desc, re.IGNORECASE)
     topics = [t.strip() for t in topics_match.group(1).split(",") if t.strip()] if topics_match else []
+    unit_name = topics[0] if topics else None
+
+    # Prefer the explicit param; fall back to a "Subtopic:" line in the description.
+    if not subtopic:
+        sub_match = re.search(r"Subtopic:\s*([^\n]+)", desc, re.IGNORECASE)
+        subtopic = sub_match.group(1).strip() if sub_match else None
+    subtopic = (subtopic or "").strip() or None
+
     learn_mode = getattr(appointment, "learn_mode", "ai_recommended") or "ai_recommended"
 
     plan_blocks = generate_plan_blocks(
@@ -912,17 +926,21 @@ async def auto_create_lesson_plan(db: AsyncSession, appointment, student_id: int
 
     if existing:
         existing.plan_blocks = plan_blocks
+        existing.unit_name = unit_name
+        existing.subtopic = subtopic
         logger.info(f"Updated existing LessonPlan for appointment_id={appointment.id}")
     else:
         lp = LessonPlan(
             appointment_id=appointment.id, student_id=student_id, created_by=student_id,
             subject=appointment.subject, key_stage=appointment.key_stage,
+            unit_name=unit_name, subtopic=subtopic,
             goal=goal, plan_blocks=plan_blocks, status="planned",
         )
         db.add(lp)
         logger.info(
             f"Created LessonPlan for appointment_id={appointment.id}, "
-            f"learn_mode={learn_mode}, goal={goal}, steps={len(plan_blocks.get('steps', []))}"
+            f"learn_mode={learn_mode}, goal={goal}, unit={unit_name!r}, subtopic={subtopic!r}, "
+            f"steps={len(plan_blocks.get('steps', []))}"
         )
 
     await db.flush()

@@ -148,11 +148,22 @@ async def get_units(
 
 
 async def get_topics_by_unit(db: AsyncSession, unit_id: int) -> List[Dict[str, Any]]:
+    """The subtopics (rh_topics) under a unit, in curriculum order. De-duplicated by title —
+    the hub sometimes carries two rows with the same title under one unit, which would otherwise
+    show as duplicate options in the lesson-setup Subtopic picker."""
     rows = (await db.execute(
         select(RHTopic).where(RHTopic.unit_hub_id == unit_id)
         .order_by(RHTopic.position, RHTopic.id)
     )).scalars().all()
-    return [{"id": t.hub_id, "title": t.title} for t in rows]
+    out: List[Dict[str, Any]] = []
+    seen: set = set()
+    for t in rows:
+        key = (t.title or "").strip().lower()
+        if not key or key in seen:
+            continue
+        seen.add(key)
+        out.append({"id": t.hub_id, "title": t.title})
+    return out
 
 
 # ---------------------------------------------------------------------------

@@ -424,9 +424,13 @@ def puzzle_tool_groups(ctx: ToolContext) -> dict:
               sensible equation works, not a fixed list.
           • kind="ph_scale", params {"substance": "lemon_juice"}
               The student slides a marker to the substance's pH.
-          • kind="force_arrows", params {"left": 30, "right": 50}   (newtons)
-              Two force arrows on a box; the student gives the resultant's size and direction.
-              Pass equal forces to teach BALANCED forces.
+          • kind="force_arrows", params {"a": 30, "a_dir": "right", "b": 50, "b_dir": "left"}
+              Two force arrows on a box, EACH drawn in its own direction; the student gives the
+              resultant's size and direction. VARY IT: point them the SAME way (they ADD, e.g.
+              a_dir=right + b_dir=right) OR OPPOSITE ways (they subtract), and let the bigger force
+              be on either side. Equal + opposite → balanced. This is a deterministic diagram, so
+              use it for the WORKED EXAMPLE too (do NOT use explanatory_puzzle for a forces
+              diagram — its AI-drawn arrows won't match your numbers).
           • kind="punnett_square", params {"parent1": "Bb", "parent2": "Bb", "trait": "brown eyes"}
               A genetic cross the student fills in. Both parents must use the SAME letter.
 
