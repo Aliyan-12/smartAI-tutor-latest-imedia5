@@ -194,7 +194,45 @@ def _auto_numeric_distractors(ans: str) -> List[str]:
 # LaTeX commands the model routinely emits with the leading backslash lost — the classic
 # failure is "\frac34" arriving as "frac34", which KaTeX then renders as the literal word.
 _LATEX_CMDS = ("dfrac", "tfrac", "frac", "sqrt", "times", "div", "cdot", "pm", "mp",
-               "leq", "geq", "neq", "approx", "ldots", "cdots", "angle", "overline")
+               "leq", "geq", "neq", "approx", "ldots", "cdots", "angle", "overline", "text")
+
+# Things that must never reach KaTeX. A student saw a maths card render as
+# "textFindthelengthofsidex … dth = 200px]https://storage.googleapis.com/…" because the model
+# put prose AND a markdown image into `latex`; KaTeX has no idea what either is, so it set the
+# URL as maths, letter by letter.
+_MD_IMAGE = re.compile(r"!\[[^\]]*\]\([^)]*\)")
+_MD_LINK = re.compile(r"(?<!!)\[[^\]]*\]\([^)]*\)")
+_URL_RE = re.compile(r"(https?://|www\.)\S+", re.IGNORECASE)
+_HTML_TAG = re.compile(r"<[^>]+>")
+# Does what's left actually contain maths? A digit, an operator, or a LaTeX command.
+_HAS_MATH = re.compile(r"[0-9]|[+\-=<>^_/×÷≤≥≠±]|\\(?!text\b)[A-Za-z]+")
+
+
+def clean_math_latex(s: str) -> tuple:
+    """(latex, problem) for the KaTeX equation card.
+
+    `problem` is "" when the latex is usable, otherwise a short reason:
+      "figure" — it carried an image/URL, i.e. the model tried to SHOW something. That must be
+                 surfaced as a tool error, because silently dropping it leaves the student a
+                 question about a diagram that isn't on screen ("find the length of side x" with
+                 no triangle anywhere).
+      "prose"  — it was only words, which the prompt line already says. Safe to drop silently.
+    """
+    if not s or not str(s).strip():
+        return "", ""
+    t = str(s)
+    had_figure = bool(_MD_IMAGE.search(t) or _URL_RE.search(t))
+    t = _MD_IMAGE.sub(" ", t)
+    t = _MD_LINK.sub(" ", t)
+    t = _URL_RE.sub(" ", t)
+    t = _HTML_TAG.sub(" ", t)
+    t = re.sub(r"\s{2,}", " ", t).strip()
+    if had_figure:
+        return "", "figure"
+    t = _repair_latex(t)
+    if not t or not _HAS_MATH.search(t):
+        return "", "prose"
+    return t, ""
 
 
 def _latexish_to_plain(s: str) -> str:
@@ -243,7 +281,9 @@ def build_math(question: str, answer: str, *, mode: str = "latex",
     mode = mode if mode in ("latex", "image") else "latex"
     if mode == "image" and not image_url:
         mode = "latex"
-    latex = _repair_latex(latex)
+    # Defence in depth: the tool already refuses a `latex` carrying a figure, so anything left
+    # here is either a real equation or prose worth dropping. Never hand raw model text to KaTeX.
+    latex, _latex_problem = clean_math_latex(latex)
     # The question line and the answer bubbles are plain text (not KaTeX), so any LaTeX the model
     # slipped into them ("\frac{3}{5}", "\(\frac{2}{3}\)") must be turned into readable text or it
     # shows up raw on the button / in the prompt.
@@ -550,18 +590,86 @@ def visual_family_for(render: Optional[str]) -> str:
     return "puzzle"          # math/graph/labelling/matching/manipulatives/explanatory image
 
 
-def pick_visual_family(seq: Optional[List[str]], available: Optional[List[str]] = None) -> str:
-    """The family to use next: the least-used AVAILABLE one, never repeating the last if there is
-    an alternative. `available` limits it to what this topic can actually offer (a topic with no
-    matching animation must not be told to play one)."""
+# The three EXPLANATORY families — things the student LOOKS AT while the tutor teaches — as
+# opposed to "puzzle", which is something they DO.
+EXPLANATORY_FAMILIES = ("mermaid", "svg", "animation")
+
+# What the mix should be in each phase of the lesson. A lesson that opens with puzzles makes the
+# student solve before they have been taught anything; a practice phase full of diagrams never
+# lets them try it themselves. So the phase — not the tutor's mood — decides the balance, and
+# EVERY tool stays bound in every phase (this is priority, not a gate: a practice phase can still
+# draw a diagram when one genuinely helps, it just won't lead with one).
+VISUAL_PHASE_WEIGHTS: Dict[str, Dict[str, float]] = {
+    "recap":    {"puzzle": 0.30, "explanatory": 0.70},   # remind them how it works
+    "teach":    {"puzzle": 0.30, "explanatory": 0.70},   # explain first, practise second
+    "practice": {"puzzle": 0.70, "explanatory": 0.30},   # now they do it
+    "quiz":     {"puzzle": 0.70, "explanatory": 0.30},
+    "review":   {"puzzle": 0.40, "explanatory": 0.60},   # summarise, with a little recall
+}
+_DEFAULT_PHASE = "teach"
+
+
+def family_weights(phase: Optional[str], available: Optional[List[str]] = None) -> Dict[str, float]:
+    """Per-family target shares for this phase, normalised over what's actually available.
+
+    The phase split is puzzle-vs-explanatory; the explanatory share is then divided evenly among
+    whichever of mermaid/svg/animation can be offered, so losing manim re-splits its share
+    between the other two instead of quietly handing it to puzzles.
+    """
+    avail = [f for f in (available or VISUAL_FAMILIES) if f in VISUAL_FAMILIES]
+    if not avail:
+        return {}
+    split = VISUAL_PHASE_WEIGHTS.get((phase or "").strip().lower()) \
+        or VISUAL_PHASE_WEIGHTS[_DEFAULT_PHASE]
+    expl = [f for f in avail if f in EXPLANATORY_FAMILIES]
+    out: Dict[str, float] = {}
+    if "puzzle" in avail:
+        out["puzzle"] = split["puzzle"] if expl else 1.0
+    for f in expl:
+        out[f] = (split["explanatory"] if "puzzle" in avail else 1.0) / len(expl)
+    total = sum(out.values()) or 1.0
+    return {f: w / total for f, w in out.items()}
+
+
+def pick_visual_family(seq: Optional[List[str]], available: Optional[List[str]] = None,
+                       phase: Optional[str] = None) -> str:
+    """The family to use next, so the running mix converges on this PHASE's target ratio.
+
+    Largest-deficit selection: pick whichever family is furthest below the share it should have
+    had by now (`weight × turns_so_far − times_used`). That converges on the target exactly AND
+    stays smooth — a 70% family comes up roughly two turns in three rather than in one long burst,
+    which a per-turn dice roll or a naive virtual-time scheduler would both get wrong.
+
+    A repeat is only broken on a TIE, never forbidden outright: an earlier version excluded the
+    previous family whenever any alternative existed, which silently capped every weight at 50%
+    and made a 70% practice phase impossible.
+
+    `available` limits it to what can actually be offered; `phase` comes from the lesson state
+    machine (plan_blocks step type). With no phase this falls back to the teaching mix.
+    """
     avail = [f for f in (available or VISUAL_FAMILIES) if f in VISUAL_FAMILIES]
     if not avail:
         return "puzzle"
     hist = [s for s in (seq or []) if s in VISUAL_FAMILIES]
+    weights = family_weights(phase, avail)
     last = hist[-1] if hist else None
-    pool = [f for f in avail if f != last] or avail
-    fewest = min(hist.count(f) for f in pool)
-    return random.choice([f for f in pool if hist.count(f) == fewest])
+    turn = len(hist) + 1
+
+    best, best_score = [], None
+    for f in avail:
+        w = weights.get(f, 0.0)
+        if w <= 0:
+            continue
+        deficit = w * turn - hist.count(f)
+        if best_score is None or deficit > best_score + 1e-9:
+            best, best_score = [f], deficit
+        elif abs(deficit - best_score) <= 1e-9:
+            best.append(f)
+    if not best:
+        return random.choice(avail)
+    # Only when the leaders are tied do we steer away from repeating the last family.
+    alternatives = [f for f in best if f != last]
+    return random.choice(alternatives or best)
 
 
 async def get_visual_seq(db: AsyncSession, appointment_id: int) -> List[str]:

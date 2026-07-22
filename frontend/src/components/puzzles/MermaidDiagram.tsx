@@ -54,10 +54,16 @@ export default function MermaidDiagram({ payload }: { payload: PuzzlePayload }) 
       alignItems: "center", justifyContent: "center", gap: 14, padding: "8px 16px",
       overflow: "auto", background: "#fff",
     }}>
+      {/* Mermaid stamps a pixel `max-width` on the <svg> it generates, sized for the desktop
+          panel it was measured in. On a phone that overflows the Learn panel and the student
+          gets a horizontally-scrolled sliver of the diagram. Inline styles can't reach a child
+          injected via dangerouslySetInnerHTML, so override it with a scoped rule. */}
+      <style>{`.pz-mmd-fit > svg { width: 100%; height: auto; max-width: 100% !important; }`}</style>
       {svg && !failed ? (
         <div
+          className="pz-mmd-fit"
           dangerouslySetInnerHTML={{ __html: svg }}
-          style={{ maxWidth: "100%", maxHeight: "100%", display: "flex", justifyContent: "center" }}
+          style={{ width: "100%", maxWidth: "100%", maxHeight: "100%", display: "flex", justifyContent: "center" }}
         />
       ) : failed ? (
         <pre style={{

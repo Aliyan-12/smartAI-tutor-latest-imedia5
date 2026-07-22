@@ -66,6 +66,61 @@ def _get_kokoro() -> KPipeline:
     return _kokoro
 
 
+def _say_math(text: str) -> str:
+    """Turn written maths into words a voice can actually say.
+
+    This tutor teaches maths, so the model emits LaTeX and maths symbols constantly (that is why
+    `puzzle_service._repair_latex` exists). Kokoro has no idea what any of it means: without this,
+    "$\\frac{3}{4}$" is spoken as "dollar backslash frac open brace three close brace…". Order
+    matters — fractions and roots are expanded BEFORE the delimiters and backslashes are stripped.
+    """
+    # \frac{3}{4} → "3 over 4"  (twice, so a nested numerator still resolves)
+    for _ in range(2):
+        text = _re.sub(r'\\[dt]?frac\s*\{([^{}]+)\}\s*\{([^{}]+)\}', r'\1 over \2', text)
+    text = _re.sub(r'\\sqrt\s*\{([^{}]+)\}', r'the square root of \1', text)
+    text = _re.sub(r'\\sqrt\s+(\w+)', r'the square root of \1', text)
+
+    # Powers and indices: x^2 / x^{2} / 10^-3. The negative lookahead rejects a DECIMAL
+    # exponent (^2.5) but must still allow a sentence-ending full stop ("area in cm^2.").
+    text = _re.sub(r'\^\s*\{?\s*2\s*\}?(?!\.?\d)(?!\w)', ' squared ', text)
+    text = _re.sub(r'\^\s*\{?\s*3\s*\}?(?!\.?\d)(?!\w)', ' cubed ', text)
+    text = _re.sub(r'\^\s*\{?\s*(-?\d+(?:\.\d+)?|\w)\s*\}?', r' to the power of \1 ', text)
+    text = _re.sub(r'(?<=\w)_\s*\{?\s*(\w+)\s*\}?', r' sub \1 ', text)
+
+    symbols = [
+        (r'\\times', ' times '), (r'\\div', ' divided by '), (r'\\cdot', ' times '),
+        (r'\\pm', ' plus or minus '), (r'\\approx', ' is about '),
+        (r'\\neq', ' is not equal to '), (r'\\leq?\b', ' is less than or equal to '),
+        (r'\\geq?\b', ' is greater than or equal to '),
+        (r'\\rightarrow|\\to\b|-->|->|→', ' gives '), (r'\\degree|°', ' degrees '),
+        (r'\\pi\b|π', ' pi '), (r'\\theta\b|θ', ' theta '), (r'\\alpha\b|α', ' alpha '),
+        (r'\\beta\b|β', ' beta '), (r'\\Delta\b|\\delta\b|Δ', ' delta '),
+        (r'\\infty|∞', ' infinity '), (r'\\%|%', ' percent '), (r'×', ' times '),
+        (r'÷', ' divided by '), (r'≈', ' is about '), (r'≠', ' is not equal to '),
+        (r'≤', ' is less than or equal to '), (r'≥', ' is greater than or equal to '),
+        (r'√', ' the square root of '), (r'²', ' squared '), (r'³', ' cubed '),
+    ]
+    for pat, rep in symbols:
+        text = _re.sub(pat, rep, text)
+
+    # Bare comparisons, but NOT inside a stray HTML-ish tag or an arrow already handled.
+    text = _re.sub(r'\s>\s', ' is greater than ', text)
+    text = _re.sub(r'\s<\s', ' is less than ', text)
+
+    # Now the delimiters and any leftover TeX scaffolding can go.
+    text = _re.sub(r'\$\$?', '', text)
+    text = _re.sub(r'\\(?:left|right|displaystyle|text|mathrm|mbox)\b', '', text)
+    text = _re.sub(r'\\[a-zA-Z]+', '', text)      # any remaining \command
+    text = text.replace('{', '').replace('}', '')
+    # "=" is silent in most TTS voices, which turns "A = pi r squared" into a list of nouns.
+    text = _re.sub(r'\s*=\s*', ' equals ', text)
+    # Tidy the spacing the substitutions above introduce, so nothing runs together
+    # ("x squared+ 3x") and no space is left stranded before punctuation ("degrees .").
+    text = _re.sub(r'\s{2,}', ' ', text)
+    text = _re.sub(r'\s+([.,!?;:])', r'\1', text)
+    return text
+
+
 def _prep_tts_text(text: str) -> str:
     """Strip markdown Kokoro would read literally, but KEEP prosody punctuation
     (commas, em-dashes, ellipses) so phrasing sounds natural, and turn line/paragraph
@@ -76,6 +131,7 @@ def _prep_tts_text(text: str) -> str:
     text = _re.sub(r'`+([^`]+)`+', r'\1', text)                     # `code`
     text = _re.sub(r'^\s*[-*•]\s+', '', text, flags=_re.MULTILINE)  # bullet markers
     text = _re.sub(r'\[[A-Z_:][^\]]*\]', '', text)                 # [MARKER] control tags
+    text = _say_math(text)                                          # LaTeX/symbols → words
     # Breaks → pauses: a blank line is a full stop; a single line break is a short pause.
     text = _re.sub(r'\n{2,}', '. ', text)
     text = _re.sub(r'\n', ', ', text)

@@ -4,10 +4,15 @@ import type { PuzzlePayload } from "./types";
 /**
  * AnimationPlayer — plays a pre-rendered Manim animation (MP4) on the Learn panel.
  *
- * Display-only: the tutor shows a short animation to explain a heavier maths/science idea (a sine
- * wave coming off a circle, adding vectors, jumping a number line), then teaches from it. The MP4
- * is rendered server-side from a curated template and cached, so it's exact and — after the first
- * render — instant. Loops quietly, with a replay button.
+ * Display-only: the tutor shows a short animation for an idea that motion explains better than a
+ * still (a wave travelling, particles diffusing, a shape being reflected), then teaches from it.
+ *
+ * The tutor WRITES the Manim scene for the lesson it's teaching; the server validates that code
+ * against an AST allow-list and renders it in an isolated process, then caches the MP4 by a hash
+ * of the code — so the first showing takes a few seconds and every repeat is instant.
+ *
+ * Muted + playsInline so it autoplays on iOS Safari (an unmuted autoplay is blocked outright);
+ * loops quietly, with a replay button sized as a real touch target.
  */
 export default function AnimationPlayer({ payload }: { payload: PuzzlePayload }) {
   const video = (payload.params.video as string) || "";

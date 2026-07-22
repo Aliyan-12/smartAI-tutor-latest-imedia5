@@ -105,38 +105,60 @@ async def _award_puzzle_xp(ctx: ToolContext, verdict: dict) -> int:
     return xp
 
 
+async def persist_and_return(ctx: ToolContext, full: dict) -> dict:
+    """Store the full payload (with server-only solution) and return the client payload
+    (no solution) with a fresh instance_id.
+
+    Module-level rather than a closure because `visual_tools` shares it: every visual —
+    puzzle, diagram, animation — must land on screen through the SAME path, or the puzzle
+    state, the hands-on quota and the visual-family counts drift apart.
+    """
+    try:
+        instance_id = await puzzle_service.set_puzzle_shown(ctx.db, ctx.appointment_id, full)
+    except Exception as e:  # noqa: BLE001
+        logger.warning("set_puzzle_shown failed: %s", e)
+        instance_id = ""
+    ptype = full.get("puzzle_type")
+    # Count it against the hands-on quota (KS1/2 100% · KS3 60% · KS4 30% · KS5 0%), which
+    # is what the LESSON STATE anchor reads to tell the model which style to use next.
+    # `explanatory` is a teaching diagram, not practice, so it doesn't count either way.
+    if ptype != "explanatory":
+        try:
+            await manipulative_service.bump_mix(
+                ctx.db, ctx.appointment_id,
+                "manipulative" if ptype == "manipulative" else "classic",
+                # For a manipulative, `render` IS the kind — recorded so the next
+                # suggestion can avoid repeating it.
+                kind=full.get("render") if ptype == "manipulative" else None,
+            )
+        except Exception as e:  # noqa: BLE001
+            logger.warning("bump_mix failed: %s", e)
+    # Record which VISUAL FAMILY reached the screen (puzzle · animation · svg · mermaid) so the
+    # anchor can hold the PHASE's target mix instead of the tutor reusing one family all lesson.
+    try:
+        await puzzle_service.bump_visual_family(
+            ctx.db, ctx.appointment_id,
+            puzzle_service.visual_family_for(full.get("render")),
+        )
+    except Exception as e:  # noqa: BLE001
+        logger.warning("bump_visual_family failed: %s", e)
+    client = puzzle_service._client_payload(full)
+    client["instance_id"] = instance_id
+    client["rendered"] = True
+    logger.info("PUZZLE built render=%s type=%s instance=%s",
+                client.get("render"), client.get("puzzle_type"), instance_id)
+    return client
+
+
 def puzzle_tool_groups(ctx: ToolContext) -> dict:
-    """Generative puzzle tools (generators + clear + evaluators) for the registry."""
+    """Generative puzzle tools (generators + clear + evaluators) for the registry.
+
+    Display-only teaching visuals (mermaid / svg / manim) live in `visual_tools.py` — they are
+    what the tutor EXPLAINS with, while these are what the student DOES.
+    """
 
     async def _persist_and_return(full: dict) -> dict:
-        """Store the full payload (with server-only solution) and return the client
-        payload (no solution) with a fresh instance_id."""
-        try:
-            instance_id = await puzzle_service.set_puzzle_shown(ctx.db, ctx.appointment_id, full)
-        except Exception as e:  # noqa: BLE001
-            logger.warning("set_puzzle_shown failed: %s", e)
-            instance_id = ""
-        ptype = full.get("puzzle_type")
-        # Count it against the hands-on quota (KS1/2 100% · KS3 60% · KS4 30% · KS5 0%), which
-        # is what the LESSON STATE anchor reads to tell the model which style to use next.
-        # `explanatory` is a teaching diagram, not practice, so it doesn't count either way.
-        if ptype != "explanatory":
-            try:
-                await manipulative_service.bump_mix(
-                    ctx.db, ctx.appointment_id,
-                    "manipulative" if ptype == "manipulative" else "classic",
-                    # For a manipulative, `render` IS the kind — recorded so the next
-                    # suggestion can avoid repeating it.
-                    kind=full.get("render") if ptype == "manipulative" else None,
-                )
-            except Exception as e:  # noqa: BLE001
-                logger.warning("bump_mix failed: %s", e)
-        client = puzzle_service._client_payload(full)
-        client["instance_id"] = instance_id
-        client["rendered"] = True
-        logger.info("PUZZLE built render=%s type=%s instance=%s",
-                    client.get("render"), client.get("puzzle_type"), instance_id)
-        return client
+        return await persist_and_return(ctx, full)
 
     @tool
     async def explanatory_puzzle(image_prompt: str, caption: str = "", title: str = "") -> dict:
@@ -168,107 +190,6 @@ def puzzle_tool_groups(ctx: ToolContext) -> dict:
             return {"action": "show_puzzle", "error": "image_gen_failed",
                     "message": "The image couldn't be generated — keep teaching in words instead."}
         return await _persist_and_return(puzzle_service.build_explanatory(url, caption, title))
-
-    @tool
-    async def mermaid_diagram(mermaid: str, caption: str = "", title: str = "") -> dict:
-        """
-        Show a live MERMAID DIAGRAM on the student's screen to EXPLAIN a concept visually — a
-        flowchart, cycle, process, sequence, timeline, hierarchy, mind-map or state machine. This
-        is your GO-TO for anything with steps, arrows, stages or relationships: photosynthesis,
-        the water/rock/nitrogen cycle, a reaction pathway, digestion, a food chain, an algorithm,
-        circuit logic, classification trees, a maths method's steps. It renders instantly and
-        EXACTLY (no image generation, never misdrawn), so PREFER it over explanatory_puzzle for
-        structured concepts. Display-only — nothing to submit; teach FROM it.
-
-        `mermaid` is a valid Mermaid spec, e.g.
-          "flowchart LR\\n  A[Carbon dioxide] --> P((Photosynthesis))\\n  B[Water] --> P\\n  P --> G[Glucose]\\n  P --> O[Oxygen]"
-        Start it with a diagram type (flowchart TD/LR, sequenceDiagram, stateDiagram-v2, timeline,
-        mindmap, pie…). Keep it focused — 4-10 nodes reads best. Do NOT wrap it in ``` fences and
-        do NOT put your spoken explanation inside it.
-
-        LEAD WITH THE DIAGRAM, then explain it in a few plain sentences — not a wall of text.
-        Call SILENTLY.
-        """
-        spec = puzzle_service.clean_mermaid(mermaid)
-        if not puzzle_service.is_valid_mermaid(spec):
-            return {"action": "show_puzzle", "error": "bad_mermaid",
-                    "message": "That isn't a Mermaid diagram. Start with a type like 'flowchart TD', "
-                               "'sequenceDiagram', 'stateDiagram-v2', 'timeline', 'mindmap' or 'pie', "
-                               "with the nodes/edges below it and NO ``` fences."}
-        return await _persist_and_return(puzzle_service.build_mermaid(spec, caption, title))
-
-    @tool
-    async def svg_diagram(kind: str, params: Union[dict, str] = "", caption: str = "") -> dict:
-        """
-        Show a READY-MADE, exactly-drawn TEACHING DIAGRAM for this topic — a labelled structure the
-        student can look at while you explain it. These are drawn by the server from real
-        curriculum diagrams, so they are ALWAYS correct (a generated picture mislabels and
-        miscounts). Display-only — teach FROM it.
-
-        PREFER THIS over explanatory_puzzle whenever one of these fits the topic:
-          Biology  : animal_cell · plant_cell · digestive_system · photosynthesis
-          Chemistry: particle_states (solid/liquid/gas) · atom_shells {"element":"Carbon","protons":6,"neutrons":6}
-          Physics  : series_circuit {"lamps":2} · parallel_circuit · wave_parts {"cycles":2}
-                     · solar_system · forces_on_object {"up":"Lift","down":"Weight","left":"Drag","right":"Thrust"}
-
-        The LESSON STATE block tells you which diagram matches the topic you're teaching right now —
-        use that one. If none fits, use mermaid_diagram (flows/cycles) instead. Call SILENTLY, then
-        explain the diagram in a few plain sentences.
-        """
-        from app.services import svg_diagram_service as sds
-        k = (kind or "").strip().lower()
-        avail = sds.available_kinds(ctx.key_stage, ctx.subject)
-        if k not in sds.DIAGRAMS:
-            return {"action": "show_puzzle", "error": "bad_kind",
-                    "message": f"Unknown diagram {kind!r}. For {ctx.subject} at {ctx.key_stage} "
-                               f"choose one of: {', '.join(avail) or 'none'} — or use mermaid_diagram."}
-        if k not in avail:
-            return {"action": "show_puzzle", "error": "not_for_key_stage",
-                    "message": f"{k!r} doesn't suit {ctx.subject} at {ctx.key_stage}. "
-                               f"Choose one of: {', '.join(avail) or 'none'} — or use mermaid_diagram."}
-        built = sds.build(k, _coerce_dict(params))
-        if not built:
-            return {"action": "show_puzzle", "error": "render_failed",
-                    "message": "That diagram couldn't be drawn — use mermaid_diagram instead."}
-        return await _persist_and_return(
-            puzzle_service.build_svg_diagram(built["svg"], caption or built["caption"], built["title"]))
-
-    @tool
-    async def show_animation(kind: str, params: Union[dict, str] = "", caption: str = "") -> dict:
-        """
-        Play a short pre-rendered MATHS/SCIENCE ANIMATION (MP4) for a HEAVIER, motion-based idea a
-        still picture can't show — a sine wave coming off a circle, adding vectors tip-to-tail,
-        jumping along a number line. Display-only; teach FROM it.
-
-        You pass ONLY `kind` + numeric params (never code):
-          • kind="sine_wave"        params {"cycles": 2}                  (KS4-KS5 maths/physics)
-          • kind="vector_addition"  params {"ax":3,"ay":1,"bx":1,"by":2}  (KS4-KS5 maths/physics)
-          • kind="number_line_add"  params {"start":3,"step":2,"jumps":4} (KS1-KS3 maths)
-
-        Animations render server-side and are cached: the FIRST time one is asked for it isn't
-        ready ('rendering'). When that happens DON'T wait — explain with a mermaid_diagram or in
-        words now, and it'll be instant next time. Use sparingly; mermaid_diagram is the everyday
-        visual. Call SILENTLY.
-        """
-        from app.services import manim_service
-        if not manim_service.MANIM_AVAILABLE:
-            return {"action": "show_puzzle", "error": "animations_disabled",
-                    "message": "Animations aren't enabled here — use mermaid_diagram (a live "
-                               "flowchart/graph) or diagram_math_puzzle instead."}
-        avail = manim_service.available_kinds(ctx.key_stage, ctx.subject)
-        k = (kind or "").strip().lower()
-        if k not in avail:
-            return {"action": "show_puzzle", "error": "bad_kind",
-                    "message": f"No animation {kind!r} for {ctx.subject} at {ctx.key_stage}. "
-                               f"Available: {', '.join(avail) or 'none'} — otherwise use mermaid_diagram."}
-        status, key, title, cap = manim_service.render_or_queue(k, _coerce_dict(params))
-        if status != "ready":
-            return {"action": "show_puzzle", "error": "rendering",
-                    "message": "That animation is being prepared and is NOT on screen yet — explain "
-                               "it with a mermaid_diagram or in words now; it'll be ready next time."}
-        url = f"/api/curriculum/animations/{key}.mp4"
-        return await _persist_and_return(
-            puzzle_service.build_animation(url, caption or cap, title))
 
     @tool
     async def labelling_puzzle(items: str, prompt: str = "") -> dict:
@@ -332,9 +253,29 @@ def puzzle_tool_groups(ctx: ToolContext) -> dict:
         open-ended answers); for a plain numeric answer the server still adds tappable options
         automatically.
 
+        `latex` IS AN EQUATION ONLY — it is typeset by KaTeX. Never put prose, a markdown image,
+        an HTML tag or a URL in it (they render as gibberish, letter by letter). If the question
+        needs a FIGURE the student must look at (a labelled triangle, a shape with dimensions), do
+        NOT try to embed it here — put the figure on screen FIRST with draw_svg (or use
+        diagram_math_puzzle), then ask about it. If the words alone are enough, leave `latex`
+        empty and put everything in `question`.
+
         After showing it, WAIT — on submit call math_evaluator. Not for graphs (use
         graph_puzzle). Call SILENTLY.
         """
+        # A `latex` carrying an image/URL means the model meant to SHOW a figure. Refusing loudly
+        # is the only safe answer: dropping it silently ships a question about a diagram that was
+        # never drawn ("find the length of side x" with no triangle on screen).
+        _clean_latex, _latex_problem = puzzle_service.clean_math_latex(latex)
+        if _latex_problem == "figure":
+            return {"action": "show_puzzle", "error": "latex_not_an_equation",
+                    "message": "`latex` is typeset by KaTeX, so it can only hold an EQUATION — "
+                               "the image/URL you put there would render as gibberish and the "
+                               "figure would never appear. Draw the figure FIRST with draw_svg "
+                               "(or use diagram_math_puzzle), then call math_puzzle again asking "
+                               "about what is now on screen — or drop `latex` and put the whole "
+                               "problem in `question`."}
+        latex = _clean_latex
         image_url = ""
         if mode == "image" and image_prompt:
             image_url = await image_gen_service.generate_image(image_prompt) or ""
@@ -723,7 +664,7 @@ def puzzle_tool_groups(ctx: ToolContext) -> dict:
         return await _evaluate("graph")
 
     puzzles = [
-        explanatory_puzzle, svg_diagram, mermaid_diagram, show_animation, labelling_puzzle, matching_puzzle,
+        explanatory_puzzle, labelling_puzzle, matching_puzzle,
         math_puzzle, diagram_math_puzzle, graph_puzzle, clear_puzzle, quick_replies,
         labelling_evaluator, matching_evaluator, math_evaluator, graph_evaluator,
     ]

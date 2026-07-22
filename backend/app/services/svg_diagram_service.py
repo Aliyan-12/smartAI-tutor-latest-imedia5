@@ -20,8 +20,9 @@ SAFETY: all text baked into the SVG comes from these templates or from validated
 param-derived text is escaped by `_esc` — the model never injects raw markup.
 """
 import logging
+import re
 from html import escape
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 logger = logging.getLogger(__name__)
 
@@ -613,6 +614,231 @@ def pick_for_topic(topic: Optional[str], key_stage: Optional[str],
             scored.append((hits, k))
     scored.sort(key=lambda x: (-x[0], x[1]))
     return [k for _h, k in scored]
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# MODEL-AUTHORED SVG — sanitiser
+# ─────────────────────────────────────────────────────────────────────────────
+# The templates above cover 16 common structures; the curriculum has hundreds. So the tutor may
+# also WRITE an SVG for whatever it is teaching. That markup is inlined into the page with
+# `dangerouslySetInnerHTML`, so it is an XSS sink and is treated as hostile input.
+#
+# This is an ALLOW-LIST PARSER, not a filter. The markup is parsed to a tree, every element and
+# attribute not on the lists below is dropped, and the result is re-serialised from scratch —
+# so anything the parser did not explicitly understand cannot survive into the output. A
+# blocklist ("strip <script>") would be defeated by the first novel vector; this cannot be,
+# because unknown input is dropped rather than passed through.
+#
+# Note there is NO code execution here at all: SVG is declarative markup. That makes this
+# strictly safer than the Manim path, which is why the tutor is pointed here first.
+
+_SVG_NS = "http://www.w3.org/2000/svg"
+_XLINK_NS = "http://www.w3.org/1999/xlink"
+
+MAX_SVG_CHARS = 20000
+MAX_SVG_NODES = 800
+
+_SVG_ELEMENTS = {
+    "svg", "g", "defs", "title", "desc", "symbol", "use",
+    "path", "rect", "circle", "ellipse", "line", "polyline", "polygon",
+    "text", "tspan", "textPath",
+    "marker", "linearGradient", "radialGradient", "stop", "pattern",
+    "clipPath", "mask", "filter",
+    # SMIL — free animation with no video render at all
+    "animate", "animateTransform", "animateMotion", "mpath", "set",
+    # a small, well-understood filter set
+    "feGaussianBlur", "feOffset", "feMerge", "feMergeNode", "feDropShadow",
+    "feColorMatrix", "feBlend", "feFlood", "feComposite",
+}
+
+_PRESENTATION_ATTRS = {
+    "fill", "fill-opacity", "fill-rule", "stroke", "stroke-width", "stroke-opacity",
+    "stroke-linecap", "stroke-linejoin", "stroke-dasharray", "stroke-dashoffset",
+    "stroke-miterlimit", "opacity", "color", "display", "visibility", "transform",
+    "vector-effect", "paint-order", "shape-rendering", "clip-path", "clip-rule",
+    "mask", "filter", "marker-start", "marker-mid", "marker-end",
+    "font-family", "font-size", "font-weight", "font-style", "text-anchor",
+    "dominant-baseline", "alignment-baseline", "letter-spacing", "word-spacing",
+    "baseline-shift", "writing-mode", "stop-color", "stop-opacity",
+    "flood-color", "flood-opacity",
+}
+
+_SVG_ATTRS = _PRESENTATION_ATTRS | {
+    "id", "class", "style",
+    # geometry
+    "x", "y", "x1", "y1", "x2", "y2", "cx", "cy", "r", "rx", "ry",
+    "width", "height", "d", "points", "dx", "dy", "rotate", "pathLength",
+    # root / viewport
+    "viewBox", "preserveAspectRatio", "version", "xmlns", "xmlns:xlink",
+    # text
+    "textLength", "lengthAdjust", "startOffset", "xml:space",
+    # gradients / patterns
+    "gradientUnits", "gradientTransform", "spreadMethod", "offset", "fx", "fy",
+    "patternUnits", "patternContentUnits", "patternTransform",
+    # markers
+    "markerWidth", "markerHeight", "refX", "refY", "orient", "markerUnits",
+    # clip / mask
+    "clipPathUnits", "maskUnits", "maskContentUnits",
+    # animation
+    "attributeName", "attributeType", "from", "to", "by", "values", "keyTimes",
+    "keySplines", "dur", "begin", "end", "repeatCount", "repeatDur", "calcMode",
+    "additive", "accumulate", "type", "path", "keyPoints",
+    # filter primitives
+    "in", "in2", "result", "stdDeviation", "mode", "operator", "k1", "k2", "k3", "k4",
+    # local references only — enforced in _clean_attr
+    "href", "xlink:href",
+}
+
+
+class SvgError(ValueError):
+    """Sanitising failed — the message is written to be actionable by the model."""
+
+
+def _local(tag: str) -> Optional[str]:
+    """Strip the namespace. Returns None for a namespace we don't accept at all."""
+    if not isinstance(tag, str):
+        return None                       # comments / PIs arrive as callables
+    if tag.startswith("{"):
+        ns, _, name = tag[1:].partition("}")
+        if ns == _SVG_NS:
+            return name
+        if ns == _XLINK_NS:
+            return f"xlink:{name}"
+        return None
+    return tag
+
+
+def _safe_style(value: str) -> bool:
+    v = value.lower().replace(" ", "")
+    if "javascript:" in v or "expression(" in v or "@import" in v or "behavior:" in v:
+        return False
+    # url(#local) is fine (gradients/markers); any other url() reaches off-document
+    idx = 0
+    while True:
+        idx = v.find("url(", idx)
+        if idx == -1:
+            return True
+        if not v[idx + 4:].lstrip("'\"").startswith("#"):
+            return False
+        idx += 4
+
+
+def _clean_attr(name: str, value: str) -> Optional[Tuple[str, str]]:
+    n = _local(name)
+    if not n:
+        return None
+    if n.lower().startswith("on"):        # every event handler, known or not
+        return None
+    if n not in _SVG_ATTRS:
+        return None
+    v = (value or "").strip()
+    if n in ("href", "xlink:href"):
+        # Only same-document references (<use href="#star">). Anything else could fetch,
+        # navigate or carry a javascript: payload.
+        if not v.startswith("#"):
+            return None
+    if n == "style" and not _safe_style(v):
+        return None
+    if n == "attributeName":
+        # SMIL can animate an arbitrary attribute — including one that would become a handler.
+        if v not in _PRESENTATION_ATTRS and v not in (
+                "x", "y", "cx", "cy", "r", "rx", "ry", "width", "height", "d", "points",
+                "transform", "offset", "x1", "y1", "x2", "y2"):
+            return None
+    if "javascript:" in v.lower().replace(" ", ""):
+        return None
+    return n, v
+
+
+_VOID_OK = {"path", "rect", "circle", "ellipse", "line", "polyline", "polygon",
+            "stop", "use", "animate", "animateTransform", "animateMotion", "set",
+            "mpath", "feGaussianBlur", "feOffset", "feMergeNode", "feDropShadow",
+            "feColorMatrix", "feBlend", "feFlood", "feComposite"}
+
+
+def _serialise(el, out: List[str], budget: List[int]) -> None:
+    tag = _local(el.tag)
+    if not tag or tag not in _SVG_ELEMENTS:
+        return                              # drop the element AND its subtree
+    budget[0] -= 1
+    if budget[0] < 0:
+        raise SvgError(f"the diagram has too many elements (max {MAX_SVG_NODES}) — "
+                       "show one clear structure, not a whole scene")
+
+    attrs = []
+    for k, v in (el.attrib or {}).items():
+        cleaned = _clean_attr(k, v)
+        if cleaned:
+            attrs.append(f'{cleaned[0]}="{escape(cleaned[1], quote=True)}"')
+    open_tag = f"<{tag}{(' ' + ' '.join(attrs)) if attrs else ''}"
+
+    children = list(el)
+    text = (el.text or "").strip()
+    if not children and not text and tag in _VOID_OK:
+        out.append(open_tag + "/>")
+        return
+
+    out.append(open_tag + ">")
+    if text:
+        out.append(escape(text))
+    for child in children:
+        _serialise(child, out, budget)
+        tail = (child.tail or "").strip()
+        if tail:
+            out.append(escape(tail))
+    out.append(f"</{tag}>")
+
+
+def sanitize_svg(markup: str) -> str:
+    """Return safe, self-contained SVG, or raise SvgError with a model-actionable message."""
+    import xml.etree.ElementTree as ET
+
+    src = (markup or "").strip()
+    if not src:
+        raise SvgError("the SVG was empty")
+    if len(src) > MAX_SVG_CHARS:
+        raise SvgError(f"the SVG is too long ({len(src)} chars, max {MAX_SVG_CHARS})")
+
+    # Strip a ```svg fence if the model wrapped it despite being told not to.
+    if src.startswith("```"):
+        src = re.sub(r"^```[a-zA-Z]*\s*|\s*```$", "", src).strip()
+
+    # Reject doctypes/entities/PIs BEFORE parsing: internal entity expansion is a
+    # denial-of-service ("billion laughs") and external entities read local files (XXE).
+    low = src.lower()
+    if "<!doctype" in low or "<!entity" in low or "<?" in low:
+        raise SvgError("doctypes, entities and processing instructions are not allowed — "
+                       "send a plain <svg>…</svg> element only")
+
+    start = src.find("<svg")
+    if start == -1:
+        raise SvgError("that isn't an SVG — it must start with an <svg> element carrying a viewBox")
+    src = src[start:]
+
+    try:
+        root = ET.fromstring(src)
+    except ET.ParseError as e:
+        raise SvgError(f"the SVG is not well-formed XML ({e}) — every tag must be closed, "
+                       "e.g. <circle ... /> and <text ...>label</text>") from e
+
+    if _local(root.tag) != "svg":
+        raise SvgError("the root element must be <svg>")
+
+    out: List[str] = []
+    _serialise(root, out, [MAX_SVG_NODES])
+    svg = "".join(out)
+
+    # Guarantee a viewBox so the diagram scales to the Learn panel instead of overflowing.
+    if "viewBox=" not in svg:
+        w = (root.get("width") or "").strip().rstrip("px") or str(W)
+        h = (root.get("height") or "").strip().rstrip("px") or str(H)
+        try:
+            svg = svg.replace("<svg", f'<svg viewBox="0 0 {float(w):g} {float(h):g}"', 1)
+        except ValueError:
+            svg = svg.replace("<svg", f'<svg viewBox="0 0 {W} {H}"', 1)
+    if "xmlns=" not in svg:
+        svg = svg.replace("<svg", f'<svg xmlns="{_SVG_NS}"', 1)
+    return svg
 
 
 def build(kind: str, params: Optional[dict] = None) -> Optional[Dict[str, str]]:
