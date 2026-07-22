@@ -37,8 +37,51 @@ def goal_resource_types(goal: Optional[str]) -> List[str]:
     return _GOAL_TYPES.get((goal or "").lower(), _DEFAULT_TYPES)
 
 
+# ── Goal × session-length RESOURCE POLICY ────────────────────────────────────────
+# Which Resource-Hub material a lesson actually uses, so the four goals FEEL different:
+#
+#   every goal @ 20 min → NO resources at all (too short to open a deck): pure teaching,
+#                         hands-on puzzles and a quiz.
+#   learn_scratch 40+   → SLIDES, taught one at a time with short explanations/examples.
+#   homework/catch_up   → WORKSHEET-LED: show the worksheet and help the student work
+#            40+          through it, plus practice examples, quiz and summary.
+#   revision 40+        → QUIZ SHEET first, then worksheet, then practice + quiz + summary.
+#
+# `style` is handed to the session prompt so the tutor teaches the material the right way.
+_POLICY_STYLES = {
+    "slides": "Teach the SLIDES one at a time — show a slide, explain it briefly with an example, then move on.",
+    "worksheet": "WORKSHEET-LED: put the worksheet on screen and work through it WITH the student, question by question, then practice examples, a quiz and a summary.",
+    "quiz_sheet": "EXAM-STYLE: lead with the quiz/exam sheet, then the worksheet, working through questions with the student, then practice, quiz and summary.",
+    "none": "NO resources this session — teach directly, with hands-on puzzles and a quiz.",
+}
+
+
+def lesson_resource_policy(goal: Optional[str], duration_minutes: Optional[int]) -> Dict[str, Any]:
+    """(use_resources, types, style, style_note) for this goal + length."""
+    g = (goal or "").lower()
+    mins = int(duration_minutes or 60)
+
+    # A 20-minute lesson never opens the deck — there isn't time to teach from it.
+    if mins <= 25:
+        return {"use_resources": False, "types": [], "style": "none",
+                "style_note": _POLICY_STYLES["none"]}
+
+    if g in ("learn_scratch", "teach_from_scratch"):
+        return {"use_resources": True, "types": ["powerpoint", "pdf"], "style": "slides",
+                "style_note": _POLICY_STYLES["slides"]}
+
+    if g in ("revision", "test_prep"):
+        return {"use_resources": True,
+                "types": ["quiz", "mark_scheme", "markscheme", "worksheet", "homework", "pdf"],
+                "style": "quiz_sheet", "style_note": _POLICY_STYLES["quiz_sheet"]}
+
+    # homework (Practice & Improve) / catch_up → worksheet-led
+    return {"use_resources": True, "types": ["worksheet", "homework", "pdf"],
+            "style": "worksheet", "style_note": _POLICY_STYLES["worksheet"]}
+
+
 def _parse_description(description: Optional[str]) -> Dict[str, Any]:
-    out: Dict[str, Any] = {"topics": [], "year_group": None}
+    out: Dict[str, Any] = {"topics": [], "year_group": None, "subtopic": None}
     if not description:
         return out
     m = re.search(r"Topics?:\s*([^\n]+)", description, re.IGNORECASE)
@@ -47,6 +90,9 @@ def _parse_description(description: Optional[str]) -> Dict[str, Any]:
     m = re.search(r"Year group:\s*([^\n]+)", description, re.IGNORECASE)
     if m:
         out["year_group"] = m.group(1).strip()
+    m = re.search(r"Subtopic:\s*([^\n]+)", description, re.IGNORECASE)
+    if m:
+        out["subtopic"] = m.group(1).strip()
     return out
 
 
@@ -64,10 +110,24 @@ async def _page_count(db: AsyncSession, resource: RHResource) -> int:
 
 
 async def build_playlist(db: AsyncSession, appointment) -> List[RHResource]:
-    """Ordered list of resources for the lesson, prioritised by the goal's types."""
+    """The ordered material for this lesson.
+
+    Three things decide it:
+      1. SCOPE — resources hang off SUBTOPICS in the hub (each sub-unit has its own PPT/worksheet).
+         If the student picked a subtopic we teach THAT subtopic's material; otherwise the whole
+         unit, in curriculum order.
+      2. POLICY — the goal × length matrix (see `lesson_resource_policy`): a 20-minute lesson uses
+         no resources at all, Learn-from-Scratch uses slides, Practice/Catch-up are worksheet-led,
+         Exam Revision leads with the quiz sheet.
+      3. ORDER — curriculum order (subtopic position, then type), NOT grouped by type. Grouping by
+         type made the tutor walk every PowerPoint of every subtopic before any worksheet.
+    """
+    from app.models.resource_hub import RHTopic, RHUnit
+
     info = _parse_description(getattr(appointment, "description", "") or "")
     topics = info["topics"]
     year_group = info["year_group"]
+    subtopic = info["subtopic"]
 
     goal = None
     try:
@@ -77,9 +137,14 @@ async def build_playlist(db: AsyncSession, appointment) -> List[RHResource]:
         )).scalar_one_or_none()
         if lp:
             goal = lp.goal
+            subtopic = (lp.subtopic or subtopic) or None
     except Exception:  # noqa: BLE001
         pass
-    types = goal_resource_types(goal)
+
+    policy = lesson_resource_policy(goal, getattr(appointment, "duration_minutes", None))
+    if not policy["use_resources"]:
+        return []                      # short lesson → teach directly, no deck
+    types = policy["types"]
 
     q = select(RHResource).where(
         RHResource.key_stage == appointment.key_stage,
@@ -91,15 +156,46 @@ async def build_playlist(db: AsyncSession, appointment) -> List[RHResource]:
         q = q.where(RHResource.unit_title.in_(topics))
     resources = list((await db.execute(q)).scalars().all())
 
+    # 1. Subtopic scope — the student asked to start at one sub-unit, so teach its material.
+    if subtopic:
+        scoped = [r for r in resources
+                  if (r.topic_title or "").strip().lower() == subtopic.strip().lower()]
+        if scoped:
+            resources = scoped
+
+    # 2. Policy types (fall back to whatever exists rather than showing nothing).
     preferred = [r for r in resources if (r.resource_type or "").lower() in types]
     chosen = preferred if preferred else resources
+    if not chosen:
+        return []
+
+    # 3. Curriculum order: subtopic position within the unit, then the policy's type priority.
+    positions: Dict[str, int] = {}
+    try:
+        unit_ids = {r.unit_hub_id for r in chosen if r.unit_hub_id is not None}
+        if unit_ids:
+            rows = (await db.execute(
+                select(RHTopic.title, RHTopic.position).where(RHTopic.unit_hub_id.in_(unit_ids))
+            )).all()
+            for title, pos in rows:
+                key = (title or "").strip().lower()
+                if key not in positions:
+                    positions[key] = pos or 0
+    except Exception:  # noqa: BLE001 — ordering is a nicety, never break the lesson
+        positions = {}
 
     def sort_key(r: RHResource):
         t = (r.resource_type or "").lower()
         pri = types.index(t) if t in types else len(types)
-        return (pri, r.unit_title or "", r.topic_title or "", r.hub_id)
+        pos = positions.get((r.topic_title or "").strip().lower(), 10_000)
+        return (r.unit_title or "", pos, pri, r.hub_id)
 
     chosen.sort(key=sort_key)
+    logger.info(
+        "PLAYLIST appt=%s goal=%s dur=%s style=%s subtopic=%r -> %d resources",
+        getattr(appointment, "id", None), goal,
+        getattr(appointment, "duration_minutes", None), policy["style"], subtopic, len(chosen),
+    )
     return chosen
 
 

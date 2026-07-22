@@ -985,9 +985,31 @@ ALWAYS use this content as your PRIMARY teaching source when it is present.
         "- 🧩 PUZZLES BETWEEN AND AFTER — THE SAME IN EVERY LESSON LENGTH (this does NOT change with the pace above): after EACH main concept you teach, set a PRACTICE PUZZLE before moving on to the next concept — slides and puzzles ALTERNATE, they are not two separate halves of the lesson. When the deck is finished (or there are no more concept slides), KEEP GOING with practice puzzles on what you taught — the lesson does not stop being interactive once the slides run out. Then the quiz near the end. Never teach the whole deck first and only then start practising."
     )
 
+    # WHICH material this goal + length uses, and HOW to teach it (the goal × length matrix in
+    # session_resource_service.lesson_resource_policy). This is what makes the four goals feel
+    # genuinely different: slides for Learn-from-Scratch, worksheet-led for Practice/Catch-up,
+    # quiz-sheet-led for Exam Revision, and nothing at all for a 20-minute lesson.
+    resource_style_note = ""
+    try:
+        from app.services.session_resource_service import lesson_resource_policy
+        _goal_for_policy = None
+        try:
+            from app.models.lesson_plan import LessonPlan as _LPP
+            _lpp = (await db.execute(
+                select(_LPP).where(_LPP.appointment_id == appointment_id)
+            )).scalar_one_or_none()
+            _goal_for_policy = _lpp.goal if _lpp else None
+        except Exception:
+            pass
+        _pol = lesson_resource_policy(_goal_for_policy, duration_minutes)
+        resource_style_note = f"- 📚 HOW TO USE THE MATERIAL: {_pol['style_note']}"
+    except Exception:
+        logger.warning("resource policy note failed for appt %s", appointment_id, exc_info=True)
+
     if has_slides:
         slides_block = f"""TEACHING SLIDES — TEACH FROM THE ON-SCREEN RESOURCES (IMPORTANT):
-- This lesson has real teaching slides shown on the student's screen. You MUST teach STRICTLY in slide order (slide 1, then 2, then 3…), one slide per concept, never out of order.
+- This lesson has real teaching material shown on the student's screen. You MUST teach STRICTLY in order (item 1, then 2, then 3…), one concept at a time, never out of order.
+{resource_style_note}
 - The CURRENT slide is ALWAYS shown to you each turn in an "ON-SCREEN SLIDE N of M" block, and the student is already looking at it. Teach THAT slide's content this turn — never teach ahead of the slide on screen.
 - FIRST TEACHING TURN: slide 1 is already on screen. Introduce the lesson using that slide's content. Do NOT call advance_lesson_slide on the first turn (that would skip slide 1). Do not narrate two slides in one turn.
 {pace_block}
