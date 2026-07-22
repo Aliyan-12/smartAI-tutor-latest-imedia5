@@ -11,6 +11,7 @@ import os
 import random
 import re as _re
 import time
+from difflib import SequenceMatcher
 from pathlib import Path
 from typing import Optional
 from uuid import uuid4
@@ -1983,6 +1984,18 @@ async def build_lesson_state_anchor(
                 ". These are drawn/rendered exactly by the server — USE ONE of them instead of "
                 "explanatory_puzzle (a generated image mislabels structures). Show it, then explain it."
             )
+        else:
+            # NO ready-made diagram fits this topic — but mermaid always can, because YOU write
+            # the spec. Without this line the model gets no visual nudge at all and just types
+            # prose at an empty panel (most of the Maths units land here).
+            lines.append(
+                "🖼️ NO ready-made diagram fits this topic — so build one with mermaid_diagram. "
+                "Almost any topic has a structure worth drawing: the STEPS OF THE METHOD as a "
+                "flowchart (e.g. \"flowchart TD\" of how to round to 3 significant figures, or how "
+                "to convert to standard form), a comparison of two cases, a classification tree, "
+                "a cycle, or a worked example broken into stages. Put that on screen FIRST, then "
+                "explain it in a few short sentences — do not type prose at an empty panel."
+            )
     except Exception:
         logger.warning("topic-visual anchor failed for appt %s", appt_id, exc_info=True)
 
@@ -2325,8 +2338,8 @@ async def _run_turn(send, chat_id, user_id, *, saved_user_text, ai_content,
         _pending_ended_appt = None
 
         def _dup(sentence: str) -> bool:
-            # The lead-in streams as text (before a tool), and Gemini sometimes RE-STATES
-            # it (or its verdict) after the tool → drop a repeat so it isn't shown twice.
+            # The lead-in streams as text (before a tool / before a safety-net recovery), and
+            # Gemini often RE-STATES it afterwards → drop the repeat so it isn't shown twice.
             # Threshold kept low so short-but-meaningful repeats ("You got it!", "Correct.")
             # are also caught, while true fillers ("OK", "Yes") slip through.
             norm = " ".join((sentence or "").split()).lower().strip(" .!?,:;")
@@ -2334,6 +2347,16 @@ async def _run_turn(send, chat_id, user_id, *, saved_user_text, ai_content,
                 return False
             if norm in _seen_norm:
                 return True
+            # NEAR-duplicate. The restatement is usually REWORDED slightly ("It's super useful"
+            # → "This is super useful", "To get started" → "To get us started"), which an exact
+            # match misses — that's how a whole greeting shipped twice in one reply. Compare
+            # longer sentences fuzzily; short ones stay exact so genuinely different short lines
+            # ("Well done!" vs "Try again!") are never collapsed.
+            if len(norm) >= 25:
+                for prev in _seen_norm:
+                    if len(prev) >= 25 and SequenceMatcher(None, norm, prev).ratio() >= 0.86:
+                        logger.info("DEDUP near-repeat dropped: %r", sentence[:70])
+                        return True
             _seen_norm.add(norm)
             return False
 
@@ -2345,7 +2368,14 @@ async def _run_turn(send, chat_id, user_id, *, saved_user_text, ai_content,
         # answer without typing). Used by the "don't force typing" safety net below.
         quick_replies_shown_this_turn = False
 
-        async def _consume(content_for_call, *, with_image: bool):
+        async def _consume(content_for_call, *, with_image: bool, suppress_text: bool = False):
+            # `suppress_text` runs a turn for its TOOL CALLS ONLY and throws its prose away.
+            # Used by the quick-replies safety net: the question was already asked and shown, so
+            # that recovery exists purely to attach the buttons — any sentence it writes is a
+            # restatement of what the student just read ("Which specific question are you stuck
+            # on?" → "…let's start with the question you're stuck on."). Those restatements are
+            # reworded enough to slip past sentence dedup, so the only reliable fix is not to
+            # emit them at all.
             nonlocal seq, generator_shown_this_turn, quick_replies_shown_this_turn, _pending_ended_appt
             async for raw in gemini_service.stream_response_async(
                 hist_slice, content_for_call, rag_chunks=rag_chunks,
@@ -2421,17 +2451,19 @@ async def _run_turn(send, chat_id, user_id, *, saved_user_text, ai_content,
                         logger.warning("Failed to forward TOOL_RESULT: %s", _tr_err)
                     continue
                 for sentence in segmenter.feed(token):
-                    if _dup(sentence):
+                    if suppress_text or _dup(sentence):
                         continue
                     await stream_segment(send, seq, sentence, tts=tts, turn_id=turn_id)
                     full.append(sentence)
                     seq += 1
 
             rem = segmenter.flush()
-            if rem and not _dup(rem):
+            if rem and not suppress_text and not _dup(rem):
                 await stream_segment(send, seq, rem, tts=tts, turn_id=turn_id)
                 full.append(rem)
                 seq += 1
+            if suppress_text:
+                segmenter.flush()   # drain, don't show
 
         await _consume(ai_content, with_image=True)
 
@@ -2481,8 +2513,11 @@ async def _run_turn(send, chat_id, user_id, *, saved_user_text, ai_content,
                         "order_numbers · place_value_counters · counting_bubbles · dot_array · "
                         "times_table_dash · fraction_canvas · column_addition · number_grid_sums)\n"
                         "  • reading a graph → graph_puzzle\n"
-                        "Then say ONE short sentence like 'It's on your screen now — have a go!'. "
-                        "Do NOT repeat your previous message and do NOT ask a different question."
+                        "⚠️ YOUR PREVIOUS MESSAGE HAS ALREADY BEEN SHOWN TO THE STUDENT and is on "
+                        "their chat right now. Do NOT greet them again, do NOT re-introduce the "
+                        "topic, do NOT restate or re-word ANY part of it — that would appear twice "
+                        "and read as a glitch. Reply with ONE short new sentence only, e.g. "
+                        "\"It's on your screen now — have a go!\". Nothing else."
                     )
                     try:
                         await _consume(_recovery, with_image=False)
@@ -2503,11 +2538,17 @@ async def _run_turn(send, chat_id, user_id, *, saved_user_text, ai_content,
                         "call quick_replies NOW with 2-4 tap options (PIPE-separated) that answer "
                         "YOUR question — the correct answer plus plausible wrong ones (e.g. "
                         "\"A clock | A ruler | A book\"), or for a yes/no / 'ready?' use "
-                        "\"Yes, let's go! | Not yet\". Do NOT repeat your message and do NOT ask "
-                        "a different question — just add the buttons."
+                        "\"Yes, let's go! | Not yet\".\n"
+                        "⚠️ YOUR PREVIOUS MESSAGE HAS ALREADY BEEN SHOWN TO THE STUDENT. Do NOT "
+                        "greet them again, do NOT re-introduce the topic, do NOT restate or "
+                        "re-word ANY part of it, and do NOT ask a different question — that would "
+                        "appear twice and read as a glitch. Just call the tool — say nothing else."
                     )
                     try:
-                        await _consume(_recovery, with_image=False)
+                        # TOOL-ONLY: the question is already on screen, so this recovery must add
+                        # buttons and nothing more. Its prose would only restate what the student
+                        # just read, reworded enough to slip past sentence dedup.
+                        await _consume(_recovery, with_image=False, suppress_text=True)
                     except Exception:
                         logger.warning("quick-reply recovery turn failed for appt %s", appt_id, exc_info=True)
 

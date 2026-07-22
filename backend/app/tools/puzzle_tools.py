@@ -150,8 +150,20 @@ def puzzle_tool_groups(ctx: ToolContext) -> dict:
         vivid description of the picture to draw; caption is one short line shown under it.
         Call SILENTLY.
         """
-        key = f"{ctx.subject}|{ctx.key_stage}|{ctx.topic_title or ''}"
-        url = await image_gen_service.generate_image(image_prompt, cache_key=key)
+        # PRE-SEEDED FIRST. A topic image generated once by `app.seed_explanatory_images` is
+        # instant and its labelling has been checked, whereas a live generation costs ~5-10 s
+        # mid-lesson and looks different every time. Scoped like the resources are: the chosen
+        # subtopic's image, else the unit's. Only fall through to live generation when neither
+        # has been seeded, so nothing regresses on an unseeded topic.
+        url = image_gen_service.topic_image_url(
+            ctx.subject, ctx.key_stage, ctx.unit_title, ctx.topic_title,
+        )
+        if url:
+            logger.info("EXPLANATORY served pre-seeded topic image (unit=%r subtopic=%r)",
+                        ctx.unit_title, ctx.topic_title)
+        else:
+            key = f"{ctx.subject}|{ctx.key_stage}|{ctx.topic_title or ''}"
+            url = await image_gen_service.generate_image(image_prompt, cache_key=key)
         if not url:
             return {"action": "show_puzzle", "error": "image_gen_failed",
                     "message": "The image couldn't be generated — keep teaching in words instead."}

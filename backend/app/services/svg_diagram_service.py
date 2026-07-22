@@ -302,6 +302,171 @@ _ARROW_DEF = ('<defs><marker id="svgarrow" markerWidth="9" markerHeight="9" refX
               'style="fill:inherit"/></marker></defs>')
 
 
+# ── Maths ────────────────────────────────────────────────────────────────────────
+# Maths is over half the curriculum here, so these cover its biggest recurring themes:
+# place value / significant figures / standard form, fractions, angles, area & perimeter,
+# and reading a bar chart.
+
+_PV_COLUMNS = [("Thousands", 1000), ("Hundreds", 100), ("Tens", 10), ("Ones", 1),
+               ("Tenths", 0.1), ("Hundredths", 0.01)]
+
+
+def _place_value(p: dict) -> str:
+    """Place-value columns with a number placed in them; optionally highlights the significant
+    figures (KS2/KS3 place value · decimals · significant figures · standard form)."""
+    raw = str(p.get("number", p.get("value", "3040"))).strip()
+    sig = _clampi(p.get("significant_figures", p.get("sig_figs")), 0, 6, 0)
+    digits = [c for c in raw if c.isdigit()]
+    digits = digits[:6] or ["0"]
+    # index of the first significant digit (first non-zero)
+    first_sig = next((i for i, d in enumerate(digits) if d != "0"), 0)
+
+    parts = [_title(f"Place value — {_esc(raw)}")]
+    n = len(digits)
+    total_w = n * 84
+    x0 = (W - total_w) / 2
+    cols = _PV_COLUMNS[:n] if n <= len(_PV_COLUMNS) else _PV_COLUMNS
+    for i, d in enumerate(digits):
+        x = x0 + i * 84
+        is_sig = sig > 0 and first_sig <= i < first_sig + sig
+        fill = "#dbeafe" if is_sig else "#f8fafc"
+        stroke = "#2563eb" if is_sig else LINE
+        parts.append(f'<rect x="{x:.0f}" y="120" width="76" height="96" rx="8" fill="{fill}" '
+                     f'stroke="{stroke}" stroke-width="{3 if is_sig else 1.6}"/>')
+        parts.append(_label(x + 38, 184, d, size=38, weight=800,
+                            colour="#1d4ed8" if is_sig else INK))
+        name = cols[i][0] if i < len(cols) else ""
+        parts.append(_label(x + 38, 238, name, size=11, colour=MUTED, weight=600))
+        if sig > 0 and first_sig <= i < first_sig + sig:
+            parts.append(_label(x + 38, 106, f"{i - first_sig + 1}{'st' if i == first_sig else ('nd' if i - first_sig == 1 else ('rd' if i - first_sig == 2 else 'th'))}",
+                                size=11, colour="#1d4ed8"))
+    if sig > 0:
+        parts.append(_label(W / 2, 300, f"The first {sig} significant figure(s) are highlighted — "
+                                        f"count from the FIRST non-zero digit.", size=13, colour="#1d4ed8"))
+        parts.append(_label(W / 2, 326, "Leading zeros are never significant.",
+                            size=12, colour=MUTED, weight=500))
+    else:
+        parts.append(_label(W / 2, 300, "Each column is 10× the one to its right.",
+                            size=13, colour=MUTED, weight=500))
+    return _wrap("".join(parts))
+
+
+def _fraction_compare(p: dict) -> str:
+    """Two fraction bars side by side (KS1-KS3 fractions · equivalence · comparing)."""
+    a_n = _clampi(p.get("a_numerator", p.get("n1")), 0, 12, 1)
+    a_d = _clampi(p.get("a_denominator", p.get("d1")), 1, 12, 2)
+    b_n = _clampi(p.get("b_numerator", p.get("n2")), 0, 12, 2)
+    b_d = _clampi(p.get("b_denominator", p.get("d2")), 1, 12, 4)
+    a_n, b_n = min(a_n, a_d), min(b_n, b_d)
+    parts = [_title("Comparing fractions")]
+    for row, (nn, dd, colour) in enumerate(((a_n, a_d, "#2563eb"), (b_n, b_d, "#16a34a"))):
+        y = 120 + row * 110
+        bw = 440
+        x0 = 100
+        parts.append(_label(x0 - 22, y + 40, f"{nn}/{dd}", size=20, anchor="end", colour=colour))
+        for i in range(dd):
+            w = bw / dd
+            fill = colour if i < nn else "#ffffff"
+            parts.append(f'<rect x="{x0 + i * w:.1f}" y="{y}" width="{w:.1f}" height="62" '
+                         f'fill="{fill}" stroke="{INK}" stroke-width="1.8"/>')
+    va = a_n / a_d if a_d else 0
+    vb = b_n / b_d if b_d else 0
+    verdict = ("They are EQUIVALENT — the same amount." if abs(va - vb) < 1e-9
+               else (f"{a_n}/{a_d} is bigger." if va > vb else f"{b_n}/{b_d} is bigger."))
+    parts.append(_label(W / 2, 356, verdict, size=14))
+    return _wrap("".join(parts))
+
+
+def _angle_types(p: dict) -> str:
+    """The four angle types drawn to scale (KS2/KS3 angles · geometry · shape)."""
+    import math
+    parts = [_title("Types of angle")]
+    kinds = [("Acute", 45, "#16a34a", "less than 90°"), ("Right", 90, "#2563eb", "exactly 90°"),
+             ("Obtuse", 130, "#f97316", "between 90° and 180°"), ("Reflex", 240, "#7c3aed", "more than 180°")]
+    for i, (name, deg, colour, note) in enumerate(kinds):
+        cx = 90 + i * 155
+        cy = 215
+        r = 54
+        a = math.radians(deg)
+        parts.append(f'<line x1="{cx}" y1="{cy}" x2="{cx + r}" y2="{cy}" stroke="{INK}" stroke-width="3"/>')
+        parts.append(f'<line x1="{cx}" y1="{cy}" x2="{cx + math.cos(-a) * r:.1f}" '
+                     f'y2="{cy + math.sin(-a) * r:.1f}" stroke="{INK}" stroke-width="3"/>')
+        large = 1 if deg > 180 else 0
+        ax, ay = cx + 26, cy
+        bx = cx + math.cos(-a) * 26
+        by = cy + math.sin(-a) * 26
+        parts.append(f'<path d="M{ax} {ay} A 26 26 0 {large} 0 {bx:.1f} {by:.1f}" fill="none" '
+                     f'stroke="{colour}" stroke-width="3"/>')
+        parts.append(_label(cx + 10, cy + 78, name, size=14, colour=colour))
+        parts.append(_label(cx + 10, cy + 96, note, size=10.5, colour=MUTED, weight=500))
+    return _wrap("".join(parts))
+
+
+def _area_perimeter(p: dict) -> str:
+    """A labelled rectangle showing area vs perimeter (KS2/KS3 area · perimeter)."""
+    w_ = _clampi(p.get("width", p.get("w")), 1, 20, 8)
+    h_ = _clampi(p.get("height", p.get("h")), 1, 20, 5)
+    parts = [_title("Area and perimeter")]
+    px, py = 170, 120
+    pw, ph = 300, 170
+    parts.append(f'<rect x="{px}" y="{py}" width="{pw}" height="{ph}" fill="#dbeafe" '
+                 f'stroke="#2563eb" stroke-width="3"/>')
+    for i in range(1, w_):
+        x = px + pw * i / w_
+        parts.append(f'<line x1="{x:.1f}" y1="{py}" x2="{x:.1f}" y2="{py + ph}" stroke="#93c5fd" stroke-width="1"/>')
+    for i in range(1, h_):
+        y = py + ph * i / h_
+        parts.append(f'<line x1="{px}" y1="{y:.1f}" x2="{px + pw}" y2="{y:.1f}" stroke="#93c5fd" stroke-width="1"/>')
+    parts.append(_label(px + pw / 2, py - 12, f"{w_} cm", size=14, colour="#1d4ed8"))
+    parts.append(_label(px - 34, py + ph / 2 + 5, f"{h_} cm", size=14, colour="#1d4ed8"))
+    parts.append(_label(px + pw / 2, py + ph / 2 + 6, f"Area = {w_} × {h_} = {w_ * h_} cm²",
+                        size=16, weight=800))
+    parts.append(_label(W / 2, 330, f"Perimeter = all the way round = {2 * (w_ + h_)} cm", size=14))
+    parts.append(_label(W / 2, 354, "Area fills the inside · perimeter goes around the edge",
+                        size=12, colour=MUTED, weight=500))
+    return _wrap("".join(parts))
+
+
+def _bar_chart(p: dict) -> str:
+    """A labelled bar chart to read off (KS1-KS3 statistics · charts · data)."""
+    raw = p.get("values") or [4, 7, 3, 6]
+    labels = p.get("labels") or ["A", "B", "C", "D"]
+    if isinstance(raw, str):
+        raw = [v.strip() for v in raw.split(",")]
+    if isinstance(labels, str):
+        labels = [v.strip() for v in labels.split(",")]
+    vals = []
+    for v in list(raw)[:6]:
+        try:
+            vals.append(max(0, min(20, int(v))))
+        except (TypeError, ValueError):
+            vals.append(0)
+    if not vals:
+        vals = [4, 7, 3, 6]
+    labels = (list(labels) + [f"#{i+1}" for i in range(len(vals))])[:len(vals)]
+    top = max(vals + [1])
+    parts = [_title("Reading a bar chart")]
+    bx, by, bw, bh = 110, 300, 400, 190
+    parts.append(f'<line x1="{bx}" y1="{by}" x2="{bx + bw}" y2="{by}" stroke="{INK}" stroke-width="2.5"/>')
+    parts.append(f'<line x1="{bx}" y1="{by}" x2="{bx}" y2="{by - bh}" stroke="{INK}" stroke-width="2.5"/>')
+    for g in range(0, top + 1, max(1, top // 5)):
+        y = by - (g / top) * bh
+        parts.append(f'<line x1="{bx - 5}" y1="{y:.1f}" x2="{bx + bw}" y2="{y:.1f}" stroke="#e2e8f0" stroke-width="1"/>')
+        parts.append(_label(bx - 12, y + 4, str(g), size=11, colour=MUTED, anchor="end", weight=500))
+    n = len(vals)
+    slot = bw / n
+    colours = ["#2563eb", "#16a34a", "#f97316", "#7c3aed", "#ec4899", "#0891b2"]
+    for i, v in enumerate(vals):
+        h = (v / top) * bh
+        x = bx + i * slot + slot * 0.18
+        w = slot * 0.64
+        parts.append(f'<rect x="{x:.1f}" y="{by - h:.1f}" width="{w:.1f}" height="{h:.1f}" '
+                     f'fill="{colours[i % len(colours)]}" rx="3"/>')
+        parts.append(_label(x + w / 2, by - h - 8, str(v), size=12))
+        parts.append(_label(x + w / 2, by + 18, str(labels[i])[:10], size=11, colour=MUTED, weight=600))
+    return _wrap("".join(parts))
+
+
 # ── Registry ─────────────────────────────────────────────────────────────────────
 # topics = keywords matched against the lesson's unit/subtopic title.
 
@@ -374,6 +539,43 @@ DIAGRAMS: Dict[str, Dict[str, Any]] = {
         "key_stages": ["KS2", "KS3", "KS4"], "subjects": ["physics", "science"],
         "topics": ["force", "thrust", "drag", "weight", "upthrust", "friction", "moving by force",
                    "hidden force", "gravity", "air resistance"],
+    },
+
+    # ── Maths (over half the curriculum — these cover its biggest recurring themes) ──
+    "place_value_columns": {
+        "build": _place_value, "title": "Place value columns",
+        "caption": "Each column is ten times the one to its right.",
+        "key_stages": ["KS1", "KS2", "KS3", "KS4"], "subjects": ["maths"],
+        "topics": ["significant figure", "standard form", "place value", "rounding", "round to",
+                   "decimal", "power", "indices", "estimat", "ordering numbers", "tens and ones",
+                   "digit"],
+    },
+    "fraction_compare": {
+        "build": _fraction_compare, "title": "Comparing fractions",
+        "caption": "Two fraction bars side by side.",
+        "key_stages": ["KS1", "KS2", "KS3"], "subjects": ["maths"],
+        "topics": ["fraction", "equivalent", "compare", "numerator", "denominator", "percent",
+                   "ratio", "proportion", "half", "quarter", "third"],
+    },
+    "angle_types": {
+        "build": _angle_types, "title": "Types of angle",
+        "caption": "Acute, right, obtuse and reflex angles.",
+        "key_stages": ["KS2", "KS3", "KS4"], "subjects": ["maths"],
+        "topics": ["angle", "geometry", "shape", "polygon", "triangle", "degrees", "protractor",
+                   "properties of shape", "acute", "obtuse", "reflex"],
+    },
+    "area_perimeter": {
+        "build": _area_perimeter, "title": "Area and perimeter",
+        "caption": "Area fills the inside; perimeter goes around the edge.",
+        "key_stages": ["KS2", "KS3", "KS4"], "subjects": ["maths"],
+        "topics": ["area", "perimeter", "volume", "surface", "rectangle", "square units", "cm2"],
+    },
+    "bar_chart": {
+        "build": _bar_chart, "title": "Reading a bar chart",
+        "caption": "Read each bar off against the scale.",
+        "key_stages": ["KS1", "KS2", "KS3", "KS4"], "subjects": ["maths", "science"],
+        "topics": ["chart", "graph", "statistic", "data", "average", "mean", "median", "mode",
+                   "bar", "pictogram", "tally", "frequency", "diagrams"],
     },
 }
 

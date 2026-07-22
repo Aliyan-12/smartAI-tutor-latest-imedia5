@@ -20,27 +20,47 @@ PRESETS = {
 }
 
 
+BATCH_SIZE = 128
+
+
 def main() -> None:
     from app.services import manim_service as ms
     if not ms.MANIM_AVAILABLE:
         log.warning("Manim isn't installed — nothing to seed. Rebuild the backend with manim first.")
         return
-    done = skipped = failed = 0
+
+    # Flatten to a work list first so it can be batched (and counted) the same way the
+    # explanatory-image seeder is.
+    work = []
     for kind, presets in PRESETS.items():
         if kind not in ms.TEMPLATES:
             continue
         for params in presets:
             spec = ms.spec_for(kind, params)
-            if not spec:
-                continue
-            key, clean, _title, _cap = spec
+            if spec:
+                work.append((kind, spec))
+
+    done = skipped = failed = 0
+    total = len(work)
+    n_batches = (total + BATCH_SIZE - 1) // BATCH_SIZE or 1
+    for b in range(n_batches):
+        chunk = work[b * BATCH_SIZE:(b + 1) * BATCH_SIZE]
+        b_done = b_skip = b_fail = 0
+        log.info("── batch %d/%d (%d items) ──", b + 1, n_batches, len(chunk))
+        for kind, (key, clean, _title, _cap) in chunk:
             if ms.cached_path(key):
-                skipped += 1
+                skipped += 1; b_skip += 1
                 continue
             log.info("rendering %s %s ...", kind, clean)
             ok = ms._render_sync(kind, clean, key)
-            done += int(ok)
-            failed += int(not ok)
+            done += int(ok); failed += int(not ok)
+            b_done += int(ok); b_fail += int(not ok)
+        # Each MP4 is moved into the cache as it finishes, so a batch boundary is simply a
+        # checkpoint — everything so far is durable and the run is safe to stop/resume here.
+        log.info("── batch %d/%d done: %d rendered, %d cached, %d failed "
+                 "(running total: %d rendered of %d) ──",
+                 b + 1, n_batches, b_done, b_skip, b_fail, done, total)
+
     log.info("Animation seeding complete: %d rendered, %d already cached, %d failed.",
              done, skipped, failed)
 
