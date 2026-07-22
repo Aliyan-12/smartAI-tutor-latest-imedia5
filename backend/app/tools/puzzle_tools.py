@@ -158,6 +158,71 @@ def puzzle_tool_groups(ctx: ToolContext) -> dict:
         return await _persist_and_return(puzzle_service.build_explanatory(url, caption, title))
 
     @tool
+    async def mermaid_diagram(mermaid: str, caption: str = "", title: str = "") -> dict:
+        """
+        Show a live MERMAID DIAGRAM on the student's screen to EXPLAIN a concept visually — a
+        flowchart, cycle, process, sequence, timeline, hierarchy, mind-map or state machine. This
+        is your GO-TO for anything with steps, arrows, stages or relationships: photosynthesis,
+        the water/rock/nitrogen cycle, a reaction pathway, digestion, a food chain, an algorithm,
+        circuit logic, classification trees, a maths method's steps. It renders instantly and
+        EXACTLY (no image generation, never misdrawn), so PREFER it over explanatory_puzzle for
+        structured concepts. Display-only — nothing to submit; teach FROM it.
+
+        `mermaid` is a valid Mermaid spec, e.g.
+          "flowchart LR\\n  A[Carbon dioxide] --> P((Photosynthesis))\\n  B[Water] --> P\\n  P --> G[Glucose]\\n  P --> O[Oxygen]"
+        Start it with a diagram type (flowchart TD/LR, sequenceDiagram, stateDiagram-v2, timeline,
+        mindmap, pie…). Keep it focused — 4-10 nodes reads best. Do NOT wrap it in ``` fences and
+        do NOT put your spoken explanation inside it.
+
+        LEAD WITH THE DIAGRAM, then explain it in a few plain sentences — not a wall of text.
+        Call SILENTLY.
+        """
+        spec = puzzle_service.clean_mermaid(mermaid)
+        if not puzzle_service.is_valid_mermaid(spec):
+            return {"action": "show_puzzle", "error": "bad_mermaid",
+                    "message": "That isn't a Mermaid diagram. Start with a type like 'flowchart TD', "
+                               "'sequenceDiagram', 'stateDiagram-v2', 'timeline', 'mindmap' or 'pie', "
+                               "with the nodes/edges below it and NO ``` fences."}
+        return await _persist_and_return(puzzle_service.build_mermaid(spec, caption, title))
+
+    @tool
+    async def show_animation(kind: str, params: Union[dict, str] = "", caption: str = "") -> dict:
+        """
+        Play a short pre-rendered MATHS/SCIENCE ANIMATION (MP4) for a HEAVIER, motion-based idea a
+        still picture can't show — a sine wave coming off a circle, adding vectors tip-to-tail,
+        jumping along a number line. Display-only; teach FROM it.
+
+        You pass ONLY `kind` + numeric params (never code):
+          • kind="sine_wave"        params {"cycles": 2}                  (KS4-KS5 maths/physics)
+          • kind="vector_addition"  params {"ax":3,"ay":1,"bx":1,"by":2}  (KS4-KS5 maths/physics)
+          • kind="number_line_add"  params {"start":3,"step":2,"jumps":4} (KS1-KS3 maths)
+
+        Animations render server-side and are cached: the FIRST time one is asked for it isn't
+        ready ('rendering'). When that happens DON'T wait — explain with a mermaid_diagram or in
+        words now, and it'll be instant next time. Use sparingly; mermaid_diagram is the everyday
+        visual. Call SILENTLY.
+        """
+        from app.services import manim_service
+        if not manim_service.MANIM_AVAILABLE:
+            return {"action": "show_puzzle", "error": "animations_disabled",
+                    "message": "Animations aren't enabled here — use mermaid_diagram (a live "
+                               "flowchart/graph) or diagram_math_puzzle instead."}
+        avail = manim_service.available_kinds(ctx.key_stage, ctx.subject)
+        k = (kind or "").strip().lower()
+        if k not in avail:
+            return {"action": "show_puzzle", "error": "bad_kind",
+                    "message": f"No animation {kind!r} for {ctx.subject} at {ctx.key_stage}. "
+                               f"Available: {', '.join(avail) or 'none'} — otherwise use mermaid_diagram."}
+        status, key, title, cap = manim_service.render_or_queue(k, _coerce_dict(params))
+        if status != "ready":
+            return {"action": "show_puzzle", "error": "rendering",
+                    "message": "That animation is being prepared and is NOT on screen yet — explain "
+                               "it with a mermaid_diagram or in words now; it'll be ready next time."}
+        url = f"/api/curriculum/animations/{key}.mp4"
+        return await _persist_and_return(
+            puzzle_service.build_animation(url, caption or cap, title))
+
+    @tool
     async def labelling_puzzle(items: str, prompt: str = "") -> dict:
         """
         Practice: show 3–4 SEPARATE generated pictures, one at a time, and the student
@@ -610,8 +675,8 @@ def puzzle_tool_groups(ctx: ToolContext) -> dict:
         return await _evaluate("graph")
 
     puzzles = [
-        explanatory_puzzle, labelling_puzzle, matching_puzzle, math_puzzle,
-        diagram_math_puzzle, graph_puzzle, clear_puzzle, quick_replies,
+        explanatory_puzzle, mermaid_diagram, show_animation, labelling_puzzle, matching_puzzle,
+        math_puzzle, diagram_math_puzzle, graph_puzzle, clear_puzzle, quick_replies,
         labelling_evaluator, matching_evaluator, math_evaluator, graph_evaluator,
     ]
     # Bind the hands-on tools only when this subject + key stage actually HAS activities (an

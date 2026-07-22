@@ -1223,6 +1223,10 @@ def _mark_punnett(solution: Any, answer: Any) -> Dict[str, Any]:
 
 # ── 15. force_arrows — resultant of two horizontal forces ────────────────────────
 
+def _mirror_dir(d: str) -> str:
+    return "left" if d == "right" else "right"
+
+
 def _force_dir(v: Any, default: str) -> str:
     s = str(v if v is not None else "").strip().lower()
     if s in ("left", "l", "-", "back", "backward", "backwards", "west", "<-", "←"):
@@ -1263,6 +1267,16 @@ def _build_force_arrows(p: dict, key_stage: Optional[str] = None) -> Tuple[dict,
         raise ParamError("Each force must be between 0 and 500 N.")
     if a == 0 and b == 0:
         raise ParamError("Both forces are 0 N — pass at least one non-zero force.")
+
+    # RANDOMISE WHICH WAY IT RESOLVES. Left to itself the model almost always builds the same
+    # shape (bigger force on the right → answer always "right"), so a student learns "tap Right"
+    # instead of reading the arrows. Mirroring the whole set-up half the time flips left↔right —
+    # same physics and same magnitudes, but the answer genuinely varies. Safe to do server-side:
+    # the SERVER derives the answer, and the final a/b/dirs go back in `clean`, so the picture,
+    # the marking and what the tutor sees all agree.
+    if not p.get("no_mirror") and _rng().random() < 0.5:
+        a, b = b, a
+        a_dir, b_dir = _mirror_dir(b_dir), _mirror_dir(a_dir)
 
     signed = (a if a_dir == "right" else -a) + (b if b_dir == "right" else -b)
     magnitude = abs(signed)

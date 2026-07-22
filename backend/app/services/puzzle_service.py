@@ -61,6 +61,59 @@ def build_explanatory(image_url: str, caption: str = "", title: str = "") -> Dic
     }
 
 
+# Mermaid diagram types the client can render. Used only to sanity-check that the model actually
+# sent a diagram (not prose), so a broken spec is bounced back to it rather than shown as an error.
+_MERMAID_STARTS = (
+    "graph", "flowchart", "sequencediagram", "classdiagram", "statediagram", "erdiagram",
+    "gantt", "pie", "mindmap", "timeline", "journey", "gitgraph", "quadrantchart",
+    "xychart", "sankey", "requirementdiagram", "block-beta", "c4context",
+)
+
+
+def clean_mermaid(spec: str) -> str:
+    """Strip ```mermaid fences / stray backticks the model wraps around the spec."""
+    s = (spec or "").strip()
+    if s.startswith("```"):
+        s = re.sub(r"^```[a-zA-Z]*\n?", "", s)
+        s = re.sub(r"\n?```$", "", s).strip()
+    return s
+
+
+def is_valid_mermaid(spec: str) -> bool:
+    first = (spec or "").lstrip().lower()
+    return any(first.startswith(k) for k in _MERMAID_STARTS)
+
+
+def build_mermaid(spec: str, caption: str = "", title: str = "") -> Dict[str, Any]:
+    """A MERMAID diagram rendered LIVE in the browser (flowchart / cycle / sequence / timeline /
+    state / mind-map …). Display-only — accurate and instant, no image generation, no GPU, and it
+    can't misrender counts the way a generated picture can. Same show_puzzle pipeline as the rest."""
+    return {
+        "render": "mermaid",
+        "puzzle_type": "explanatory",
+        "title": title or "Diagram",
+        "prompt": caption or "",
+        "params": {"mermaid": clean_mermaid(spec), "caption": caption or ""},
+        "solution": None,
+        "answer_type": "none",
+    }
+
+
+def build_animation(video_url: str, caption: str = "", title: str = "",
+                    poster_url: str = "") -> Dict[str, Any]:
+    """A pre-rendered Manim animation (MP4). Display-only. `video_url` is served from the animation
+    cache; `poster_url` is an optional first-frame image shown while it loads."""
+    return {
+        "render": "animation",
+        "puzzle_type": "explanatory",
+        "title": title or "Animation",
+        "prompt": caption or "",
+        "params": {"video": video_url, "poster": poster_url or "", "caption": caption or ""},
+        "solution": None,
+        "answer_type": "none",
+    }
+
+
 def build_labelling(items: List[Dict[str, str]], prompt: str = "") -> Dict[str, Any]:
     """items: [{label, image_url}] — student names each image in turn."""
     good = [it for it in items if it.get("image_url")]

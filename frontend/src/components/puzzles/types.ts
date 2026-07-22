@@ -7,6 +7,8 @@
 export type PuzzleRender =
   // ── Generated media: the AI writes the question and hands over the answer ──
   | "explanatory_image"   // display-only diagram that explains a concept
+  | "mermaid"             // display-only Mermaid diagram rendered live in the browser
+  | "animation"           // display-only pre-rendered Manim animation (MP4)
   | "labelling"           // name each generated image in turn
   | "matching"            // match generated images to their names
   | "math"                // a maths problem shown as LaTeX or an image
