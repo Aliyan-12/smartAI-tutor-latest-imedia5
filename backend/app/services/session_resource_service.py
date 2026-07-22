@@ -109,6 +109,84 @@ async def _page_count(db: AsyncSession, resource: RHResource) -> int:
     return (doc.page_count if doc else resource.page_count) or 1
 
 
+async def _studied_subtopics(db: AsyncSession, student_id: int, subject: str,
+                             unit_title: str, exclude_appointment_id) -> set:
+    """Subtopic titles this student has ALREADY had a lesson on for this unit.
+
+    Read from LessonPlan.subtopic of their earlier appointments — which is why the auto-picked
+    subtopic is written back to the plan below: without that, an auto-scoped lesson would leave
+    no trace and every future booking would restart at subtopic 1.
+    """
+    from app.models.lesson_plan import LessonPlan
+    from app.models.appointment import Appointment
+    try:
+        rows = (await db.execute(
+            select(LessonPlan.subtopic)
+            .join(Appointment, Appointment.id == LessonPlan.appointment_id)
+            .where(
+                LessonPlan.student_id == student_id,
+                LessonPlan.subtopic.isnot(None),
+                LessonPlan.unit_name == unit_title,
+                Appointment.subject == subject,
+                Appointment.id != exclude_appointment_id,
+            )
+        )).all()
+    except Exception:  # noqa: BLE001 — progression is a nicety, never break the lesson
+        logger.warning("studied-subtopic lookup failed", exc_info=True)
+        return set()
+    return {(r[0] or "").strip().lower() for r in rows if r[0]}
+
+
+async def _next_unstudied_subtopic(db: AsyncSession, appointment, unit_title: str):
+    """The first subtopic of this unit the student hasn't covered yet (curriculum order),
+    restricted to subtopics that actually HAVE resources. None when the unit has no subtopics —
+    the caller then keeps the whole-unit behaviour."""
+    from app.models.resource_hub import RHTopic, RHUnit
+
+    unit = (await db.execute(
+        select(RHUnit).where(RHUnit.title == unit_title)
+    )).scalars().first()
+    if not unit:
+        return None
+    subs = (await db.execute(
+        select(RHTopic).where(RHTopic.unit_hub_id == unit.hub_id)
+        .order_by(RHTopic.position, RHTopic.id)
+    )).scalars().all()
+    if not subs:
+        return None
+
+    # Only offer subtopics that have material to teach, in curriculum order, de-duplicated
+    # (the hub carries repeated titles under one unit).
+    with_res = {
+        (r[0] or "").strip().lower()
+        for r in (await db.execute(
+            select(RHResource.topic_title).where(
+                RHResource.unit_title == unit_title,
+                RHResource.topic_title.isnot(None),
+            )
+        )).all()
+    }
+    ordered, seen = [], set()
+    for t in subs:
+        key = (t.title or "").strip().lower()
+        if not key or key in seen or (with_res and key not in with_res):
+            continue
+        seen.add(key)
+        ordered.append(t.title)
+    if not ordered:
+        return None
+
+    studied = await _studied_subtopics(
+        db, appointment.student_id, appointment.subject, unit_title, appointment.id,
+    )
+    nxt = next((t for t in ordered if t.strip().lower() not in studied), None)
+    if nxt is None:
+        # Whole unit already covered — start the cycle again rather than showing nothing.
+        nxt = ordered[0]
+        logger.info("PROGRESSION unit %r fully studied — restarting at %r", unit_title, nxt)
+    return nxt
+
+
 async def build_playlist(db: AsyncSession, appointment) -> List[RHResource]:
     """The ordered material for this lesson.
 
@@ -130,6 +208,7 @@ async def build_playlist(db: AsyncSession, appointment) -> List[RHResource]:
     subtopic = info["subtopic"]
 
     goal = None
+    lp = None
     try:
         from app.models.lesson_plan import LessonPlan
         lp = (await db.execute(
@@ -140,6 +219,18 @@ async def build_playlist(db: AsyncSession, appointment) -> List[RHResource]:
             subtopic = (lp.subtopic or subtopic) or None
     except Exception:  # noqa: BLE001
         pass
+
+    # NO SUBTOPIC CHOSEN → teach ONE subtopic, starting at the first and advancing each time the
+    # student comes back to this unit. Previously this pulled the WHOLE unit's material into one
+    # lesson, so a 7-subtopic unit tried to cover everything at once. When a subtopic IS chosen we
+    # never touch it — that lesson uses exactly that sub-unit's slides.
+    auto_subtopic = None
+    if not subtopic and topics:
+        auto_subtopic = await _next_unstudied_subtopic(
+            db, appointment, topics[0],
+        )
+        if auto_subtopic:
+            subtopic = auto_subtopic
 
     policy = lesson_resource_policy(goal, getattr(appointment, "duration_minutes", None))
     if not policy["use_resources"]:
@@ -156,12 +247,26 @@ async def build_playlist(db: AsyncSession, appointment) -> List[RHResource]:
         q = q.where(RHResource.unit_title.in_(topics))
     resources = list((await db.execute(q)).scalars().all())
 
-    # 1. Subtopic scope — the student asked to start at one sub-unit, so teach its material.
+    # 1. Subtopic scope — one sub-unit's material, whether the student chose it or we advanced
+    #    to it automatically.
     if subtopic:
         scoped = [r for r in resources
                   if (r.topic_title or "").strip().lower() == subtopic.strip().lower()]
         if scoped:
             resources = scoped
+            # Record an AUTO-picked subtopic on the plan the first time we resolve it, so the
+            # student's NEXT booking on this unit starts at the following subtopic instead of
+            # repeating this one. Only ever fills a blank — an explicit choice is never touched.
+            if auto_subtopic and lp is not None and not lp.subtopic:
+                try:
+                    lp.subtopic = auto_subtopic
+                    if not lp.unit_name and topics:
+                        lp.unit_name = topics[0]
+                    await db.flush()
+                    logger.info("PROGRESSION appt=%s auto-selected subtopic %r for unit %r",
+                                appointment.id, auto_subtopic, topics[0] if topics else None)
+                except Exception:  # noqa: BLE001
+                    logger.warning("failed to persist auto subtopic", exc_info=True)
 
     # 2. Policy types (fall back to whatever exists rather than showing nothing).
     preferred = [r for r in resources if (r.resource_type or "").lower() in types]

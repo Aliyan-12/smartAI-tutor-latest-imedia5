@@ -503,6 +503,19 @@ async def build_session_system_prompt(
     # to it; when absent the lesson starts at the beginning of the topic.
     _sub_match = _re.search(r"Subtopic:\s*([^\n]+)", description, _re.IGNORECASE)
     subtopic_str = _sub_match.group(1).strip() if _sub_match else ""
+    if not subtopic_str:
+        # No explicit choice → the playlist auto-advances to the next unstudied subtopic and
+        # records it on the plan. Read it back so the tutor teaches THAT sub-unit rather than
+        # the whole unit, and so a repeat booking clearly moves on to the next one.
+        try:
+            from app.models.lesson_plan import LessonPlan as _LPS
+            _lps = (await db.execute(
+                select(_LPS).where(_LPS.appointment_id == appointment_id)
+            )).scalar_one_or_none()
+            if _lps and _lps.subtopic:
+                subtopic_str = _lps.subtopic.strip()
+        except Exception:
+            pass
     if subtopic_str:
         topics_str += (
             f"\n\n  🎯 START AT THIS SUBTOPIC: \"{subtopic_str}\". Begin the lesson HERE, not at "
@@ -1481,6 +1494,44 @@ def strip_display_markers(text: str) -> str:
     return _DISPLAY_MARKER.sub("", text)
 
 
+# Gemini sometimes writes its plan as ORDINARY TEXT tagged "<thinking …" instead of returning it
+# as a flagged thought part — and it never closes the tag, so chunk-level suppression can't bound
+# it. These catch it at the sentence level instead.
+_THINK_TAG = _re.compile(r"<\s*/?\s*think(ing)?\b[^>]*>?", _re.IGNORECASE)
+# Meta-reasoning talks ABOUT the student in the third person, or narrates the tool plan
+# ("Evaluate the puzzle: I need to call manipulative_evaluator"). Real teaching addresses the
+# student directly ("you"), so these shapes are safe to drop.
+_REASONING_SHAPE = _re.compile(
+    # Third-person reference to the learner. A tutor speaking TO a student says "you"; only the
+    # model's internal plan says "the student"/"the user", so this alone is a reliable tell.
+    r"\bthe (user|student)('s)?\b|"
+    r"\bI (need to|will|am going to|should) call\b|"
+    # Plan labels, allowing a few words before the colon ("Acknowledge submission:").
+    r"^(acknowledge|evaluate|provide feedback|transition|next step|plan|step \d+)\b[^:]{0,40}:|"
+    # A raw params/verdict dict is never something a student should read.
+    r"\{['\"](magnitude|direction|score|correct|answer|kind|params)['\"]|"
+    r"\b(manipulative_evaluator|math_evaluator|graph_evaluator|labelling_evaluator|"
+    r"matching_evaluator|show_puzzle|generate_quiz|advance_lesson_slide|quick_replies)\b",
+    _re.IGNORECASE,
+)
+
+
+def clean_reasoning_leak(sentence: str) -> str:
+    """Strip a leaked '<thinking …' plan out of a sentence bound for the chat bubble.
+
+    Returns "" when the whole sentence is internal reasoning. Everything BEFORE the tag is kept —
+    the model typically writes a real line then tacks its plan on ("OK, let's see how you did.
+    <thinking The user has submitted an answer…"), and that first half is the actual reply.
+    """
+    s = sentence or ""
+    m = _THINK_TAG.search(s)
+    if m:
+        s = s[:m.start()]           # keep the genuine text, drop the tag and everything after
+    if not s.strip():
+        return ""
+    return "" if _REASONING_SHAPE.search(s.strip()) else s
+
+
 class SentenceSegmenter:
     """Accumulates streamed text and emits complete segments (~sentences)."""
 
@@ -2451,17 +2502,25 @@ async def _run_turn(send, chat_id, user_id, *, saved_user_text, ai_content,
                         logger.warning("Failed to forward TOOL_RESULT: %s", _tr_err)
                     continue
                 for sentence in segmenter.feed(token):
-                    if suppress_text or _dup(sentence):
+                    if suppress_text:
+                        continue
+                    # Drop a leaked "<thinking …" plan BEFORE dedup: the leak glues the model's
+                    # reasoning onto a real line, which both exposes internals and defeats the
+                    # repeat check (the restated opening rode along inside a longer segment).
+                    sentence = clean_reasoning_leak(sentence)
+                    if not sentence.strip() or _dup(sentence):
                         continue
                     await stream_segment(send, seq, sentence, tts=tts, turn_id=turn_id)
                     full.append(sentence)
                     seq += 1
 
             rem = segmenter.flush()
-            if rem and not suppress_text and not _dup(rem):
-                await stream_segment(send, seq, rem, tts=tts, turn_id=turn_id)
-                full.append(rem)
-                seq += 1
+            if rem and not suppress_text:
+                rem = clean_reasoning_leak(rem)
+                if rem.strip() and not _dup(rem):
+                    await stream_segment(send, seq, rem, tts=tts, turn_id=turn_id)
+                    full.append(rem)
+                    seq += 1
             if suppress_text:
                 segmenter.flush()   # drain, don't show
 

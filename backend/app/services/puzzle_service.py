@@ -530,6 +530,64 @@ async def clear_puzzle_state(db: AsyncSession, appointment_id: int) -> None:
     await db.flush()
 
 
+# ── Visual-family rotation (puzzle · animation · svg · mermaid, evenly) ───────────
+# The tutor left to itself reaches for the same kind of visual all lesson. The target is an even
+# 25/25/25/25 split across the four families, so we record what has actually been shown and the
+# LESSON STATE anchor names the family that is furthest behind — the same running-quota approach
+# that made the manipulative/classic mix hold, rather than hoping a prompt line is obeyed.
+VISUAL_FAMILIES = ("puzzle", "animation", "svg", "mermaid")
+
+
+def visual_family_for(render: Optional[str]) -> str:
+    """Which family a shown visual belongs to, from its render key."""
+    r = (render or "").strip().lower()
+    if r == "mermaid":
+        return "mermaid"
+    if r == "animation":
+        return "animation"
+    if r == "svg_diagram":
+        return "svg"
+    return "puzzle"          # math/graph/labelling/matching/manipulatives/explanatory image
+
+
+def pick_visual_family(seq: Optional[List[str]], available: Optional[List[str]] = None) -> str:
+    """The family to use next: the least-used AVAILABLE one, never repeating the last if there is
+    an alternative. `available` limits it to what this topic can actually offer (a topic with no
+    matching animation must not be told to play one)."""
+    avail = [f for f in (available or VISUAL_FAMILIES) if f in VISUAL_FAMILIES]
+    if not avail:
+        return "puzzle"
+    hist = [s for s in (seq or []) if s in VISUAL_FAMILIES]
+    last = hist[-1] if hist else None
+    pool = [f for f in avail if f != last] or avail
+    fewest = min(hist.count(f) for f in pool)
+    return random.choice([f for f in pool if hist.count(f) == fewest])
+
+
+async def get_visual_seq(db: AsyncSession, appointment_id: int) -> List[str]:
+    plan = await _load_plan(db, appointment_id)
+    if plan is None or not plan.session_state:
+        return []
+    return list(plan.session_state.get("visual_seq") or [])
+
+
+async def bump_visual_family(db: AsyncSession, appointment_id: int, family: str) -> None:
+    """Record that a visual of this family reached the screen. Read-modify-write the whole
+    session_state dict (JSONB) — mutating a nested key in place isn't seen as dirty and would
+    silently not save, the same trap as puzzle_state/puzzle_mix."""
+    if family not in VISUAL_FAMILIES:
+        return
+    plan = await _load_plan(db, appointment_id)
+    if plan is None:
+        return
+    state = dict(plan.session_state) if plan.session_state else {}
+    seq = list(state.get("visual_seq") or [])
+    seq.append(family)
+    state["visual_seq"] = seq[-24:]
+    plan.session_state = state
+    await db.flush()
+
+
 async def get_puzzle_state(db: AsyncSession, appointment_id: int) -> Optional[dict]:
     plan = await _load_plan(db, appointment_id)
     if plan is None or not plan.session_state:

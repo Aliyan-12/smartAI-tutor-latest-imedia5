@@ -144,6 +144,13 @@ def _is_thinking_token(text: str) -> bool:
         s.startswith("```tool_code") or
         s.startswith("thought ") or
         s.startswith(" thought ") or
+        # Gemini sometimes narrates its plan as ordinary text tagged "<thinking …" rather than
+        # returning it as a flagged thought part. Catch it here when it opens a chunk; because it
+        # is never closed, a leak that starts mid-sentence is cleaned per-sentence downstream by
+        # session_agent_service.clean_reasoning_leak.
+        s.lower().startswith("<thinking") or
+        s.lower().startswith("<think>") or
+        s.lower().startswith("</think") or
         "print(default_api." in s or
         "default_api." in s
     ):
