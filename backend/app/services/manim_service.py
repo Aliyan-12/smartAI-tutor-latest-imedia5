@@ -295,10 +295,23 @@ _CPU_SECONDS = 60
 _MEM_BYTES = 3 * 1024 * 1024 * 1024      # 3 GB — cairo/ffmpeg need real headroom
 _FSIZE_BYTES = 256 * 1024 * 1024
 
+# Blocking `MathTex`/`Tex` in the validator is NOT enough to keep a scene LaTeX-free: several
+# ordinary Mobjects reach for LaTeX internally to typeset their number labels, and shell out to
+# the `latex` binary that isn't installed. Verified to fail without this: Axes(include_numbers),
+# Axes.add_coordinates(), NumberLine(include_numbers) and therefore ax.plot(...) with numbered
+# axes — i.e. exactly what a "straight-line graphs" lesson asks for. Repointing the two label
+# constructors at Pango `Text` makes every one of them render. (NumberPlane and bare shapes were
+# always fine, which is why this hid for so long.)
+_LATEX_FREE_PREAMBLE = """\
+DecimalNumber.set_default(mob_class=Text)
+NumberLine.set_default(label_constructor=Text)
+"""
+
 _RUNNER = '''\
 from manim import *
 from manim import tempconfig
 
+{preamble}
 class Gen(Scene):
     def construct(self):
 {body}
@@ -355,6 +368,7 @@ def _render_sync(code: str, key: str) -> bool:
     work = Path(tempfile.mkdtemp(prefix="scene-", dir=str(_WORK_DIR)))
     try:
         script = _RUNNER.format(
+            preamble=_LATEX_FREE_PREAMBLE,
             body=textwrap.indent(code, " " * 8),
             key=key,
             media=str(work / "media"),
@@ -392,7 +406,17 @@ def _render_sync(code: str, key: str) -> bool:
             **popen_kw,
         )
         if proc.returncode != 0:
-            err = (proc.stderr or b"").decode("utf-8", "replace").strip().splitlines()
+            raw = (proc.stderr or b"").decode("utf-8", "replace")
+            err = raw.strip().splitlines()
+            # Call this one out by name. It renders as a generic FileNotFoundError('latex') that
+            # says nothing about WHICH mobject wanted LaTeX, and because the render is in the
+            # background the model never learns the animation failed — it just never appears.
+            if "'latex'" in raw or "No such file or directory: 'latex'" in raw:
+                logger.error(
+                    "ANIMATION render key=%s needed the LaTeX binary — a mobject typeset its "
+                    "labels with MathTex despite the LaTeX-free preamble. Add its label "
+                    "constructor to _LATEX_FREE_PREAMBLE (see the note there).", key)
+                return False
             logger.warning("ANIMATION render failed key=%s rc=%s: %s",
                            key, proc.returncode, err[-1] if err else "(no stderr)")
             return False
