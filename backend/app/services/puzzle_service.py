@@ -609,6 +609,17 @@ VISUAL_PHASE_WEIGHTS: Dict[str, Dict[str, float]] = {
 _DEFAULT_PHASE = "teach"
 
 
+def _split_entry(entry: str) -> tuple:
+    """A visual_seq entry is "phase:family" ("teach:mermaid"). Entries written before the mix
+    became phase-aware are bare family names — they carry no phase, so they are counted toward
+    no phase's target (they still age out of the capped window)."""
+    s = str(entry or "")
+    if ":" in s:
+        ph, _, fam = s.partition(":")
+        return ph.strip().lower(), fam.strip()
+    return None, s.strip()
+
+
 def family_weights(phase: Optional[str], available: Optional[List[str]] = None) -> Dict[str, float]:
     """Per-family target shares for this phase, normalised over what's actually available.
 
@@ -644,16 +655,38 @@ def pick_visual_family(seq: Optional[List[str]], available: Optional[List[str]] 
     previous family whenever any alternative existed, which silently capped every weight at 50%
     and made a 70% practice phase impossible.
 
+    THE DEFICIT IS COUNTED WITHIN THE CURRENT PHASE ONLY. Counting it across the whole lesson
+    while applying a per-phase target is incoherent, and measurably broke the mix: a practice
+    phase (70% puzzle) drove the lesson-wide puzzle count so high that the following review phase
+    (40%) could never pick a puzzle again. Audited over 7,072 real lessons it produced
+    practice 97% / review 0% / recap 50% against targets of 70 / 40 / 30.
+
     `available` limits it to what can actually be offered; `phase` comes from the lesson state
     machine (plan_blocks step type). With no phase this falls back to the teaching mix.
     """
     avail = [f for f in (available or VISUAL_FAMILIES) if f in VISUAL_FAMILIES]
     if not avail:
         return "puzzle"
-    hist = [s for s in (seq or []) if s in VISUAL_FAMILIES]
+    entries = [_split_entry(s) for s in (seq or [])]
+    entries = [(p, f) for p, f in entries if f in VISUAL_FAMILIES]
     weights = family_weights(phase, avail)
-    last = hist[-1] if hist else None
+    ph = (phase or _DEFAULT_PHASE).strip().lower()
+    # Only this phase's history counts toward this phase's target. `last` deliberately ignores
+    # the phase, so we still avoid showing the same family twice in a row across a boundary.
+    hist = [f for p, f in entries if p == ph]
+    last = entries[-1][1] if entries else None
     turn = len(hist) + 1
+
+    # FIRST pick of a phase: sample from the target distribution instead of handing it to
+    # whichever family has the largest single weight. Deterministically awarding it cost a
+    # minority family a slot it could not win back in a short phase — audited at teach 33%
+    # against an achievable 22%. Every later pick is deterministic largest-deficit, so this
+    # only removes the head start; it does not add ongoing randomness.
+    if not hist:
+        pool = [f for f in avail if f != last] or avail
+        ws = [weights.get(f, 0.0) for f in pool]
+        if sum(ws) > 0:
+            return random.choices(pool, weights=ws, k=1)[0]
 
     best, best_score = [], None
     for f in avail:
@@ -679,10 +712,16 @@ async def get_visual_seq(db: AsyncSession, appointment_id: int) -> List[str]:
     return list(plan.session_state.get("visual_seq") or [])
 
 
-async def bump_visual_family(db: AsyncSession, appointment_id: int, family: str) -> None:
-    """Record that a visual of this family reached the screen. Read-modify-write the whole
-    session_state dict (JSONB) — mutating a nested key in place isn't seen as dirty and would
-    silently not save, the same trap as puzzle_state/puzzle_mix."""
+async def bump_visual_family(db: AsyncSession, appointment_id: int, family: str,
+                             phase: Optional[str] = None) -> None:
+    """Record that a visual of this family reached the screen, TAGGED WITH THE LESSON PHASE.
+
+    The phase has to be stored, not just used at pick time: each phase has its own target mix, so
+    the running count must be attributable to a phase or the targets cannot be held (see
+    pick_visual_family). Read-modify-write the whole session_state dict (JSONB) — mutating a
+    nested key in place isn't seen as dirty and would silently not save, the same trap as
+    puzzle_state/puzzle_mix.
+    """
     if family not in VISUAL_FAMILIES:
         return
     plan = await _load_plan(db, appointment_id)
@@ -690,8 +729,10 @@ async def bump_visual_family(db: AsyncSession, appointment_id: int, family: str)
         return
     state = dict(plan.session_state) if plan.session_state else {}
     seq = list(state.get("visual_seq") or [])
-    seq.append(family)
-    state["visual_seq"] = seq[-24:]
+    seq.append(f"{(phase or _DEFAULT_PHASE).strip().lower()}:{family}")
+    # Window is per-lesson but the counts are read per-PHASE, so it has to be long enough that a
+    # single phase still has a usable history inside it.
+    state["visual_seq"] = seq[-40:]
     plan.session_state = state
     await db.flush()
 

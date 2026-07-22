@@ -139,6 +139,7 @@ async def persist_and_return(ctx: ToolContext, full: dict) -> dict:
         await puzzle_service.bump_visual_family(
             ctx.db, ctx.appointment_id,
             puzzle_service.visual_family_for(full.get("render")),
+            phase=getattr(ctx, "phase", None),
         )
     except Exception as e:  # noqa: BLE001
         logger.warning("bump_visual_family failed: %s", e)

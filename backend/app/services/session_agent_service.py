@@ -2118,7 +2118,10 @@ async def build_lesson_state_anchor(
             "puzzle": "a hands-on PUZZLE (manipulative_puzzle / diagram_math_puzzle / math_puzzle "
                       "/ labelling_puzzle) — something the student DOES, not just looks at.",
         }[_fam]
-        _counts = " · ".join(f"{f}:{_vseq.count(f)}" for f in _pzv.VISUAL_FAMILIES)
+        # Count within THIS phase — the target beside it is per-phase, so lesson-wide counts
+        # would look like they contradict it.
+        _phase_hist = [f for p, f in (_pzv._split_entry(s) for s in _vseq) if p == _phase_type]
+        _counts = " · ".join(f"{f}:{_phase_hist.count(f)}" for f in _pzv.VISUAL_FAMILIES)
         _w = _pzv.family_weights(_phase_type, _available)
         _target = " · ".join(f"{f} {round(_w.get(f, 0) * 100)}%" for f in _available)
 
@@ -2144,14 +2147,24 @@ async def build_lesson_state_anchor(
                 "open with one and never make the student solve something you haven't taught yet."
             )
 
+        # This used to be a suggestion in brackets and was simply ignored: four real lessons
+        # produced puzzle 11 · svg 3 · mermaid 0 · animation 0. Two things make it stick — it is
+        # now an IMPERATIVE naming the exact call, and it says outright that advancing a slide
+        # does not count (the model treated the deck as "the visual for this turn" and so never
+        # drew anything of its own).
+        _slide_note = (
+            " Moving to a slide does NOT count as this turn's visual — the deck is the source "
+            "material, the diagram is how YOU explain it."
+            if has_slides else ""
+        )
         lines.append(
             f"{_phase_rule}\n"
-            f"🖼️ NEXT VISUAL = {_fam.upper()} → {_how}\n"
-            f"   (shown so far — {_counts}; target for this phase — {_target}. This line names "
-            "whichever family is furthest behind that target, so following it keeps the balance "
-            "right on its own. EVERY tool is still available — this is priority, not a "
-            "restriction. Put the visual on screen FIRST, then explain it in a few short "
-            "sentences — never type prose at an empty panel.)"
+            f"🖼️ DO NOW — SHOW A {_fam.upper()}: {_how}\n"
+            f"   Use it THIS reply, then teach from it in a few short sentences.{_slide_note} "
+            f"(shown so far — {_counts}; target for this phase — {_target}. This names whichever "
+            "family is furthest behind, so just following it holds the balance. Every tool stays "
+            "available — this is priority, not a restriction. If this family genuinely cannot "
+            "carry the point, use another one rather than showing nothing.)"
         )
     except Exception:
         logger.warning("topic-visual anchor failed for appt %s", appt_id, exc_info=True)
@@ -2494,6 +2507,11 @@ async def _run_turn(send, chat_id, user_id, *, saved_user_text, ai_content,
                     _, _, _phase_now = await _phase_and_next(db, appt_id, _elapsed, _dur)
                 except Exception:
                     _phase_now = "teach"
+                # Tools record each visual against the phase it was shown in, so the per-phase
+                # target mix can be held. ToolContext is built before the clock is read, so set
+                # it here rather than at construction.
+                if tool_context is not None:
+                    tool_context.phase = _phase_now
                 tool_groups_for_turn = select_tool_groups(
                     event_kind=event_kind, intent_text=saved_user_text,
                     has_slides=has_slides, end_allowed=_end_allowed, quiz_phase=_quiz_phase,

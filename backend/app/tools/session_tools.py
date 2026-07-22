@@ -34,6 +34,9 @@ class ToolContext:
     # actual topic being taught.
     unit_title: Optional[str] = None
     topic_title: Optional[str] = None
+    # Lesson phase this turn (recap|teach|practice|quiz|review), from the state machine. Every
+    # visual is recorded against it so each phase's target mix can be held independently.
+    phase: str = "teach"
     # Turn-scoped guard: at most ONE slide move (advance/retreat/show) per reply,
     # so the AI can't race several slides ahead in a single turn. Reset each turn
     # because a fresh ToolContext is built per turn in _run_turn.

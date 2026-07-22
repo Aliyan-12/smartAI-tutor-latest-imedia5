@@ -173,25 +173,27 @@ def visual_tool_groups(ctx: ToolContext) -> dict:
             FadeOut, Transform, Rotate, Indicate, LaggedStart, `.animate`, self.play, self.wait.
           • Keep it SHORT — one idea, 5-15 seconds.
 
-        Rendering takes a few seconds, so the FIRST time a given animation is asked for it comes
-        back 'rendering' and is NOT on screen: don't wait and don't pretend it's there — explain
-        with draw_svg or mermaid_diagram now, and the identical animation is instant next time.
-        Call SILENTLY.
+        The render takes a couple of seconds and this tool WAITS for it, so when it returns
+        successfully the animation IS on screen — go straight into explaining it. Call SILENTLY.
         """
         from app.services import manim_service as mms
         if not mms.MANIM_AVAILABLE:
             return {"action": "show_puzzle", "error": "animations_disabled",
                     "message": "Animations aren't enabled here — use draw_svg or mermaid_diagram instead."}
         try:
-            status, key = mms.render_code_or_queue(code)
+            status, key = await mms.render_code(code)
         except mms.SceneCodeError as e:
             return {"action": "show_puzzle", "error": "bad_code",
                     "message": f"{e}. Fix the animation code and resend, or use draw_svg instead."}
+        if status == "failed":
+            return {"action": "show_puzzle", "error": "render_failed",
+                    "message": "That scene couldn't be rendered, so nothing is on screen. Draw the "
+                               "idea with draw_svg or mermaid_diagram instead — don't refer to an "
+                               "animation."}
         if status != "ready":
             return {"action": "show_puzzle", "error": "rendering",
-                    "message": "That animation is being prepared and is NOT on screen yet — explain "
-                               "it with draw_svg or mermaid_diagram or in words now; the same "
-                               "animation will be instant next time."}
+                    "message": "That animation is taking unusually long and is NOT on screen — "
+                               "explain it with draw_svg or mermaid_diagram or in words now."}
         url = f"/api/curriculum/animations/{key}.mp4"
         return await _persist_and_return(
             puzzle_service.build_animation(url, caption, title or "Animation"))

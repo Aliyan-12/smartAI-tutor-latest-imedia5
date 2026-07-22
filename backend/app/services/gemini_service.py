@@ -478,6 +478,14 @@ async def stream_response_async(
 
     emitted_text = False        # have we yielded any visible answer text yet?
     preamble_text = ""          # last tool-round's text, kept ONLY as a fallback
+    # Tools that HARD-REFUSED this turn (returned error + suppressed, i.e. nothing changed on
+    # screen and retrying cannot succeed because the guard is turn-scoped). They are unbound for
+    # the rest of the loop. Without this the model re-called advance_lesson_slide after each
+    # refusal and burned every remaining round on it — observed in real lessons as
+    # "advance ok → refused → refused → refused → Tool loop completed after 4 round(s)", which
+    # left ZERO rounds to draw a diagram or animation, so mermaid/svg/manim were never reached.
+    # An instruction not to retry did not work; removing the tool does.
+    retired_tools: set = set()
 
     for _round in range(4):   # max 4 tool-call rounds
         full_response = None
@@ -557,7 +565,7 @@ async def stream_response_async(
         if round_text.strip():
             preamble_text = round_text
 
-        tool_map = {t.name: t for t in tools}
+        tool_map = {t.name: t for t in tools if t.name not in retired_tools}
         tool_messages = []
 
         for tc in tool_calls:
@@ -568,18 +576,26 @@ async def stream_response_async(
                 # BACK to it (instead of silently dropping the call) so it can recover and
                 # does NOT narrate the action as done — that silent drop is exactly what
                 # made it say "look at the puzzle" when no show_puzzle ran.
-                logger.warning(f"Tool '{tool_name}' not found in tool_map (not bound this turn)")
+                if tool_name in retired_tools:
+                    logger.info(f"Tool '{tool_name}' already refused this turn — call ignored")
+                    _msg = (
+                        f"'{tool_name}' ALREADY REFUSED this reply and has been switched off for "
+                        "the rest of it — calling it again will keep failing and nothing has "
+                        "changed on screen. Stop retrying it. Do the useful thing instead: teach "
+                        "the slide that IS on screen, and put a visual up with mermaid_diagram, "
+                        "draw_svg or animate_concept, then explain it."
+                    )
+                else:
+                    logger.warning(f"Tool '{tool_name}' not found in tool_map (not bound this turn)")
+                    _msg = (
+                        f"The tool '{tool_name}' is not available this turn, so nothing "
+                        "happened on the student's screen. Do NOT tell the student you did "
+                        "this (no 'look at the puzzle/slide'). Continue with a normal typed "
+                        "response, or call one of the tools that ARE available."
+                    )
                 tool_messages.append(
                     ToolMessage(
-                        content=_json.dumps({
-                            "error": "tool_unavailable",
-                            "message": (
-                                f"The tool '{tool_name}' is not available this turn, so nothing "
-                                "happened on the student's screen. Do NOT tell the student you did "
-                                "this (no 'look at the puzzle/slide'). Continue with a normal typed "
-                                "response, or call one of the tools that ARE available."
-                            ),
-                        }),
+                        content=_json.dumps({"error": "tool_unavailable", "message": _msg}),
                         tool_call_id=tc["id"],
                         name=tool_name,
                     )
@@ -594,6 +610,12 @@ async def stream_response_async(
                         name=tool_name,
                     )
                 )
+                # A hard refusal (nothing changed AND retrying can't succeed) retires the tool
+                # for the rest of this turn, so the model can't spend its remaining rounds on it.
+                if isinstance(result, dict) and result.get("suppressed") and result.get("error"):
+                    retired_tools.add(tool_name)
+                    logger.info("Tool retired for this turn after refusal: %s (%s)",
+                                tool_name, result.get("error"))
                 # Emit a structured tool-result token for the router to intercept
                 yield f"\n[TOOL_RESULT:{_json.dumps({'tool': tool_name, 'data': result})}]\n"
                 logger.info(f"Tool executed: {tool_name} → action={result.get('action', 'n/a')}")

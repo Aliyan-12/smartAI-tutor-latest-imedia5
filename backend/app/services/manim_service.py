@@ -439,13 +439,27 @@ def _render_sync(code: str, key: str) -> bool:
         shutil.rmtree(work, ignore_errors=True)
 
 
-_inflight: set = set()
+_inflight: dict = {}
+
+# How long a turn will wait for an animation before giving up on showing it THIS turn.
+# Measured renders are ~2-3s and a tool-using turn already takes 15-45s, so waiting is nearly
+# free and is the difference between animations appearing and never appearing at all.
+RENDER_WAIT_S = 30.0
 
 
-def render_code_or_queue(code: str) -> Tuple[str, Optional[str]]:
-    """(status, key). status: 'ready' (cache hit → show now) or 'rendering' (background).
+async def render_code(code: str, wait_s: float = RENDER_WAIT_S) -> Tuple[str, Optional[str]]:
+    """(status, key) — 'ready' | 'rendering' | 'failed' | 'unavailable'.
 
-    Never blocks the turn: a miss starts the render and returns immediately.
+    WAITS for the render rather than firing it into the background. The old fire-and-forget
+    version returned 'rendering' on a miss and promised the animation would be "instant next
+    time" — true in the TEMPLATE era, when a handful of fixed param sets meant the cache filled
+    up quickly. It is FALSE for model-authored code: the key is a hash of the exact source, the
+    model never writes byte-identical code twice (one space is a different key), so every request
+    missed, every animation came back 'rendering', and an animation could never reach the screen
+    in ANY lesson. Measured across four real lessons: animation 0, mermaid 0.
+
+    A render that overruns `wait_s` is left running and cached for a later identical request, so
+    a slow scene degrades to the old behaviour instead of blocking the lesson.
     Raises SceneCodeError if the code fails validation.
     """
     if not MANIM_AVAILABLE:
@@ -454,20 +468,29 @@ def render_code_or_queue(code: str) -> Tuple[str, Optional[str]]:
     key = code_key(clean)
     if cached_path(key):
         return "ready", key
-    if key not in _inflight:
-        _inflight.add(key)
 
-        async def _bg():
-            try:
-                await asyncio.to_thread(_render_sync, clean, key)
-            finally:
-                _inflight.discard(key)
+    task = _inflight.get(key)
+    if task is None or task.done():
+        task = asyncio.create_task(asyncio.to_thread(_render_sync, clean, key))
+        _inflight[key] = task
 
-        try:
-            asyncio.get_running_loop().create_task(_bg())
-        except RuntimeError:
-            _inflight.discard(key)
-    return "rendering", key
+        def _cleanup(_t, _k=key):
+            _inflight.pop(_k, None)
+
+        task.add_done_callback(_cleanup)
+
+    try:
+        # shield so a timeout here doesn't cancel the render itself — it keeps going and lands
+        # in the cache for the next attempt.
+        ok = await asyncio.wait_for(asyncio.shield(task), timeout=wait_s)
+    except asyncio.TimeoutError:
+        logger.info("ANIMATION still rendering after %.0fs key=%s — continuing in background",
+                    wait_s, key)
+        return "rendering", key
+    except Exception as e:  # noqa: BLE001
+        logger.warning("ANIMATION render task error key=%s: %s", key, e)
+        return "failed", key
+    return ("ready", key) if ok else ("failed", key)
 
 
 def available_kinds(key_stage: Optional[str] = None, subject: Optional[str] = None) -> List[str]:
