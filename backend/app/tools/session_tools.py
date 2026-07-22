@@ -40,6 +40,29 @@ class ToolContext:
     slide_moved: bool = False
 
 
+def _slide_move_refused(payload: dict, verb: str) -> dict:
+    """Turn a blocked second slide-move into an UNMISTAKABLE refusal.
+
+    It used to return a normal, success-shaped payload with a soft "note", so the model didn't
+    realise it had been refused and simply called the tool again — four `advance_lesson_slide`
+    calls in one turn, each costing a full model round-trip (~30s wasted) and each printing
+    "Moving to the next slide" in the thinking strip, so it looked like the deck had jumped four
+    slides when it had actually moved once.
+
+    `error` makes the refusal legible to the model, and `suppressed` tells the turn loop not to
+    emit a WS frame or a thinking step for a call that changed nothing on screen.
+    """
+    out = dict(payload or {})
+    out["error"] = "already_moved"
+    out["suppressed"] = True
+    out["message"] = (
+        f"REFUSED — you already moved a slide this turn, so nothing changed on screen. Teaching "
+        f"is ONE slide per reply. Do NOT call {verb}_lesson_slide again in this reply: write your "
+        f"explanation of the slide that is on screen NOW, and move again on your next reply."
+    )
+    return out
+
+
 async def _clear_puzzle_on_slide(ctx: "ToolContext") -> None:
     """Slides and puzzles are mutually-exclusive views of the Learn panel — moving to a
     slide takes any on-screen puzzle off, so drop it from authoritative puzzle_state too.
@@ -91,12 +114,10 @@ def session_tool_groups(ctx: ToolContext) -> dict:
         from app.services.session_resource_service import slide_action
         if ctx.slide_moved:
             # Teaching advances one slide per turn — don't race ahead.
-            payload = await slide_action(ctx.db, ctx.appointment_id, mode="show")
-            payload["note"] = (
-                "You've already moved a slide this turn. Teaching goes ONE slide per "
-                "reply — teach the current slide now and advance on the next turn."
+            return _slide_move_refused(
+                await slide_action(ctx.db, ctx.appointment_id, mode="show"),
+                "advance",
             )
-            return payload
         ctx.slide_moved = True
         result = await slide_action(ctx.db, ctx.appointment_id, mode="advance")
         await _clear_puzzle_on_slide(ctx)
@@ -112,12 +133,10 @@ def session_tool_groups(ctx: ToolContext) -> dict:
         """
         from app.services.session_resource_service import slide_action
         if ctx.slide_moved:
-            payload = await slide_action(ctx.db, ctx.appointment_id, mode="show")
-            payload["note"] = (
-                "You've already moved a slide this turn. Teach the current slide now; "
-                "move again on the next turn."
+            return _slide_move_refused(
+                await slide_action(ctx.db, ctx.appointment_id, mode="show"),
+                "retreat",
             )
-            return payload
         ctx.slide_moved = True
         result = await slide_action(ctx.db, ctx.appointment_id, mode="retreat")
         await _clear_puzzle_on_slide(ctx)

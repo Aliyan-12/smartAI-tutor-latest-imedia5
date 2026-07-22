@@ -7,6 +7,7 @@
 export type PuzzleRender =
   // ── Generated media: the AI writes the question and hands over the answer ──
   | "explanatory_image"   // display-only diagram that explains a concept
+  | "svg_diagram"         // display-only server-drawn SVG teaching diagram (cell, circuit, wave…)
   | "mermaid"             // display-only Mermaid diagram rendered live in the browser
   | "animation"           // display-only pre-rendered Manim animation (MP4)
   | "labelling"           // name each generated image in turn

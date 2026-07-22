@@ -45,15 +45,18 @@ def _clampi(v: Any, lo: int, hi: int, default: int) -> int:
 
 
 TEMPLATES: Dict[str, Dict[str, Any]] = {
+    # NOTE on key stages: gate these to where the topic is ACTUALLY taught in this curriculum,
+    # not to a textbook assumption. Trigonometry sits in KS3 Year 9 here (UNIT 11), and ~99% of
+    # the Hub's content is KS3 — gating sine_wave/vector_addition to KS4+ made them unreachable.
     "sine_wave": {
-        "scene": "SineWave", "key_stages": ["KS4", "KS5"],
+        "scene": "SineWave", "key_stages": ["KS3", "KS4", "KS5"],
         "subjects": ["maths", "physics", "science"],
         "params": lambda p: {"cycles": _clampi(p.get("cycles"), 1, 3, 2)},
         "title": "Sine wave from the circle",
         "caption": "As the point goes round the circle, its height traces a sine wave.",
     },
     "vector_addition": {
-        "scene": "VectorAddition", "key_stages": ["KS4", "KS5"],
+        "scene": "VectorAddition", "key_stages": ["KS3", "KS4", "KS5"],
         "subjects": ["maths", "physics", "science"],
         "params": lambda p: {
             "ax": _clampi(p.get("ax"), -4, 4, 3), "ay": _clampi(p.get("ay"), -4, 4, 1),

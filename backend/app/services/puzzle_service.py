@@ -99,6 +99,21 @@ def build_mermaid(spec: str, caption: str = "", title: str = "") -> Dict[str, An
     }
 
 
+def build_svg_diagram(svg: str, caption: str = "", title: str = "") -> Dict[str, Any]:
+    """A deterministic, server-drawn SVG teaching diagram (cell, circuit, wave, solar system…).
+    Display-only. Drawn by code from validated params, so the picture always matches what the
+    tutor says — unlike a generated image, which can misdraw structures and labels."""
+    return {
+        "render": "svg_diagram",
+        "puzzle_type": "explanatory",
+        "title": title or "Diagram",
+        "prompt": caption or "",
+        "params": {"svg": svg, "caption": caption or ""},
+        "solution": None,
+        "answer_type": "none",
+    }
+
+
 def build_animation(video_url: str, caption: str = "", title: str = "",
                     poster_url: str = "") -> Dict[str, Any]:
     """A pre-rendered Manim animation (MP4). Display-only. `video_url` is served from the animation

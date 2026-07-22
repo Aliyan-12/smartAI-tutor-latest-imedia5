@@ -1,6 +1,7 @@
 import { useState } from "react";
 import type { PuzzlePayload } from "./puzzles/types";
 import ExplanatoryImage from "./puzzles/ExplanatoryImage";
+import SvgDiagram from "./puzzles/SvgDiagram";
 import MermaidDiagram from "./puzzles/MermaidDiagram";
 import AnimationPlayer from "./puzzles/AnimationPlayer";
 import LabellingPuzzle from "./puzzles/LabellingPuzzle";
@@ -69,7 +70,8 @@ export default function PuzzlePlayer({
   // Display-only teaching visuals — nothing to submit, so no puzzle backdrop and no
   // "checking your answer" note. (Name kept: everywhere it already meant "display-only".)
   const isExplanatory = payload.render === "explanatory_image"
-    || payload.render === "mermaid" || payload.render === "animation";
+    || payload.render === "svg_diagram" || payload.render === "mermaid"
+    || payload.render === "animation";
   const isManipulative = MANIPULATIVE_RENDERS.has(payload.render);
   // A plain interactive puzzle (math / graph): short content that should sit CENTRED in the
   // panel, so the backdrop fills evenly top-and-bottom instead of leaving white space below.
@@ -89,6 +91,8 @@ export default function PuzzlePlayer({
     switch (payload.render) {
       case "explanatory_image":
         return <ExplanatoryImage payload={payload} />;
+      case "svg_diagram":
+        return <SvgDiagram payload={payload} />;
       case "mermaid":
         return <MermaidDiagram payload={payload} />;
       case "animation":

@@ -190,6 +190,16 @@ def _parse_unit_names(description: str) -> list[str]:
     return [u.strip() for u in raw.split(",") if u.strip()]
 
 
+# Topic words that make a manim ANIMATION worth showing (motion the still diagram can't carry).
+# Kept next to the topic helpers so the anchor can name the right animation for the lesson.
+_ANIM_TOPIC_WORDS = {
+    "sine_wave": ("trigonometr", "sine", "cosine", "wave", "circular", "unit circle", "graph of sin"),
+    "vector_addition": ("vector", "resultant", "displacement", "bearing", "force"),
+    "number_line_add": ("number line", "counting on", "counting back", "addition", "adding",
+                        "subtract", "skip count"),
+}
+
+
 def _lesson_topic_text(appointment) -> str:
     """All the words that describe what THIS lesson is about — title, subject, the parsed
     'Topics:' units AND the chosen 'Subtopic:' — as one string. Used to decide which manipulative
@@ -1647,12 +1657,23 @@ _QUESTION_INVITE_RE = _re.compile(
 )
 
 
+# The tutor CLAIMING something is already displayed ("the puzzle should be on your screen now").
+# This is the most damaging shape of the bug — the student is looking at a slide, or nothing, and
+# is told to work on a puzzle that was never generated (or was cleared when we moved to a slide).
+# It needs to trigger recovery on its own, because the message may carry no invite phrase at all.
+_CLAIMS_ON_SCREEN_RE = _re.compile(
+    r"\b(on|onto) your screen\b|\bon the screen\b|\bshould be (up|there|showing|visible)\b|"
+    r"\b(puzzle|activity|question|diagram) is (now )?(up|there|showing|ready)\b",
+    _re.IGNORECASE,
+)
+
+
 def _invites_practice(text: str) -> bool:
-    """True when the tutor's message asks the student to DO/answer something. Used ONLY to
-    catch the case where it invited practice but never put a puzzle on screen — a false
-    positive just triggers one extra (harmless) generator turn."""
+    """True when the tutor's message asks the student to DO/answer something, OR claims something
+    is already on their screen. Used ONLY to catch the case where it invited practice but never
+    put a puzzle up — a false positive just triggers one extra (harmless) generator turn."""
     t = (text or "").strip()
-    if _STRONG_INVITE_RE.search(t):
+    if _STRONG_INVITE_RE.search(t) or _CLAIMS_ON_SCREEN_RE.search(t):
         return True
     return "?" in t and bool(_QUESTION_INVITE_RE.search(t))
 
@@ -1931,6 +1952,39 @@ async def build_lesson_state_anchor(
         logger.warning("puzzle-mix anchor failed for appt %s", appt_id, exc_info=True)
 
     lines.append(_puzzle_state_lines(pstate, next_style, next_kind))
+
+    # WHICH READY-MADE VISUAL FITS THIS TOPIC. The model can't know which exact diagrams and
+    # animations exist, so it defaults to a generated image (which mislabels). Naming the ones
+    # that match THIS lesson's topic is what actually gets the accurate visual on screen.
+    try:
+        from app.services import svg_diagram_service as _sds
+        _subj_v = getattr(appointment, "subject", None) if appointment is not None else None
+        _ks_v = getattr(appointment, "key_stage", None) if appointment is not None else None
+        _topic_v = _lesson_topic_text(appointment)
+        _svgs = _sds.pick_for_topic(_topic_v, _ks_v, _subj_v)
+        _anims: list = []
+        try:
+            from app.services import manim_service as _mms
+            if _mms.MANIM_AVAILABLE:
+                _tl = (_topic_v or "").lower()
+                _anims = [k for k in _mms.available_kinds(_ks_v, _subj_v)
+                          if any(w in _tl for w in _ANIM_TOPIC_WORDS.get(k, ()))]
+        except Exception:
+            _anims = []
+        if _svgs or _anims:
+            bits = []
+            if _svgs:
+                bits.append(f"svg_diagram(kind=\"{_svgs[0]}\")"
+                            + (f" [also: {', '.join(_svgs[1:3])}]" if len(_svgs) > 1 else ""))
+            if _anims:
+                bits.append(f"show_animation(kind=\"{_anims[0]}\")")
+            lines.append(
+                "🖼️ READY-MADE VISUAL FOR THIS TOPIC: " + " · ".join(bits) +
+                ". These are drawn/rendered exactly by the server — USE ONE of them instead of "
+                "explanatory_puzzle (a generated image mislabels structures). Show it, then explain it."
+            )
+    except Exception:
+        logger.warning("topic-visual anchor failed for appt %s", appt_id, exc_info=True)
 
     # KS1/KS2 — the SOLID puzzle-only rule, at maximum recency. A 5-7 year old cannot read a
     # chat question and type an answer, yet the tutor kept doing exactly that ("what is 19 − 3?",
@@ -2330,11 +2384,20 @@ async def _run_turn(send, chat_id, user_id, *, saved_user_text, ai_content,
                         # Tap-to-answer buttons were attached (student won't have to type).
                         if _action == "quick_replies" and not _data.get("error"):
                             quick_replies_shown_this_turn = True
-                        await send({"type": "tool", "tool": _ws_tool, "data": _data})
-                        # Friendly one-line "thinking" step for the tool just run.
-                        _label = _THINKING_LABELS.get(_tool)
-                        if _label:
-                            await _emit_thinking(send, thinking_steps, _label)
+                        # A call the server REFUSED (e.g. a second slide move in one reply)
+                        # changed nothing on screen — don't push a WS frame and don't print a
+                        # thinking step for it. Printing one is what showed "Moving to the next
+                        # slide" four times when the deck had actually advanced once.
+                        _suppressed = bool(_data.get("suppressed"))
+                        if not _suppressed:
+                            await send({"type": "tool", "tool": _ws_tool, "data": _data})
+                            # Friendly one-line "thinking" step for the tool just run.
+                            _label = _THINKING_LABELS.get(_tool)
+                            if _label:
+                                await _emit_thinking(send, thinking_steps, _label)
+                        else:
+                            logger.info("TOOL refused (suppressed) tool=%s reason=%s",
+                                        _tool, _data.get("error"))
                         # Puzzle XP earned this turn → surface it in the thinking strip (NOT in
                         # the AI's reply text), so the student sees the reward without bragging.
                         _xp = _data.get("xp_awarded")
@@ -2404,15 +2467,22 @@ async def _run_turn(send, chat_id, user_id, *, saved_user_text, ai_content,
                     _recovery = (
                         "[SYSTEM — DO THIS NOW, silently] Your last message to the student was:\n"
                         f"\"{_said[:400]}\"\n"
-                        "But you did NOT put a puzzle on their screen, so they can see nothing to "
-                        "do (they will ask 'where is it?'). Call the correct puzzle generator "
-                        "RIGHT NOW to show it — pick the tool that matches what you just asked: a "
-                        "manipulative for the topic (compare_numbers · order_numbers · "
-                        "place_value_counters · counting_bubbles · dot_array · times_table_dash · "
-                        "fraction_canvas · column_addition · number_grid_sums), or math_puzzle "
-                        "for a plain sum/subtraction (it shows tappable answer buttons). Then say "
-                        "ONE short sentence like 'It's on your screen now — have a go!'. Do NOT "
-                        "repeat your previous message and do NOT ask a different question."
+                        "But there is NO puzzle on their screen, so they can see nothing to do "
+                        "(they will ask 'where is it?'). NOTE: moving to a slide CLEARS any puzzle, "
+                        "so if you showed one earlier it is gone — you must generate it AGAIN. "
+                        "Call the generator that matches what you just asked, RIGHT NOW:\n"
+                        "  • naming/identifying parts of pictures → labelling_puzzle\n"
+                        "  • pairing things up → matching_puzzle\n"
+                        "  • a labelled structure to study (cell, circuit, wave, forces) → svg_diagram\n"
+                        "  • a flow/cycle/relationship → mermaid_diagram\n"
+                        "  • an exact fraction / clock / ruler reading → diagram_math_puzzle\n"
+                        "  • a sum, equation or algebra → math_puzzle (tappable answer buttons)\n"
+                        "  • a hands-on maths activity → manipulative_puzzle (compare_numbers · "
+                        "order_numbers · place_value_counters · counting_bubbles · dot_array · "
+                        "times_table_dash · fraction_canvas · column_addition · number_grid_sums)\n"
+                        "  • reading a graph → graph_puzzle\n"
+                        "Then say ONE short sentence like 'It's on your screen now — have a go!'. "
+                        "Do NOT repeat your previous message and do NOT ask a different question."
                     )
                     try:
                         await _consume(_recovery, with_image=False)

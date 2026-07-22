@@ -186,6 +186,42 @@ def puzzle_tool_groups(ctx: ToolContext) -> dict:
         return await _persist_and_return(puzzle_service.build_mermaid(spec, caption, title))
 
     @tool
+    async def svg_diagram(kind: str, params: Union[dict, str] = "", caption: str = "") -> dict:
+        """
+        Show a READY-MADE, exactly-drawn TEACHING DIAGRAM for this topic — a labelled structure the
+        student can look at while you explain it. These are drawn by the server from real
+        curriculum diagrams, so they are ALWAYS correct (a generated picture mislabels and
+        miscounts). Display-only — teach FROM it.
+
+        PREFER THIS over explanatory_puzzle whenever one of these fits the topic:
+          Biology  : animal_cell · plant_cell · digestive_system · photosynthesis
+          Chemistry: particle_states (solid/liquid/gas) · atom_shells {"element":"Carbon","protons":6,"neutrons":6}
+          Physics  : series_circuit {"lamps":2} · parallel_circuit · wave_parts {"cycles":2}
+                     · solar_system · forces_on_object {"up":"Lift","down":"Weight","left":"Drag","right":"Thrust"}
+
+        The LESSON STATE block tells you which diagram matches the topic you're teaching right now —
+        use that one. If none fits, use mermaid_diagram (flows/cycles) instead. Call SILENTLY, then
+        explain the diagram in a few plain sentences.
+        """
+        from app.services import svg_diagram_service as sds
+        k = (kind or "").strip().lower()
+        avail = sds.available_kinds(ctx.key_stage, ctx.subject)
+        if k not in sds.DIAGRAMS:
+            return {"action": "show_puzzle", "error": "bad_kind",
+                    "message": f"Unknown diagram {kind!r}. For {ctx.subject} at {ctx.key_stage} "
+                               f"choose one of: {', '.join(avail) or 'none'} — or use mermaid_diagram."}
+        if k not in avail:
+            return {"action": "show_puzzle", "error": "not_for_key_stage",
+                    "message": f"{k!r} doesn't suit {ctx.subject} at {ctx.key_stage}. "
+                               f"Choose one of: {', '.join(avail) or 'none'} — or use mermaid_diagram."}
+        built = sds.build(k, _coerce_dict(params))
+        if not built:
+            return {"action": "show_puzzle", "error": "render_failed",
+                    "message": "That diagram couldn't be drawn — use mermaid_diagram instead."}
+        return await _persist_and_return(
+            puzzle_service.build_svg_diagram(built["svg"], caption or built["caption"], built["title"]))
+
+    @tool
     async def show_animation(kind: str, params: Union[dict, str] = "", caption: str = "") -> dict:
         """
         Play a short pre-rendered MATHS/SCIENCE ANIMATION (MP4) for a HEAVIER, motion-based idea a
@@ -675,7 +711,7 @@ def puzzle_tool_groups(ctx: ToolContext) -> dict:
         return await _evaluate("graph")
 
     puzzles = [
-        explanatory_puzzle, mermaid_diagram, show_animation, labelling_puzzle, matching_puzzle,
+        explanatory_puzzle, svg_diagram, mermaid_diagram, show_animation, labelling_puzzle, matching_puzzle,
         math_puzzle, diagram_math_puzzle, graph_puzzle, clear_puzzle, quick_replies,
         labelling_evaluator, matching_evaluator, math_evaluator, graph_evaluator,
     ]
