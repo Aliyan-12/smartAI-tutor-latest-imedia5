@@ -154,6 +154,11 @@ export default function SessionPage() {
   // silently celebrate nothing.
   const [verdict, setVerdict] = useState<{ correct: boolean }>({ correct: false });
   const [celebrateTick, setCelebrateTick] = useState(0);
+  // The Learn panel is a scroll container, and it KEEPS its scroll position when new content
+  // mounts. After a tall slide, a freshly-shown diagram rendered below the fold: the student saw
+  // an empty panel and told the tutor "it's gone" — the tutor then re-showed a diagram that had
+  // been there all along. Any new visual must start at the top of the panel.
+  const learnScrollRef = useRef<HTMLDivElement | null>(null);
 
   // Attachment / web-search opts for ChatInput
   const [webSearchEnabled, setWebSearchEnabled] = useState(false);
@@ -529,6 +534,19 @@ export default function SessionPage() {
     window.addEventListener("tool_result", handler);
     return () => window.removeEventListener("tool_result", handler);
   }, []);
+
+  // Whatever the tutor just put on the Learn panel must be visible WITHOUT scrolling. Keyed on
+  // the identity of the thing on screen (puzzle instance, or resource + slide) so it fires for a
+  // new diagram, a new puzzle AND a slide change — but not on every unrelated re-render.
+  useEffect(() => {
+    learnScrollRef.current?.scrollTo({ top: 0, behavior: "auto" });
+  }, [
+    currentPuzzle?.instance_id,
+    currentPuzzle?.render,
+    currentResource?.resourceHubId,
+    currentResource?.slideIndex,
+    learnTab,
+  ]);
 
   // Session event bus → forward any component's emitted event to the WS (→ the AI).
   // Bound once (via sendEventRef) so it survives re-renders.
@@ -1166,7 +1184,7 @@ export default function SessionPage() {
         ))}
       </div>
 
-      <div style={styles.learnContent}>
+      <div ref={learnScrollRef} style={styles.learnContent}>
         {isPaused ? (
           <div style={styles.pausedOverlay}>
             <span style={{ fontSize: 32 }}>⏸</span>

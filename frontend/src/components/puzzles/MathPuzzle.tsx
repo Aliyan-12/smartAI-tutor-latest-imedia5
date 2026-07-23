@@ -35,6 +35,9 @@ export default function MathPuzzle({ payload, onSubmit, disabled }: InteractiveP
         initial={{ scale: 0.9, opacity: 0, y: 8 }}
         animate={{ scale: 1, opacity: 1, y: 0 }}
         transition={{ type: "spring", stiffness: 300, damping: 22 }}
+        // Full width so the card can use the panel; without this the flex item shrink-wraps
+        // and forces the formula to wrap even with a wide panel available.
+        style={{ width: "100%", display: "flex", justifyContent: "center" }}
       >
         {mode === "image" && image ? (
           <img
@@ -45,16 +48,60 @@ export default function MathPuzzle({ payload, onSubmit, disabled }: InteractiveP
             style={{ width: "100%", maxWidth: 620, maxHeight: "min(46vh, 420px)", objectFit: "contain", borderRadius: 16, background: "#fff", padding: 10 }}
           />
         ) : latex ? (
-          <div style={{
-            // The equation IS the question — scale it with the panel instead of a fixed 30px.
-            fontSize: "clamp(30px, 4.4vw, 52px)", padding: "26px 38px", borderRadius: 18, color: "#0f172a",
-            background: "rgba(255,255,255,0.96)",
-            boxShadow: "0 10px 30px rgba(0,0,0,0.35)",
-            border: "1px solid rgba(255,255,255,0.6)",
-            maxWidth: "100%", overflowX: "auto",
-          }}>
-            <BlockMath math={latex} />
-          </div>
+          <>
+            {/* ONE LINE. KaTeX's display wrapper is a block that wraps at spaces, so a formula
+                like "A = πr², r = 6 cm" broke into four stacked lines inside a narrow card and
+                read as four separate facts. nowrap keeps it as the single statement it is; the
+                card stretches to the panel instead of shrink-wrapping the text. */}
+            <style>{`
+              .pz-math-line .katex-display { margin: 0 !important; }
+              .pz-math-line .katex-display > .katex { white-space: nowrap !important; }
+              .pz-math-line .katex { white-space: nowrap !important; }
+            `}</style>
+            <div
+              className="pz-math-line"
+              style={{
+                // The equation IS the question — scale it with the panel, but keep it on one
+                // line: the ceiling is lower than before because a wrapped formula is worse
+                // than a slightly smaller one.
+                fontSize: "clamp(24px, 3.4vw, 42px)", padding: "24px 34px", borderRadius: 18,
+                color: "#0f172a",
+                background: "rgba(255,255,255,0.96)",
+                boxShadow: "0 10px 30px rgba(0,0,0,0.35)",
+                border: "1px solid rgba(255,255,255,0.6)",
+                width: "100%", maxWidth: 900,
+                overflowX: "auto", textAlign: "center",
+              }}
+            >
+              {/* LAST LINE OF DEFENCE. The server repairs the common breakages, but if KaTeX
+                  still can't parse something it renders a red error string at the student —
+                  worse than plain text. Degrade to the readable form instead: strip the TeX
+                  scaffolding and show the maths as words/symbols, so the question is always
+                  answerable even when the typesetting fails. */}
+              <BlockMath
+                math={latex}
+                renderError={() => (
+                  <span style={{ fontFamily: "inherit" }}>
+                    {latex
+                      .replace(/\\[,;!:]/g, " ")
+                      .replace(/\\(?:left|right|displaystyle)\b/g, "")
+                      .replace(/\\frac\s*\{([^{}]*)\}\s*\{([^{}]*)\}/g, "$1/$2")
+                      .replace(/\\text\s*\{([^{}]*)\}/g, "$1")
+                      .replace(/\\times/g, "×").replace(/\\div/g, "÷")
+                      .replace(/\\pi/g, "π").replace(/\\theta/g, "θ")
+                      .replace(/\\geq/g, "≥").replace(/\\leq/g, "≤").replace(/\\neq/g, "≠")
+                      .replace(/\\approx/g, "≈").replace(/\\pm/g, "±")
+                      .replace(/\\rightarrow/g, "→").replace(/\\%/g, "%")
+                      .replace(/\^2/g, "²").replace(/\^3/g, "³")
+                      .replace(/\\[a-zA-Z]+/g, "")
+                      .replace(/[{}]/g, "")
+                      .replace(/\s{2,}/g, " ")
+                      .trim()}
+                  </span>
+                )}
+              />
+            </div>
+          </>
         ) : null}
       </motion.div>
 

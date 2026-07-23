@@ -239,8 +239,31 @@ def _auto_numeric_distractors(ans: str) -> List[str]:
 
 # LaTeX commands the model routinely emits with the leading backslash lost — the classic
 # failure is "\frac34" arriving as "frac34", which KaTeX then renders as the literal word.
-_LATEX_CMDS = ("dfrac", "tfrac", "frac", "sqrt", "times", "div", "cdot", "pm", "mp",
-               "leq", "geq", "neq", "approx", "ldots", "cdots", "angle", "overline", "text")
+# Commands whose backslash the model drops. Each becomes `\cmd` only when it stands alone as a
+# word, so "fractions" and "since" are never touched. Ordered longest-first at use so `dfrac`
+# isn't half-matched by `frac`.
+_LATEX_CMDS = (
+    # fractions / roots / powers
+    "dfrac", "tfrac", "cfrac", "frac", "sqrt", "binom", "overline", "underline",
+    # operators
+    "times", "div", "cdot", "pm", "mp", "ast", "star", "bullet",
+    # relations
+    "leq", "geq", "neq", "approx", "equiv", "propto", "sim", "cong", "perp", "parallel",
+    "le", "ge", "ne", "ll", "gg",
+    # arrows
+    "rightarrow", "leftarrow", "Rightarrow", "Leftarrow", "leftrightarrow", "mapsto",
+    # big operators / calculus
+    "sum", "prod", "int", "lim", "infty", "partial", "nabla",
+    # geometry / symbols
+    "angle", "circ", "degree", "triangle", "square", "therefore", "because",
+    # greek (lower case) — the ones that actually appear in KS1-KS5 maths & science
+    "alpha", "beta", "gamma", "delta", "theta", "lambda", "mu", "sigma", "rho", "phi",
+    "omega", "pi",
+    # greek (capitalised)
+    "Delta", "Sigma", "Omega", "Theta", "Lambda", "Phi",
+    # accents / formatting (these take an argument, so only help when braces are present)
+    "vec", "hat", "bar", "tilde", "mathrm", "mathbf", "boxed", "text",
+)
 
 # Things that must never reach KaTeX. A student saw a maths card render as
 # "textFindthelengthofsidex … dth = 200px]https://storage.googleapis.com/…" because the model
@@ -264,10 +287,51 @@ _LATEX_WORDS = (
     (r"(?<![\\a-zA-Z])minus(?![a-zA-Z])", "-"),
     (r"(?<![\\a-zA-Z])equals(?![a-zA-Z])", "="),
     (r"(?<![\\a-zA-Z])degrees(?![a-zA-Z])", r"^\\circ"),
+    # π is the single most common symbol in this curriculum and the model keeps dropping the
+    # backslash. Bare "pi" renders as two italic letters — a student saw "A = pir²" for the area
+    # of a circle. Handle it standalone AND glued to the next variable ("pir^2" → "\pi r^2").
+    (r"(?<![\\a-zA-Z])pi(?![a-zA-Z])", r"\\pi "),
+    (r"(?<![\\a-zA-Z])pi(?=[a-z](?![a-zA-Z]))", r"\\pi "),
+    # `\text` without a {…} argument is a KaTeX error; the model writes "6 \text cm". Drop the
+    # command and keep the unit — "6 cm" reads fine, "textcm" does not.
+    (r"\\text(?!\s*\{)", " "),
+    # A BARE % IS A COMMENT IN (KA)TEX — it silently swallows the rest of the line, so
+    # "20% of 50" rendered as just "20". Escape it.
+    (r"(?<!\\)%", r"\\%"),
+    # Powers written in words: "r squared" → r^2.
+    (r"\s+squared(?![a-zA-Z])", "^2"),
+    (r"\s+cubed(?![a-zA-Z])", "^3"),
+    # Word relations the model reaches for mid-equation.
+    (r"(?<![\\a-zA-Z])is\s+approximately(?![a-zA-Z])", r"\\approx"),
+    (r"(?<![\\a-zA-Z])approximately(?![a-zA-Z])", r"\\approx"),
+    (r"(?<![\\a-zA-Z])not\s+equal\s+to(?![a-zA-Z])", r"\\neq"),
+    (r"(?<![\\a-zA-Z])greater\s+than\s+or\s+equal\s+to(?![a-zA-Z])", r"\\geq"),
+    (r"(?<![\\a-zA-Z])less\s+than\s+or\s+equal\s+to(?![a-zA-Z])", r"\\leq"),
+    (r"(?<![\\a-zA-Z])greater\s+than(?![a-zA-Z])", ">"),
+    (r"(?<![\\a-zA-Z])less\s+than(?![a-zA-Z])", "<"),
+    (r"(?<![\\a-zA-Z])plus\s+or\s+minus(?![a-zA-Z])", r"\\pm"),
+    (r"(?<![\\a-zA-Z])infinity(?![a-zA-Z])", r"\\infty"),
+    # ASCII arrows the model uses for "gives / leads to".
+    (r"-+>", r"\\rightarrow"),
+    (r"=>", r"\\Rightarrow"),
+    # "cm2" / "mm3" are squared/cubed units, not a unit times a number. Only the unambiguous
+    # multi-letter units — a bare "m2" could be a variable.
+    (r"(?<![a-zA-Z\\])(cm|mm|km|kg)([23])(?![0-9a-zA-Z])", r"\1^\2"),
+)
+
+# Multi-letter UNITS. In maths mode KaTeX sets them in italics letter-by-letter, so "6 cm" reads
+# as c×m. Only multi-letter units are wrapped — a bare "m" or "s" is far more likely to be a
+# variable than metres or seconds, and guessing wrong is worse than leaving it.
+_UNITS = ("cm", "mm", "km", "kg", "mg", "ml", "km/h", "m/s", "cm²", "m²", "cm³", "m³",
+          "sec", "min", "hr", "kJ", "mol", "Hz", "N", "Pa")
+_UNIT_RE = re.compile(
+    r"(?<=[\d\}])\s*(?<!\\)(" + "|".join(re.escape(u) for u in sorted(_UNITS, key=len, reverse=True))
+    + r")(?![a-zA-Z])"
 )
 # Function names must be backslashed or KaTeX italicises them letter by letter.
-_LATEX_FUNCS = ("sin", "cos", "tan", "log", "ln", "exp", "min", "max", "det", "arcsin",
-                "arccos", "arctan", "sinh", "cosh", "tanh", "sec", "csc", "cot")
+_LATEX_FUNCS = ("arcsin", "arccos", "arctan", "sinh", "cosh", "tanh",
+                "sin", "cos", "tan", "log", "ln", "exp", "det", "gcd", "lcm",
+                "sec", "csc", "cot", "deg", "dim", "hom", "ker", "arg")
 
 
 def normalise_math_latex(s: str) -> str:
@@ -284,6 +348,8 @@ def normalise_math_latex(s: str) -> str:
         t = re.sub(pat, rep, t, flags=re.IGNORECASE)
     for fn in sorted(_LATEX_FUNCS, key=len, reverse=True):
         t = re.sub(rf"(?<![\\a-zA-Z]){fn}(?![a-zA-Z])", "\\\\" + fn, t)
+    # Units after a number read as multiplied variables in maths mode — set them upright.
+    t = _UNIT_RE.sub(lambda m: r"\,\text{" + m.group(1) + "}", t)
     return re.sub(r"\s{2,}", " ", t).strip()
 
 
