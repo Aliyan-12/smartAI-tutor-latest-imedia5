@@ -22,6 +22,13 @@ function ensureInit() {
     securityLevel: "strict",   // the spec is model-authored — no click handlers, no scripts
     flowchart: { htmlLabels: true, curve: "basis" },
     fontFamily: "inherit",
+    // REQUIRED, not cosmetic. mermaid renders into a temp container attached to <body>; when a
+    // spec fails to parse it draws its built-in "error" diagram — a cartoon BOMB with "Syntax
+    // error in text" — and skips removeTempElements(), so the bomb is orphaned in the DOM
+    // OUTSIDE our React tree and survives navigation. A student saw two bombs stuck to the
+    // bottom-left of the lesson page. With this on, mermaid cleans up and rethrows instead, so
+    // the `.catch()` below is the only failure path and our own fallback card is what shows.
+    suppressErrorRendering: true,
   });
   _initialised = true;
 }
@@ -66,13 +73,21 @@ export default function MermaidDiagram({ payload }: { payload: PuzzlePayload }) 
           style={{ width: "100%", maxWidth: "100%", maxHeight: "100%", display: "flex", justifyContent: "center" }}
         />
       ) : failed ? (
-        <pre style={{
-          maxWidth: "100%", overflow: "auto", fontSize: 13, lineHeight: 1.5, color: "#334155",
-          background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: 10,
-          padding: "12px 16px", whiteSpace: "pre-wrap", fontFamily: "ui-monospace, monospace",
+        // A spec the browser can't draw. Showing the raw source dumped a wall of `graph TD ...`
+        // code onto a child's screen while the tutor said "I've put a flowchart up for you", so
+        // the fallback now reads as a missing picture, not as broken code. (The server repairs
+        // the common syntax breaks in `_quote_mermaid_labels` before it ever gets here.)
+        <div style={{
+          maxWidth: 420, textAlign: "center", color: "#64748b", fontSize: 14,
+          background: "#f8fafc", border: "1px dashed #cbd5e1", borderRadius: 12,
+          padding: "20px 24px", lineHeight: 1.5,
         }}>
-          {spec}
-        </pre>
+          <div style={{ fontSize: 26, marginBottom: 6 }} aria-hidden>🗺️</div>
+          {caption
+            ? <span><strong style={{ color: "#334155" }}>{caption}</strong><br />
+                Ask your tutor to explain this one in words.</span>
+            : "This diagram couldn't be drawn — ask your tutor to explain it in words."}
+        </div>
       ) : (
         <span style={{ color: "#94a3b8", fontSize: 14 }}>Drawing the diagram…</span>
       )}

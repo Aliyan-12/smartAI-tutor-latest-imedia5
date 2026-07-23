@@ -70,13 +70,59 @@ _MERMAID_STARTS = (
 )
 
 
+# Characters that make the flowchart grammar choke inside an UNQUOTED label. Verified against the
+# real mermaid parser: parentheses inside a [] node are the killer (`F[Use SINE (SOH)]` — the
+# exact spec that shipped to a student as a wall of raw code). Quoting is always safe.
+_MERMAID_NEEDS_QUOTE = re.compile(r"[()\[\]{}&|<>#;]")
+
+# ONE pass over all shapes, as an alternation — never several passes. A second pass re-matches
+# nodes the first already rewrote: `P((Photosynthesis))` became `P("(Photosynthesis")` and the
+# docstring's own example stopped parsing. Each `(?!x)` guard also makes the DOUBLE-delimiter
+# shapes (`((circle))`, `[[sub]]`, `{{hex}}`) unmatchable — they're rare, and their contents are
+# genuinely ambiguous to quote, so they are deliberately left untouched rather than half-fixed.
+_MERMAID_NODE_RE = re.compile(
+    r'(?<![\w"])([A-Za-z_]\w*)'
+    r'(?:'
+    r'\[(?!\[)(?P<sq>[^\]\n]*)\](?!\])'      # A[label] — parens INSIDE are the real-world break
+    r'|\((?!\()(?P<rnd>[^()\n]*)\)(?!\))'    # A(label)
+    r'|\{(?!\{)(?P<rho>[^{}\n]*)\}(?!\})'    # A{label}
+    r')'
+)
+
+
+def _quote_mermaid_labels(spec: str) -> str:
+    """Wrap node labels in quotes when they contain characters the parser can't take raw.
+
+    The model writes natural labels ("Use SINE (SOH)", "Opposite & Hypotenuse"); mermaid needs
+    those quoted. Without this the whole diagram throws and the student sees the raw spec as a
+    wall of code. Same idea as `_repair_latex`: repair server-side rather than hoping the model
+    gets the syntax exactly right every time.
+    """
+    def _fix(m):
+        node = m.group(1)
+        for key, open_d, close_d in (("sq", "[", "]"), ("rnd", "(", ")"), ("rho", "{", "}")):
+            label = m.group(key)
+            if label is None:
+                continue
+            stripped = label.strip()
+            if (not stripped
+                    or stripped.startswith('"')
+                    or not _MERMAID_NEEDS_QUOTE.search(stripped)):
+                return m.group(0)
+            safe = stripped.replace('"', "'")
+            return f'{node}{open_d}"{safe}"{close_d}'
+        return m.group(0)
+
+    return _MERMAID_NODE_RE.sub(_fix, spec)
+
+
 def clean_mermaid(spec: str) -> str:
-    """Strip ```mermaid fences / stray backticks the model wraps around the spec."""
+    """Strip ```mermaid fences / stray backticks, then repair unquoted node labels."""
     s = (spec or "").strip()
     if s.startswith("```"):
         s = re.sub(r"^```[a-zA-Z]*\n?", "", s)
         s = re.sub(r"\n?```$", "", s).strip()
-    return s
+    return _quote_mermaid_labels(s)
 
 
 def is_valid_mermaid(spec: str) -> bool:
@@ -599,12 +645,18 @@ EXPLANATORY_FAMILIES = ("mermaid", "svg", "animation")
 # lets them try it themselves. So the phase — not the tutor's mood — decides the balance, and
 # EVERY tool stays bound in every phase (this is priority, not a gate: a practice phase can still
 # draw a diagram when one genuinely helps, it just won't lead with one).
+#
+# The split is DECISIVE, not a gentle 70/30 blend, for two reasons. Pedagogically the phases mean
+# different things: a teaching phase is slides + the visual that explains them, a practice phase
+# is the student working. Arithmetically, real plan_blocks give recap ~2 turns and review ~3 —
+# a 30% target over 2 picks cannot be expressed at all (you get 0% or 50%), so a soft blend in a
+# short phase is decided entirely by rounding. Near the extremes the rounding stops mattering.
 VISUAL_PHASE_WEIGHTS: Dict[str, Dict[str, float]] = {
-    "recap":    {"puzzle": 0.30, "explanatory": 0.70},   # remind them how it works
-    "teach":    {"puzzle": 0.30, "explanatory": 0.70},   # explain first, practise second
-    "practice": {"puzzle": 0.70, "explanatory": 0.30},   # now they do it
-    "quiz":     {"puzzle": 0.70, "explanatory": 0.30},
-    "review":   {"puzzle": 0.40, "explanatory": 0.60},   # summarise, with a little recall
+    "recap":    {"puzzle": 0.15, "explanatory": 0.85},   # remind them how it works
+    "teach":    {"puzzle": 0.20, "explanatory": 0.80},   # explain first, practise second
+    "practice": {"puzzle": 0.85, "explanatory": 0.15},   # now they do it
+    "quiz":     {"puzzle": 0.90, "explanatory": 0.10},
+    "review":   {"puzzle": 0.30, "explanatory": 0.70},   # summarise, with a little recall
 }
 _DEFAULT_PHASE = "teach"
 
@@ -676,17 +728,6 @@ def pick_visual_family(seq: Optional[List[str]], available: Optional[List[str]] 
     hist = [f for p, f in entries if p == ph]
     last = entries[-1][1] if entries else None
     turn = len(hist) + 1
-
-    # FIRST pick of a phase: sample from the target distribution instead of handing it to
-    # whichever family has the largest single weight. Deterministically awarding it cost a
-    # minority family a slot it could not win back in a short phase — audited at teach 33%
-    # against an achievable 22%. Every later pick is deterministic largest-deficit, so this
-    # only removes the head start; it does not add ongoing randomness.
-    if not hist:
-        pool = [f for f in avail if f != last] or avail
-        ws = [weights.get(f, 0.0) for f in pool]
-        if sum(ws) > 0:
-            return random.choices(pool, weights=ws, k=1)[0]
 
     best, best_score = [], None
     for f in avail:
