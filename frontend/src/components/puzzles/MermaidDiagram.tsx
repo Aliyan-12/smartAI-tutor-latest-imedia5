@@ -61,16 +61,32 @@ export default function MermaidDiagram({ payload }: { payload: PuzzlePayload }) 
       alignItems: "center", justifyContent: "center", gap: 14, padding: "8px 16px",
       overflow: "auto", background: "#fff",
     }}>
-      {/* Mermaid stamps a pixel `max-width` on the <svg> it generates, sized for the desktop
-          panel it was measured in. On a phone that overflows the Learn panel and the student
-          gets a horizontally-scrolled sliver of the diagram. Inline styles can't reach a child
-          injected via dangerouslySetInnerHTML, so override it with a scoped rule. */}
-      <style>{`.pz-mmd-fit > svg { width: 100%; height: auto; max-width: 100% !important; }`}</style>
+      {/* FIT the diagram to the panel — bound BOTH dimensions, never force either.
+          Mermaid stamps a pixel `max-width` on the <svg> it emits, sized for whatever it was
+          measured in, which overflowed on narrow screens. The first fix set `width: 100%`, and
+          that was worse for the common case: a tall `graph TD` stretched to the full panel width
+          became enormously tall, so a 5-step flowchart needed scrolling and one node filled the
+          screen. Capping max-width AND max-height with `width/height: auto` lets the browser
+          scale it down on whichever axis binds first, preserving the aspect ratio from the
+          viewBox. Inline styles can't reach a child injected via dangerouslySetInnerHTML, hence
+          the scoped rule. Uses `vh` (not `svh`): an unsupported unit inside min() invalidates the whole
+          declaration, which would silently restore the bug. */}
+      <style>{`
+        .pz-mmd-fit > svg {
+          width: auto !important;
+          height: auto !important;
+          max-width: 100% !important;
+          max-height: min(70vh, 100%) !important;
+        }
+      `}</style>
       {svg && !failed ? (
         <div
           className="pz-mmd-fit"
           dangerouslySetInnerHTML={{ __html: svg }}
-          style={{ width: "100%", maxWidth: "100%", maxHeight: "100%", display: "flex", justifyContent: "center" }}
+          style={{
+            flex: "1 1 auto", minHeight: 0, width: "100%", maxWidth: "100%",
+            display: "flex", alignItems: "center", justifyContent: "center",
+          }}
         />
       ) : failed ? (
         // A spec the browser can't draw. Showing the raw source dumped a wall of `graph TD ...`
