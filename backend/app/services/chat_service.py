@@ -117,6 +117,7 @@ async def build_context(
     db: AsyncSession,
     chat_id: int,
     user_query: Optional[str] = None,
+    rag_scope: Optional[dict] = None,
 ) -> Tuple[List[dict], List[RetrievedChunk]]:
     messages = await get_chat_history(db, chat_id)
     # Only real conversation turns go to the LLM. Persisted lifecycle/interactive
@@ -133,10 +134,34 @@ async def build_context(
         try:
             from app.core.config import settings
             if settings.rag_enabled:
-                # Free simple chat: loosely grounded in Resource Hub content
-                # (no curriculum filter — just similarity).
                 from app.services.rag_service import retrieve_hub_chunks
-                rag_chunks = await retrieve_hub_chunks(db=db, query=user_query)
+                if rag_scope:
+                    # LESSON turn: retrieval must be scoped to the SUBTOPIC being taught.
+                    # Unscoped similarity search pulled neighbouring subtopics out of the same
+                    # unit — a "2. The sine ratio" lesson was fed tangent and cosine chunks and
+                    # duly taught all three. Widen only if the tight scope finds nothing, so a
+                    # subtopic with no vectorised slides still gets context instead of silence.
+                    ladder = [
+                        dict(rag_scope),
+                        {k: v for k, v in rag_scope.items() if k != "topic_title"},
+                        {k: v for k, v in rag_scope.items()
+                         if k in ("subject", "key_stage")},
+                    ]
+                    for i, flt in enumerate(ladder):
+                        rag_chunks = await retrieve_hub_chunks(
+                            db=db, query=user_query,
+                            **{k: v for k, v in flt.items() if v},
+                        )
+                        if rag_chunks:
+                            if i:
+                                logger.info(
+                                    "RAG scope widened to level %d (%s) — no chunks at the "
+                                    "tighter scope", i, ",".join(sorted(flt)))
+                            break
+                else:
+                    # Free simple chat: loosely grounded in Resource Hub content
+                    # (no curriculum filter — just similarity).
+                    rag_chunks = await retrieve_hub_chunks(db=db, query=user_query)
         except Exception as e:
             logger.warning(f"RAG retrieval skipped: {e}")
 

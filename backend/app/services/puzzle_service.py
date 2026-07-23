@@ -254,6 +254,39 @@ _HTML_TAG = re.compile(r"<[^>]+>")
 _HAS_MATH = re.compile(r"[0-9]|[+\-=<>^_/×÷≤≥≠±]|\\(?!text\b)[A-Za-z]+")
 
 
+# Prose the model writes INSIDE a LaTeX field. KaTeX renders "times" as three italic letters and
+# "sin(30)" as s·i·n·(30), so `x = sin(30) times 20` comes out as gibberish rather than maths.
+_LATEX_WORDS = (
+    (r"(?<![\\a-zA-Z])times(?![a-zA-Z])", r"\\times"),
+    (r"(?<![\\a-zA-Z])divided\s+by(?![a-zA-Z])", r"\\div"),
+    (r"(?<![\\a-zA-Z])multiplied\s+by(?![a-zA-Z])", r"\\times"),
+    (r"(?<![\\a-zA-Z])plus(?![a-zA-Z])", "+"),
+    (r"(?<![\\a-zA-Z])minus(?![a-zA-Z])", "-"),
+    (r"(?<![\\a-zA-Z])equals(?![a-zA-Z])", "="),
+    (r"(?<![\\a-zA-Z])degrees(?![a-zA-Z])", r"^\\circ"),
+)
+# Function names must be backslashed or KaTeX italicises them letter by letter.
+_LATEX_FUNCS = ("sin", "cos", "tan", "log", "ln", "exp", "min", "max", "det", "arcsin",
+                "arccos", "arctan", "sinh", "cosh", "tanh", "sec", "csc", "cot")
+
+
+def normalise_math_latex(s: str) -> str:
+    """Turn the prose-maths the model sometimes writes into real LaTeX.
+
+    Reported from a live lesson: `x = sin(30) times 20`. Both problems are silent — KaTeX renders
+    it without erroring, just wrongly — so there is nothing to bounce back to the model; the
+    server has to repair it, the same way `_repair_latex` re-adds dropped backslashes.
+    """
+    if not s:
+        return s
+    t = str(s)
+    for pat, rep in _LATEX_WORDS:
+        t = re.sub(pat, rep, t, flags=re.IGNORECASE)
+    for fn in sorted(_LATEX_FUNCS, key=len, reverse=True):
+        t = re.sub(rf"(?<![\\a-zA-Z]){fn}(?![a-zA-Z])", "\\\\" + fn, t)
+    return re.sub(r"\s{2,}", " ", t).strip()
+
+
 def clean_math_latex(s: str) -> tuple:
     """(latex, problem) for the KaTeX equation card.
 
@@ -275,8 +308,13 @@ def clean_math_latex(s: str) -> tuple:
     t = re.sub(r"\s{2,}", " ", t).strip()
     if had_figure:
         return "", "figure"
-    t = _repair_latex(t)
-    if not t or not _HAS_MATH.search(t):
+    # Decide prose-vs-maths on the RAW text. Doing it after the repairs is circular: they turn
+    # "times" into "\times", which then looks like maths, so the sentence "The times table is
+    # fun" would be typeset as an equation instead of being dropped.
+    if not _HAS_MATH.search(t):
+        return "", "prose"
+    t = normalise_math_latex(_repair_latex(t))
+    if not t:
         return "", "prose"
     return t, ""
 

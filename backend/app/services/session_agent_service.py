@@ -2366,7 +2366,40 @@ async def _run_turn(send, chat_id, user_id, *, saved_user_text, ai_content,
 
         if saved_user_text is not None:
             await chat_service.add_message(db, chat_id, "user", saved_user_text)
-        history, rag_chunks = await chat_service.build_context(db, chat_id, user_query=saved_user_text or ai_content)
+
+        # Scope RAG to THIS lesson's curriculum coordinates — most importantly the SUBTOPIC.
+        # Without it, similarity search happily returns the neighbouring subtopics of the same
+        # unit, which is why a "sine ratio" lesson also taught cosine and tangent.
+        _scope = None
+        try:
+            _sc_appt_id = _appt_id_from_chat(chat)
+            if _sc_appt_id:
+                _sc_appt = await _load_appointment(db, _sc_appt_id)
+                if _sc_appt is not None:
+                    from app.services.session_resource_service import _parse_description as _srs_parse
+                    _info = _srs_parse(getattr(_sc_appt, "description", "") or "")
+                    _sc_sub = _info.get("subtopic") or ""
+                    _sc_units = _info.get("topics") or []
+                    if not _sc_sub:
+                        # No subtopic chosen at booking → the playlist picks the first
+                        # unstudied one and writes it onto the LessonPlan. Teach exactly that.
+                        from app.models.lesson_plan import LessonPlan as _LPs
+                        _lp = (await db.execute(
+                            select(_LPs).where(_LPs.appointment_id == _sc_appt_id)
+                        )).scalar_one_or_none()
+                        _sc_sub = (getattr(_lp, "subtopic", None) or "") if _lp else ""
+                    _scope = {
+                        "subject": getattr(_sc_appt, "subject", None),
+                        "key_stage": getattr(_sc_appt, "key_stage", None),
+                        "unit_title": _sc_units[0] if _sc_units else None,
+                        "topic_title": _sc_sub or None,
+                    }
+        except Exception:
+            _scope = None
+            logger.warning("RAG scope build failed for chat %s", chat_id, exc_info=True)
+
+        history, rag_chunks = await chat_service.build_context(
+            db, chat_id, user_query=saved_user_text or ai_content, rag_scope=_scope)
         await db.commit()
 
         appt_id = _appt_id_from_chat(chat)

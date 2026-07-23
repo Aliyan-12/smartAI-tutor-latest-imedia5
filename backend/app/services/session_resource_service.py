@@ -111,11 +111,19 @@ async def _page_count(db: AsyncSession, resource: RHResource) -> int:
 
 async def _studied_subtopics(db: AsyncSession, student_id: int, subject: str,
                              unit_title: str, exclude_appointment_id) -> set:
-    """Subtopic titles this student has ALREADY had a lesson on for this unit.
+    """Subtopic titles this student has ACTUALLY COVERED for this unit.
 
     Read from LessonPlan.subtopic of their earlier appointments — which is why the auto-picked
     subtopic is written back to the plan below: without that, an auto-scoped lesson would leave
     no trace and every future booking would restart at subtopic 1.
+
+    COVERED MEANS THE LESSON FINISHED, not that it was booked. `LessonPlan.status` flips to
+    "completed" when the end-of-lesson report is written (`appointment_service`), so that is the
+    coverage marker. Counting every booked plan meant a lesson opened and abandoned after a
+    minute burned its subtopic permanently — real data had 20 `planned` against 10 `completed`,
+    including a "1. The tangent ratio" the student would never have been offered again.
+    Erring towards re-teaching is also the safer failure: repeating a subtopic wastes a lesson,
+    skipping one leaves a hole in the sequence.
     """
     from app.models.lesson_plan import LessonPlan
     from app.models.appointment import Appointment
@@ -127,6 +135,7 @@ async def _studied_subtopics(db: AsyncSession, student_id: int, subject: str,
                 LessonPlan.student_id == student_id,
                 LessonPlan.subtopic.isnot(None),
                 LessonPlan.unit_name == unit_title,
+                LessonPlan.status == "completed",
                 Appointment.subject == subject,
                 Appointment.id != exclude_appointment_id,
             )
