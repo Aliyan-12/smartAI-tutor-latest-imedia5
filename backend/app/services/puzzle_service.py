@@ -659,7 +659,7 @@ async def clear_puzzle_state(db: AsyncSession, appointment_id: int) -> None:
 # 25/25/25/25 split across the four families, so we record what has actually been shown and the
 # LESSON STATE anchor names the family that is furthest behind — the same running-quota approach
 # that made the manipulative/classic mix hold, rather than hoping a prompt line is obeyed.
-VISUAL_FAMILIES = ("puzzle", "animation", "svg", "mermaid")
+VISUAL_FAMILIES = ("puzzle", "animation", "svg", "mermaid", "image")
 
 
 def visual_family_for(render: Optional[str]) -> str:
@@ -671,12 +671,18 @@ def visual_family_for(render: Optional[str]) -> str:
         return "animation"
     if r == "svg_diagram":
         return "svg"
-    return "puzzle"          # math/graph/labelling/matching/manipulatives/explanatory image
+    if r == "explanatory_image":
+        # A generated teaching picture is something the student LOOKS AT, not something they
+        # DO — it used to fall through to "puzzle", so showing one during a teaching phase
+        # spent the puzzle quota and the rotation then steered AWAY from explanatory content,
+        # the exact opposite of what a teaching phase wants.
+        return "image"
+    return "puzzle"          # math/graph/labelling/matching/manipulatives
 
 
 # The three EXPLANATORY families — things the student LOOKS AT while the tutor teaches — as
 # opposed to "puzzle", which is something they DO.
-EXPLANATORY_FAMILIES = ("mermaid", "svg", "animation")
+EXPLANATORY_FAMILIES = ("mermaid", "svg", "animation", "image")
 
 # What the mix should be in each phase of the lesson. A lesson that opens with puzzles makes the
 # student solve before they have been taught anything; a practice phase full of diagrams never

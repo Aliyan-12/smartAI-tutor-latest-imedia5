@@ -2131,7 +2131,7 @@ async def build_lesson_state_anchor(
         # flips it (~70/30 puzzles) so they actually do the work. Every tool stays bound in
         # every phase — this is priority, not a gate.
         from app.services import puzzle_service as _pzv
-        _available = ["puzzle", "mermaid", "svg"]
+        _available = ["puzzle", "mermaid", "svg", "image"]
         if _anim_ok:
             _available.append("animation")
         _vseq = await _pzv.get_visual_seq(db, appt_id)
@@ -2149,8 +2149,13 @@ async def build_lesson_state_anchor(
             "mermaid": "mermaid_diagram — YOU write the spec, so anything works: the STEPS OF THE "
                        "METHOD as a flowchart, a comparison, a classification tree, a cycle, or a "
                        "worked example broken into stages.",
-            "puzzle": "a hands-on PUZZLE (manipulative_puzzle / diagram_math_puzzle / math_puzzle "
-                      "/ labelling_puzzle) — something the student DOES, not just looks at.",
+            "image": "explanatory_puzzle — a labelled teaching PICTURE of this concept "
+                     "(pre-seeded for this topic where one exists, so it's instant). Use it for "
+                     "a real-world / structural illustration; if the picture must be EXACT "
+                     "(counts, angles, measurements) use svg_diagram or draw_svg instead.",
+            "puzzle": "a hands-on PUZZLE — labelling_puzzle · math_puzzle · graph_puzzle · "
+                      "manipulative_puzzle · matching_puzzle · diagram_math_puzzle — something "
+                      "the student DOES and submits, not just looks at.",
         }[_fam]
         # Count within THIS phase — the target beside it is per-phase, so lesson-wide counts
         # would look like they contradict it.
@@ -2186,10 +2191,17 @@ async def build_lesson_state_anchor(
         # now an IMPERATIVE naming the exact call, and it says outright that advancing a slide
         # does not count (the model treated the deck as "the visual for this turn" and so never
         # drew anything of its own).
+        # SLIDES LEAD. The deck is the curriculum; the visual is how you explain what's on it.
+        # Without this the tutor treated the two as alternatives and sometimes led with a diagram
+        # the slide hadn't introduced yet.
         _slide_note = (
-            " Moving to a slide does NOT count as this turn's visual — the deck is the source "
-            "material, the diagram is how YOU explain it."
-            if has_slides else ""
+            " ORDER MATTERS: teach the ON-SCREEN SLIDE's content FIRST (in your own words), and "
+            "use this visual to explain THAT — built from the slide's own terms, numbers and "
+            "steps. Never lead with a visual for something the slide hasn't covered yet, and "
+            "moving to a slide does NOT count as this turn's visual."
+            if has_slides else
+            " There are no slides, so this visual IS your teaching material — lead with it and "
+            "teach from it."
         )
         lines.append(
             f"{_phase_rule}\n"

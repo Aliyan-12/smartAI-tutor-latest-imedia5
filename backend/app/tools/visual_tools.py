@@ -25,7 +25,7 @@ from typing import Union
 
 from langchain_core.tools import tool
 
-from app.services import puzzle_service
+from app.services import image_gen_service, puzzle_service
 from app.tools.session_tools import ToolContext
 from app.tools.puzzle_tools import persist_and_return, _coerce_dict
 
@@ -37,6 +37,39 @@ def visual_tool_groups(ctx: ToolContext) -> dict:
 
     async def _persist_and_return(full: dict) -> dict:
         return await persist_and_return(ctx, full)
+
+    @tool
+    async def explanatory_puzzle(image_prompt: str, caption: str = "", title: str = "") -> dict:
+        """
+        Show a clear, generated diagram/illustration that EXPLAINS the concept you are
+        teaching right now (e.g. "a labelled diagram comparing a plant cell and an animal
+        cell", "the water cycle with arrows"). A GO-TO teaching visual for Science / Maths /
+        Physics / Chemistry / Biology — show it instead of a wall of text. Display-only: the
+        student just looks at it, so after showing it, keep teaching FROM it (no answer to
+        wait for). image_prompt is a vivid description of the picture to draw; caption is one
+        short line shown under it.
+
+        Prefer svg_diagram / draw_svg when the picture must be EXACT (counts, labels, measured
+        angles) — a generated image mislabels and miscounts. Call SILENTLY.
+        """
+        # PRE-SEEDED FIRST. A topic image generated once by `app.seed_explanatory_images` is
+        # instant and its labelling has been checked, whereas a live generation costs ~5-10 s
+        # mid-lesson and looks different every time. Scoped like the resources are: the chosen
+        # subtopic's image, else the unit's. Only fall through to live generation when neither
+        # has been seeded, so nothing regresses on an unseeded topic.
+        url = image_gen_service.topic_image_url(
+            ctx.subject, ctx.key_stage, ctx.unit_title, ctx.topic_title,
+        )
+        if url:
+            logger.info("EXPLANATORY served pre-seeded topic image (unit=%r subtopic=%r)",
+                        ctx.unit_title, ctx.topic_title)
+        else:
+            key = f"{ctx.subject}|{ctx.key_stage}|{ctx.topic_title or ''}"
+            url = await image_gen_service.generate_image(image_prompt, cache_key=key)
+        if not url:
+            return {"action": "show_puzzle", "error": "image_gen_failed",
+                    "message": "The image couldn't be generated — keep teaching in words instead."}
+        return await _persist_and_return(puzzle_service.build_explanatory(url, caption, title))
 
     @tool
     async def mermaid_diagram(mermaid: str, caption: str = "", title: str = "") -> dict:
@@ -198,4 +231,4 @@ def visual_tool_groups(ctx: ToolContext) -> dict:
         return await _persist_and_return(
             puzzle_service.build_animation(url, caption, title or "Animation"))
 
-    return {"visuals": [mermaid_diagram, svg_diagram, draw_svg, animate_concept]}
+    return {"visuals": [explanatory_puzzle, mermaid_diagram, svg_diagram, draw_svg, animate_concept]}
