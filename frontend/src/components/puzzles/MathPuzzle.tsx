@@ -40,11 +40,14 @@ export default function MathPuzzle({ payload, onSubmit, disabled }: InteractiveP
           <img
             src={image}
             alt="maths problem"
-            style={{ maxWidth: "min(100%, 300px)", maxHeight: 210, objectFit: "contain", borderRadius: 16, background: "#fff", padding: 8 }}
+            // Was capped at 300x210 — a maths diagram the student must READ (side lengths,
+            // angle marks) rendered as a thumbnail. The Learn panel is ~70% of the screen.
+            style={{ width: "100%", maxWidth: 620, maxHeight: "min(46vh, 420px)", objectFit: "contain", borderRadius: 16, background: "#fff", padding: 10 }}
           />
         ) : latex ? (
           <div style={{
-            fontSize: 30, padding: "22px 34px", borderRadius: 18, color: "#0f172a",
+            // The equation IS the question — scale it with the panel instead of a fixed 30px.
+            fontSize: "clamp(30px, 4.4vw, 52px)", padding: "26px 38px", borderRadius: 18, color: "#0f172a",
             background: "rgba(255,255,255,0.96)",
             boxShadow: "0 10px 30px rgba(0,0,0,0.35)",
             border: "1px solid rgba(255,255,255,0.6)",

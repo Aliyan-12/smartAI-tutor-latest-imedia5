@@ -37,8 +37,51 @@ def goal_resource_types(goal: Optional[str]) -> List[str]:
     return _GOAL_TYPES.get((goal or "").lower(), _DEFAULT_TYPES)
 
 
+# ── Goal × session-length RESOURCE POLICY ────────────────────────────────────────
+# Which Resource-Hub material a lesson actually uses, so the four goals FEEL different:
+#
+#   every goal @ 20 min → NO resources at all (too short to open a deck): pure teaching,
+#                         hands-on puzzles and a quiz.
+#   learn_scratch 40+   → SLIDES, taught one at a time with short explanations/examples.
+#   homework/catch_up   → WORKSHEET-LED: show the worksheet and help the student work
+#            40+          through it, plus practice examples, quiz and summary.
+#   revision 40+        → QUIZ SHEET first, then worksheet, then practice + quiz + summary.
+#
+# `style` is handed to the session prompt so the tutor teaches the material the right way.
+_POLICY_STYLES = {
+    "slides": "Teach the SLIDES one at a time — show a slide, explain it briefly with an example, then move on.",
+    "worksheet": "WORKSHEET-LED: put the worksheet on screen and work through it WITH the student, question by question, then practice examples, a quiz and a summary.",
+    "quiz_sheet": "EXAM-STYLE: lead with the quiz/exam sheet, then the worksheet, working through questions with the student, then practice, quiz and summary.",
+    "none": "NO resources this session — teach directly, with hands-on puzzles and a quiz.",
+}
+
+
+def lesson_resource_policy(goal: Optional[str], duration_minutes: Optional[int]) -> Dict[str, Any]:
+    """(use_resources, types, style, style_note) for this goal + length."""
+    g = (goal or "").lower()
+    mins = int(duration_minutes or 60)
+
+    # A 20-minute lesson never opens the deck — there isn't time to teach from it.
+    if mins <= 25:
+        return {"use_resources": False, "types": [], "style": "none",
+                "style_note": _POLICY_STYLES["none"]}
+
+    if g in ("learn_scratch", "teach_from_scratch"):
+        return {"use_resources": True, "types": ["powerpoint", "pdf"], "style": "slides",
+                "style_note": _POLICY_STYLES["slides"]}
+
+    if g in ("revision", "test_prep"):
+        return {"use_resources": True,
+                "types": ["quiz", "mark_scheme", "markscheme", "worksheet", "homework", "pdf"],
+                "style": "quiz_sheet", "style_note": _POLICY_STYLES["quiz_sheet"]}
+
+    # homework (Practice & Improve) / catch_up → worksheet-led
+    return {"use_resources": True, "types": ["worksheet", "homework", "pdf"],
+            "style": "worksheet", "style_note": _POLICY_STYLES["worksheet"]}
+
+
 def _parse_description(description: Optional[str]) -> Dict[str, Any]:
-    out: Dict[str, Any] = {"topics": [], "year_group": None}
+    out: Dict[str, Any] = {"topics": [], "year_group": None, "subtopic": None}
     if not description:
         return out
     m = re.search(r"Topics?:\s*([^\n]+)", description, re.IGNORECASE)
@@ -47,6 +90,9 @@ def _parse_description(description: Optional[str]) -> Dict[str, Any]:
     m = re.search(r"Year group:\s*([^\n]+)", description, re.IGNORECASE)
     if m:
         out["year_group"] = m.group(1).strip()
+    m = re.search(r"Subtopic:\s*([^\n]+)", description, re.IGNORECASE)
+    if m:
+        out["subtopic"] = m.group(1).strip()
     return out
 
 
@@ -63,13 +109,115 @@ async def _page_count(db: AsyncSession, resource: RHResource) -> int:
     return (doc.page_count if doc else resource.page_count) or 1
 
 
+async def _studied_subtopics(db: AsyncSession, student_id: int, subject: str,
+                             unit_title: str, exclude_appointment_id) -> set:
+    """Subtopic titles this student has ACTUALLY COVERED for this unit.
+
+    Read from LessonPlan.subtopic of their earlier appointments — which is why the auto-picked
+    subtopic is written back to the plan below: without that, an auto-scoped lesson would leave
+    no trace and every future booking would restart at subtopic 1.
+
+    COVERED MEANS THE LESSON FINISHED, not that it was booked. `LessonPlan.status` flips to
+    "completed" when the end-of-lesson report is written (`appointment_service`), so that is the
+    coverage marker. Counting every booked plan meant a lesson opened and abandoned after a
+    minute burned its subtopic permanently — real data had 20 `planned` against 10 `completed`,
+    including a "1. The tangent ratio" the student would never have been offered again.
+    Erring towards re-teaching is also the safer failure: repeating a subtopic wastes a lesson,
+    skipping one leaves a hole in the sequence.
+    """
+    from app.models.lesson_plan import LessonPlan
+    from app.models.appointment import Appointment
+    try:
+        rows = (await db.execute(
+            select(LessonPlan.subtopic)
+            .join(Appointment, Appointment.id == LessonPlan.appointment_id)
+            .where(
+                LessonPlan.student_id == student_id,
+                LessonPlan.subtopic.isnot(None),
+                LessonPlan.unit_name == unit_title,
+                LessonPlan.status == "completed",
+                Appointment.subject == subject,
+                Appointment.id != exclude_appointment_id,
+            )
+        )).all()
+    except Exception:  # noqa: BLE001 — progression is a nicety, never break the lesson
+        logger.warning("studied-subtopic lookup failed", exc_info=True)
+        return set()
+    return {(r[0] or "").strip().lower() for r in rows if r[0]}
+
+
+async def _next_unstudied_subtopic(db: AsyncSession, appointment, unit_title: str):
+    """The first subtopic of this unit the student hasn't covered yet (curriculum order),
+    restricted to subtopics that actually HAVE resources. None when the unit has no subtopics —
+    the caller then keeps the whole-unit behaviour."""
+    from app.models.resource_hub import RHTopic, RHUnit
+
+    unit = (await db.execute(
+        select(RHUnit).where(RHUnit.title == unit_title)
+    )).scalars().first()
+    if not unit:
+        return None
+    subs = (await db.execute(
+        select(RHTopic).where(RHTopic.unit_hub_id == unit.hub_id)
+        .order_by(RHTopic.position, RHTopic.id)
+    )).scalars().all()
+    if not subs:
+        return None
+
+    # Only offer subtopics that have material to teach, in curriculum order, de-duplicated
+    # (the hub carries repeated titles under one unit).
+    with_res = {
+        (r[0] or "").strip().lower()
+        for r in (await db.execute(
+            select(RHResource.topic_title).where(
+                RHResource.unit_title == unit_title,
+                RHResource.topic_title.isnot(None),
+            )
+        )).all()
+    }
+    ordered, seen = [], set()
+    for t in subs:
+        key = (t.title or "").strip().lower()
+        if not key or key in seen or (with_res and key not in with_res):
+            continue
+        seen.add(key)
+        ordered.append(t.title)
+    if not ordered:
+        return None
+
+    studied = await _studied_subtopics(
+        db, appointment.student_id, appointment.subject, unit_title, appointment.id,
+    )
+    nxt = next((t for t in ordered if t.strip().lower() not in studied), None)
+    if nxt is None:
+        # Whole unit already covered — start the cycle again rather than showing nothing.
+        nxt = ordered[0]
+        logger.info("PROGRESSION unit %r fully studied — restarting at %r", unit_title, nxt)
+    return nxt
+
+
 async def build_playlist(db: AsyncSession, appointment) -> List[RHResource]:
-    """Ordered list of resources for the lesson, prioritised by the goal's types."""
+    """The ordered material for this lesson.
+
+    Three things decide it:
+      1. SCOPE — resources hang off SUBTOPICS in the hub (each sub-unit has its own PPT/worksheet).
+         If the student picked a subtopic we teach THAT subtopic's material; otherwise the whole
+         unit, in curriculum order.
+      2. POLICY — the goal × length matrix (see `lesson_resource_policy`): a 20-minute lesson uses
+         no resources at all, Learn-from-Scratch uses slides, Practice/Catch-up are worksheet-led,
+         Exam Revision leads with the quiz sheet.
+      3. ORDER — curriculum order (subtopic position, then type), NOT grouped by type. Grouping by
+         type made the tutor walk every PowerPoint of every subtopic before any worksheet.
+    """
+    from app.models.resource_hub import RHTopic, RHUnit
+
     info = _parse_description(getattr(appointment, "description", "") or "")
     topics = info["topics"]
     year_group = info["year_group"]
+    subtopic = info["subtopic"]
 
     goal = None
+    lp = None
     try:
         from app.models.lesson_plan import LessonPlan
         lp = (await db.execute(
@@ -77,9 +225,26 @@ async def build_playlist(db: AsyncSession, appointment) -> List[RHResource]:
         )).scalar_one_or_none()
         if lp:
             goal = lp.goal
+            subtopic = (lp.subtopic or subtopic) or None
     except Exception:  # noqa: BLE001
         pass
-    types = goal_resource_types(goal)
+
+    # NO SUBTOPIC CHOSEN → teach ONE subtopic, starting at the first and advancing each time the
+    # student comes back to this unit. Previously this pulled the WHOLE unit's material into one
+    # lesson, so a 7-subtopic unit tried to cover everything at once. When a subtopic IS chosen we
+    # never touch it — that lesson uses exactly that sub-unit's slides.
+    auto_subtopic = None
+    if not subtopic and topics:
+        auto_subtopic = await _next_unstudied_subtopic(
+            db, appointment, topics[0],
+        )
+        if auto_subtopic:
+            subtopic = auto_subtopic
+
+    policy = lesson_resource_policy(goal, getattr(appointment, "duration_minutes", None))
+    if not policy["use_resources"]:
+        return []                      # short lesson → teach directly, no deck
+    types = policy["types"]
 
     q = select(RHResource).where(
         RHResource.key_stage == appointment.key_stage,
@@ -91,15 +256,60 @@ async def build_playlist(db: AsyncSession, appointment) -> List[RHResource]:
         q = q.where(RHResource.unit_title.in_(topics))
     resources = list((await db.execute(q)).scalars().all())
 
+    # 1. Subtopic scope — one sub-unit's material, whether the student chose it or we advanced
+    #    to it automatically.
+    if subtopic:
+        scoped = [r for r in resources
+                  if (r.topic_title or "").strip().lower() == subtopic.strip().lower()]
+        if scoped:
+            resources = scoped
+            # Record an AUTO-picked subtopic on the plan the first time we resolve it, so the
+            # student's NEXT booking on this unit starts at the following subtopic instead of
+            # repeating this one. Only ever fills a blank — an explicit choice is never touched.
+            if auto_subtopic and lp is not None and not lp.subtopic:
+                try:
+                    lp.subtopic = auto_subtopic
+                    if not lp.unit_name and topics:
+                        lp.unit_name = topics[0]
+                    await db.flush()
+                    logger.info("PROGRESSION appt=%s auto-selected subtopic %r for unit %r",
+                                appointment.id, auto_subtopic, topics[0] if topics else None)
+                except Exception:  # noqa: BLE001
+                    logger.warning("failed to persist auto subtopic", exc_info=True)
+
+    # 2. Policy types (fall back to whatever exists rather than showing nothing).
     preferred = [r for r in resources if (r.resource_type or "").lower() in types]
     chosen = preferred if preferred else resources
+    if not chosen:
+        return []
+
+    # 3. Curriculum order: subtopic position within the unit, then the policy's type priority.
+    positions: Dict[str, int] = {}
+    try:
+        unit_ids = {r.unit_hub_id for r in chosen if r.unit_hub_id is not None}
+        if unit_ids:
+            rows = (await db.execute(
+                select(RHTopic.title, RHTopic.position).where(RHTopic.unit_hub_id.in_(unit_ids))
+            )).all()
+            for title, pos in rows:
+                key = (title or "").strip().lower()
+                if key not in positions:
+                    positions[key] = pos or 0
+    except Exception:  # noqa: BLE001 — ordering is a nicety, never break the lesson
+        positions = {}
 
     def sort_key(r: RHResource):
         t = (r.resource_type or "").lower()
         pri = types.index(t) if t in types else len(types)
-        return (pri, r.unit_title or "", r.topic_title or "", r.hub_id)
+        pos = positions.get((r.topic_title or "").strip().lower(), 10_000)
+        return (r.unit_title or "", pos, pri, r.hub_id)
 
     chosen.sort(key=sort_key)
+    logger.info(
+        "PLAYLIST appt=%s goal=%s dur=%s style=%s subtopic=%r -> %d resources",
+        getattr(appointment, "id", None), goal,
+        getattr(appointment, "duration_minutes", None), policy["style"], subtopic, len(chosen),
+    )
     return chosen
 
 

@@ -1223,23 +1223,72 @@ def _mark_punnett(solution: Any, answer: Any) -> Dict[str, Any]:
 
 # ── 15. force_arrows — resultant of two horizontal forces ────────────────────────
 
+def _mirror_dir(d: str) -> str:
+    return "left" if d == "right" else "right"
+
+
+def _force_dir(v: Any, default: str) -> str:
+    s = str(v if v is not None else "").strip().lower()
+    if s in ("left", "l", "-", "back", "backward", "backwards", "west", "<-", "←"):
+        return "left"
+    if s in ("right", "r", "+", "forward", "forwards", "east", "->", "→"):
+        return "right"
+    return default
+
+
 def _build_force_arrows(p: dict, key_stage: Optional[str] = None) -> Tuple[dict, Any, str, str]:
-    left = _require_int(p, ("left", "left_force"), 0, 500,
-                        "The force pulling LEFT, in newtons.")
-    right = _require_int(p, ("right", "right_force"), 0, 500,
-                         "The force pulling RIGHT, in newtons.")
-    if left == 0 and right == 0:
+    """Two forces act on the box — A (drawn on top) and B (drawn below), EACH with its own
+    direction. That's the fix for "the arrows always point right and the AI subtracts anyway":
+    the picture now genuinely shows each force's direction, and the resultant is the SIGNED sum,
+    so BOTH cases are covered — same direction → the forces ADD; opposite → the difference,
+    pointing the way of the bigger force. Either force can be the bigger one.
+
+    Params: {"a": 30, "a_dir": "right", "b": 50, "b_dir": "left"}. Legacy {"left": x, "right": y}
+    still works and means two OPPOSITE forces (a left-pointing x and a right-pointing y)."""
+    legacy = (p.get("a") is None and p.get("force_a") is None
+              and (p.get("left") is not None or p.get("right") is not None))
+    if legacy:
+        a_raw, a_dir = p.get("left", 0), "left"
+        b_raw, b_dir = p.get("right", 0), "right"
+    else:
+        a_raw = next((p[k] for k in ("a", "force_a", "f1", "first") if p.get(k) is not None), None)
+        b_raw = next((p[k] for k in ("b", "force_b", "f2", "second") if p.get(k) is not None), None)
+        a_dir = _force_dir(p.get("a_dir", p.get("dir_a")), "right")
+        b_dir = _force_dir(p.get("b_dir", p.get("dir_b")), "left")
+
+    a, b = _as_int(a_raw), _as_int(b_raw)
+    if a is None or b is None:
+        raise ParamError(
+            "Pass TWO forces, each with a size (newtons) and a direction, e.g. "
+            "{\"a\": 30, \"a_dir\": \"right\", \"b\": 50, \"b_dir\": \"left\"}. Vary it — sometimes "
+            "have them point the SAME way (they add) and sometimes OPPOSITE (they subtract)."
+        )
+    if not (0 <= a <= 500 and 0 <= b <= 500):
+        raise ParamError("Each force must be between 0 and 500 N.")
+    if a == 0 and b == 0:
         raise ParamError("Both forces are 0 N — pass at least one non-zero force.")
-    net = right - left
-    magnitude = abs(net)
-    direction = "balanced" if net == 0 else ("right" if net > 0 else "left")
-    clean = {"left": left, "right": right, "max": max(left, right, 1)}
+
+    # RANDOMISE WHICH WAY IT RESOLVES. Left to itself the model almost always builds the same
+    # shape (bigger force on the right → answer always "right"), so a student learns "tap Right"
+    # instead of reading the arrows. Mirroring the whole set-up half the time flips left↔right —
+    # same physics and same magnitudes, but the answer genuinely varies. Safe to do server-side:
+    # the SERVER derives the answer, and the final a/b/dirs go back in `clean`, so the picture,
+    # the marking and what the tutor sees all agree.
+    if not p.get("no_mirror") and _rng().random() < 0.5:
+        a, b = b, a
+        a_dir, b_dir = _mirror_dir(b_dir), _mirror_dir(a_dir)
+
+    signed = (a if a_dir == "right" else -a) + (b if b_dir == "right" else -b)
+    magnitude = abs(signed)
+    direction = "balanced" if signed == 0 else ("right" if signed > 0 else "left")
+    same = a_dir == b_dir
+    clean = {"a": a, "a_dir": a_dir, "b": b, "b_dir": b_dir, "max": max(a, b, 1)}
     prompt = _rng().choice([
-        "Look at the two forces on the box. Work out the RESULTANT force: set its size, choose its direction, then press Check.",
-        "Two forces are pulling on this box. What single force would have the same effect? Set the size and direction, then Check.",
-        "Find the resultant of these two forces — set how big it is and which way it acts, then press Check.",
+        "Look at the two forces on the box — note which WAY each one points. Work out the RESULTANT: set its size, choose its direction, then press Check.",
+        "Two forces pull on this box. What single force would have the same effect? Watch the arrows' directions — set the size and direction, then Check.",
+        "Find the resultant of these two forces. Do they point the same way or opposite ways? Set how big it is and which way it acts, then press Check.",
     ])
-    return clean, {"magnitude": magnitude, "direction": direction}, prompt, "Resultant force"
+    return clean, {"magnitude": magnitude, "direction": direction, "same_dir": same}, prompt, "Resultant force"
 
 
 def _mark_force_arrows(solution: Any, answer: Any) -> Dict[str, Any]:
@@ -1247,6 +1296,7 @@ def _mark_force_arrows(solution: Any, answer: Any) -> Dict[str, Any]:
     got = answer if isinstance(answer, dict) else {}
     want_mag = int(sol.get("magnitude", -1))
     want_dir = str(sol.get("direction", ""))
+    same = bool(sol.get("same_dir", False))
     got_mag = _as_int(got.get("magnitude"))
     got_dir = str(got.get("direction", "")).strip().lower()
     if got_mag is None or not got_dir:
@@ -1254,17 +1304,19 @@ def _mark_force_arrows(solution: Any, answer: Any) -> Dict[str, Any]:
     mag_ok = got_mag == want_mag
     # When the forces balance, the direction buttons are irrelevant — 0 N has no direction.
     dir_ok = True if want_dir == "balanced" and want_mag == 0 and got_mag == 0 else got_dir == want_dir
+    method = "ADD the two forces together" if same else "subtract the smaller force from the bigger one"
     if mag_ok and dir_ok:
         if want_dir == "balanced":
-            return _verdict(True, 10, "Exactly — the forces are equal and opposite, so they "
-                            "balance: the resultant is 0 N and the box stays still.")
-        return _verdict(True, 10, f"Spot on — {want_mag} N to the {want_dir}.")
+            return _verdict(True, 10, "Exactly — equal forces in opposite directions cancel out, "
+                            "so the resultant is 0 N and the box stays still.")
+        extra = "adding them" if same else "taking the difference"
+        return _verdict(True, 10, f"Spot on — {want_mag} N to the {want_dir}, by {extra}.")
     if mag_ok and not dir_ok:
-        return _verdict(False, 6, "The size is right, but check the direction — the resultant "
-                        "points the way of the BIGGER force.", {"magnitude": True, "direction": False})
-    return _verdict(False, 0 if not dir_ok else 4,
-                    "Not quite — subtract the smaller force from the bigger one; the resultant "
-                    "points the way of the bigger force.",
+        return _verdict(False, 6, "The size is right — check the direction: the resultant points "
+                        "the way of the bigger force.", {"magnitude": True, "direction": False})
+    return _verdict(False, 4 if dir_ok else 0,
+                    f"Not quite — the two forces point the {'SAME way, so you ' + method if same else 'OPPOSITE way, so you ' + method}. "
+                    "The resultant then points the way of the bigger force.",
                     {"magnitude": False, "direction": dir_ok})
 
 

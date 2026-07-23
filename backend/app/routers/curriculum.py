@@ -48,6 +48,22 @@ async def get_resource_slides_pdf(hub_id: int):
     )
 
 
+@router.get("/animations/{key}.mp4")
+async def get_animation(key: str):
+    """Serve a rendered Manim animation MP4 from the cache (played in the session Learn panel)."""
+    from app.services.manim_service import ANIM_DIR
+    # `key` is a server-generated hash slug; refuse traversal characters defensively.
+    if "/" in key or "\\" in key or ".." in key:
+        raise HTTPException(status_code=400, detail="bad key")
+    path = ANIM_DIR / f"{key}.mp4"
+    if not path.exists():
+        raise HTTPException(status_code=404, detail="Animation not ready")
+    return FileResponse(
+        str(path), media_type="video/mp4",
+        headers={"Cache-Control": "public, max-age=86400", "Content-Disposition": "inline"},
+    )
+
+
 @router.get("/keystages")
 async def list_keystages(
     current_user: User = Depends(require_any_authenticated),

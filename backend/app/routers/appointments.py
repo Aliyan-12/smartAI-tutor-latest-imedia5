@@ -21,6 +21,21 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/appointments", tags=["appointments"])
 
 
+def _validate_goal_duration(description: Optional[str], duration_minutes: int) -> None:
+    """Server-side guard for the goal × session-length matrix (the frontend also disables invalid
+    combinations, but the API must not trust the client). The only HARD-blocked combination is
+    'Learn from Scratch' under 40 minutes — a topic can't be taught from nothing in 20 minutes.
+    The other short-lesson goals are merely reduced in scope, not blocked."""
+    import re
+    m = re.search(r"Session type:\s*(.+)", description or "", re.IGNORECASE)
+    session_type = (m.group(1).splitlines()[0].strip().lower() if m else "")
+    if "learn from scratch" in session_type and duration_minutes < 40:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Learn from Scratch requires at least a 40-minute lesson.",
+        )
+
+
 @router.get("/teachers", response_model=list[UserResponse])
 async def list_teachers(
     current_user: User = Depends(require_any_authenticated),
@@ -59,6 +74,8 @@ async def book_appointment(
     if current_user.role == ROLE_PARENT and student.parent_id != current_user.id:
         raise HTTPException(status_code=403, detail="Student is not linked to your account")
 
+    _validate_goal_duration(payload.description, payload.duration_minutes)
+
     try:
         appointment = await appointment_service.book_appointment(
             db=db,
@@ -90,6 +107,7 @@ async def book_appointment(
                 db=db,
                 appointment=appointment,
                 student_id=current_user.id,
+                subtopic=payload.subtopic,
             )
         except Exception as _e:
             logger.warning(f"Auto lesson plan generation failed (non-fatal): {_e}")

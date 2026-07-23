@@ -34,3 +34,12 @@ Authlib>=1.3.2
 itsdangerous>=2.2.0
 casbin>=1.36.0
 casbin-async-sqlalchemy-adapter>=1.4.0
+# Manim — pre-rendered maths/science ANIMATIONS (manim_service + manim_scenes). OPTIONAL: the app
+# runs fully without it (show_animation reports disabled and the tutor falls back to a mermaid
+# diagram). Needs the cairo/pango/ffmpeg system deps added in the Dockerfile.
+#
+# NOTE: the animation scenes label with manim's Text (Pango) rather than MathTex, so this does not
+# pull the huge `texlive` SYSTEM package into the image. That is ONLY about the video renderer —
+# it does NOT affect LaTeX in the app: equation puzzles still render LaTeX with KaTeX in the
+# browser (katex / react-katex + puzzle_service._repair_latex), which is untouched.
+manim>=0.18.1

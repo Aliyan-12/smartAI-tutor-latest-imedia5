@@ -61,6 +61,120 @@ def build_explanatory(image_url: str, caption: str = "", title: str = "") -> Dic
     }
 
 
+# Mermaid diagram types the client can render. Used only to sanity-check that the model actually
+# sent a diagram (not prose), so a broken spec is bounced back to it rather than shown as an error.
+_MERMAID_STARTS = (
+    "graph", "flowchart", "sequencediagram", "classdiagram", "statediagram", "erdiagram",
+    "gantt", "pie", "mindmap", "timeline", "journey", "gitgraph", "quadrantchart",
+    "xychart", "sankey", "requirementdiagram", "block-beta", "c4context",
+)
+
+
+# Characters that make the flowchart grammar choke inside an UNQUOTED label. Verified against the
+# real mermaid parser: parentheses inside a [] node are the killer (`F[Use SINE (SOH)]` — the
+# exact spec that shipped to a student as a wall of raw code). Quoting is always safe.
+_MERMAID_NEEDS_QUOTE = re.compile(r"[()\[\]{}&|<>#;]")
+
+# ONE pass over all shapes, as an alternation — never several passes. A second pass re-matches
+# nodes the first already rewrote: `P((Photosynthesis))` became `P("(Photosynthesis")` and the
+# docstring's own example stopped parsing. Each `(?!x)` guard also makes the DOUBLE-delimiter
+# shapes (`((circle))`, `[[sub]]`, `{{hex}}`) unmatchable — they're rare, and their contents are
+# genuinely ambiguous to quote, so they are deliberately left untouched rather than half-fixed.
+_MERMAID_NODE_RE = re.compile(
+    r'(?<![\w"])([A-Za-z_]\w*)'
+    r'(?:'
+    r'\[(?!\[)(?P<sq>[^\]\n]*)\](?!\])'      # A[label] — parens INSIDE are the real-world break
+    r'|\((?!\()(?P<rnd>[^()\n]*)\)(?!\))'    # A(label)
+    r'|\{(?!\{)(?P<rho>[^{}\n]*)\}(?!\})'    # A{label}
+    r')'
+)
+
+
+def _quote_mermaid_labels(spec: str) -> str:
+    """Wrap node labels in quotes when they contain characters the parser can't take raw.
+
+    The model writes natural labels ("Use SINE (SOH)", "Opposite & Hypotenuse"); mermaid needs
+    those quoted. Without this the whole diagram throws and the student sees the raw spec as a
+    wall of code. Same idea as `_repair_latex`: repair server-side rather than hoping the model
+    gets the syntax exactly right every time.
+    """
+    def _fix(m):
+        node = m.group(1)
+        for key, open_d, close_d in (("sq", "[", "]"), ("rnd", "(", ")"), ("rho", "{", "}")):
+            label = m.group(key)
+            if label is None:
+                continue
+            stripped = label.strip()
+            if (not stripped
+                    or stripped.startswith('"')
+                    or not _MERMAID_NEEDS_QUOTE.search(stripped)):
+                return m.group(0)
+            safe = stripped.replace('"', "'")
+            return f'{node}{open_d}"{safe}"{close_d}'
+        return m.group(0)
+
+    return _MERMAID_NODE_RE.sub(_fix, spec)
+
+
+def clean_mermaid(spec: str) -> str:
+    """Strip ```mermaid fences / stray backticks, then repair unquoted node labels."""
+    s = (spec or "").strip()
+    if s.startswith("```"):
+        s = re.sub(r"^```[a-zA-Z]*\n?", "", s)
+        s = re.sub(r"\n?```$", "", s).strip()
+    return _quote_mermaid_labels(s)
+
+
+def is_valid_mermaid(spec: str) -> bool:
+    first = (spec or "").lstrip().lower()
+    return any(first.startswith(k) for k in _MERMAID_STARTS)
+
+
+def build_mermaid(spec: str, caption: str = "", title: str = "") -> Dict[str, Any]:
+    """A MERMAID diagram rendered LIVE in the browser (flowchart / cycle / sequence / timeline /
+    state / mind-map …). Display-only — accurate and instant, no image generation, no GPU, and it
+    can't misrender counts the way a generated picture can. Same show_puzzle pipeline as the rest."""
+    return {
+        "render": "mermaid",
+        "puzzle_type": "explanatory",
+        "title": title or "Diagram",
+        "prompt": caption or "",
+        "params": {"mermaid": clean_mermaid(spec), "caption": caption or ""},
+        "solution": None,
+        "answer_type": "none",
+    }
+
+
+def build_svg_diagram(svg: str, caption: str = "", title: str = "") -> Dict[str, Any]:
+    """A deterministic, server-drawn SVG teaching diagram (cell, circuit, wave, solar system…).
+    Display-only. Drawn by code from validated params, so the picture always matches what the
+    tutor says — unlike a generated image, which can misdraw structures and labels."""
+    return {
+        "render": "svg_diagram",
+        "puzzle_type": "explanatory",
+        "title": title or "Diagram",
+        "prompt": caption or "",
+        "params": {"svg": svg, "caption": caption or ""},
+        "solution": None,
+        "answer_type": "none",
+    }
+
+
+def build_animation(video_url: str, caption: str = "", title: str = "",
+                    poster_url: str = "") -> Dict[str, Any]:
+    """A pre-rendered Manim animation (MP4). Display-only. `video_url` is served from the animation
+    cache; `poster_url` is an optional first-frame image shown while it loads."""
+    return {
+        "render": "animation",
+        "puzzle_type": "explanatory",
+        "title": title or "Animation",
+        "prompt": caption or "",
+        "params": {"video": video_url, "poster": poster_url or "", "caption": caption or ""},
+        "solution": None,
+        "answer_type": "none",
+    }
+
+
 def build_labelling(items: List[Dict[str, str]], prompt: str = "") -> Dict[str, Any]:
     """items: [{label, image_url}] — student names each image in turn."""
     good = [it for it in items if it.get("image_url")]
@@ -126,7 +240,83 @@ def _auto_numeric_distractors(ans: str) -> List[str]:
 # LaTeX commands the model routinely emits with the leading backslash lost — the classic
 # failure is "\frac34" arriving as "frac34", which KaTeX then renders as the literal word.
 _LATEX_CMDS = ("dfrac", "tfrac", "frac", "sqrt", "times", "div", "cdot", "pm", "mp",
-               "leq", "geq", "neq", "approx", "ldots", "cdots", "angle", "overline")
+               "leq", "geq", "neq", "approx", "ldots", "cdots", "angle", "overline", "text")
+
+# Things that must never reach KaTeX. A student saw a maths card render as
+# "textFindthelengthofsidex … dth = 200px]https://storage.googleapis.com/…" because the model
+# put prose AND a markdown image into `latex`; KaTeX has no idea what either is, so it set the
+# URL as maths, letter by letter.
+_MD_IMAGE = re.compile(r"!\[[^\]]*\]\([^)]*\)")
+_MD_LINK = re.compile(r"(?<!!)\[[^\]]*\]\([^)]*\)")
+_URL_RE = re.compile(r"(https?://|www\.)\S+", re.IGNORECASE)
+_HTML_TAG = re.compile(r"<[^>]+>")
+# Does what's left actually contain maths? A digit, an operator, or a LaTeX command.
+_HAS_MATH = re.compile(r"[0-9]|[+\-=<>^_/×÷≤≥≠±]|\\(?!text\b)[A-Za-z]+")
+
+
+# Prose the model writes INSIDE a LaTeX field. KaTeX renders "times" as three italic letters and
+# "sin(30)" as s·i·n·(30), so `x = sin(30) times 20` comes out as gibberish rather than maths.
+_LATEX_WORDS = (
+    (r"(?<![\\a-zA-Z])times(?![a-zA-Z])", r"\\times"),
+    (r"(?<![\\a-zA-Z])divided\s+by(?![a-zA-Z])", r"\\div"),
+    (r"(?<![\\a-zA-Z])multiplied\s+by(?![a-zA-Z])", r"\\times"),
+    (r"(?<![\\a-zA-Z])plus(?![a-zA-Z])", "+"),
+    (r"(?<![\\a-zA-Z])minus(?![a-zA-Z])", "-"),
+    (r"(?<![\\a-zA-Z])equals(?![a-zA-Z])", "="),
+    (r"(?<![\\a-zA-Z])degrees(?![a-zA-Z])", r"^\\circ"),
+)
+# Function names must be backslashed or KaTeX italicises them letter by letter.
+_LATEX_FUNCS = ("sin", "cos", "tan", "log", "ln", "exp", "min", "max", "det", "arcsin",
+                "arccos", "arctan", "sinh", "cosh", "tanh", "sec", "csc", "cot")
+
+
+def normalise_math_latex(s: str) -> str:
+    """Turn the prose-maths the model sometimes writes into real LaTeX.
+
+    Reported from a live lesson: `x = sin(30) times 20`. Both problems are silent — KaTeX renders
+    it without erroring, just wrongly — so there is nothing to bounce back to the model; the
+    server has to repair it, the same way `_repair_latex` re-adds dropped backslashes.
+    """
+    if not s:
+        return s
+    t = str(s)
+    for pat, rep in _LATEX_WORDS:
+        t = re.sub(pat, rep, t, flags=re.IGNORECASE)
+    for fn in sorted(_LATEX_FUNCS, key=len, reverse=True):
+        t = re.sub(rf"(?<![\\a-zA-Z]){fn}(?![a-zA-Z])", "\\\\" + fn, t)
+    return re.sub(r"\s{2,}", " ", t).strip()
+
+
+def clean_math_latex(s: str) -> tuple:
+    """(latex, problem) for the KaTeX equation card.
+
+    `problem` is "" when the latex is usable, otherwise a short reason:
+      "figure" — it carried an image/URL, i.e. the model tried to SHOW something. That must be
+                 surfaced as a tool error, because silently dropping it leaves the student a
+                 question about a diagram that isn't on screen ("find the length of side x" with
+                 no triangle anywhere).
+      "prose"  — it was only words, which the prompt line already says. Safe to drop silently.
+    """
+    if not s or not str(s).strip():
+        return "", ""
+    t = str(s)
+    had_figure = bool(_MD_IMAGE.search(t) or _URL_RE.search(t))
+    t = _MD_IMAGE.sub(" ", t)
+    t = _MD_LINK.sub(" ", t)
+    t = _URL_RE.sub(" ", t)
+    t = _HTML_TAG.sub(" ", t)
+    t = re.sub(r"\s{2,}", " ", t).strip()
+    if had_figure:
+        return "", "figure"
+    # Decide prose-vs-maths on the RAW text. Doing it after the repairs is circular: they turn
+    # "times" into "\times", which then looks like maths, so the sentence "The times table is
+    # fun" would be typeset as an equation instead of being dropped.
+    if not _HAS_MATH.search(t):
+        return "", "prose"
+    t = normalise_math_latex(_repair_latex(t))
+    if not t:
+        return "", "prose"
+    return t, ""
 
 
 def _latexish_to_plain(s: str) -> str:
@@ -175,7 +365,9 @@ def build_math(question: str, answer: str, *, mode: str = "latex",
     mode = mode if mode in ("latex", "image") else "latex"
     if mode == "image" and not image_url:
         mode = "latex"
-    latex = _repair_latex(latex)
+    # Defence in depth: the tool already refuses a `latex` carrying a figure, so anything left
+    # here is either a real equation or prose worth dropping. Never hand raw model text to KaTeX.
+    latex, _latex_problem = clean_math_latex(latex)
     # The question line and the answer bubbles are plain text (not KaTeX), so any LaTeX the model
     # slipped into them ("\frac{3}{5}", "\(\frac{2}{3}\)") must be turned into readable text or it
     # shows up raw on the button / in the prompt.
@@ -458,6 +650,174 @@ async def clear_puzzle_state(db: AsyncSession, appointment_id: int) -> None:
         return
     state = dict(plan.session_state) if plan.session_state else {}
     state.pop("puzzle_state", None)
+    plan.session_state = state
+    await db.flush()
+
+
+# ── Visual-family rotation (puzzle · animation · svg · mermaid, evenly) ───────────
+# The tutor left to itself reaches for the same kind of visual all lesson. The target is an even
+# 25/25/25/25 split across the four families, so we record what has actually been shown and the
+# LESSON STATE anchor names the family that is furthest behind — the same running-quota approach
+# that made the manipulative/classic mix hold, rather than hoping a prompt line is obeyed.
+VISUAL_FAMILIES = ("puzzle", "animation", "svg", "mermaid", "image")
+
+
+def visual_family_for(render: Optional[str]) -> str:
+    """Which family a shown visual belongs to, from its render key."""
+    r = (render or "").strip().lower()
+    if r == "mermaid":
+        return "mermaid"
+    if r == "animation":
+        return "animation"
+    if r == "svg_diagram":
+        return "svg"
+    if r == "explanatory_image":
+        # A generated teaching picture is something the student LOOKS AT, not something they
+        # DO — it used to fall through to "puzzle", so showing one during a teaching phase
+        # spent the puzzle quota and the rotation then steered AWAY from explanatory content,
+        # the exact opposite of what a teaching phase wants.
+        return "image"
+    return "puzzle"          # math/graph/labelling/matching/manipulatives
+
+
+# The three EXPLANATORY families — things the student LOOKS AT while the tutor teaches — as
+# opposed to "puzzle", which is something they DO.
+EXPLANATORY_FAMILIES = ("mermaid", "svg", "animation", "image")
+
+# What the mix should be in each phase of the lesson. A lesson that opens with puzzles makes the
+# student solve before they have been taught anything; a practice phase full of diagrams never
+# lets them try it themselves. So the phase — not the tutor's mood — decides the balance, and
+# EVERY tool stays bound in every phase (this is priority, not a gate: a practice phase can still
+# draw a diagram when one genuinely helps, it just won't lead with one).
+#
+# The split is DECISIVE, not a gentle 70/30 blend, for two reasons. Pedagogically the phases mean
+# different things: a teaching phase is slides + the visual that explains them, a practice phase
+# is the student working. Arithmetically, real plan_blocks give recap ~2 turns and review ~3 —
+# a 30% target over 2 picks cannot be expressed at all (you get 0% or 50%), so a soft blend in a
+# short phase is decided entirely by rounding. Near the extremes the rounding stops mattering.
+VISUAL_PHASE_WEIGHTS: Dict[str, Dict[str, float]] = {
+    "recap":    {"puzzle": 0.15, "explanatory": 0.85},   # remind them how it works
+    "teach":    {"puzzle": 0.20, "explanatory": 0.80},   # explain first, practise second
+    "practice": {"puzzle": 0.85, "explanatory": 0.15},   # now they do it
+    "quiz":     {"puzzle": 0.90, "explanatory": 0.10},
+    "review":   {"puzzle": 0.30, "explanatory": 0.70},   # summarise, with a little recall
+}
+_DEFAULT_PHASE = "teach"
+
+
+def _split_entry(entry: str) -> tuple:
+    """A visual_seq entry is "phase:family" ("teach:mermaid"). Entries written before the mix
+    became phase-aware are bare family names — they carry no phase, so they are counted toward
+    no phase's target (they still age out of the capped window)."""
+    s = str(entry or "")
+    if ":" in s:
+        ph, _, fam = s.partition(":")
+        return ph.strip().lower(), fam.strip()
+    return None, s.strip()
+
+
+def family_weights(phase: Optional[str], available: Optional[List[str]] = None) -> Dict[str, float]:
+    """Per-family target shares for this phase, normalised over what's actually available.
+
+    The phase split is puzzle-vs-explanatory; the explanatory share is then divided evenly among
+    whichever of mermaid/svg/animation can be offered, so losing manim re-splits its share
+    between the other two instead of quietly handing it to puzzles.
+    """
+    avail = [f for f in (available or VISUAL_FAMILIES) if f in VISUAL_FAMILIES]
+    if not avail:
+        return {}
+    split = VISUAL_PHASE_WEIGHTS.get((phase or "").strip().lower()) \
+        or VISUAL_PHASE_WEIGHTS[_DEFAULT_PHASE]
+    expl = [f for f in avail if f in EXPLANATORY_FAMILIES]
+    out: Dict[str, float] = {}
+    if "puzzle" in avail:
+        out["puzzle"] = split["puzzle"] if expl else 1.0
+    for f in expl:
+        out[f] = (split["explanatory"] if "puzzle" in avail else 1.0) / len(expl)
+    total = sum(out.values()) or 1.0
+    return {f: w / total for f, w in out.items()}
+
+
+def pick_visual_family(seq: Optional[List[str]], available: Optional[List[str]] = None,
+                       phase: Optional[str] = None) -> str:
+    """The family to use next, so the running mix converges on this PHASE's target ratio.
+
+    Largest-deficit selection: pick whichever family is furthest below the share it should have
+    had by now (`weight × turns_so_far − times_used`). That converges on the target exactly AND
+    stays smooth — a 70% family comes up roughly two turns in three rather than in one long burst,
+    which a per-turn dice roll or a naive virtual-time scheduler would both get wrong.
+
+    A repeat is only broken on a TIE, never forbidden outright: an earlier version excluded the
+    previous family whenever any alternative existed, which silently capped every weight at 50%
+    and made a 70% practice phase impossible.
+
+    THE DEFICIT IS COUNTED WITHIN THE CURRENT PHASE ONLY. Counting it across the whole lesson
+    while applying a per-phase target is incoherent, and measurably broke the mix: a practice
+    phase (70% puzzle) drove the lesson-wide puzzle count so high that the following review phase
+    (40%) could never pick a puzzle again. Audited over 7,072 real lessons it produced
+    practice 97% / review 0% / recap 50% against targets of 70 / 40 / 30.
+
+    `available` limits it to what can actually be offered; `phase` comes from the lesson state
+    machine (plan_blocks step type). With no phase this falls back to the teaching mix.
+    """
+    avail = [f for f in (available or VISUAL_FAMILIES) if f in VISUAL_FAMILIES]
+    if not avail:
+        return "puzzle"
+    entries = [_split_entry(s) for s in (seq or [])]
+    entries = [(p, f) for p, f in entries if f in VISUAL_FAMILIES]
+    weights = family_weights(phase, avail)
+    ph = (phase or _DEFAULT_PHASE).strip().lower()
+    # Only this phase's history counts toward this phase's target. `last` deliberately ignores
+    # the phase, so we still avoid showing the same family twice in a row across a boundary.
+    hist = [f for p, f in entries if p == ph]
+    last = entries[-1][1] if entries else None
+    turn = len(hist) + 1
+
+    best, best_score = [], None
+    for f in avail:
+        w = weights.get(f, 0.0)
+        if w <= 0:
+            continue
+        deficit = w * turn - hist.count(f)
+        if best_score is None or deficit > best_score + 1e-9:
+            best, best_score = [f], deficit
+        elif abs(deficit - best_score) <= 1e-9:
+            best.append(f)
+    if not best:
+        return random.choice(avail)
+    # Only when the leaders are tied do we steer away from repeating the last family.
+    alternatives = [f for f in best if f != last]
+    return random.choice(alternatives or best)
+
+
+async def get_visual_seq(db: AsyncSession, appointment_id: int) -> List[str]:
+    plan = await _load_plan(db, appointment_id)
+    if plan is None or not plan.session_state:
+        return []
+    return list(plan.session_state.get("visual_seq") or [])
+
+
+async def bump_visual_family(db: AsyncSession, appointment_id: int, family: str,
+                             phase: Optional[str] = None) -> None:
+    """Record that a visual of this family reached the screen, TAGGED WITH THE LESSON PHASE.
+
+    The phase has to be stored, not just used at pick time: each phase has its own target mix, so
+    the running count must be attributable to a phase or the targets cannot be held (see
+    pick_visual_family). Read-modify-write the whole session_state dict (JSONB) — mutating a
+    nested key in place isn't seen as dirty and would silently not save, the same trap as
+    puzzle_state/puzzle_mix.
+    """
+    if family not in VISUAL_FAMILIES:
+        return
+    plan = await _load_plan(db, appointment_id)
+    if plan is None:
+        return
+    state = dict(plan.session_state) if plan.session_state else {}
+    seq = list(state.get("visual_seq") or [])
+    seq.append(f"{(phase or _DEFAULT_PHASE).strip().lower()}:{family}")
+    # Window is per-lesson but the counts are read per-PHASE, so it has to be long enough that a
+    # single phase still has a usable history inside it.
+    state["visual_seq"] = seq[-40:]
     plan.session_state = state
     await db.flush()
 

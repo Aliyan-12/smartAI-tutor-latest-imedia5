@@ -109,6 +109,11 @@ export default function SessionPage() {
   const [isMobile, setIsMobile] = useState(false);
   const [isSmall, setIsSmall] = useState(false);
   const [mobilePanelView, setMobilePanelView] = useState<"chat" | "learn">("chat");
+  // Mobile shows ONE panel at a time, so a visual that arrives while the student is on Chat is
+  // completely invisible to them. Where we deliberately DON'T auto-switch (a slide move in text
+  // mode — yanking them off the input mid-answer is worse), flag the Learn tab instead so the
+  // AI's "take a look at this" has something to point at.
+  const [learnUnseen, setLearnUnseen] = useState(false);
   const [xp, setXp] = useState(0);
   const timerRef = useRef<number | null>(null);
 
@@ -235,8 +240,10 @@ export default function SessionPage() {
           setQuickReplies([]); // the puzzle is the thing to answer now
           setCurrentPuzzle(data as unknown as PuzzlePayload);
           setLearnTab("learn");
-          // A puzzle needs the Learn panel — surface it (mobile shows one panel).
+          // A puzzle/diagram/animation needs the Learn panel — surface it (mobile shows one
+          // panel). All four visual families ride this same show_puzzle frame.
           setMobilePanelView("learn");
+          setLearnUnseen(false);
         }
       } else if (tool === "clear_puzzle") {
         setCurrentPuzzle(null);
@@ -286,8 +293,14 @@ export default function SessionPage() {
           // talking, not typing, so surface the slide the AI just navigated to —
           // otherwise they'd stay on Chat and never see it. In text mode we leave
           // their panel alone (auto-switching would yank them off the input every
-          // time they need to type an answer); they can tap Learn to follow along.
-          if (voiceActive) setMobilePanelView("learn");
+          // time they need to type an answer) and badge the Learn tab instead, so the
+          // change is never silent.
+          if (voiceActive) {
+            setMobilePanelView("learn");
+            setLearnUnseen(false);
+          } else {
+            setLearnUnseen(true);
+          }
         }
       } else {
         setToolResults((prev) => [...prev, { tool, data, id: Date.now().toString() }]);
@@ -1675,10 +1688,25 @@ export default function SessionPage() {
                     marginBottom: -2,
                     transition: "color 0.15s, border-color 0.15s",
                     fontFamily: "inherit",
+                    position: "relative",
                   }}
-                  onClick={() => setMobilePanelView(tab.id)}
+                  onClick={() => {
+                    setMobilePanelView(tab.id);
+                    if (tab.id === "learn") setLearnUnseen(false);
+                  }}
+                  aria-label={tab.id === "learn" && learnUnseen ? `${tab.label} — new` : undefined}
                 >
                   {tab.label}
+                  {tab.id === "learn" && learnUnseen && mobilePanelView !== "learn" && (
+                    <span
+                      aria-hidden
+                      style={{
+                        display: "inline-block", width: 7, height: 7, borderRadius: "50%",
+                        background: "var(--accent-blue, #3b82f6)", marginLeft: 6,
+                        verticalAlign: "middle",
+                      }}
+                    />
+                  )}
                 </button>
               ))}
             </div>

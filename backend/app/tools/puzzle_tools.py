@@ -105,57 +105,101 @@ async def _award_puzzle_xp(ctx: ToolContext, verdict: dict) -> int:
     return xp
 
 
+async def persist_and_return(ctx: ToolContext, full: dict) -> dict:
+    """Store the full payload (with server-only solution) and return the client payload
+    (no solution) with a fresh instance_id.
+
+    Module-level rather than a closure because `visual_tools` shares it: every visual —
+    puzzle, diagram, animation — must land on screen through the SAME path, or the puzzle
+    state, the hands-on quota and the visual-family counts drift apart.
+
+    ONE VISUAL PER REPLY IS ENFORCED HERE. The Learn panel shows a single thing, so a second
+    visual in the same reply silently REPLACES the first: a lesson fired explanatory_puzzle,
+    then animate_concept, then a puzzle, and only the puzzle was ever on screen — while the
+    reply cheerfully explained the image, then the animation, then the puzzle, two-thirds of it
+    describing things the student never saw. The prompt already asked for one-at-a-time and was
+    ignored, so it is a server guard now, like the slide-move guard. The refusal carries
+    `error` + `suppressed`, which makes `gemini_service` unbind the tool for the rest of the
+    turn, so the model can't burn its remaining rounds retrying.
+    """
+    kind = full.get("render") or "visual"
+    already = getattr(ctx, "visual_shown", "")
+    if already:
+        logger.info("VISUAL refused (one per reply) tried=%s already=%s appt=%s",
+                    kind, already, ctx.appointment_id)
+        if already == "slide":
+            # The reported failure: advance_lesson_slide → math_puzzle in one reply. The puzzle
+            # covers the slide, so the student is asked to answer a question about content they
+            # were never shown or taught — "I haven't been taught this".
+            msg = (
+                "REFUSED — you have just moved to a NEW SLIDE, and it is what the student is "
+                "looking at. A puzzle or diagram would have covered it before they read a word "
+                "of it. Nothing was shown. TEACH THAT SLIDE FIRST: in this reply, explain the "
+                "slide_content you just received in your own warm words, with an example. THEN, "
+                "in your NEXT reply, set a puzzle on what you have just taught. Never ask a "
+                "student to practise something you have not explained yet."
+            )
+        else:
+            msg = (
+                f"REFUSED — you already put a '{already}' on the student's screen in this reply, "
+                "and the panel only shows ONE thing, so this would have replaced it before they "
+                "ever saw it. Nothing was shown. Now write your reply about the "
+                f"'{already}' that IS on screen — explain just that one thing. Show the next "
+                "visual in your NEXT reply, after they have responded."
+            )
+        return {"action": "show_puzzle", "error": "already_showed_visual",
+                "suppressed": True, "message": msg}
+    try:
+        ctx.visual_shown = kind
+    except Exception:  # noqa: BLE001 — frozen/duck-typed ctx must never break a lesson
+        pass
+    try:
+        instance_id = await puzzle_service.set_puzzle_shown(ctx.db, ctx.appointment_id, full)
+    except Exception as e:  # noqa: BLE001
+        logger.warning("set_puzzle_shown failed: %s", e)
+        instance_id = ""
+    ptype = full.get("puzzle_type")
+    # Count it against the hands-on quota (KS1/2 100% · KS3 60% · KS4 30% · KS5 0%), which
+    # is what the LESSON STATE anchor reads to tell the model which style to use next.
+    # `explanatory` is a teaching diagram, not practice, so it doesn't count either way.
+    if ptype != "explanatory":
+        try:
+            await manipulative_service.bump_mix(
+                ctx.db, ctx.appointment_id,
+                "manipulative" if ptype == "manipulative" else "classic",
+                # For a manipulative, `render` IS the kind — recorded so the next
+                # suggestion can avoid repeating it.
+                kind=full.get("render") if ptype == "manipulative" else None,
+            )
+        except Exception as e:  # noqa: BLE001
+            logger.warning("bump_mix failed: %s", e)
+    # Record which VISUAL FAMILY reached the screen (puzzle · animation · svg · mermaid) so the
+    # anchor can hold the PHASE's target mix instead of the tutor reusing one family all lesson.
+    try:
+        await puzzle_service.bump_visual_family(
+            ctx.db, ctx.appointment_id,
+            puzzle_service.visual_family_for(full.get("render")),
+            phase=getattr(ctx, "phase", None),
+        )
+    except Exception as e:  # noqa: BLE001
+        logger.warning("bump_visual_family failed: %s", e)
+    client = puzzle_service._client_payload(full)
+    client["instance_id"] = instance_id
+    client["rendered"] = True
+    logger.info("PUZZLE built render=%s type=%s instance=%s",
+                client.get("render"), client.get("puzzle_type"), instance_id)
+    return client
+
+
 def puzzle_tool_groups(ctx: ToolContext) -> dict:
-    """Generative puzzle tools (generators + clear + evaluators) for the registry."""
+    """Generative puzzle tools (generators + clear + evaluators) for the registry.
+
+    Display-only teaching visuals (mermaid / svg / manim) live in `visual_tools.py` — they are
+    what the tutor EXPLAINS with, while these are what the student DOES.
+    """
 
     async def _persist_and_return(full: dict) -> dict:
-        """Store the full payload (with server-only solution) and return the client
-        payload (no solution) with a fresh instance_id."""
-        try:
-            instance_id = await puzzle_service.set_puzzle_shown(ctx.db, ctx.appointment_id, full)
-        except Exception as e:  # noqa: BLE001
-            logger.warning("set_puzzle_shown failed: %s", e)
-            instance_id = ""
-        ptype = full.get("puzzle_type")
-        # Count it against the hands-on quota (KS1/2 100% · KS3 60% · KS4 30% · KS5 0%), which
-        # is what the LESSON STATE anchor reads to tell the model which style to use next.
-        # `explanatory` is a teaching diagram, not practice, so it doesn't count either way.
-        if ptype != "explanatory":
-            try:
-                await manipulative_service.bump_mix(
-                    ctx.db, ctx.appointment_id,
-                    "manipulative" if ptype == "manipulative" else "classic",
-                    # For a manipulative, `render` IS the kind — recorded so the next
-                    # suggestion can avoid repeating it.
-                    kind=full.get("render") if ptype == "manipulative" else None,
-                )
-            except Exception as e:  # noqa: BLE001
-                logger.warning("bump_mix failed: %s", e)
-        client = puzzle_service._client_payload(full)
-        client["instance_id"] = instance_id
-        client["rendered"] = True
-        logger.info("PUZZLE built render=%s type=%s instance=%s",
-                    client.get("render"), client.get("puzzle_type"), instance_id)
-        return client
-
-    @tool
-    async def explanatory_puzzle(image_prompt: str, caption: str = "", title: str = "") -> dict:
-        """
-        Show a clear, generated diagram/illustration that EXPLAINS the concept you are
-        teaching right now (e.g. "a labelled diagram comparing a plant cell and an animal
-        cell", "the water cycle with arrows"). This is your GO-TO visual for teaching and
-        for helping students who find a Science/Maths/Physics/Chemistry/Biology idea hard —
-        show it instead of a wall of text. Display-only: the student just looks at it, so
-        after showing it, keep teaching from it (no answer to wait for). image_prompt is a
-        vivid description of the picture to draw; caption is one short line shown under it.
-        Call SILENTLY.
-        """
-        key = f"{ctx.subject}|{ctx.key_stage}|{ctx.topic_title or ''}"
-        url = await image_gen_service.generate_image(image_prompt, cache_key=key)
-        if not url:
-            return {"action": "show_puzzle", "error": "image_gen_failed",
-                    "message": "The image couldn't be generated — keep teaching in words instead."}
-        return await _persist_and_return(puzzle_service.build_explanatory(url, caption, title))
+        return await persist_and_return(ctx, full)
 
     @tool
     async def labelling_puzzle(items: str, prompt: str = "") -> dict:
@@ -219,9 +263,29 @@ def puzzle_tool_groups(ctx: ToolContext) -> dict:
         open-ended answers); for a plain numeric answer the server still adds tappable options
         automatically.
 
+        `latex` IS AN EQUATION ONLY — it is typeset by KaTeX. Never put prose, a markdown image,
+        an HTML tag or a URL in it (they render as gibberish, letter by letter). If the question
+        needs a FIGURE the student must look at (a labelled triangle, a shape with dimensions), do
+        NOT try to embed it here — put the figure on screen FIRST with draw_svg (or use
+        diagram_math_puzzle), then ask about it. If the words alone are enough, leave `latex`
+        empty and put everything in `question`.
+
         After showing it, WAIT — on submit call math_evaluator. Not for graphs (use
         graph_puzzle). Call SILENTLY.
         """
+        # A `latex` carrying an image/URL means the model meant to SHOW a figure. Refusing loudly
+        # is the only safe answer: dropping it silently ships a question about a diagram that was
+        # never drawn ("find the length of side x" with no triangle on screen).
+        _clean_latex, _latex_problem = puzzle_service.clean_math_latex(latex)
+        if _latex_problem == "figure":
+            return {"action": "show_puzzle", "error": "latex_not_an_equation",
+                    "message": "`latex` is typeset by KaTeX, so it can only hold an EQUATION — "
+                               "the image/URL you put there would render as gibberish and the "
+                               "figure would never appear. Draw the figure FIRST with draw_svg "
+                               "(or use diagram_math_puzzle), then call math_puzzle again asking "
+                               "about what is now on screen — or drop `latex` and put the whole "
+                               "problem in `question`."}
+        latex = _clean_latex
         image_url = ""
         if mode == "image" and image_prompt:
             image_url = await image_gen_service.generate_image(image_prompt) or ""
@@ -424,9 +488,13 @@ def puzzle_tool_groups(ctx: ToolContext) -> dict:
               sensible equation works, not a fixed list.
           • kind="ph_scale", params {"substance": "lemon_juice"}
               The student slides a marker to the substance's pH.
-          • kind="force_arrows", params {"left": 30, "right": 50}   (newtons)
-              Two force arrows on a box; the student gives the resultant's size and direction.
-              Pass equal forces to teach BALANCED forces.
+          • kind="force_arrows", params {"a": 30, "a_dir": "right", "b": 50, "b_dir": "left"}
+              Two force arrows on a box, EACH drawn in its own direction; the student gives the
+              resultant's size and direction. VARY IT: point them the SAME way (they ADD, e.g.
+              a_dir=right + b_dir=right) OR OPPOSITE ways (they subtract), and let the bigger force
+              be on either side. Equal + opposite → balanced. This is a deterministic diagram, so
+              use it for the WORKED EXAMPLE too (do NOT use explanatory_puzzle for a forces
+              diagram — its AI-drawn arrows won't match your numbers).
           • kind="punnett_square", params {"parent1": "Bb", "parent2": "Bb", "trait": "brown eyes"}
               A genetic cross the student fills in. Both parents must use the SAME letter.
 
@@ -606,8 +674,8 @@ def puzzle_tool_groups(ctx: ToolContext) -> dict:
         return await _evaluate("graph")
 
     puzzles = [
-        explanatory_puzzle, labelling_puzzle, matching_puzzle, math_puzzle,
-        diagram_math_puzzle, graph_puzzle, clear_puzzle, quick_replies,
+        labelling_puzzle, matching_puzzle,
+        math_puzzle, diagram_math_puzzle, graph_puzzle, clear_puzzle, quick_replies,
         labelling_evaluator, matching_evaluator, math_evaluator, graph_evaluator,
     ]
     # Bind the hands-on tools only when this subject + key stage actually HAS activities (an
