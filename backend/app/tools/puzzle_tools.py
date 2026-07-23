@@ -112,7 +112,35 @@ async def persist_and_return(ctx: ToolContext, full: dict) -> dict:
     Module-level rather than a closure because `visual_tools` shares it: every visual —
     puzzle, diagram, animation — must land on screen through the SAME path, or the puzzle
     state, the hands-on quota and the visual-family counts drift apart.
+
+    ONE VISUAL PER REPLY IS ENFORCED HERE. The Learn panel shows a single thing, so a second
+    visual in the same reply silently REPLACES the first: a lesson fired explanatory_puzzle,
+    then animate_concept, then a puzzle, and only the puzzle was ever on screen — while the
+    reply cheerfully explained the image, then the animation, then the puzzle, two-thirds of it
+    describing things the student never saw. The prompt already asked for one-at-a-time and was
+    ignored, so it is a server guard now, like the slide-move guard. The refusal carries
+    `error` + `suppressed`, which makes `gemini_service` unbind the tool for the rest of the
+    turn, so the model can't burn its remaining rounds retrying.
     """
+    kind = full.get("render") or "visual"
+    already = getattr(ctx, "visual_shown", "")
+    if already:
+        logger.info("VISUAL refused (one per reply) tried=%s already=%s appt=%s",
+                    kind, already, ctx.appointment_id)
+        return {
+            "action": "show_puzzle", "error": "already_showed_visual", "suppressed": True,
+            "message": (
+                f"REFUSED — you already put a '{already}' on the student's screen in this reply, "
+                "and the panel only shows ONE thing, so this would have replaced it before they "
+                "ever saw it. Nothing was shown. Now write your reply about the "
+                f"'{already}' that IS on screen — explain just that one thing. Show the next "
+                "visual in your NEXT reply, after they have responded."
+            ),
+        }
+    try:
+        ctx.visual_shown = kind
+    except Exception:  # noqa: BLE001 — frozen/duck-typed ctx must never break a lesson
+        pass
     try:
         instance_id = await puzzle_service.set_puzzle_shown(ctx.db, ctx.appointment_id, full)
     except Exception as e:  # noqa: BLE001

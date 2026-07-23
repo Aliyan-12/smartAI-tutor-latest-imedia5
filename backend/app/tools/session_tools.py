@@ -37,6 +37,10 @@ class ToolContext:
     # Lesson phase this turn (recap|teach|practice|quiz|review), from the state machine. Every
     # visual is recorded against it so each phase's target mix can be held independently.
     phase: str = "teach"
+    # Turn-scoped: has something already been put on the Learn panel this reply? The panel shows
+    # ONE thing, so a second visual in the same reply silently replaces the first — see
+    # `persist_and_return`. Reset every turn because a fresh ToolContext is built per turn.
+    visual_shown: str = ""
     # Turn-scoped guard: at most ONE slide move (advance/retreat/show) per reply,
     # so the AI can't race several slides ahead in a single turn. Reset each turn
     # because a fresh ToolContext is built per turn in _run_turn.

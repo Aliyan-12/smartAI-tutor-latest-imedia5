@@ -998,7 +998,10 @@ ALWAYS use this content as your PRIMARY teaching source when it is present.
     # go BETWEEN the concepts and continue AFTER the deck is finished, in every mode.
     puzzle_rhythm = (
         "- 🧩 PUZZLES BETWEEN AND AFTER — THE SAME IN EVERY LESSON LENGTH (this does NOT change with the pace above): after EACH main concept you teach, set a PRACTICE PUZZLE before moving on to the next concept — slides and puzzles ALTERNATE, they are not two separate halves of the lesson. When the deck is finished (or there are no more concept slides), KEEP GOING with practice puzzles on what you taught — the lesson does not stop being interactive once the slides run out. Then the quiz near the end. Never teach the whole deck first and only then start practising.\n"
-        "- 🔁 ONE VISUAL PER REPLY, THEN EXPLAIN IT (STRICT): each reply changes the Learn panel AT MOST ONCE — ONE slide move OR ONE puzzle/diagram — and then you EXPLAIN what you just put there. Never fire two view-changing tools in the same reply (two slide moves, or a diagram AND a puzzle): the second one replaces the first on screen, so the student never sees it and your explanation no longer matches the panel. The rhythm is: show ONE thing → explain it → (next reply) show the next → explain it. The server enforces this for slides, so a second move in the same reply is refused."
+        "- 🔁 ONE VISUAL PER REPLY, THEN EXPLAIN IT (STRICT, SERVER-ENFORCED): each reply changes the Learn panel AT MOST ONCE — ONE slide move OR ONE puzzle/diagram/animation — and then you EXPLAIN what you just put there.\n"
+        "  • The panel shows ONE thing at a time. A second visual in the same reply REPLACES the first before the student ever sees it, so a reply that shows a picture, then an animation, then a puzzle leaves only the puzzle on screen — and an explanation covering all three describes two things that were never visible. The server now REFUSES the second visual and tells you so; a refusal means nothing was shown.\n"
+        "  • So: ONE tool → explain THAT one thing in a few sentences → stop. Next reply: the next tool → explain that. Never queue several visuals and describe them afterwards, and never narrate a visual you did not successfully show this reply.\n"
+        "  • Explain what is on screen NOW, in the present tense, and do not re-describe visuals from earlier replies — the student has already seen those."
     )
 
     # WHICH material this goal + length uses, and HOW to teach it (the goal × length matrix in
@@ -2003,6 +2006,37 @@ async def build_lesson_state_anchor(
             lines.append(phase_line)
             if next_line:
                 lines.append(next_line)
+
+            # PHASE HAND-OVER. The state machine moves the lesson on by the clock, but the model
+            # only ever saw the CURRENT phase — it had no way to notice a boundary had just been
+            # crossed, so it carried on teaching into a practice step and the lesson had no
+            # audible gear change. Compare against the last phase we told it about and, on the
+            # turn the phase flips, make the transition an explicit instruction.
+            try:
+                from app.services import session_state_service as _sss_ph
+                _prev = await _sss_ph.get_flag(db, appt_id, "announced_phase")
+                if _prev and _prev != _phase_type:
+                    _what = {
+                        "recap":    "a quick reminder of what they already know",
+                        "teach":    "teaching the new idea",
+                        "practice": "letting them try it themselves",
+                        "quiz":     "a short quiz to check it stuck",
+                        "review":   "recapping what they've learned",
+                    }
+                    lines.append(
+                        f"⏭️ PHASE JUST CHANGED: {_prev.upper()} → {_phase_type.upper()}. "
+                        f"OPEN this reply with ONE short, warm sentence that closes off the last "
+                        f"part and names what's next — e.g. \"Nice work, that's the idea sorted — "
+                        f"let's have a go at one ourselves.\" Then immediately do the new phase's "
+                        f"work ({_what.get(_phase_type, 'the next part')}). One sentence only: no "
+                        f"summary of the whole lesson, no goodbye language, don't announce it "
+                        f"twice, and never stop and wait for permission to move on."
+                    )
+                if _prev != _phase_type:
+                    await _sss_ph.set_flag(db, appt_id, "announced_phase", _phase_type)
+                    logger.info("PHASE %s → %s appt=%s", _prev or "(start)", _phase_type, appt_id)
+            except Exception:
+                logger.warning("phase-change anchor failed for appt %s", appt_id, exc_info=True)
         except Exception:
             logger.warning("phase/next anchor failed for appt %s", appt_id, exc_info=True)
 
@@ -2762,6 +2796,12 @@ async def _run_turn(send, chat_id, user_id, *, saved_user_text, ai_content,
                         "\"It's on your screen now — have a go!\". Nothing else."
                     )
                     try:
+                        # The recovery IS a deliberate second view change: the AI promised a
+                        # practice question and none is on screen, so the puzzle it generates
+                        # now is meant to replace whatever is showing. Clear the one-visual
+                        # guard for it, or a teaching diagram earlier in this same turn would
+                        # silently block the recovery and the safety net would stop working.
+                        tool_context.visual_shown = ""
                         await _consume(_recovery, with_image=False)
                     except Exception:
                         logger.warning("safety-net recovery turn failed for appt %s", appt_id, exc_info=True)
