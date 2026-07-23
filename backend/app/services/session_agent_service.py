@@ -1001,7 +1001,9 @@ ALWAYS use this content as your PRIMARY teaching source when it is present.
         "- 🔁 ONE VISUAL PER REPLY, THEN EXPLAIN IT (STRICT, SERVER-ENFORCED): each reply changes the Learn panel AT MOST ONCE — ONE slide move OR ONE puzzle/diagram/animation — and then you EXPLAIN what you just put there.\n"
         "  • The panel shows ONE thing at a time. A second visual in the same reply REPLACES the first before the student ever sees it, so a reply that shows a picture, then an animation, then a puzzle leaves only the puzzle on screen — and an explanation covering all three describes two things that were never visible. The server now REFUSES the second visual and tells you so; a refusal means nothing was shown.\n"
         "  • So: ONE tool → explain THAT one thing in a few sentences → stop. Next reply: the next tool → explain that. Never queue several visuals and describe them afterwards, and never narrate a visual you did not successfully show this reply.\n"
-        "  • Explain what is on screen NOW, in the present tense, and do not re-describe visuals from earlier replies — the student has already seen those."
+        "  • Explain what is on screen NOW, in the present tense, and do not re-describe visuals from earlier replies — the student has already seen those.\n"
+        "- 🗣️ IF YOU SHOW IT, YOU EXPLAIN IT — NO EXCEPTIONS. This applies to EVERYTHING you put on the Learn panel: a SLIDE, an explanatory IMAGE, an SVG diagram, a mermaid chart, a manim ANIMATION. The moment something appears, the student is looking at it and waiting for you to talk them through it. So every reply that changes the panel MUST also say, in your own warm words: what they're looking at, the one idea it shows, and how to read it (\"start at the top-left…\", \"the arrow shows…\"). Never show something and go straight to a question, and never show something and say nothing — an unexplained visual just confuses them.\n"
+        "- 📖 TEACH BEFORE YOU TEST — the deck comes first. When you move to a new slide, that slide IS this reply's teaching: explain its content, with your own example. Only AFTER you have explained something may you set a puzzle on it, and only on what you have actually taught. A student who meets a question on material you skipped past will say \"I haven't been taught this\" — and they'll be right."
     )
 
     # WHICH material this goal + length uses, and HOW to teach it (the goal × length matrix in
@@ -2534,8 +2536,21 @@ async def _run_turn(send, chat_id, user_id, *, saved_user_text, ai_content,
                 _sc = (current_slide.get("slide_content") or "").strip()
                 _n = current_slide.get("slide_index", 1)
                 _tot = current_slide.get("page_count", 1)
+                # PROGRESS AWARENESS. The model only ever saw the current slide, so it had no
+                # idea what it had already covered or what was still to come — it re-explained
+                # finished ideas and sometimes tested things still ahead of the deck.
+                _done = max(0, _n - 1)
+                _left = max(0, _tot - _n)
+                _prog = (
+                    f"📚 DECK PROGRESS: {_done} slide(s) already taught · you are ON slide {_n} "
+                    f"· {_left} still to come. Teach slide {_n} NOW. Do not re-teach the earlier "
+                    "slides (the student has had them) and do not jump ahead to material on the "
+                    f"{_left} slides you haven't reached — only test what you have taught."
+                    if _tot > 1 else
+                    "📚 DECK PROGRESS: this is the only slide in the deck."
+                )
                 ai_content = (
-                    f"{ai_content}\n\n"
+                    f"{ai_content}\n\n{_prog}\n"
                     f"━━━ ON-SCREEN SLIDE {_n} of {_tot} (showing on the student's screen right now) ━━━\n"
                     f"{_sc or '(no extracted text on this slide — teach the concept it depicts)'}\n"
                     "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"

@@ -127,16 +127,28 @@ async def persist_and_return(ctx: ToolContext, full: dict) -> dict:
     if already:
         logger.info("VISUAL refused (one per reply) tried=%s already=%s appt=%s",
                     kind, already, ctx.appointment_id)
-        return {
-            "action": "show_puzzle", "error": "already_showed_visual", "suppressed": True,
-            "message": (
+        if already == "slide":
+            # The reported failure: advance_lesson_slide → math_puzzle in one reply. The puzzle
+            # covers the slide, so the student is asked to answer a question about content they
+            # were never shown or taught — "I haven't been taught this".
+            msg = (
+                "REFUSED — you have just moved to a NEW SLIDE, and it is what the student is "
+                "looking at. A puzzle or diagram would have covered it before they read a word "
+                "of it. Nothing was shown. TEACH THAT SLIDE FIRST: in this reply, explain the "
+                "slide_content you just received in your own warm words, with an example. THEN, "
+                "in your NEXT reply, set a puzzle on what you have just taught. Never ask a "
+                "student to practise something you have not explained yet."
+            )
+        else:
+            msg = (
                 f"REFUSED — you already put a '{already}' on the student's screen in this reply, "
                 "and the panel only shows ONE thing, so this would have replaced it before they "
                 "ever saw it. Nothing was shown. Now write your reply about the "
                 f"'{already}' that IS on screen — explain just that one thing. Show the next "
                 "visual in your NEXT reply, after they have responded."
-            ),
-        }
+            )
+        return {"action": "show_puzzle", "error": "already_showed_visual",
+                "suppressed": True, "message": msg}
     try:
         ctx.visual_shown = kind
     except Exception:  # noqa: BLE001 — frozen/duck-typed ctx must never break a lesson

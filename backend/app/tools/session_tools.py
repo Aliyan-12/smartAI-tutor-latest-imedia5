@@ -101,6 +101,9 @@ def session_tool_groups(ctx: ToolContext) -> dict:
         # call. It still counts as this turn's slide move, so a stray sequential
         # advance/retreat afterwards is suppressed.
         ctx.slide_moved = True
+        # The deck now owns the Learn panel this reply — see persist_and_return. Teaching the
+        # slide comes BEFORE anything overlays it.
+        ctx.visual_shown = "slide"
         result = await slide_action(
             ctx.db, ctx.appointment_id, mode="show",
             resource_hub_id=resource_hub_id, slide_index=slide_index,
@@ -126,6 +129,9 @@ def session_tool_groups(ctx: ToolContext) -> dict:
                 "advance",
             )
         ctx.slide_moved = True
+        # The deck now owns the Learn panel this reply — see persist_and_return. Teaching the
+        # slide comes BEFORE anything overlays it.
+        ctx.visual_shown = "slide"
         result = await slide_action(ctx.db, ctx.appointment_id, mode="advance")
         await _clear_puzzle_on_slide(ctx)
         return result
@@ -145,6 +151,9 @@ def session_tool_groups(ctx: ToolContext) -> dict:
                 "retreat",
             )
         ctx.slide_moved = True
+        # The deck now owns the Learn panel this reply — see persist_and_return. Teaching the
+        # slide comes BEFORE anything overlays it.
+        ctx.visual_shown = "slide"
         result = await slide_action(ctx.db, ctx.appointment_id, mode="retreat")
         await _clear_puzzle_on_slide(ctx)
         return result
