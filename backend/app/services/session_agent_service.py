@@ -2569,6 +2569,53 @@ async def _run_turn(send, chat_id, user_id, *, saved_user_text, ai_content,
                     if _tot > 1 else
                     "📚 DECK PROGRESS: this is the only slide in the deck."
                 )
+
+                # DECK MAP — what is on every slide, so the tutor teaches in the deck's own order
+                # instead of improvising a concept whose slide is still ahead of it.
+                try:
+                    from app.services import session_resource_service as _srs_map
+                    from app.models.resource_hub import RHResource as _RHR
+                    _rid = current_slide.get("resource_hub_id")
+                    _res = (await db.execute(select(_RHR).where(_RHR.hub_id == _rid))
+                            ).scalar_one_or_none() if _rid else None
+                    _dmap = await _srs_map.get_deck_map(db, appt_id, _res) if _res else []
+                except Exception:
+                    _dmap = []
+                    logger.warning("deck map failed for appt %s", appt_id, exc_info=True)
+
+                if _dmap:
+                    _icon = {"title": "▶", "objectives": "🎯", "vocab": "🔤", "recap": "↩",
+                             "concept": "📖", "formula": "🧮", "example": "✏", "question": "❓",
+                             "answer": "✅", "summary": "🏁", "blank": "·"}
+                    _lines = " | ".join(
+                        f"{'▸' if d['index'] == _n else ''}{d['index']}{_icon.get(d['kind'], '·')}"
+                        f"{d['kind']}: {d['label'][:34]}"
+                        for d in _dmap
+                    )
+                    _ahead = [d for d in _dmap if d["index"] > _n and d["kind"] in ("formula", "example")]
+                    _nextq = next((d for d in _dmap if d["index"] > _n and d["kind"] == "question"), None)
+                    _prog += (
+                        f"\n🗺️ DECK MAP (▸ = where you are): {_lines}\n"
+                        "   USE THIS MAP. Teach the deck IN ORDER. If a concept, formula or "
+                        "example has its OWN slide later on, do NOT teach it from memory now — "
+                        "advance to that slide when you reach it and teach it there, so what you "
+                        "say and what the student sees always match."
+                    )
+                    if _ahead:
+                        _prog += ("\n   ⏭ Still ahead of you: "
+                                  + ", ".join(f"slide {d['index']} ({d['kind']}) {d['label'][:30]}"
+                                              for d in _ahead[:4])
+                                  + " — don't pre-empt these.")
+                    if _nextq:
+                        _prog += (f"\n   ❓ Next question slide: {_nextq['index']} "
+                                  f"({_nextq['label'][:34]}).")
+                    if any(d["index"] == _n and d["kind"] == "question" for d in _dmap):
+                        _prog += ("\n   ❗ THE SLIDE ON SCREEN IS A QUESTION — ask the student for "
+                                  "their answer and WAIT. The next slide reveals it; do not move "
+                                  "on, and do not give the answer, until they have tried.")
+                    if any(d["index"] == _n and d["kind"] == "answer" for d in _dmap):
+                        _prog += ("\n   ✅ THIS IS THE ANSWER SLIDE — go through it now, "
+                                  "confirming what they got right and correcting gently.")
                 ai_content = (
                     f"{ai_content}\n\n{_prog}\n"
                     f"━━━ ON-SCREEN SLIDE {_n} of {_tot} (showing on the student's screen right now) ━━━\n"
