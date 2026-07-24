@@ -770,6 +770,20 @@ VISUAL_PHASE_WEIGHTS: Dict[str, Dict[str, float]] = {
 }
 _DEFAULT_PHASE = "teach"
 
+# How the EXPLANATORY share is divided between the four teaching visuals. Not an even 4-way
+# split: an even split gave animation only ~20% of teaching turns and animations stayed rare,
+# even after the prompt was told to reach for them. Motion is what a still genuinely cannot do —
+# current flowing and splitting, a shape reflecting, a graph being traced — and it is the format
+# students learn most from here, so during TEACHING it leads. Review leans on mermaid instead,
+# because summarising what was covered is a structure job, not a motion one.
+_EXPL_BIAS: Dict[str, Dict[str, float]] = {
+    "recap":    {"animation": 0.40, "svg": 0.25, "mermaid": 0.20, "image": 0.15},
+    "teach":    {"animation": 0.45, "svg": 0.25, "mermaid": 0.15, "image": 0.15},
+    "practice": {"animation": 0.40, "svg": 0.30, "mermaid": 0.15, "image": 0.15},
+    "quiz":     {"animation": 0.35, "svg": 0.30, "mermaid": 0.20, "image": 0.15},
+    "review":   {"animation": 0.25, "svg": 0.20, "mermaid": 0.40, "image": 0.15},
+}
+
 
 def _split_entry(entry: str) -> tuple:
     """A visual_seq entry is "phase:family" ("teach:mermaid"). Entries written before the mix
@@ -785,9 +799,9 @@ def _split_entry(entry: str) -> tuple:
 def family_weights(phase: Optional[str], available: Optional[List[str]] = None) -> Dict[str, float]:
     """Per-family target shares for this phase, normalised over what's actually available.
 
-    The phase split is puzzle-vs-explanatory; the explanatory share is then divided evenly among
-    whichever of mermaid/svg/animation can be offered, so losing manim re-splits its share
-    between the other two instead of quietly handing it to puzzles.
+    The phase split is puzzle-vs-explanatory; the explanatory share is then divided among
+    whichever of mermaid/svg/animation/image can be offered, using the per-phase bias below, so
+    losing manim re-splits its share among the others instead of quietly handing it to puzzles.
     """
     avail = [f for f in (available or VISUAL_FAMILIES) if f in VISUAL_FAMILIES]
     if not avail:
@@ -795,11 +809,14 @@ def family_weights(phase: Optional[str], available: Optional[List[str]] = None) 
     split = VISUAL_PHASE_WEIGHTS.get((phase or "").strip().lower()) \
         or VISUAL_PHASE_WEIGHTS[_DEFAULT_PHASE]
     expl = [f for f in avail if f in EXPLANATORY_FAMILIES]
+    bias = _EXPL_BIAS.get((phase or "").strip().lower()) or _EXPL_BIAS[_DEFAULT_PHASE]
     out: Dict[str, float] = {}
     if "puzzle" in avail:
         out["puzzle"] = split["puzzle"] if expl else 1.0
+    expl_share = (split["explanatory"] if "puzzle" in avail else 1.0)
+    bias_total = sum(bias.get(f, 0.0) for f in expl) or 1.0
     for f in expl:
-        out[f] = (split["explanatory"] if "puzzle" in avail else 1.0) / len(expl)
+        out[f] = expl_share * (bias.get(f, 0.0) / bias_total)
     total = sum(out.values()) or 1.0
     return {f: w / total for f, w in out.items()}
 

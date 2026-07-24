@@ -766,10 +766,30 @@ def _serialise(el, out: List[str], budget: List[int]) -> None:
                        "show one clear structure, not a whole scene")
 
     attrs = []
+    kept: dict = {}
     for k, v in (el.attrib or {}).items():
         cleaned = _clean_attr(k, v)
         if cleaned:
+            kept[cleaned[0]] = cleaned[1]
             attrs.append(f'{cleaned[0]}="{escape(cleaned[1], quote=True)}"')
+
+    # THE CLASSIC SVG TRAP: `fill` defaults to BLACK, not none. A <path>/<polyline> drawn as a
+    # WIRE — stroked, open, no fill given — is therefore filled solid black between its endpoints.
+    # A student was shown a parallel circuit as three black triangles. If the author stroked it
+    # and said nothing about fill, they meant a line, so make that explicit. Elements that DO
+    # specify a fill, and genuinely-filled shapes (polygon arrowheads, rect, circle), are
+    # untouched — as is any element with no stroke, which is filled on purpose.
+    if (tag in ("path", "polyline")
+            and "fill" not in kept
+            and "fill" not in (kept.get("style") or "")):
+        attrs.append('fill="none"')
+        # A path with neither fill nor stroke was only visible BECAUSE of the black default, so
+        # give it a visible stroke rather than turning it invisible.
+        if "stroke" not in kept and "stroke" not in (kept.get("style") or ""):
+            attrs.append('stroke="#0f172a"')
+        if "stroke-width" not in kept:
+            attrs.append('stroke-width="2"')
+
     open_tag = f"<{tag}{(' ' + ' '.join(attrs)) if attrs else ''}"
 
     children = list(el)
