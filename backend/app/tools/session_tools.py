@@ -70,6 +70,71 @@ def _slide_move_refused(payload: dict, verb: str) -> dict:
     return out
 
 
+async def _answer_slide_gate(ctx: "ToolContext"):
+    """Stop the tutor advancing onto an ANSWER-REVEAL slide before the student has had a go.
+
+    Real decks pair a question slide with an identical-looking `✅` answer slide. Advancing
+    straight through hands the student the answer to a question they were never asked — the
+    single most damaging thing the slide tools can do unsupervised.
+
+    Deliberately gates ONCE per slide: the refusal makes the tutor ask the question, and if it
+    advances again on a LATER turn (i.e. after the student has replied) the move goes through.
+    A permanent block could deadlock the lesson when a student answers out loud, or refuses to
+    answer at all — a one-turn pause achieves the teaching goal without that risk.
+    """
+    from app.services import session_resource_service as srs
+    from app.models.resource_hub import RHResource
+    from app.models.lesson_plan import LessonPlan
+    from sqlalchemy import select
+    try:
+        cur = await srs.get_current_slide(ctx.db, ctx.appointment_id)
+        if not cur:
+            return None
+        nxt = int(cur.get("slide_index") or 1) + 1
+        res = (await ctx.db.execute(
+            select(RHResource).where(RHResource.hub_id == cur.get("resource_hub_id"))
+        )).scalar_one_or_none()
+        if not res:
+            return None
+        dmap = await srs.get_deck_map(ctx.db, ctx.appointment_id, res)
+        target = next((d for d in dmap if d["index"] == nxt), None)
+        if not target or target["kind"] != "answer":
+            return None
+
+        plan = (await ctx.db.execute(
+            select(LessonPlan).where(LessonPlan.appointment_id == ctx.appointment_id)
+        )).scalar_one_or_none()
+        state = dict(plan.session_state) if (plan is not None and plan.session_state) else {}
+        gated = list(state.get("answer_gate") or [])
+        if nxt in gated:
+            return None                     # already paused once here — let it through
+        if plan is not None:
+            state["answer_gate"] = (gated + [nxt])[-20:]
+            plan.session_state = state
+            await ctx.db.flush()
+        logger.info("ANSWER GATE held slide=%s appt=%s", nxt, ctx.appointment_id)
+
+        payload = await slide_action_show(ctx)
+        out = dict(payload or {})
+        out["error"] = "answer_slide_ahead"
+        out["suppressed"] = True
+        out["message"] = (
+            f"HELD — the next slide (#{nxt}) REVEALS THE ANSWERS to the question on screen. "
+            "Nothing moved. Ask the student for their answer to the question they can see and "
+            "WAIT for it. Once they have answered (or genuinely given up), call "
+            "advance_lesson_slide again and it will go through, so you can mark it together."
+        )
+        return out
+    except Exception:  # noqa: BLE001 — a guard must never break the lesson
+        logger.warning("answer-slide gate failed for appt %s", ctx.appointment_id, exc_info=True)
+        return None
+
+
+async def slide_action_show(ctx: "ToolContext"):
+    from app.services.session_resource_service import slide_action
+    return await slide_action(ctx.db, ctx.appointment_id, mode="show")
+
+
 async def _clear_puzzle_on_slide(ctx: "ToolContext") -> None:
     """Slides and puzzles are mutually-exclusive views of the Learn panel — moving to a
     slide takes any on-screen puzzle off, so drop it from authoritative puzzle_state too.
@@ -128,6 +193,9 @@ def session_tool_groups(ctx: ToolContext) -> dict:
                 await slide_action(ctx.db, ctx.appointment_id, mode="show"),
                 "advance",
             )
+        gate = await _answer_slide_gate(ctx)
+        if gate:
+            return gate
         ctx.slide_moved = True
         # The deck now owns the Learn panel this reply — see persist_and_return. Teaching the
         # slide comes BEFORE anything overlays it.

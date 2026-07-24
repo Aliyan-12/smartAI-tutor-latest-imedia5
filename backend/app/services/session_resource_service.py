@@ -355,6 +355,114 @@ async def get_slide_payload(db: AsyncSession, resource: RHResource, slide_index:
     }
 
 
+# ── DECK MAP ─────────────────────────────────────────────────────────────────────────────
+# The tutor only ever sees the CURRENT slide's text, so it has no idea what is on the rest of
+# the deck. That is why it would teach a formula from its own knowledge, illustrate it with an
+# animation, and then arrive at the slide that actually introduces that formula several minutes
+# later — the lesson doubled back on itself. The deck map gives it a table of contents: what is
+# on every slide, and what KIND of slide each one is.
+#
+# Classification is deterministic from the slide's own text — no model call, no cost. The real
+# decks are highly structured ("Learning Objectives", "Key Vocabulary", "RECAP", "Quick Check",
+# and a ✅ on every answer-reveal slide), which is what makes this reliable rather than a guess.
+_SLIDE_KINDS = (
+    # (kind, matcher) — FIRST match wins, so order is the priority order.
+    ("answer",     lambda t, h: "✅" in h or bool(re.match(r"^\s*answers?\b", h, re.I))
+                                or bool(re.search(r"\banswers?\s*[:：]", h, re.I))),
+    ("objectives", lambda t, h: bool(re.search(r"learning objectives|lesson objectives|by the end of", h, re.I))),
+    ("vocab",      lambda t, h: bool(re.search(r"key vocabulary|vocabulary|key words|keywords|glossary", h, re.I))),
+    ("recap",      lambda t, h: bool(re.search(r"\brecap\b|\brecall\b|prior knowledge|last lesson", h, re.I))),
+    ("question",   lambda t, h: bool(re.search(r"challenge|quick check|your turn|have a go|question\s*\d|"
+                                               r"practice questions?|try these|exercise", h, re.I))),
+    ("example",    lambda t, h: bool(re.search(r"worked example|example\b|let'?s try|model answer", h, re.I))),
+    ("summary",    lambda t, h: bool(re.search(r"summary|plenary|what we learned|key takeaway", h, re.I))),
+    # A formula slide is one whose text carries an actual equation or names a formula/rule.
+    ("formula",    lambda t, h: bool(re.search(r"formula|equation|\brule\b", h, re.I))
+                                or bool(re.search(r"[A-Za-z]\s*=\s*[^=]", t))),
+)
+
+
+def classify_slide(text: str, index: int) -> str:
+    """The KIND of a slide, from its extracted text. `index` only decides the title slide."""
+    t = (text or "").strip()
+    head = " ".join(t.split())[:220]          # the heading carries the signal
+    if not t:
+        return "blank"
+    for kind, match in _SLIDE_KINDS:
+        try:
+            if match(t, head):
+                return kind
+        except Exception:  # noqa: BLE001 — a bad regex must never break a lesson
+            continue
+    return "title" if index <= 1 else "concept"
+
+
+def _slide_label(text: str) -> str:
+    """A short human label — the slide's own heading, trimmed."""
+    line = next((l.strip() for l in (text or "").splitlines() if l.strip()), "")
+    line = re.sub(r"\s+", " ", line)
+    return (line[:52] + "…") if len(line) > 53 else line
+
+
+async def build_deck_map(db: AsyncSession, resource) -> List[Dict[str, Any]]:
+    """[{index, kind, label}] for every slide of this resource, in order."""
+    doc = (await db.execute(
+        select(RHDocument).where(RHDocument.resource_id == resource.id)
+    )).scalar_one_or_none()
+    if not doc:
+        return []
+    rows = (await db.execute(
+        select(RHDocumentChunk.slide_index, RHDocumentChunk.content)
+        .where(RHDocumentChunk.rh_document_id == doc.id)
+        .order_by(RHDocumentChunk.slide_index, RHDocumentChunk.chunk_index)
+    )).all()
+    per_slide: Dict[int, List[str]] = {}
+    for idx, content in rows:
+        per_slide.setdefault(int(idx or 1), []).append(content or "")
+    out = []
+    for idx in sorted(per_slide):
+        text = "\n".join(per_slide[idx]).strip()
+        out.append({"index": idx, "kind": classify_slide(text, idx), "label": _slide_label(text)})
+
+    # STRUCTURAL INFERENCE: the slide immediately before an answer-reveal IS the question, even
+    # when its heading doesn't say so. Real decks repeat the same heading on both slides and put
+    # the ✅ only on the second ("Check Your Coordinates" → "Check Your Coordinates ✅"), so the
+    # question slide is only identifiable from its position. Getting this right matters because
+    # the answer gate keys off it.
+    for i in range(len(out) - 1):
+        if out[i + 1]["kind"] == "answer" and out[i]["kind"] in ("concept", "title", "formula"):
+            out[i]["kind"] = "question"
+    return out
+
+
+async def get_deck_map(db: AsyncSession, appointment_id: int, resource) -> List[Dict[str, Any]]:
+    """Deck map for this lesson's resource, cached in session_state.
+
+    Cached per resource so a deck is classified once per lesson rather than on every turn, and
+    keyed by resource id so moving to the next resource rebuilds it. Read-modify-write the whole
+    session_state dict — the JSONB in-place mutation trap.
+    """
+    from app.models.lesson_plan import LessonPlan
+    plan = (await db.execute(
+        select(LessonPlan).where(LessonPlan.appointment_id == appointment_id)
+    )).scalar_one_or_none()
+    key = f"deck_map:{resource.id}"
+    if plan is not None and plan.session_state and key in (plan.session_state or {}):
+        return list(plan.session_state[key] or [])
+    dmap = await build_deck_map(db, resource)
+    if plan is not None and dmap:
+        state = dict(plan.session_state) if plan.session_state else {}
+        # Keep only the current deck's map so session_state can't grow without bound.
+        state = {k: v for k, v in state.items() if not k.startswith("deck_map:")}
+        state[key] = dmap
+        plan.session_state = state
+        await db.flush()
+        logger.info("DECK MAP built appt=%s resource=%s slides=%d kinds=%s",
+                    appointment_id, resource.id, len(dmap),
+                    {k: sum(1 for d in dmap if d["kind"] == k) for k in {d["kind"] for d in dmap}})
+    return dmap
+
+
 async def get_current_slide(db: AsyncSession, appointment_id: int) -> Optional[Dict[str, Any]]:
     """The slide the lesson is currently on, initialising to the FIRST slide of the
     first resource when the lesson hasn't started navigating yet.

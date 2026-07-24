@@ -813,15 +813,45 @@ _DEFAULT_AI_INSTRUCTION = "Guide the student through this step clearly and check
 _DEFAULT_TYPE = "teach"
 
 
-def _distribute_time(n_middle_steps: int, duration: int) -> List[int]:
-    """First step = 5 min recap, last = 10 min review, rest split evenly."""
-    if duration <= 20:
-        each = max(5, (duration - 5) // max(1, n_middle_steps))
-        return [5] + [each] * n_middle_steps
-    reserved = 5 + 10
-    middle = duration - reserved
-    each = max(5, middle // max(1, n_middle_steps))
-    return [5] + [each] * n_middle_steps + [10]
+# Minutes per PHASE for each session length. Allocated by phase, not split evenly across steps:
+# an even split gave teaching and practice identical time at every length, and the totals were
+# wrong — a 20-minute plan allocated 25 minutes (so its review phase was unreachable) and a
+# 40-minute plan allocated 39.
+#
+# A 20-minute lesson has NO TEACHING PHASE by design: there isn't time to introduce new material
+# and practise it, so a Quick Boost recaps, practises, and reviews. A `0` here removes that
+# phase from the plan entirely rather than shrinking it to a token minute — the lesson state
+# machine then never enters it, and the tutor is told outright not to teach new content.
+_PHASE_BUDGET: Dict[int, Dict[str, int]] = {
+    20: {"recap": 5, "teach": 0,  "practice": 10, "quiz": 0, "review": 5},
+    40: {"recap": 5, "teach": 15, "practice": 10, "quiz": 0, "review": 10},
+    60: {"recap": 5, "teach": 20, "practice": 25, "quiz": 0, "review": 10},
+    90: {"recap": 5, "teach": 35, "practice": 40, "quiz": 0, "review": 10},
+}
+
+
+def phase_budget(duration: int) -> Dict[str, int]:
+    """Minutes per phase for this lesson length. Exact for the four bookable lengths; any other
+    duration is scaled from the nearest one, with the rounding remainder given to practice so the
+    total always equals the lesson length."""
+    if duration in _PHASE_BUDGET:
+        return dict(_PHASE_BUDGET[duration])
+    nearest = min(_PHASE_BUDGET, key=lambda d: abs(d - duration))
+    base = _PHASE_BUDGET[nearest]
+    scale = duration / nearest
+    out = {k: int(round(v * scale)) if v else 0 for k, v in base.items()}
+    drift = duration - sum(out.values())
+    if drift:
+        out["practice"] = max(0, out.get("practice", 0) + drift)
+    return out
+
+
+def _split_evenly(total: int, n: int) -> List[int]:
+    """Split `total` minutes across `n` steps so the parts sum EXACTLY to total."""
+    if n <= 0 or total <= 0:
+        return []
+    base, extra = divmod(total, n)
+    return [base + (1 if i < extra else 0) for i in range(n)]
 
 
 def generate_plan_blocks(
@@ -855,33 +885,53 @@ def generate_plan_blocks(
         else:
             titles.append(t)
 
-    n_steps = len(titles)
-    if n_steps == 0:
+    if not titles:
         return {"steps": []}
 
-    if n_steps == 1:
-        durations = [duration_minutes]
-    elif n_steps == 2:
-        durations = [5, max(5, duration_minutes - 5)]
-    else:
-        n_middle = n_steps - 2
-        durations = _distribute_time(n_middle, duration_minutes)
-        while len(durations) < n_steps:
-            durations.append(5)
-        durations = durations[:n_steps]
-
-    steps = []
-    for i, (title, dur) in enumerate(zip(titles, durations), start=1):
+    # Resolve each step's TYPE first — time is budgeted per phase, so we need to know which
+    # phase a step belongs to before we can give it any minutes.
+    resolved = []
+    for title in titles:
         base_title = title.split(":")[0].strip() if ":" in title else title
         meta = _STEP_META.get(base_title) or _STEP_META.get(title)
-        step_type = meta[0] if meta else _DEFAULT_TYPE
-        ai_instruction = meta[1] if meta else _DEFAULT_AI_INSTRUCTION
+        resolved.append((title,
+                         meta[0] if meta else _DEFAULT_TYPE,
+                         meta[1] if meta else _DEFAULT_AI_INSTRUCTION))
+
+    budget = phase_budget(duration_minutes)
+    # A phase with a zero budget is DROPPED, not shrunk — a 20-minute lesson genuinely has no
+    # teaching phase, and a 1-minute teach step would just invite the tutor to start teaching.
+    kept = [r for r in resolved if budget.get(r[1], 0) > 0]
+    if not kept:                      # never leave a lesson with no plan at all
+        kept = resolved
+        budget = {t: duration_minutes // len(resolved) for _, t, _ in resolved}
+
+    # Share each phase's minutes across however many steps carry that type.
+    per_type: Dict[str, List[int]] = {}
+    for phase in {r[1] for r in kept}:
+        n = sum(1 for r in kept if r[1] == phase)
+        per_type[phase] = _split_evenly(budget.get(phase, 0), n)
+
+    steps, cursor = [], {}
+    for i, (title, step_type, ai_instruction) in enumerate(kept, start=1):
+        idx = cursor.get(step_type, 0)
+        cursor[step_type] = idx + 1
+        slots = per_type.get(step_type) or [0]
         steps.append({
-            "order": i, "title": title, "duration_minutes": dur,
+            "order": i, "title": title,
+            "duration_minutes": slots[idx] if idx < len(slots) else 0,
             "type": step_type, "ai_instruction": ai_instruction,
         })
 
-    return {"steps": steps, "learn_mode": mode, "goal": goal, "total_duration_minutes": duration_minutes}
+    dropped = sorted({r[1] for r in resolved} - {r[1] for r in kept})
+    logger.info("PLAN %dmin goal=%s steps=%d budget=%s dropped=%s",
+                duration_minutes, goal, len(steps),
+                {k: v for k, v in budget.items() if v}, dropped or "none")
+
+    return {"steps": steps, "learn_mode": mode, "goal": goal,
+            "total_duration_minutes": duration_minutes,
+            "phase_budget": {k: v for k, v in budget.items() if v},
+            "phases_omitted": dropped}
 
 
 async def auto_create_lesson_plan(db: AsyncSession, appointment, student_id: int,

@@ -12,6 +12,7 @@ import { gamificationApi, assignmentsApi, appointmentsApi, curriculumApi, settin
 import type { HubTopic } from "../services/api";
 import type { HubSubject } from "../services/api";
 import type { StudentProfile, MyAssignment } from "../types";
+import { phasesFor, type PhaseKey } from "../lib/lessonPhases";
 
 // ── Goal → session type mapping ─────────────────────────────────────────────
 
@@ -117,148 +118,50 @@ const STEP_COLOR_HEX: Record<StepColor, string> = {
   purple: "#8b5cf6",
 };
 
-const LESSON_PLAN_DATA: Record<number, Record<GoalId, PlanStep[]>> = {
-  20: {
-    learn_scratch: [
-      { color: "green",  time: 2, title: "Quick Recap / Prior Knowledge", desc: "Warm up + identify what student already knows" },
-      { color: "blue",   time: 5, title: "Learn Topic",                   desc: "Clear step-by-step teaching with examples" },
-      { color: "blue",   time: 5, title: "Guided Practice",               desc: "AI and student solve together" },
-      { color: "blue",   time: 4, title: "Quick Challenge Quiz",          desc: "Independent confidence check" },
-      { color: "purple", time: 4, title: "Review & Next Steps",           desc: "Feedback + what to practise next" },
-    ],
-    homework: [
-      { color: "green",  time: 3, title: "Homework Review",       desc: "Understand task + identify struggles" },
-      { color: "blue",   time: 7, title: "Explain Difficult Parts", desc: "Break concepts down simply" },
-      { color: "blue",   time: 5, title: "Solve Together",         desc: "Step-by-step guided support" },
-      { color: "blue",   time: 3, title: "Fix Mistakes",           desc: "Correct misunderstandings" },
-      { color: "purple", time: 2, title: "Ready-to-Submit Check",  desc: "Final confidence boost" },
-    ],
-    catch_up: [
-      { color: "green",  time: 2, title: "What Was Missed" },
-      { color: "blue",   time: 7, title: "Teach Key Concept" },
-      { color: "blue",   time: 5, title: "Guided Examples" },
-      { color: "blue",   time: 3, title: "Understanding Check" },
-      { color: "purple", time: 3, title: "What Next" },
-    ],
-    revision: [
-      { color: "green",  time: 3, title: "Topic Recap" },
-      { color: "blue",   time: 6, title: "Quick Challenge Questions" },
-      { color: "blue",   time: 5, title: "Learn From Mistakes" },
-      { color: "blue",   time: 3, title: "Exam Confidence Boost" },
-      { color: "purple", time: 3, title: "Wrap-Up" },
-    ],
+
+
+// Wording per goal for each phase. The TIMES come from the shared budget — this only supplies
+// the language, so a goal can read differently without ever misstating the lesson's shape.
+const GOAL_PHASE_COPY: Record<GoalId, Record<PhaseKey, { title: string; desc: string }>> = {
+  learn_scratch: {
+    recap:    { title: "Quick Recap",           desc: "Warm up + check what you already know" },
+    teach:    { title: "Learn the Topic",       desc: "Step-by-step teaching from the slides, with visuals" },
+    practice: { title: "Guided Practice",       desc: "Work through it together, then try some yourself" },
+    review:   { title: "Review & Next Steps",   desc: "Recap + what to practise next" },
   },
-  40: {
-    learn_scratch: [
-      { color: "green",  time: 5,  title: "Prior Knowledge Check",  desc: "Activate previous learning" },
-      { color: "blue",   time: 10, title: "Step-by-Step Teaching",  desc: "Clear structured explanation" },
-      { color: "blue",   time: 8,  title: "Worked Examples",        desc: '"I do"' },
-      { color: "blue",   time: 8,  title: "Guided Practice",        desc: '"We do"' },
-      { color: "blue",   time: 5,  title: "Independent Attempt",    desc: '"You do"' },
-      { color: "purple", time: 4,  title: "Quick Recap & Reflection" },
-    ],
-    homework: [
-      { color: "green",  time: 5,  title: "Homework Walkthrough" },
-      { color: "blue",   time: 10, title: "Explain Difficult Concepts" },
-      { color: "blue",   time: 10, title: "Guided Support" },
-      { color: "blue",   time: 8,  title: "Similar Practice Questions" },
-      { color: "purple", time: 7,  title: "Fix Mistakes + Confidence Check" },
-    ],
-    catch_up: [
-      { color: "green",  time: 5,  title: "Missed Lesson Recap" },
-      { color: "blue",   time: 12, title: "Teach Key Concepts" },
-      { color: "blue",   time: 8,  title: "Guided Examples" },
-      { color: "blue",   time: 8,  title: "Practice Together" },
-      { color: "purple", time: 7,  title: "Understanding Check + Revisit Plan" },
-    ],
-    revision: [
-      { color: "green",  time: 5,  title: "Topic Recap" },
-      { color: "blue",   time: 10, title: "Practice Questions" },
-      { color: "blue",   time: 8,  title: "Correct Mistakes" },
-      { color: "blue",   time: 8,  title: "Timed Challenge" },
-      { color: "purple", time: 9,  title: "Exam Strategy + Summary" },
-    ],
+  homework: {
+    recap:    { title: "Homework Review",       desc: "Understand the task + spot the sticking points" },
+    teach:    { title: "Explain the Hard Parts", desc: "Break the tricky concepts down simply" },
+    practice: { title: "Solve It Together",     desc: "Step-by-step support, then you try" },
+    review:   { title: "Ready-to-Submit Check", desc: "Fix mistakes + final confidence boost" },
   },
-  60: {
-    learn_scratch: [
-      { color: "green",  time: 5,  title: "Prior Knowledge Activation" },
-      { color: "blue",   time: 15, title: "Guided Teaching" },
-      { color: "blue",   time: 10, title: "Multiple Worked Examples" },
-      { color: "blue",   time: 10, title: "Scaffolded Practice" },
-      { color: "blue",   time: 8,  title: "Independent Questions" },
-      { color: "blue",   time: 5,  title: "Common Mistakes Review" },
-      { color: "blue",   time: 4,  title: "Quiz Understanding" },
-      { color: "purple", time: 3,  title: "Summary & Next Steps" },
-    ],
-    homework: [
-      { color: "green",  time: 5,  title: "Homework Review" },
-      { color: "blue",   time: 15, title: "Full Guided Walkthrough" },
-      { color: "blue",   time: 10, title: "Difficult Areas Explained" },
-      { color: "blue",   time: 10, title: "Practice Similar Questions" },
-      { color: "blue",   time: 8,  title: "Independent Confidence Check" },
-      { color: "purple", time: 12, title: "Final Review & Feedback" },
-    ],
-    catch_up: [
-      { color: "green",  time: 5,  title: "Missed Lesson Recap" },
-      { color: "blue",   time: 15, title: "Teach Missing Concepts" },
-      { color: "blue",   time: 10, title: "Interactive Explanation" },
-      { color: "blue",   time: 10, title: "Guided Examples" },
-      { color: "blue",   time: 7,  title: "Practice Questions" },
-      { color: "purple", time: 13, title: "Understanding Quiz + Summary" },
-    ],
-    revision: [
-      { color: "green",  time: 5,  title: "Topic Recap" },
-      { color: "blue",   time: 12, title: "Guided Exam Questions" },
-      { color: "blue",   time: 10, title: "Mistake Feedback" },
-      { color: "blue",   time: 10, title: "Harder Challenge Questions" },
-      { color: "blue",   time: 8,  title: "Exam Strategy + Timed Retrieval" },
-      { color: "purple", time: 15, title: "Confidence Check & Summary" },
-    ],
+  catch_up: {
+    recap:    { title: "Find the Gaps",         desc: "Check what was missed" },
+    teach:    { title: "Missed Content",        desc: "Teach the parts you weren't there for" },
+    practice: { title: "Practice to Catch Up",  desc: "Questions until it feels normal again" },
+    review:   { title: "Back on Track",         desc: "Recap + how to stay caught up" },
   },
-  90: {
-    learn_scratch: [
-      { color: "green",  time: 8,  title: "Prior Knowledge Activation" },
-      { color: "blue",   time: 18, title: "Deep Teaching" },
-      { color: "blue",   time: 12, title: "Worked Examples" },
-      { color: "blue",   time: 12, title: "Practice Together" },
-      { color: "yellow", time: 5,  title: "Brain Break / Reset" },
-      { color: "blue",   time: 12, title: "Independent Challenge" },
-      { color: "blue",   time: 10, title: "Quiz Assessment" },
-      { color: "purple", time: 13, title: "Reflection & Mastery Review" },
-    ],
-    homework: [
-      { color: "green",  time: 8,  title: "Homework Review" },
-      { color: "blue",   time: 18, title: "Deep Explanation" },
-      { color: "blue",   time: 12, title: "Practice Similar Questions" },
-      { color: "yellow", time: 5,  title: "Reset Break" },
-      { color: "blue",   time: 15, title: "Independent Attempt" },
-      { color: "blue",   time: 10, title: "Tutor Feedback" },
-      { color: "purple", time: 22, title: "Final Review & Confidence Check" },
-    ],
-    catch_up: [
-      { color: "green",  time: 8,  title: "Lesson Recovery" },
-      { color: "blue",   time: 20, title: "Guided Teaching" },
-      { color: "blue",   time: 12, title: "Visual Explanation" },
-      { color: "blue",   time: 10, title: "Practice Together" },
-      { color: "yellow", time: 5,  title: "Break" },
-      { color: "blue",   time: 15, title: "Independent Confidence Building" },
-      { color: "purple", time: 20, title: "Quiz + What Next" },
-    ],
-    revision: [
-      { color: "green",  time: 8,  title: "Full Topic Recap" },
-      { color: "blue",   time: 18, title: "Exam-Style Questions" },
-      { color: "blue",   time: 12, title: "Marking & Feedback" },
-      { color: "yellow", time: 5,  title: "Break" },
-      { color: "blue",   time: 15, title: "Harder Challenge Questions" },
-      { color: "blue",   time: 12, title: "Timed Practice" },
-      { color: "purple", time: 20, title: "Exam Strategy + Final Confidence Review" },
-    ],
+  revision: {
+    recap:    { title: "Quick Recall",          desc: "What do you remember?" },
+    teach:    { title: "Key Concept Review",    desc: "Refresh the ideas that matter most" },
+    practice: { title: "Exam-Style Questions",  desc: "Practise under exam conditions" },
+    review:   { title: "Mark & Improve",        desc: "Mark scheme + where to gain marks" },
   },
 };
 
 function getDynamicPreview(goal: GoalId, duration: number): PlanStep[] {
-  const key = [20, 40, 60, 90].includes(duration) ? duration : 40;
-  return LESSON_PLAN_DATA[key]?.[goal] ?? LESSON_PLAN_DATA[40].learn_scratch;
+  // Built from the SHARED phase budget (lib/lessonPhases), which mirrors the server's
+  // _PHASE_BUDGET. The old hand-written table drifted from the real plan — it promised a
+  // 20-minute lesson 5 minutes of teaching when the server gives it none — and a student who
+  // is shown a structure the tutor does not follow loses trust in the first two minutes.
+  const copy = GOAL_PHASE_COPY[goal] ?? GOAL_PHASE_COPY.learn_scratch;
+  const colour: Record<PhaseKey, StepColor> = {
+    recap: "green", teach: "blue", practice: "blue", review: "purple",
+  };
+  return phasesFor(duration).map((p) => ({
+    color: colour[p.key], time: p.mins,
+    title: copy[p.key].title, desc: copy[p.key].desc,
+  }));
 }
 
 // ── Focus checklist by goal ──────────────────────────────────────────────────
