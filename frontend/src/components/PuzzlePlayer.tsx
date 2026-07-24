@@ -175,8 +175,12 @@ export default function PuzzlePlayer({
           position: "relative",
           flex: 1,
           minHeight: 0,
-          overflow: isManipulative ? "hidden" : "auto",
-          padding: isManipulative ? "12px 0 0" : 20,
+          // A display-only visual (diagram / image / animation / flowchart) must FIT the panel,
+          // never scroll: the student can't tell the difference between "scrolled past it" and
+          // "nothing there", and one reported an empty white panel while a flowchart sat below
+          // the fold — they asked the tutor to re-show a diagram that was already up.
+          overflow: isManipulative || isExplanatory ? "hidden" : "auto",
+          padding: isManipulative ? "12px 0 0" : isExplanatory ? "10px 14px" : 20,
           display: "flex",
           flexDirection: "column",
           alignItems: isManipulative ? "stretch" : "center",
@@ -197,7 +201,11 @@ export default function PuzzlePlayer({
           {payload.prompt}
         </p>
 
-        <div style={{ position: "relative", zIndex: 1, flex: isManipulative ? 1 : "0 0 auto",
+        {/* Explanatory visuals get `flex: 1` like manipulatives do. With `0 0 auto` the wrapper
+            had no definite height, so the child's `height: 100%` was indefinite and the diagram
+            centred itself inside a box taller than the panel — pushed below the fold. */}
+        <div style={{ position: "relative", zIndex: 1,
+                      flex: isManipulative || isExplanatory ? 1 : "0 0 auto",
                       minHeight: 0, width: "100%", display: "flex", flexDirection: "column",
                       alignItems: isManipulative ? "stretch" : "center", gap: isManipulative ? 0 : 14 }}>
           {body()}

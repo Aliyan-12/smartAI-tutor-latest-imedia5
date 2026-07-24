@@ -763,12 +763,34 @@ EXPLANATORY_FAMILIES = ("mermaid", "svg", "animation", "image")
 # short phase is decided entirely by rounding. Near the extremes the rounding stops mattering.
 VISUAL_PHASE_WEIGHTS: Dict[str, Dict[str, float]] = {
     "recap":    {"puzzle": 0.15, "explanatory": 0.85},   # remind them how it works
-    "teach":    {"puzzle": 0.20, "explanatory": 0.80},   # explain first, practise second
+    "teach":    {"puzzle": 0.15, "explanatory": 0.85},   # explain first, practise second
     "practice": {"puzzle": 0.85, "explanatory": 0.15},   # now they do it
     "quiz":     {"puzzle": 0.90, "explanatory": 0.10},
     "review":   {"puzzle": 0.30, "explanatory": 0.70},   # summarise, with a little recall
 }
 _DEFAULT_PHASE = "teach"
+
+# How the EXPLANATORY share is divided between the four teaching visuals. Not an even 4-way
+# split: an even split gave animation only ~20% of teaching turns and animations stayed rare,
+# even after the prompt was told to reach for them. Motion is what a still genuinely cannot do —
+# current flowing and splitting, a shape reflecting, a graph being traced — and it is the format
+# students learn most from here, so during TEACHING it leads. Review leans on mermaid instead,
+# because summarising what was covered is a structure job, not a motion one.
+_EXPL_BIAS: Dict[str, Dict[str, float]] = {
+    "recap":    {"animation": 0.40, "svg": 0.25, "mermaid": 0.20, "image": 0.15},
+    # TEACH is written as the share of the WHOLE turn budget, not of the explanatory slice —
+    # these four sum to 85, matching `explanatory: 0.85` above, and family_weights renormalises
+    # anyway. Written this way so the numbers here are the numbers you measure: animation 35%,
+    # svg 20%, mermaid 15%, image 15%, puzzle 15%.
+    # svg is nudged BELOW its nominal 20 because a teach phase is only ~4-5 picks long, and with
+    # so few picks the largest-deficit rounding consistently broke ties in svg's favour — it
+    # measured 25% at a raw 20. These raw numbers are tuned so the MEASURED mix matches the
+    # intent (animation 35 · svg 20 · mermaid 15 · image 15 · puzzle 15).
+    "teach":    {"animation": 35, "svg": 20, "mermaid": 15, "image": 15},
+    "practice": {"animation": 0.40, "svg": 0.30, "mermaid": 0.15, "image": 0.15},
+    "quiz":     {"animation": 0.35, "svg": 0.30, "mermaid": 0.20, "image": 0.15},
+    "review":   {"animation": 0.25, "svg": 0.20, "mermaid": 0.40, "image": 0.15},
+}
 
 
 def _split_entry(entry: str) -> tuple:
@@ -785,9 +807,9 @@ def _split_entry(entry: str) -> tuple:
 def family_weights(phase: Optional[str], available: Optional[List[str]] = None) -> Dict[str, float]:
     """Per-family target shares for this phase, normalised over what's actually available.
 
-    The phase split is puzzle-vs-explanatory; the explanatory share is then divided evenly among
-    whichever of mermaid/svg/animation can be offered, so losing manim re-splits its share
-    between the other two instead of quietly handing it to puzzles.
+    The phase split is puzzle-vs-explanatory; the explanatory share is then divided among
+    whichever of mermaid/svg/animation/image can be offered, using the per-phase bias below, so
+    losing manim re-splits its share among the others instead of quietly handing it to puzzles.
     """
     avail = [f for f in (available or VISUAL_FAMILIES) if f in VISUAL_FAMILIES]
     if not avail:
@@ -795,17 +817,20 @@ def family_weights(phase: Optional[str], available: Optional[List[str]] = None) 
     split = VISUAL_PHASE_WEIGHTS.get((phase or "").strip().lower()) \
         or VISUAL_PHASE_WEIGHTS[_DEFAULT_PHASE]
     expl = [f for f in avail if f in EXPLANATORY_FAMILIES]
+    bias = _EXPL_BIAS.get((phase or "").strip().lower()) or _EXPL_BIAS[_DEFAULT_PHASE]
     out: Dict[str, float] = {}
     if "puzzle" in avail:
         out["puzzle"] = split["puzzle"] if expl else 1.0
+    expl_share = (split["explanatory"] if "puzzle" in avail else 1.0)
+    bias_total = sum(bias.get(f, 0.0) for f in expl) or 1.0
     for f in expl:
-        out[f] = (split["explanatory"] if "puzzle" in avail else 1.0) / len(expl)
+        out[f] = expl_share * (bias.get(f, 0.0) / bias_total)
     total = sum(out.values()) or 1.0
     return {f: w / total for f, w in out.items()}
 
 
 def pick_visual_family(seq: Optional[List[str]], available: Optional[List[str]] = None,
-                       phase: Optional[str] = None) -> str:
+                       phase: Optional[str] = None, seed: Optional[int] = None) -> str:
     """The family to use next, so the running mix converges on this PHASE's target ratio.
 
     Largest-deficit selection: pick whichever family is furthest below the share it should have
@@ -839,12 +864,25 @@ def pick_visual_family(seq: Optional[List[str]], available: Optional[List[str]] 
     last = entries[-1][1] if entries else None
     turn = len(hist) + 1
 
+    # STOCHASTIC ROUNDING (dithering). A teach phase is only ~4-5 picks, so starting every
+    # lesson's credit at exactly zero makes the result "the top-k families by weight" — the SAME
+    # k every lesson. Measured across lessons the mix then quantises to k/5 instead of the
+    # target: svg sat at 25% against a 20% target and no amount of weight-tuning fixed it
+    # (nudging svg down to 16 sent it to 12% and threw mermaid/image up to 22%).
+    # A per-lesson offset in [0,1) makes the expected count exactly n*weight, so the average
+    # over lessons hits the target while any single lesson still looks sensible. Seeded from the
+    # appointment so a turn is deterministic — replaying the same turn gives the same answer.
+    offset = {f: 0.0 for f in avail}
+    if seed is not None:
+        rnd = random.Random(f"{seed}:{ph}")
+        offset = {f: rnd.random() for f in avail}
+
     best, best_score = [], None
     for f in avail:
         w = weights.get(f, 0.0)
         if w <= 0:
             continue
-        deficit = w * turn - hist.count(f)
+        deficit = w * turn + offset[f] - hist.count(f)
         if best_score is None or deficit > best_score + 1e-9:
             best, best_score = [f], deficit
         elif abs(deficit - best_score) <= 1e-9:

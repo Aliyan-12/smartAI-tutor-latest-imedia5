@@ -1240,6 +1240,8 @@ WHEN NOTHING NEEDS SOLVING (intro + teaching) — SHOW, DON'T MONOLOGUE:
   • 🧩 mermaid_diagram — YOUR EVERYDAY GO-TO for anything with steps, arrows, stages, cycles, relationships or a timeline: photosynthesis, the water/rock/nitrogen/carbon cycle, a reaction pathway, digestion, circulation, a food chain, classification trees, an algorithm, a maths method's steps, comparisons. It renders instantly and EXACTLY in the browser, so prefer it over explanatory_puzzle for structured ideas. Keep it to 4–10 nodes.
   • 🖍️ draw_svg — YOU write the SVG when no ready-made svg_diagram fits: an exact, labelled picture of THIS slide's structure (a labelled leaf, an apparatus setup, a force diagram, a shape with its dimensions). Markup only — no script/foreignObject/external images.
   • 🎞️ animate_concept — YOU write a short Manim scene for a MOTION idea a still can't show (a wave travelling, particles diffusing, a shape rotating or reflecting, a graph being traced, forces acting). No LaTeX — use Text(...). If it reports 'rendering' it is NOT on screen: explain with draw_svg or in words now, and it's instant next time.
+  • 🎬 ANIMATE YOUR OWN EXAMPLES — DON'T WAIT TO BE ASKED. The moment you catch yourself typing a scenario, an analogy or a walk-through where something MOVES, CHANGES, SPLITS, FLOWS, GROWS or IS BUILT UP STEP BY STEP — "imagine the current is like water flowing through pipes", "picture the ball rolling down", "watch what happens as we double the radius", "let's build the shape one side at a time" — that description IS the animation brief. Call animate_concept and SHOW it, then narrate what they're watching. A student should almost never have to ask "can you show me that as an animation?"; if they do, you left the best explanation on the table.
+    Make it genuinely explain, not decorate: put the real NUMBERS from your example on screen as labels, move the thing that actually moves (dots along a wire, an arrow growing, a shape unfolding), pause on the key moment, and let the picture answer the question you're about to ask. A worked example animated beats the same example typed, every time.
   • GROUND EVERY VISUAL IN THE SLIDE: the labels, stages and numbers in your diagram/animation must be the ones on the ON-SCREEN SLIDE. A visual whose labels don't appear on the slide is wrong, however pretty it is.
   • 🖼️ explanatory_puzzle — a GENERATED illustration for a real-world scene/photo where exact counts don't matter. For an exact fraction/clock/count use diagram_math_puzzle(display_only=True) instead (a generated image misdraws counts).
   • ➗ math_puzzle with mode="latex" — still the right tool for EQUATIONS; LaTeX renders crisply. Diagrams and animations do not replace it.
@@ -2145,9 +2147,13 @@ async def build_lesson_state_anchor(
                     if _svgs else
                     "draw_svg — WRITE the SVG yourself for THIS slide's structure (label it "
                     "generously; build it from the slide's own parts and numbers)."),
-            "animation": "animate_concept — WRITE a short Manim scene for the motion behind THIS "
-                         "slide's example (no LaTeX: use Text(...)). If it reports 'rendering' it "
-                         "is NOT on screen — explain with draw_svg or in words now.",
+            "animation": "animate_concept — ANIMATE THE EXAMPLE YOU ARE ABOUT TO GIVE. Take the "
+                         "scenario/analogy/worked example you'd otherwise type ('imagine the "
+                         "current is like water…', 'watch what happens as we double it…') and "
+                         "SHOW it moving: real numbers as Text labels, dots/arrows/shapes that "
+                         "travel, a pause on the key moment, so the picture answers the question "
+                         "you're about to ask. No LaTeX — use Text(...). If it reports "
+                         "'rendering' it is NOT on screen — explain with draw_svg or in words.",
             "mermaid": "mermaid_diagram — YOU write the spec, so anything works: the STEPS OF THE "
                        "METHOD as a flowchart, a comparison, a classification tree, a cycle, or a "
                        "worked example broken into stages.",

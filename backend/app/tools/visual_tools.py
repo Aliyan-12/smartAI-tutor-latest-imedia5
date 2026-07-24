@@ -158,6 +158,13 @@ def visual_tool_groups(ctx: ToolContext) -> dict:
           stroke="#1e3a8a" stroke-width="3"/><text x="320" y="205" text-anchor="middle"
           font-size="18" fill="#0f172a">Nucleus</text></svg>
 
+        ⚠️ LINES MUST SAY `fill="none"`. In SVG `fill` defaults to BLACK, so a `<path>` or
+        `<polyline>` drawn as a wire/axis/connector without it is filled solid black between its
+        endpoints — a circuit diagram came out as three black blobs. Every stroked line needs
+        `fill="none" stroke="#0f172a" stroke-width="2"`. (The server now forces this, but write
+        it yourself so what you intend and what appears always match.) Simple straight
+        connectors are safer as `<line x1 y1 x2 y2>`, which cannot be filled at all.
+
         RULES — markup only, no scripting:
           • Allowed: g, path, rect, circle, ellipse, line, polyline, polygon, text, tspan, defs,
             linearGradient/stop, marker, clipPath, use (href="#local" only), and SMIL
@@ -184,6 +191,16 @@ def visual_tool_groups(ctx: ToolContext) -> dict:
         particles diffusing, a shape rotating or being reflected, a graph being traced out, a
         number line being jumped along, forces acting, an orbit. You WRITE the animation: pass the
         body of a Manim `Scene.construct()`. Display-only; teach FROM it.
+
+        REACH FOR THIS WHENEVER YOU DESCRIBE SOMETHING HAPPENING. If you are about to type a
+        scenario, an analogy or a worked example in which something moves, splits, flows, grows,
+        or is built up step by step — animate it instead of describing it. Don't wait to be asked.
+
+        A pattern that works well (a parallel-circuit lesson): draw the circuit with `Line`s, put
+        the real values on as `Text` labels ("6A", "4A", "?"), then send small `Dot`s travelling
+        along the wires with `MoveAlongPath` / `.animate`, fewer dots down each branch after the
+        split — the student COUNTS the answer off the screen instead of being told it. Use the
+        same shape for anything that flows: charge, water, cars, molecules, money.
 
         GROUND IT IN THE SLIDE: animate the actual example on the "ON-SCREEN SLIDE" you were given
         this turn — the same numbers and the same shapes the student is looking at.

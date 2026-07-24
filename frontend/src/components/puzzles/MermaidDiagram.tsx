@@ -58,8 +58,12 @@ export default function MermaidDiagram({ payload }: { payload: PuzzlePayload }) 
   return (
     <div style={{
       width: "100%", height: "100%", display: "flex", flexDirection: "column",
-      alignItems: "center", justifyContent: "center", gap: 14, padding: "8px 16px",
-      overflow: "auto", background: "#fff",
+      alignItems: "center", justifyContent: "flex-start", gap: 12, padding: "8px 16px",
+      // NEVER scroll and NEVER centre in a box taller than the panel. Both produced the same
+      // symptom: a student looking at a blank white panel with the flowchart below the fold,
+      // telling the tutor the diagram was "gone". The SVG is capped to 100% of this box, so it
+      // always fits; starting at the top means the first thing drawn is the first thing seen.
+      overflow: "hidden", background: "#fff",
     }}>
       {/* FIT the diagram to the panel — bound BOTH dimensions, never force either.
           Mermaid stamps a pixel `max-width` on the <svg> it emits, sized for whatever it was
@@ -76,7 +80,7 @@ export default function MermaidDiagram({ payload }: { payload: PuzzlePayload }) 
           width: auto !important;
           height: auto !important;
           max-width: 100% !important;
-          max-height: min(70vh, 100%) !important;
+          max-height: 100% !important;
         }
       `}</style>
       {svg && !failed ? (
