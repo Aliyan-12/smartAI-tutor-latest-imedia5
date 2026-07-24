@@ -756,11 +756,25 @@ async def build_session_system_prompt(
             if current_step_num < len(steps):
                 next_title = steps[current_step_num]["title"]
                 next_step_hint = f"\n  ➡ When Step {current_step_num} task is complete, move immediately to Step {current_step_num + 1}: {next_title}."
+            # A short lesson has NO teaching phase in its budget (see lesson_service
+            # _PHASE_BUDGET). Say so outright: the plan simply not containing a teach step is a
+            # weak signal, and the tutor would otherwise open a 20-minute Quick Boost by
+            # introducing new material and then run out of time to practise any of it.
+            no_teach = ""
+            if not any(s.get("type") == "teach" for s in steps):
+                no_teach = (
+                    "\n⏱ THIS IS A SHORT SESSION — THERE IS NO TEACHING PHASE. Do NOT introduce "
+                    "new material. Briefly refresh what they already know, then spend the lesson "
+                    "on PRACTICE — questions, puzzles and feedback on work they have already been "
+                    "taught — and close with a short review. If they turn out not to know the "
+                    "topic at all, say so kindly and suggest booking a longer lesson to learn it "
+                    "properly, then practise whatever they CAN manage today.\n"
+                )
             plan_blocks_section = f"""
 ╔══════════════════════════════════════╗
   YOUR LESSON PLAN (set at booking)
 ╚══════════════════════════════════════╝
-{step_lines}
+{step_lines}{no_teach}
 
 ▶ ACTIVE STEP: Step {current_step_num} of {len(steps)}.
 Complete each step's task then move to the next step.

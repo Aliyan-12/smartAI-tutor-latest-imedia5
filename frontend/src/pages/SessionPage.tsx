@@ -8,6 +8,7 @@ import ChatInput from "../components/ChatInput";
 import QuickReplies from "../components/QuickReplies";
 import ResourceViewer, { type ResourceSlide } from "../components/ResourceViewer";
 import PuzzlePlayer from "../components/PuzzlePlayer";
+import { phaseTimeline } from "../lib/lessonPhases";
 import LearnIdle from "../components/LearnIdle";
 import Celebration from "../components/puzzles/Celebration";
 import type { PuzzlePayload } from "../components/puzzles/types";
@@ -28,42 +29,8 @@ const SUBJECTS = [
   "Physics","Chemistry","Biology","Computer Science","French","Spanish",
 ];
 
-const PHASES_20 = [
-  { label: "Intro",    end: 2  },
-  { label: "Teaching", end: 13 },
-  { label: "Practice", end: 16 },
-  { label: "Quiz",     end: 18 },
-  { label: "Summary",  end: 20 },
-];
-const PHASES_30 = [
-  { label: "Intro",    end: 3  },
-  { label: "Teaching", end: 18 },
-  { label: "Practice", end: 25 },
-  { label: "Quiz",     end: 28 },
-  { label: "Summary",  end: 30 },
-];
-const PHASES_60 = [
-  { label: "Warm-Up",  end: 5  },
-  { label: "Teaching", end: 30 },
-  { label: "Practice", end: 45 },
-  { label: "Quiz",     end: 55 },
-  { label: "Summary",  end: 60 },
-];
-const PHASES_90 = [
-  { label: "Warm-Up",     end: 5  },
-  { label: "Teaching",    end: 40 },
-  { label: "Brain Break", end: 50 },
-  { label: "Practice",    end: 65 },
-  { label: "Quiz",        end: 80 },
-  { label: "Summary",     end: 90 },
-];
-
-function getPhasesForDuration(mins: number) {
-  if (mins <= 22) return PHASES_20;
-  if (mins <= 45) return PHASES_30;
-  if (mins <= 70) return PHASES_60;
-  return PHASES_90;
-}
+/** Phase strip timings come from the shared budget (lib/lessonPhases) that mirrors the server. */
+const getPhasesForDuration = phaseTimeline;
 
 const DURATION_CONFIG: Record<number, { emoji: string; name: string; sublabel: string }> = {
   20: { emoji: "⚡", name: "Quick Boost",   sublabel: "20 mins" },
@@ -79,7 +46,7 @@ const SUBJECT_EMOJIS: Record<string, string> = {
   "Computer Science": "💻", French: "🇫🇷", Spanish: "🇪🇸",
 };
 
-function getCurrentPhaseIndex(elapsedMin: number, phases: typeof PHASES_30) {
+function getCurrentPhaseIndex(elapsedMin: number, phases: { label: string; end: number }[]) {
   for (let i = 0; i < phases.length; i++) {
     if (elapsedMin < phases[i].end) return i;
   }
