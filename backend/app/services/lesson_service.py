@@ -764,10 +764,10 @@ async def get_appointment_report(
 
 _STEPS_BY_MODE_GOAL: Dict[str, Dict[str, List[str]]] = {
     "ai_recommended": {
-        "homework":      ["Quick Recap", "Review Homework Problem", "Work Through Together", "Practice Similar Question", "Review & Next Steps"],
-        "learn_scratch": ["Quick Recap", "Core Concept Introduction", "Worked Examples", "Guided Practice", "Review & Next Steps"],
-        "catch_up":      ["Quick Recap", "Missed Content Overview", "Worked Examples", "Catch-Up Exercises", "Review & Next Steps"],
-        "revision":      ["Quick Recap", "Key Concept Review", "Exam-Style Questions", "Mark Scheme Discussion", "Review & Next Steps"],
+        "homework":      ["Quick Recap", "Review Homework Problem", "Work Through Together", "Practice Similar Question", "Quick Quiz", "Review & Next Steps"],
+        "learn_scratch": ["Quick Recap", "Core Concept Introduction", "Worked Examples", "Guided Practice", "Quick Quiz", "Review & Next Steps"],
+        "catch_up":      ["Quick Recap", "Missed Content Overview", "Worked Examples", "Catch-Up Exercises", "Quick Quiz", "Review & Next Steps"],
+        "revision":      ["Quick Recap", "Key Concept Review", "Exam-Style Questions", "Mark Scheme Discussion", "Quick Quiz", "Review & Next Steps"],
     },
     "slides": {
         "_any": ["Quick Recap", "Slide: Key Concepts", "Slide: Worked Examples", "Guided Questions", "Summary"],
@@ -801,6 +801,7 @@ _STEP_META: Dict[str, tuple] = {
     "Guided Questions":          ("practice", "Give ONE guided question. Say 'Have a go — what do you think?' Wait for their attempt. Guide step-by-step only if stuck. Give specific feedback, then move on."),
     "Exam-Style Questions":      ("practice", "Give ONE exam-style question. Ask the student to attempt it fully before any help. Give specific exam-focused feedback on their answer, then move on."),
     "Mark Scheme Discussion":    ("practice", "Walk through the mark scheme for the attempted question. Highlight where marks are awarded and 1-2 common errors to avoid. Move on once discussed."),
+    "Quick Quiz":                ("quiz",     "It's quiz time — this is a dedicated quiz phase. Call the generate_quiz tool to set an interactive quiz on the specific concepts taught this session. Before calling, say ONE short line like: 'Great work — let me set you a quick quiz to check it's all stuck!' Do NOT keep teaching; the quiz IS this phase."),
     "Quiz Round 1":              ("quiz",     "Call the generate_quiz tool to offer an interactive quiz on the specific concepts taught this session. Before calling, say: 'We have covered a lot -- let me set you a quick test!'"),
     "Quiz Round 2":              ("quiz",     "Call the generate_quiz tool to offer a second interactive quiz focusing on any gaps identified in Round 1. Before calling, say: 'Let us go again -- this time focusing on what we need to sharpen up!'"),
     "Review Mistakes":           ("review",   "Go through any incorrect answers from the previous quiz. Clarify each misconception in 1-2 sentences. Move on once all reviewed."),
@@ -823,10 +824,13 @@ _DEFAULT_TYPE = "teach"
 # phase from the plan entirely rather than shrinking it to a token minute — the lesson state
 # machine then never enters it, and the tutor is told outright not to teach new content.
 _PHASE_BUDGET: Dict[int, Dict[str, int]] = {
-    20: {"recap": 5, "teach": 0,  "practice": 10, "quiz": 0, "review": 5},
-    40: {"recap": 5, "teach": 15, "practice": 10, "quiz": 0, "review": 10},
-    60: {"recap": 5, "teach": 20, "practice": 25, "quiz": 0, "review": 10},
-    90: {"recap": 5, "teach": 35, "practice": 40, "quiz": 0, "review": 10},
+    # A QUIZ phase follows practice in every length (5/10/10/15 min). Its time is carved mostly
+    # from practice; at 40 min practice alone isn't enough, so review also drops to 5 — a
+    # 40-minute lesson can't fit 15 teach + 10 practice + 10 quiz + 10 review + 5 recap.
+    20: {"recap": 5, "teach": 0,  "practice": 5,  "quiz": 5,  "review": 5},
+    40: {"recap": 5, "teach": 15, "practice": 5,  "quiz": 10, "review": 5},
+    60: {"recap": 5, "teach": 20, "practice": 15, "quiz": 10, "review": 10},
+    90: {"recap": 5, "teach": 35, "practice": 25, "quiz": 15, "review": 10},
 }
 
 

@@ -127,24 +127,28 @@ const GOAL_PHASE_COPY: Record<GoalId, Record<PhaseKey, { title: string; desc: st
     recap:    { title: "Quick Recap",           desc: "Warm up + check what you already know" },
     teach:    { title: "Learn the Topic",       desc: "Step-by-step teaching from the slides, with visuals" },
     practice: { title: "Guided Practice",       desc: "Work through it together, then try some yourself" },
+    quiz:     { title: "Quick Quiz",            desc: "A short quiz to check it's all stuck" },
     review:   { title: "Review & Next Steps",   desc: "Recap + what to practise next" },
   },
   homework: {
     recap:    { title: "Homework Review",       desc: "Understand the task + spot the sticking points" },
     teach:    { title: "Explain the Hard Parts", desc: "Break the tricky concepts down simply" },
     practice: { title: "Solve It Together",     desc: "Step-by-step support, then you try" },
+    quiz:     { title: "Quick Quiz",            desc: "Check you can now do it on your own" },
     review:   { title: "Ready-to-Submit Check", desc: "Fix mistakes + final confidence boost" },
   },
   catch_up: {
     recap:    { title: "Find the Gaps",         desc: "Check what was missed" },
     teach:    { title: "Missed Content",        desc: "Teach the parts you weren't there for" },
     practice: { title: "Practice to Catch Up",  desc: "Questions until it feels normal again" },
+    quiz:     { title: "Quick Quiz",            desc: "Confirm you're back up to speed" },
     review:   { title: "Back on Track",         desc: "Recap + how to stay caught up" },
   },
   revision: {
     recap:    { title: "Quick Recall",          desc: "What do you remember?" },
     teach:    { title: "Key Concept Review",    desc: "Refresh the ideas that matter most" },
     practice: { title: "Exam-Style Questions",  desc: "Practise under exam conditions" },
+    quiz:     { title: "Timed Quiz",            desc: "Test yourself against the clock" },
     review:   { title: "Mark & Improve",        desc: "Mark scheme + where to gain marks" },
   },
 };
@@ -156,7 +160,7 @@ function getDynamicPreview(goal: GoalId, duration: number): PlanStep[] {
   // is shown a structure the tutor does not follow loses trust in the first two minutes.
   const copy = GOAL_PHASE_COPY[goal] ?? GOAL_PHASE_COPY.learn_scratch;
   const colour: Record<PhaseKey, StepColor> = {
-    recap: "green", teach: "blue", practice: "blue", review: "purple",
+    recap: "green", teach: "blue", practice: "blue", quiz: "yellow", review: "purple",
   };
   return phasesFor(duration).map((p) => ({
     color: colour[p.key], time: p.mins,
