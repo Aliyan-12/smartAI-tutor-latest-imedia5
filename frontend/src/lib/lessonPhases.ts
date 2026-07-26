@@ -12,19 +12,19 @@
  * allocating 25 minutes of content into a 20-minute slot.
  *
  * A 20-minute Quick Boost deliberately has NO teaching phase: there isn't time to introduce new
- * material and practise it, so it recaps → practises → reviews.
+ * material and practise it, so it recaps → practises → quizzes → reviews.
  */
 
-export type PhaseKey = "recap" | "teach" | "practice" | "review";
+export type PhaseKey = "recap" | "teach" | "practice" | "quiz" | "review";
 
 export const PHASE_BUDGET: Record<number, Record<PhaseKey, number>> = {
-  20: { recap: 5, teach: 0,  practice: 10, review: 5 },
-  40: { recap: 5, teach: 15, practice: 10, review: 10 },
-  60: { recap: 5, teach: 20, practice: 25, review: 10 },
-  90: { recap: 5, teach: 35, practice: 40, review: 10 },
+  20: { recap: 5, teach: 0,  practice: 5,  quiz: 5,  review: 5 },
+  40: { recap: 5, teach: 15, practice: 5,  quiz: 10, review: 5 },
+  60: { recap: 5, teach: 20, practice: 15, quiz: 10, review: 10 },
+  90: { recap: 5, teach: 35, practice: 25, quiz: 15, review: 10 },
 };
 
-const ORDER: PhaseKey[] = ["recap", "teach", "practice", "review"];
+const ORDER: PhaseKey[] = ["recap", "teach", "practice", "quiz", "review"];
 
 /** Nearest bookable length — the server does the same, so previews never disagree. */
 export function budgetKey(mins: number): number {
@@ -40,7 +40,7 @@ export function phasesFor(mins: number): { key: PhaseKey; mins: number }[] {
 /** Same, with cumulative end times — used by the in-session strip to highlight by elapsed. */
 export function phaseTimeline(mins: number): { label: string; end: number }[] {
   const labels: Record<PhaseKey, string> = {
-    recap: "Recap", teach: "Teaching", practice: "Practice", review: "Summary",
+    recap: "Recap", teach: "Teaching", practice: "Practice", quiz: "Quiz", review: "Summary",
   };
   let acc = 0;
   return phasesFor(mins).map((p) => {
