@@ -2294,18 +2294,22 @@ _ACTION_LABELS = {
 
 
 def _is_quiz_phase(appointment) -> bool:
-    """Has enough of the session elapsed (or little time left) to allow a quiz?
-    Mirrors the QUIZ STATUS gate in build_session_system_prompt."""
+    """Are we in (or approaching) the dedicated QUIZ phase — i.e. may the quiz tool bind?
+
+    Derived from the real phase budget rather than a time heuristic, so it can't disagree with
+    the plan the tutor is following: the quiz phase starts after recap+teach+practice, and this
+    opens ~2 minutes before that (so the tool is ready as the phase begins) and stays open for
+    the rest of the lesson.
+    """
     elapsed, remaining, duration = _compute_lesson_clock(appointment)
-    if duration <= 25:
-        after, rem = 13, 5
-    elif duration <= 45:
-        after, rem = 28, 8
-    elif duration <= 65:
-        after, rem = 40, 18
-    else:
-        after, rem = 57, 20
-    return elapsed >= after or remaining <= rem
+    try:
+        from app.services.lesson_service import phase_budget
+        b = phase_budget(duration)
+        quiz_start = b.get("recap", 0) + b.get("teach", 0) + b.get("practice", 0)
+        return elapsed >= max(0, quiz_start - 2)
+    except Exception:
+        # Fallback to the old heuristic if the budget can't be read.
+        return elapsed >= duration * 0.6
 
 
 def select_tool_groups(
