@@ -263,6 +263,8 @@ _LATEX_CMDS = (
     "Delta", "Sigma", "Omega", "Theta", "Lambda", "Phi",
     # accents / formatting (these take an argument, so only help when braces are present)
     "vec", "hat", "bar", "tilde", "mathrm", "mathbf", "boxed", "text",
+    # spacing / font (a "quad52" from a dropped backslash rendered as literal "quad52")
+    "quad", "qquad", "bf", "it", "rm", "sf", "tt",
 )
 
 # Things that must never reach KaTeX. A student saw a maths card render as
@@ -353,6 +355,39 @@ def normalise_math_latex(s: str) -> str:
     return re.sub(r"\s{2,}", " ", t).strip()
 
 
+def _repair_array_latex(t: str) -> str:
+    """Fix the malformed ARRAY (table-of-values) syntax the model keeps emitting.
+
+    KaTeX renders `\\begin{array}{cccc} … \\end{array}` as a real table, and a "complete the
+    table for y = 2x+1" question is a perfectly good use of it. But the model writes it as a
+    pseudo-environment — `\\array|c|c|c| … \\array` — which KaTeX rejects (`Undefined control
+    sequence: \\array`), so it shipped as raw markup on screen. This turns that into valid array
+    syntax; a well-formed `\\begin{array}` is left untouched, and a `\\begin` with a missing
+    `\\end` is closed.
+    """
+    if "\\array" in t and "\\begin{array}" not in t:
+        # First `\array` + its column spec (pipes / c,l,r and spaces) → \begin{array}{spec}.
+        def _open(m):
+            spec = re.sub(r"\s+", "", m.group(1) or "")
+            return "\\begin{array}{" + (spec or "c") + "}"
+        # Braced form: \array{|c|c|}   OR   raw form: \array|c|c|c|
+        if re.search(r"\\array\s*\{", t):
+            t = re.sub(r"\\array\s*\{([^}]*)\}", _open, t, count=1)
+        else:
+            t = re.sub(r"\\array\s*([|clr][|clr\s]*)", _open, t, count=1)
+        # Any remaining `\array` (the model reuses it as the closer) → \end{array}.
+        t = t.replace("\\array", "\\end{array}")
+    # `\bf`/`\it` glued to a letter is undefined ("\bfx"); KaTeX wants a space.
+    t = re.sub(r"\\(bf|it|rm|sf|tt)([A-Za-z])", r"\\\1 \2", t)
+    # A begin with no end (or vice-versa) → balance it so KaTeX doesn't throw on the whole card.
+    nb, ne = t.count("\\begin{array}"), t.count("\\end{array}")
+    if nb > ne:
+        t = t + " \\end{array}" * (nb - ne)
+    elif ne > nb:
+        t = "\\begin{array}{c} " * (ne - nb) + t
+    return t
+
+
 def clean_math_latex(s: str) -> tuple:
     """(latex, problem) for the KaTeX equation card.
 
@@ -379,7 +414,7 @@ def clean_math_latex(s: str) -> tuple:
     # fun" would be typeset as an equation instead of being dropped.
     if not _HAS_MATH.search(t):
         return "", "prose"
-    t = normalise_math_latex(_repair_latex(t))
+    t = _repair_array_latex(normalise_math_latex(_repair_latex(t)))
     if not t:
         return "", "prose"
     return t, ""
