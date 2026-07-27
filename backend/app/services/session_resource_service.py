@@ -86,7 +86,12 @@ def _parse_description(description: Optional[str]) -> Dict[str, Any]:
         return out
     m = re.search(r"Topics?:\s*([^\n]+)", description, re.IGNORECASE)
     if m:
-        out["topics"] = [t.strip() for t in m.group(1).split(",") if t.strip()]
+        # The Topics line carries ONE unit title. It is NOT comma-separated: 16 of 221 real unit
+        # titles contain a comma ("UNIT 1: Significant Figures, powers and standard form"), and
+        # splitting on it shredded the title into fragments that matched no resource, so those
+        # units silently showed no slides at all. Treat the whole line as the single unit.
+        line = m.group(1).strip()
+        out["topics"] = [line] if line else []
     m = re.search(r"Year group:\s*([^\n]+)", description, re.IGNORECASE)
     if m:
         out["year_group"] = m.group(1).strip()
