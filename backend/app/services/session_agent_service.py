@@ -679,24 +679,16 @@ async def build_session_system_prompt(
         )
     session_quiz_str = "\n".join(session_quiz_lines) if session_quiz_lines else "  No quizzes completed in this session yet."
 
-    # Quiz timing gate — adjusted per session duration (4 tiers)
-    if duration_minutes <= 25:      # Quick Boost 20 min
-        QUIZ_UNLOCK_AFTER_MINUTES = 13
-        QUIZ_UNLOCK_REMAINING_MINUTES = 5
-    elif duration_minutes <= 45:    # Core Learning 40 min
-        QUIZ_UNLOCK_AFTER_MINUTES = 28
-        QUIZ_UNLOCK_REMAINING_MINUTES = 8
-    elif duration_minutes <= 65:    # Deep Learning 60 min
-        QUIZ_UNLOCK_AFTER_MINUTES = 40
-        QUIZ_UNLOCK_REMAINING_MINUTES = 18
-    else:                           # Intensive 90 min
-        QUIZ_UNLOCK_AFTER_MINUTES = 57
-        QUIZ_UNLOCK_REMAINING_MINUTES = 20
-
-    quiz_phase = (
-        elapsed_minutes >= QUIZ_UNLOCK_AFTER_MINUTES
-        or remaining_minutes <= QUIZ_UNLOCK_REMAINING_MINUTES
-    )
+    # Quiz timing gate — the quiz phase begins AFTER recap+teach+practice, from the SAME phase
+    # budget the plan and _is_quiz_phase use, so all three agree. The old per-tier time
+    # thresholds (plus a "little time left" early-open) unlocked the quiz DURING practice.
+    try:
+        from app.services.lesson_service import phase_budget as _pb
+        _b = _pb(duration_minutes)
+        _quiz_start = _b.get("recap", 0) + _b.get("teach", 0) + _b.get("practice", 0)
+    except Exception:
+        _quiz_start = max(1, int(duration_minutes * 0.7))
+    quiz_phase = elapsed_minutes >= _quiz_start
 
     if quiz_count >= MAX_QUIZZES:
         quiz_timing_note = (
@@ -706,10 +698,9 @@ async def build_session_system_prompt(
     elif not quiz_phase:
         quiz_timing_note = (
             f"QUIZ LOCKED -- Session has been running for ~{elapsed_minutes} minute(s) "
-            f"(~{remaining_minutes} minute(s) remaining). Do NOT call generate_quiz yet. "
-            f"Quizzes are only allowed after {QUIZ_UNLOCK_AFTER_MINUTES} minutes of teaching "
-            f"OR when less than {QUIZ_UNLOCK_REMAINING_MINUTES} minutes remain. "
-            "Focus entirely on teaching and practice right now."
+            f"(~{remaining_minutes} minute(s) remaining). Do NOT call generate_quiz yet — the "
+            f"quiz comes AFTER practice, in its own phase (~{_quiz_start} minutes in). Right now "
+            "focus entirely on teaching and hands-on PRACTICE puzzles, NOT a quiz."
         )
     else:
         remaining_quizzes = MAX_QUIZZES - quiz_count
@@ -2299,19 +2290,19 @@ _ACTION_LABELS = {
 
 
 def _is_quiz_phase(appointment) -> bool:
-    """Are we in (or approaching) the dedicated QUIZ phase — i.e. may the quiz tool bind?
+    """Are we in the dedicated QUIZ phase — i.e. may the quiz tool bind?
 
-    Derived from the real phase budget rather than a time heuristic, so it can't disagree with
-    the plan the tutor is following: the quiz phase starts after recap+teach+practice, and this
-    opens ~2 minutes before that (so the tool is ready as the phase begins) and stays open for
-    the rest of the lesson.
+    The quiz comes AFTER practice, never during it. This opens EXACTLY when the plan's quiz
+    phase begins (recap+teach+practice elapsed) — not before. A student reported the quiz
+    firing the moment practice started; that was this opening early plus the quiz tool being
+    bound during practice (both fixed).
     """
     elapsed, remaining, duration = _compute_lesson_clock(appointment)
     try:
         from app.services.lesson_service import phase_budget
         b = phase_budget(duration)
         quiz_start = b.get("recap", 0) + b.get("teach", 0) + b.get("practice", 0)
-        return elapsed >= max(0, quiz_start - 2)
+        return elapsed >= quiz_start
     except Exception:
         # Fallback to the old heuristic if the budget can't be read.
         return elapsed >= duration * 0.6
@@ -2354,15 +2345,17 @@ def select_tool_groups(
     g.add("visuals")
     if has_slides:
         g.add("teaching")
-    # Quiz window reached (state) → quiz tools ready. But NEVER once the one quiz is done:
-    # keeping `assessment` bound after that is what let the model re-offer a quiz it had already
-    # given. mastery is unaffected — that's just progress tracking, not a quiz.
-    if not quiz_done and (quiz_phase or event_kind == "quiz_result"):
+    # The QUIZ tool (generate_quiz) binds ONLY in the dedicated QUIZ phase — never during
+    # practice. Practice is for hands-on PUZZLES (the `puzzles` group + their evaluators); a quiz
+    # mid-practice is exactly the "quiz starts the moment practice starts" bug. `quiz_phase` and
+    # plan `phase == "quiz"` both open at the same point (recap+teach+practice elapsed). And never
+    # once the one quiz is done.
+    in_quiz_phase = quiz_phase or (phase or "") == "quiz"
+    if not quiz_done and (in_quiz_phase or event_kind == "quiz_result"):
         g.add("assessment")
-    # PHASE-DRIVEN: a practice/quiz step is about doing and being marked.
+    # mastery = progress tracking + answer evaluation; useful throughout practice AND quiz, and
+    # it is NOT the quiz tool, so it stays bound during practice.
     if (phase or "") in ("practice", "quiz"):
-        if not quiz_done:
-            g.add("assessment")
         g.add("mastery")
     # Lesson is closing / ending is on the table (state) → end + report bound, so a
     # wrap-up turn ("ok, time's up, let's finish") always has generate_session_report
