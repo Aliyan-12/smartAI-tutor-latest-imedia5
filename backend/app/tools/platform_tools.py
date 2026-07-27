@@ -40,6 +40,29 @@ def platform_tool_groups(ctx: ToolContext) -> dict:
         difficulty: easy | medium | hard
         """
         from app.services import gemini_service, assessment_service
+        from app.models.assessment import Assessment
+        from sqlalchemy import func, select as _select
+        # ONE QUIZ PER SESSION — HARD STOP. Once a quiz exists for this appointment, never make
+        # another. Without this the model kept calling generate_quiz and re-announcing "I've put
+        # a quiz up" after the quiz was already done. The refusal is `suppressed` so the thinking
+        # strip doesn't show a phantom step, and legible so the model stops offering.
+        existing = (await ctx.db.execute(
+            _select(func.count()).select_from(Assessment).where(
+                Assessment.appointment_id == ctx.appointment_id,
+                Assessment.student_id == ctx.student_id,
+            )
+        )).scalar() or 0
+        if existing >= 1:
+            logger.info("generate_quiz refused — quiz already done appt=%s", ctx.appointment_id)
+            return {
+                "action": "show_quiz", "error": "quiz_already_done", "suppressed": True,
+                "message": (
+                    "REFUSED — this student has ALREADY had their quiz this session, and there is "
+                    "only ONE quiz per lesson. Nothing was created. Do NOT call generate_quiz "
+                    "again and do NOT tell the student a quiz is ready or coming. Move on: talk "
+                    "through how they did, or continue to the summary."
+                ),
+            }
         questions = gemini_service.generate_mcq_questions(
             topic=topic,
             subject=ctx.subject,

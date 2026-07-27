@@ -957,8 +957,12 @@ async def auto_create_lesson_plan(db: AsyncSession, appointment, student_id: int
     }
     goal = goal_map.get(session_type, "learn_scratch")
 
+    # The Topics line is ONE unit title — do NOT split on comma. Many real unit titles contain a
+    # comma ("Significant Figures, powers and standard form"); splitting broke the unit match and
+    # those units showed no slides. (Matches _parse_description in session_resource_service.)
     topics_match = re.search(r"Topics?:\s*([^\n]+)", desc, re.IGNORECASE)
-    topics = [t.strip() for t in topics_match.group(1).split(",") if t.strip()] if topics_match else []
+    _topic_line = topics_match.group(1).strip() if topics_match else ""
+    topics = [_topic_line] if _topic_line else []
     unit_name = topics[0] if topics else None
 
     # Prefer the explicit param; fall back to a "Subtopic:" line in the description.
