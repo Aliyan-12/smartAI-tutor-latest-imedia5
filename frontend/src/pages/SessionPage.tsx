@@ -22,7 +22,10 @@ import { playCorrectSound, playWrongSound } from "../lib/sounds";
 import type { Assessment, ChatMessage, QuizOffer } from "../types";
 
 type SessionState = "loading" | "passcode" | "active" | "ended";
-type LearnTab = "learn" | "test";
+// Three Learn-panel tabs: LEARN shows the teaching slides ONLY; PRACTICE shows everything the
+// tutor generates (puzzles, diagrams, animations, mermaid, svg); TEST is the formal quiz.
+type LearnTab = "learn" | "practice" | "test";
+const LEARN_TAB_LABELS: Record<LearnTab, string> = { learn: "Learn", practice: "Practice", test: "Quiz" };
 
 const SUBJECTS = [
   "Maths","Science","English","History","Geography",
@@ -211,9 +214,10 @@ export default function SessionPage() {
         } else {
           setQuickReplies([]); // the puzzle is the thing to answer now
           setCurrentPuzzle(data as unknown as PuzzlePayload);
-          setLearnTab("learn");
-          // A puzzle/diagram/animation needs the Learn panel — surface it (mobile shows one
-          // panel). All four visual families ride this same show_puzzle frame.
+          // Everything the tutor GENERATES — puzzles, diagrams, animations, mermaid, svg — lives
+          // in the PRACTICE tab now; the Learn tab is slides only. Surface it (desktop tab +
+          // mobile panel) so the student sees what just appeared.
+          setLearnTab("practice");
           setMobilePanelView("learn");
           setLearnUnseen(false);
         }
@@ -1137,16 +1141,17 @@ export default function SessionPage() {
   const learnPanelInner = (
     <>
       <div style={styles.tabs}>
-        {(["learn", "test"] as LearnTab[]).map((tab) => (
+        {(["learn", "practice", "test"] as LearnTab[]).map((tab) => (
           <button
             key={tab}
             style={{
               ...styles.tabBtn,
               ...(learnTab === tab ? styles.tabBtnActive : {}),
+              position: "relative",
             }}
             onClick={() => setLearnTab(tab)}
           >
-            {tab.charAt(0).toUpperCase() + tab.slice(1)}
+            {LEARN_TAB_LABELS[tab]}
           </button>
         ))}
       </div>
@@ -1162,10 +1167,21 @@ export default function SessionPage() {
             </button>
           </div>
         ) : null}
+        {/* LEARN — teaching slides ONLY. */}
         {!isPaused && learnTab === "learn" && (
+          currentResource ? (
+            <div style={{ flex: 1, minHeight: "70vh", display: "flex", flexDirection: "column" }}>
+              <ResourceViewer slide={currentResource} />
+            </div>
+          ) : (
+            <LearnIdle />
+          )
+        )}
+
+        {/* PRACTICE — everything the tutor generates: puzzles, diagrams, animations, mermaid, svg. */}
+        {!isPaused && learnTab === "practice" && (
           currentPuzzle ? (
-            // No minHeight here: the puzzle should FILL the Learn body, not overflow it into a
-            // scroll. The interactive manipulatives size themselves to the space they're given.
+            // No minHeight: the activity FILLS the body rather than overflowing into a scroll.
             <div style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column" }}>
               <PuzzlePlayer
                 key={currentPuzzle.instance_id || `${currentPuzzle.puzzle_type}:${currentPuzzle.prompt}`}
@@ -1174,10 +1190,6 @@ export default function SessionPage() {
                   channel.sendPuzzleResult(currentPuzzle.puzzle_type, currentPuzzle.prompt, answer)
                 }
               />
-            </div>
-          ) : currentResource ? (
-            <div style={{ flex: 1, minHeight: "70vh", display: "flex", flexDirection: "column" }}>
-              <ResourceViewer slide={currentResource} />
             </div>
           ) : (
             <LearnIdle />

@@ -666,7 +666,7 @@ async def build_session_system_prompt(
     # Load THIS session's quiz results
     session_assessments = await _load_appointment_assessments(db, appointment_id, student_id)
     quiz_count = await _count_appointment_assessments(db, appointment_id, student_id)
-    MAX_QUIZZES = 3
+    MAX_QUIZZES = 1          # ONE quiz per session; after it, the tutor stops offering entirely.
 
     session_quiz_lines: list[str] = []
     for a in session_assessments:
@@ -1986,7 +1986,7 @@ async def _phase_and_next(db: AsyncSession, appt_id: int, elapsed: int,
 async def build_lesson_state_anchor(
     db: AsyncSession, appt_id: int, student_id: int, pstate: Optional[dict],
     available_actions: Optional[str] = None,
-    *, has_slides: bool = False, quiz_phase: bool = False,
+    *, has_slides: bool = False, quiz_phase: bool = False, quiz_done: bool = False,
     closing_stage: bool = False, end_allowed: bool = False, voice: bool = False,
 ) -> str:
     """A compact, single-purpose live snapshot of the whole lesson, injected at maximum
@@ -2072,10 +2072,15 @@ async def build_lesson_state_anchor(
                 "⚡ DO NOW: the lesson is in its final minutes — start wrapping up with a quick "
                 "recap and ONE last piece of practice. Don't open a brand-new topic."
             )
-        elif quiz_phase:
+        elif quiz_phase and not quiz_done:
             lines.append(
-                "⚡ DO NOW: the quiz window is OPEN — unless you've already quizzed this session, "
-                "finish the current point and call generate_quiz yourself (don't wait to be asked)."
+                "⚡ DO NOW: the quiz window is OPEN — finish the current point and call "
+                "generate_quiz yourself (don't wait to be asked)."
+            )
+        elif quiz_done:
+            lines.append(
+                "⚡ DO NOW: the quiz is DONE for this session — do NOT offer, mention, or set "
+                "another quiz. Talk through how they did, then keep teaching or move to the wrap-up."
             )
         elif has_slides:
             lines.append(
@@ -2315,7 +2320,7 @@ def _is_quiz_phase(appointment) -> bool:
 def select_tool_groups(
     *, event_kind: str = "user_message", intent_text: Optional[str] = None,
     has_slides: bool = False, end_allowed: bool = False, quiz_phase: bool = False,
-    closing_stage: bool = False, phase: Optional[str] = None,
+    closing_stage: bool = False, phase: Optional[str] = None, quiz_done: bool = False,
 ) -> set:
     """Choose the tool groups to bind THIS turn — STATE-DRIVEN first, then query-driven.
 
@@ -2349,14 +2354,15 @@ def select_tool_groups(
     g.add("visuals")
     if has_slides:
         g.add("teaching")
-    # Quiz window reached (state) → quiz tools ready.
-    if quiz_phase or event_kind == "quiz_result":
+    # Quiz window reached (state) → quiz tools ready. But NEVER once the one quiz is done:
+    # keeping `assessment` bound after that is what let the model re-offer a quiz it had already
+    # given. mastery is unaffected — that's just progress tracking, not a quiz.
+    if not quiz_done and (quiz_phase or event_kind == "quiz_result"):
         g.add("assessment")
-    # PHASE-DRIVEN: a practice/quiz step is about doing and being marked, so bind the
-    # assessment + mastery tools for the whole of it rather than waiting for the student to
-    # say a keyword like "test me".
+    # PHASE-DRIVEN: a practice/quiz step is about doing and being marked.
     if (phase or "") in ("practice", "quiz"):
-        g.add("assessment")
+        if not quiz_done:
+            g.add("assessment")
         g.add("mastery")
     # Lesson is closing / ending is on the table (state) → end + report bound, so a
     # wrap-up turn ("ok, time's up, let's finish") always has generate_session_report
@@ -2366,7 +2372,7 @@ def select_tool_groups(
         g.add("lifecycle")
 
     # ── 2) QUERY-DRIVEN add-ons — the student's keyword intent ───────────────────
-    if _has("quiz", "test me", "test ", "exam", "assess my", "how am i doing"):
+    if not quiz_done and _has("quiz", "test me", "test ", "exam", "assess my", "how am i doing"):
         g.add("assessment")
     if _has("puzzle", "practice", "let's try", "try one", "interactive", "drag", "game", "hands-on"):
         g.add("puzzles")
@@ -2677,10 +2683,16 @@ async def _run_turn(send, chat_id, user_id, *, saved_user_text, ai_content,
                 # it here rather than at construction.
                 if tool_context is not None:
                     tool_context.phase = _phase_now
+                # ONE quiz per session: once it's been given, unbind the quiz tool so the model
+                # can't re-offer it (and the anchor stops advertising it).
+                try:
+                    _quiz_done = await _count_appointment_assessments(db, appt_id, user_id) >= 1
+                except Exception:
+                    _quiz_done = False
                 tool_groups_for_turn = select_tool_groups(
                     event_kind=event_kind, intent_text=saved_user_text,
                     has_slides=has_slides, end_allowed=_end_allowed, quiz_phase=_quiz_phase,
-                    closing_stage=_closing, phase=_phase_now,
+                    closing_stage=_closing, phase=_phase_now, quiz_done=_quiz_done,
                 )
                 try:
                     _anchor = await build_lesson_state_anchor(
@@ -2688,6 +2700,7 @@ async def _run_turn(send, chat_id, user_id, *, saved_user_text, ai_content,
                         available_actions=_describe_actions(tool_groups_for_turn),
                         has_slides=has_slides, quiz_phase=_quiz_phase,
                         closing_stage=_closing, end_allowed=_end_allowed, voice=tts,
+                        quiz_done=_quiz_done,
                     )
                     ai_content = f"{ai_content}\n\n{_anchor}"
                 except Exception:
