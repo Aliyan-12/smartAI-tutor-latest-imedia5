@@ -21,10 +21,19 @@ class Settings(BaseSettings):
     gemini_api_key: str = ""
     gemini_model: str = "gemini-2.5-pro" #"gemini-2.5-flash"
     gemini_model_fast: str = "gemini-2.5-flash"
-    # Per-pipeline LLMs: premium session vs free /chat.
-    # Set GEMINI_SESSION_MODEL to a Gemini 3 id when ready.
-    gemini_session_model: str = "gemini-2.5-pro"
+    # Per-pipeline LLMs: session vs free /chat.
+    # LATENCY: the session model was gemini-2.5-pro, which is a deep-reasoning model and the main
+    # reason a turn took 10-25s (the "blue blob"). 2.5-flash is ~3-5x faster to first token and
+    # is more than capable here — the lesson is heavily scaffolded (state anchor, tool guards,
+    # forced recoveries), so the model does less unaided reasoning than the tool count suggests.
+    # Override with GEMINI_SESSION_MODEL=gemini-2.5-pro to trade speed back for reasoning depth.
+    gemini_session_model: str = "gemini-2.5-flash"
     gemini_chat_model: str = "gemini-2.5-flash"
+    # Thinking tokens emitted BEFORE the answer on every round — directly additive latency.
+    # Was hard-coded at 2048 (several seconds/round). A small budget keeps occasional thought
+    # summaries for the thinking strip while cutting most of that delay; 0 disables thinking
+    # entirely for the lowest latency. Env: GEMINI_THINKING_BUDGET.
+    gemini_thinking_budget: int = 512
     # "Nano Banana" — Gemini native image generation, used to create puzzle/explanatory
     # images live during a lesson. Overridable via GEMINI_IMAGE_MODEL.
     gemini_image_model: str = "gemini-2.5-flash-image"

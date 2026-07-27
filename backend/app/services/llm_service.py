@@ -33,22 +33,26 @@ def _build_session_llm() -> ChatGoogleGenerativeAI:
         temperature=1.0,
         max_retries=5,
     )
-    # `include_thoughts` surfaces a brief reasoning summary in the stream. A modest
-    # `thinking_budget` keeps it fast while making the model actually reason (and so emit a
-    # thought summary) on MOST turns — at 512 many simple turns produced no thoughts, so the
-    # thinking strip rarely showed; a larger budget makes "it's thinking" the norm.
+    # `include_thoughts` surfaces a brief reasoning summary for the thinking strip, but every
+    # thinking token is generated BEFORE the answer, so the budget is pure added latency. It's
+    # now config-driven (GEMINI_THINKING_BUDGET, default 256) instead of a hard-coded 2048 that
+    # cost several seconds per round. 0 → thinking off entirely (fastest); the strip then runs on
+    # tool-step labels alone.
+    budget = max(0, int(getattr(settings, "gemini_thinking_budget", 256)))
+    if budget > 0:
+        try:
+            llm = ChatGoogleGenerativeAI(**base, include_thoughts=True, thinking_budget=budget)
+            logger.info("Session LLM created: model=%s thinking_budget=%d",
+                        settings.gemini_session_model, budget)
+            return llm
+        except Exception as e:  # noqa: BLE001 - unknown kwargs / unsupported model → plain LLM
+            logger.warning("Thinking config unsupported (%s); creating plain session LLM", e)
     try:
-        llm = ChatGoogleGenerativeAI(**base, include_thoughts=True, thinking_budget=2048)
-        logger.info(
-            "Session LLM singleton created with thought summaries: model=%s",
-            settings.gemini_session_model,
-        )
-        return llm
-    except Exception as e:  # noqa: BLE001 - unknown kwargs / unsupported model → plain LLM
-        logger.warning("Thinking config unsupported (%s); creating plain session LLM", e)
+        llm = ChatGoogleGenerativeAI(**base, thinking_budget=0)
+    except Exception:  # noqa: BLE001 — model may not accept thinking_budget at all
         llm = ChatGoogleGenerativeAI(**base)
-        logger.info(f"Session LLM singleton created: model={settings.gemini_session_model}")
-        return llm
+    logger.info("Session LLM created (thinking OFF): model=%s", settings.gemini_session_model)
+    return llm
 
 
 def get_llm(tools: list = None) -> BaseChatModel:
