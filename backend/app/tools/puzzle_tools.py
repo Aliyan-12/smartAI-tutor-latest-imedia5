@@ -15,10 +15,11 @@ from typing import Any, List, Optional, Union
 
 from langchain_core.tools import tool
 
-from app.services import image_gen_service, teacher_service
-from app.services import practice_service as puzzle_service
-from app.services import practice_service as graph_service
-from app.services import practice_service as manipulative_service
+from app.services import image_gen_service
+from app.services.agent import teacher_service
+from app.services.agent import practice_service as puzzle_service
+from app.services.agent import practice_service as graph_service
+from app.services.agent import practice_service as manipulative_service
 from app.tools.session_tools import ToolContext
 
 logger = logging.getLogger(__name__)

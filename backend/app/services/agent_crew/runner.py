@@ -88,7 +88,7 @@ async def stream_crew_turn(
     """
     from crewai import Agent, Task, Crew
     from app.services.agent_crew.llm import build_agent_llm
-    from app.services.session_agent_service import SentenceSegmenter, stream_segment
+    from app.services.agent.session.core import SentenceSegmenter, stream_segment
 
     ws_loop = asyncio.get_running_loop()
     bridge = ToolBridge(send=send, ws_loop=ws_loop, emit_thinking=emit_thinking, appt_id=appt_id)

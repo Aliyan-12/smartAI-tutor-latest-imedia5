@@ -18,7 +18,7 @@ from app.models.appointment import Appointment
 from app.models.assessment import Assessment
 from app.models.user import User, ROLE_STUDENT
 from app.schemas.assessment import AssessmentResponse
-from app.services import session_agent_service
+from app.services.agent.session import core as session_agent_service
 
 logger = logging.getLogger(__name__)
 

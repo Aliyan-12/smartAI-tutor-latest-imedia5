@@ -52,7 +52,7 @@ async def _clear_puzzle_on_slide(ctx: "ToolContext") -> None:
     slide takes any on-screen puzzle off, so drop it from authoritative puzzle_state too.
     Keeps the per-turn LESSON STATE anchor honest (no 'puzzle still showing' after a slide
     move) and matches the frontend, which clears the puzzle overlay on any slide tool."""
-    from app.services import practice_service as puzzle_service
+    from app.services.agent import practice_service as puzzle_service
     try:
         await puzzle_service.clear_puzzle_state(ctx.db, ctx.appointment_id)
     except Exception as e:  # noqa: BLE001
@@ -73,7 +73,7 @@ def session_tool_groups(ctx: ToolContext) -> dict:
         instead. slide_index is 1-based. The returned slide_content is the text on that
         slide — teach from it.
         """
-        from app.services.session_resource_service import slide_action
+        from app.services.agent.session.resources import slide_action
         # An explicit, student-requested jump — allowed to span several slides in one
         # call. It still counts as this turn's slide move, so a stray sequential
         # advance/retreat afterwards is suppressed.
@@ -101,7 +101,7 @@ def session_tool_groups(ctx: ToolContext) -> dict:
         the answer, ask the student for their answer to the on-screen question FIRST and
         only advance once they've had a go — you decide this, no one blocks you.
         """
-        from app.services.session_resource_service import slide_action
+        from app.services.agent.session.resources import slide_action
         ctx.slide_moved = True
         ctx.visual_shown = "slide"
         result = await slide_action(ctx.db, ctx.appointment_id, mode="advance")
@@ -116,7 +116,7 @@ def session_tool_groups(ctx: ToolContext) -> dict:
         can re-teach the earlier slide. The returned slide_content is that slide's text —
         re-teach from it.
         """
-        from app.services.session_resource_service import slide_action
+        from app.services.agent.session.resources import slide_action
         ctx.slide_moved = True
         ctx.visual_shown = "slide"
         result = await slide_action(ctx.db, ctx.appointment_id, mode="retreat")
@@ -133,7 +133,7 @@ def session_tool_groups(ctx: ToolContext) -> dict:
         The returned slide_content is that slide's text — teach from it. (For step-by-step
         teaching use advance_lesson_slide; to open a DIFFERENT resource use show_resource.)
         """
-        from app.services.session_resource_service import slide_action, get_current_slide
+        from app.services.agent.session.resources import slide_action, get_current_slide
         cur = await get_current_slide(ctx.db, ctx.appointment_id)
         rid = cur.get("resource_hub_id") if cur else None
         ctx.slide_moved = True

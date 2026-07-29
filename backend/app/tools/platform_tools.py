@@ -104,7 +104,7 @@ def platform_tool_groups(ctx: ToolContext) -> dict:
         Call at the start of a session or before deciding what depth to teach at.
         Returns mastery_level per topic: not_started | learning | developing | proficient | mastered
         """
-        from app.services.session_agent_service import _load_topic_mastery
+        from app.services.agent.session.core import _load_topic_mastery
         records = await _load_topic_mastery(ctx.db, ctx.student_id, ctx.subject, ctx.key_stage)
         result = {}
         for topic in topics:
@@ -306,7 +306,7 @@ def platform_tool_groups(ctx: ToolContext) -> dict:
         Call silently.
         """
         from app.services import appointment_service
-        from app.services.session_resource_service import build_playlist, slide_action
+        from app.services.agent.session.resources import build_playlist, slide_action
         try:
             appt = await appointment_service.get_appointment(ctx.db, ctx.appointment_id)
             if not appt:
@@ -379,7 +379,8 @@ def platform_tool_groups(ctx: ToolContext) -> dict:
         it. Deliver your short, warm closing summary in your reply BEFORE calling this.
         Call silently.
         """
-        from app.services import session_state_service, appointment_service
+        from app.services import appointment_service
+        from app.services.agent.session import state as session_state_service
         allowed = await session_state_service.is_end_allowed(ctx.db, ctx.appointment_id)
         if not allowed:
             logger.info("end_lesson DENIED (end_not_allowed) appt=%s", ctx.appointment_id)
@@ -417,7 +418,7 @@ def platform_tool_groups(ctx: ToolContext) -> dict:
         from app.models.lesson_plan import LessonPlan
         from app.models.user import User
         from app.models.appointment import Appointment
-        from app.services import lesson_service
+        from app.services.agent.session import plan as lesson_service
 
         appt_result = await ctx.db.execute(
             select(Appointment).where(Appointment.id == ctx.appointment_id)

@@ -245,11 +245,19 @@ Two ways to honour "one session service":
   (`from app.services.agent.session import ...`), internally split (turn loop, resources, state,
   voice, plan). *Same import surface you asked for, maintainable internals.* **Recommended.**
 
-**Progress (2026-07-29):** `jobs/sync_service` ✅ (merged + validated live — sync runs, Hub 200s),
-`teacher_service` ✅ (svg_diagram + manim + mermaid/svg/animation builders), `practice_service` ✅
-(manipulative + graph + puzzle builders/math/latex/eval/state/rotation). Old 5 files deleted, full
-app import graph clean, app boots. REMAINING: the `session/` package (the 5 session files) —
-highest-risk, deferred until the crew is validated live.
+**Reorg DONE + validated (2026-07-29).** Final layout:
+```
+services/
+  agent/
+    teacher_service.py    ← svg_diagram + manim + mermaid/svg/animation builders
+    practice_service.py   ← manipulative + graph + puzzle builders/math/latex/eval/state/rotation
+    session/              ← core.py (turn loop/anchor/prompt) + resources + state + voice + plan
+    (agent_crew/ stays alongside: roles, navigator, runner, tools, llm)
+  jobs/sync_service.py    ← resource_hub_client + resource_sync_service (validated live, Hub 200s)
+```
+All 12 old service files deleted, every caller repointed, name collisions resolved. Full app
+import graph clean, compileall passes, container reloads to "startup complete". `session/__init__`
+is intentionally minimal (submodule-direct imports; no package-init cycle through the 3.9k-line core).
 
 **puzzle_service split is the fiddly bit:** it currently mixes teaching (mermaid + latex repair)
 and practice (puzzle builders + evaluators). The split cleanly separates:

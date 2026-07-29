@@ -49,7 +49,7 @@ class ToolBridge:
 def _thinking_labels() -> dict:
     # Lazy import breaks the import cycle (session_agent_service imports the runner).
     try:
-        from app.services.session_agent_service import _THINKING_LABELS
+        from app.services.agent.session.core import _THINKING_LABELS
         return _THINKING_LABELS
     except Exception:  # noqa: BLE001
         return {}

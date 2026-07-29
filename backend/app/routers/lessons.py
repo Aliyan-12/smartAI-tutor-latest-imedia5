@@ -20,7 +20,8 @@ from app.schemas.lesson import (
     CheckpointSaveRequest,
     ContinuationResponse,
 )
-from app.services import lesson_service, platform_service
+from app.services import platform_service
+from app.services.agent.session import plan as lesson_service
 
 logger = logging.getLogger(__name__)
 
