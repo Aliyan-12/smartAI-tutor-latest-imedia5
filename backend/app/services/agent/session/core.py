@@ -3252,6 +3252,41 @@ async def _handle_puzzle_result(send, chat_id, user_id, data):
                     tts=bool(data.get("tts", True)), anchor_slides=False, event_kind="puzzle_result")
 
 
+# Validate → fix → retry: how many LaTeX re-emits we'll ask for in a session before giving up
+# (the frontend keeps a readable degraded form on screen meanwhile, so the student is never stuck).
+_LATEX_FIX_CAP = 3
+
+
+async def _handle_latex_error(send, chat_id, user_id, data):
+    """AI_REACTIVE: the frontend KaTeX validator rejected a maths puzzle's LaTeX. Ask the AI to
+    FIX the LaTeX and re-emit the puzzle — no server-side repair. Capped so it can't loop."""
+    bad_latex = (data.get("latex") or "").strip()
+    err = (data.get("error") or "").strip()
+    prompt = (data.get("prompt") or "").strip()
+    async with async_session_factory() as _db:
+        _appt_id = await _resolve_appt_id(_db, chat_id)
+        if _appt_id:
+            from app.services.agent.session import state as session_state_service
+            _n = int(await session_state_service.get_flag(_db, _appt_id, "latex_fix_count", 0) or 0)
+            if _n >= _LATEX_FIX_CAP:
+                logger.info("latex_error: fix cap (%d) reached appt=%s — not retrying", _n, _appt_id)
+                return
+            await session_state_service.set_flag(_db, _appt_id, "latex_fix_count", _n + 1)
+            await _db.commit()
+    logger.info("latex_error: re-asking AI to fix LaTeX (%r → %s)", bad_latex[:60], err[:80])
+    ai = (
+        "[SYSTEM — DO THIS NOW, silently] The maths puzzle you just set could NOT be displayed — its "
+        "LaTeX is invalid and KaTeX rejected it.\n"
+        f"The LaTeX was: {bad_latex!r}\nKaTeX error: {err}\n"
+        + (f"Question: {prompt}\n" if prompt else "")
+        + "Call math_puzzle AGAIN for the SAME question, with CORRECTED, valid KaTeX in `latex` "
+        "(proper braces, \\frac{a}{b}, \\times, backslashed commands). Do not apologise or explain — "
+        "just re-set the puzzle, then say ONE short new line like \"Let's try that one again!\"."
+    )
+    await _run_turn(send, chat_id, user_id, saved_user_text=None, ai_content=ai,
+                    tts=bool(data.get("tts", False)), anchor_slides=False, event_kind="latex_error")
+
+
 async def _handle_user_audio(send, chat_id, user_id, data):
     """
     Custom voice loop. The client sends {stt: true, tts: ...} with the audio:
@@ -3468,13 +3503,14 @@ _AI_HANDLERS = {
     "lesson_end_request": _handle_lesson_end_request,
     "lesson_timeout": _handle_lesson_timeout,
     "student_idle": _handle_student_idle,
+    "latex_error": _handle_latex_error,
 }
 _SIDE_HANDLERS = {
     "lesson_pause": _handle_lesson_pause,
     "lesson_resume": _handle_lesson_resume,
 }
 # AI-reactive events that may be queued (latest wins) when a turn is already running.
-_QUEUEABLE = {"puzzle_result", "quiz_result", "lesson_end_request", "student_idle"}
+_QUEUEABLE = {"puzzle_result", "quiz_result", "lesson_end_request", "student_idle", "latex_error"}
 
 
 async def _guard_side(send, chat_id, user_id, mtype, data):

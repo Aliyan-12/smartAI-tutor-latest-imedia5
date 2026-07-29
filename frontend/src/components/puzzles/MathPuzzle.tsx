@@ -1,8 +1,10 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { BlockMath } from "react-katex";
+import katex from "katex";
 import "katex/dist/katex.min.css";
 import type { InteractivePuzzleProps } from "./types";
+import { emitSessionEvent } from "../../lib/sessionBus";
 
 /**
  * A maths problem — shown as crisp LaTeX, or a generated image for loose visual concepts.
@@ -27,6 +29,27 @@ export default function MathPuzzle({ payload, onSubmit, disabled }: InteractiveP
   const [picked, setPicked] = useState<string | null>(null);
 
   const hasChoices = options.length > 0;
+
+  // VALIDATE → FIX → RETRY. No client-side repair: if KaTeX can't parse the LaTeX, bounce a
+  // `latex_error` back so the AI re-emits a corrected puzzle. Reported once per distinct latex;
+  // the BlockMath below keeps a readable degraded form on screen meanwhile, so the student is
+  // never stuck on a broken formula while the fix is in flight.
+  const reportedRef = useRef<string>("");
+  useEffect(() => {
+    if (!latex || mode === "image") return;
+    try {
+      katex.renderToString(latex, { throwOnError: true, displayMode: true });
+    } catch (e) {
+      if (reportedRef.current !== latex) {
+        reportedRef.current = latex;
+        emitSessionEvent("latex_error", {
+          latex,
+          error: String((e as Error)?.message || e || "KaTeX parse error"),
+          prompt: payload.prompt || "",
+        });
+      }
+    }
+  }, [latex, mode, payload.prompt]);
 
   return (
     <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 22, width: "100%", padding: "6px 12px 0" }}>

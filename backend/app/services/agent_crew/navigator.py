@@ -48,7 +48,12 @@ def select_role(
             or any(k in txt for k in _END_INTENT):
         return SUMMARIZER
 
-    # 2) Quiz window open and not yet done → the Practitioner sets the single quiz.
+    # 2) A maths puzzle's LaTeX was rejected by the client → the Practitioner owns the puzzle
+    #    tools, so it must be the one to re-emit a corrected puzzle (validate → fix → retry).
+    if event_kind == "latex_error":
+        return PRACTITIONER
+
+    # 3) Quiz window open and not yet done → the Practitioner sets the single quiz.
     if quiz_phase and not quiz_done:
         return PRACTITIONER
 

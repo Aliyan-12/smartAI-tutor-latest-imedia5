@@ -21,7 +21,13 @@
 >   (`LLM(..., stream=True)` + `LLMStreamChunkEvent` listeners). NOT the in-house option.
 > - **B — Session file:** `agent/session/` **package** with a flat re-exported public API.
 > - **C — Order:** agent redesign FIRST (Pass 1), service reorg LAST (Pass 3).
-> - **D — LaTeX:** **REMOVE** `clean_math_latex`/`_repair_*`. Instead the AI emits LaTeX as a
+> - **D — LaTeX: DONE (2026-07-29).** Removed the repair band-aids (neutered `clean_math_latex`;
+>   deleted `_repair_latex`/`normalise_math_latex`/`_repair_array_latex` + `_LATEX_CMDS/_WORDS/_UNITS/
+>   _UNIT_RE/_FUNCS`, 158 lines). The AI's LaTeX passes through as-is. Frontend `MathPuzzle` validates
+>   with `katex.renderToString(throwOnError)`; on failure it emits a `latex_error` WS event →
+>   `_handle_latex_error` asks the AI (routed to the Practitioner) to re-emit corrected LaTeX
+>   (validate→fix→retry, capped at 3/session; a readable degraded form stays on screen meanwhile).
+> - ~~D — LaTeX:~~ **REMOVE** `clean_math_latex`/`_repair_*`. Instead the AI emits LaTeX as a
 >   real KaTeX response part; on a KaTeX **render error** the frontend reports it back and the AI
 >   re-emits a corrected version — the student only ever sees a clean render (validate→fix→retry,
 >   no regex repair).

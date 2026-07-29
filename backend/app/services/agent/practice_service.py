@@ -2570,36 +2570,6 @@ def _auto_numeric_distractors(ans: str) -> List[str]:
     return out
 
 
-# LaTeX commands the model routinely emits with the leading backslash lost — the classic
-# failure is "\frac34" arriving as "frac34", which KaTeX then renders as the literal word.
-# Commands whose backslash the model drops. Each becomes `\cmd` only when it stands alone as a
-# word, so "fractions" and "since" are never touched. Ordered longest-first at use so `dfrac`
-# isn't half-matched by `frac`.
-_LATEX_CMDS = (
-    # fractions / roots / powers
-    "dfrac", "tfrac", "cfrac", "frac", "sqrt", "binom", "overline", "underline",
-    # operators
-    "times", "div", "cdot", "pm", "mp", "ast", "star", "bullet",
-    # relations
-    "leq", "geq", "neq", "approx", "equiv", "propto", "sim", "cong", "perp", "parallel",
-    "le", "ge", "ne", "ll", "gg",
-    # arrows
-    "rightarrow", "leftarrow", "Rightarrow", "Leftarrow", "leftrightarrow", "mapsto",
-    # big operators / calculus
-    "sum", "prod", "int", "lim", "infty", "partial", "nabla",
-    # geometry / symbols
-    "angle", "circ", "degree", "triangle", "square", "therefore", "because",
-    # greek (lower case) — the ones that actually appear in KS1-KS5 maths & science
-    "alpha", "beta", "gamma", "delta", "theta", "lambda", "mu", "sigma", "rho", "phi",
-    "omega", "pi",
-    # greek (capitalised)
-    "Delta", "Sigma", "Omega", "Theta", "Lambda", "Phi",
-    # accents / formatting (these take an argument, so only help when braces are present)
-    "vec", "hat", "bar", "tilde", "mathrm", "mathbf", "boxed", "text",
-    # spacing / font (a "quad52" from a dropped backslash rendered as literal "quad52")
-    "quad", "qquad", "bf", "it", "rm", "sf", "tt",
-)
-
 # Things that must never reach KaTeX. A student saw a maths card render as
 # "textFindthelengthofsidex … dth = 200px]https://storage.googleapis.com/…" because the model
 # put prose AND a markdown image into `latex`; KaTeX has no idea what either is, so it set the
@@ -2610,115 +2580,6 @@ _URL_RE = re.compile(r"(https?://|www\.)\S+", re.IGNORECASE)
 _HTML_TAG = re.compile(r"<[^>]+>")
 # Does what's left actually contain maths? A digit, an operator, or a LaTeX command.
 _HAS_MATH = re.compile(r"[0-9]|[+\-=<>^_/×÷≤≥≠±]|\\(?!text\b)[A-Za-z]+")
-
-
-# Prose the model writes INSIDE a LaTeX field. KaTeX renders "times" as three italic letters and
-# "sin(30)" as s·i·n·(30), so `x = sin(30) times 20` comes out as gibberish rather than maths.
-_LATEX_WORDS = (
-    (r"(?<![\\a-zA-Z])times(?![a-zA-Z])", r"\\times"),
-    (r"(?<![\\a-zA-Z])divided\s+by(?![a-zA-Z])", r"\\div"),
-    (r"(?<![\\a-zA-Z])multiplied\s+by(?![a-zA-Z])", r"\\times"),
-    (r"(?<![\\a-zA-Z])plus(?![a-zA-Z])", "+"),
-    (r"(?<![\\a-zA-Z])minus(?![a-zA-Z])", "-"),
-    (r"(?<![\\a-zA-Z])equals(?![a-zA-Z])", "="),
-    (r"(?<![\\a-zA-Z])degrees(?![a-zA-Z])", r"^\\circ"),
-    # π is the single most common symbol in this curriculum and the model keeps dropping the
-    # backslash. Bare "pi" renders as two italic letters — a student saw "A = pir²" for the area
-    # of a circle. Handle it standalone AND glued to the next variable ("pir^2" → "\pi r^2").
-    (r"(?<![\\a-zA-Z])pi(?![a-zA-Z])", r"\\pi "),
-    (r"(?<![\\a-zA-Z])pi(?=[a-z](?![a-zA-Z]))", r"\\pi "),
-    # `\text` without a {…} argument is a KaTeX error; the model writes "6 \text cm". Drop the
-    # command and keep the unit — "6 cm" reads fine, "textcm" does not.
-    (r"\\text(?!\s*\{)", " "),
-    # A BARE % IS A COMMENT IN (KA)TEX — it silently swallows the rest of the line, so
-    # "20% of 50" rendered as just "20". Escape it.
-    (r"(?<!\\)%", r"\\%"),
-    # Powers written in words: "r squared" → r^2.
-    (r"\s+squared(?![a-zA-Z])", "^2"),
-    (r"\s+cubed(?![a-zA-Z])", "^3"),
-    # Word relations the model reaches for mid-equation.
-    (r"(?<![\\a-zA-Z])is\s+approximately(?![a-zA-Z])", r"\\approx"),
-    (r"(?<![\\a-zA-Z])approximately(?![a-zA-Z])", r"\\approx"),
-    (r"(?<![\\a-zA-Z])not\s+equal\s+to(?![a-zA-Z])", r"\\neq"),
-    (r"(?<![\\a-zA-Z])greater\s+than\s+or\s+equal\s+to(?![a-zA-Z])", r"\\geq"),
-    (r"(?<![\\a-zA-Z])less\s+than\s+or\s+equal\s+to(?![a-zA-Z])", r"\\leq"),
-    (r"(?<![\\a-zA-Z])greater\s+than(?![a-zA-Z])", ">"),
-    (r"(?<![\\a-zA-Z])less\s+than(?![a-zA-Z])", "<"),
-    (r"(?<![\\a-zA-Z])plus\s+or\s+minus(?![a-zA-Z])", r"\\pm"),
-    (r"(?<![\\a-zA-Z])infinity(?![a-zA-Z])", r"\\infty"),
-    # ASCII arrows the model uses for "gives / leads to".
-    (r"-+>", r"\\rightarrow"),
-    (r"=>", r"\\Rightarrow"),
-    # "cm2" / "mm3" are squared/cubed units, not a unit times a number. Only the unambiguous
-    # multi-letter units — a bare "m2" could be a variable.
-    (r"(?<![a-zA-Z\\])(cm|mm|km|kg)([23])(?![0-9a-zA-Z])", r"\1^\2"),
-)
-
-# Multi-letter UNITS. In maths mode KaTeX sets them in italics letter-by-letter, so "6 cm" reads
-# as c×m. Only multi-letter units are wrapped — a bare "m" or "s" is far more likely to be a
-# variable than metres or seconds, and guessing wrong is worse than leaving it.
-_UNITS = ("cm", "mm", "km", "kg", "mg", "ml", "km/h", "m/s", "cm²", "m²", "cm³", "m³",
-          "sec", "min", "hr", "kJ", "mol", "Hz", "N", "Pa")
-_UNIT_RE = re.compile(
-    r"(?<=[\d\}])\s*(?<!\\)(" + "|".join(re.escape(u) for u in sorted(_UNITS, key=len, reverse=True))
-    + r")(?![a-zA-Z])"
-)
-# Function names must be backslashed or KaTeX italicises them letter by letter.
-_LATEX_FUNCS = ("arcsin", "arccos", "arctan", "sinh", "cosh", "tanh",
-                "sin", "cos", "tan", "log", "ln", "exp", "det", "gcd", "lcm",
-                "sec", "csc", "cot", "deg", "dim", "hom", "ker", "arg")
-
-
-def normalise_math_latex(s: str) -> str:
-    """Turn the prose-maths the model sometimes writes into real LaTeX.
-
-    Reported from a live lesson: `x = sin(30) times 20`. Both problems are silent — KaTeX renders
-    it without erroring, just wrongly — so there is nothing to bounce back to the model; the
-    server has to repair it, the same way `_repair_latex` re-adds dropped backslashes.
-    """
-    if not s:
-        return s
-    t = str(s)
-    for pat, rep in _LATEX_WORDS:
-        t = re.sub(pat, rep, t, flags=re.IGNORECASE)
-    for fn in sorted(_LATEX_FUNCS, key=len, reverse=True):
-        t = re.sub(rf"(?<![\\a-zA-Z]){fn}(?![a-zA-Z])", "\\\\" + fn, t)
-    # Units after a number read as multiplied variables in maths mode — set them upright.
-    t = _UNIT_RE.sub(lambda m: r"\,\text{" + m.group(1) + "}", t)
-    return re.sub(r"\s{2,}", " ", t).strip()
-
-
-def _repair_array_latex(t: str) -> str:
-    """Fix the malformed ARRAY (table-of-values) syntax the model keeps emitting.
-
-    KaTeX renders `\\begin{array}{cccc} … \\end{array}` as a real table, and a "complete the
-    table for y = 2x+1" question is a perfectly good use of it. But the model writes it as a
-    pseudo-environment — `\\array|c|c|c| … \\array` — which KaTeX rejects (`Undefined control
-    sequence: \\array`), so it shipped as raw markup on screen. This turns that into valid array
-    syntax; a well-formed `\\begin{array}` is left untouched, and a `\\begin` with a missing
-    `\\end` is closed.
-    """
-    if "\\array" in t and "\\begin{array}" not in t:
-        # First `\array` + its column spec (pipes / c,l,r and spaces) → \begin{array}{spec}.
-        def _open(m):
-            spec = re.sub(r"\s+", "", m.group(1) or "")
-            return "\\begin{array}{" + (spec or "c") + "}"
-        # Braced form: \array{|c|c|}   OR   raw form: \array|c|c|c|
-        if re.search(r"\\array\s*\{", t):
-            t = re.sub(r"\\array\s*\{([^}]*)\}", _open, t, count=1)
-        else:
-            t = re.sub(r"\\array\s*([|clr][|clr\s]*)", _open, t, count=1)
-        # Any remaining `\array` (the model reuses it as the closer) → \end{array}.
-        t = t.replace("\\array", "\\end{array}")
-    # `\bf`/`\it` glued to a letter is undefined ("\bfx"); KaTeX wants a space.
-    t = re.sub(r"\\(bf|it|rm|sf|tt)([A-Za-z])", r"\\\1 \2", t)
-    # A begin with no end (or vice-versa) → balance it so KaTeX doesn't throw on the whole card.
-    nb, ne = t.count("\\begin{array}"), t.count("\\end{array}")
-    if nb > ne:
-        t = t + " \\end{array}" * (nb - ne)
-    elif ne > nb:
-        t = "\\begin{array}{c} " * (ne - nb) + t
-    return t
 
 
 def clean_math_latex(s: str) -> tuple:
@@ -2747,7 +2608,15 @@ def clean_math_latex(s: str) -> tuple:
     # fun" would be typeset as an equation instead of being dropped.
     if not _HAS_MATH.search(t):
         return "", "prose"
-    t = _repair_array_latex(normalise_math_latex(_repair_latex(t)))
+    # NO server-side LaTeX repair — the AI emits valid KaTeX directly (aligned in the agent
+    # prompts). A genuine parse error is caught by the frontend KaTeX validator, which bounces a
+    # `latex_error` event back so the AI re-emits corrected LaTeX (validate → fix → retry). We only
+    # strip the surrounding math delimiters that KaTeX's BlockMath doesn't accept.
+    t = t.strip()
+    for a, b in (("$$", "$$"), ("\\[", "\\]"), ("\\(", "\\)"), ("$", "$")):
+        if t.startswith(a) and t.endswith(b) and len(t) > len(a) + len(b):
+            t = t[len(a):len(t) - len(b)].strip()
+            break
     if not t:
         return "", "prose"
     return t, ""
@@ -2758,7 +2627,8 @@ def _latexish_to_plain(s: str) -> str:
     question line and the tappable answer bubbles. The model sometimes writes options/answers as
     "\\frac{3}{5}" or wraps the question in "\\(…\\)"; those show up as the raw string on a plain
     button. Fractions become "3/5", common operators become their symbols, math delimiters are
-    dropped. (The main equation card still gets real LaTeX via _repair_latex.)"""
+    dropped. (The main equation card gets the AI's raw LaTeX as-is, validated by KaTeX on the
+    client — an invalid one bounces a latex_error back for the AI to fix, no server repair.)"""
     if not s:
         return s
     t = str(s)
@@ -2772,25 +2642,6 @@ def _latexish_to_plain(s: str) -> str:
         t = t.replace(d, "")
     t = re.sub(r"\$+", "", t)
     return re.sub(r"\s+", " ", t).strip()
-
-
-def _repair_latex(s: str) -> str:
-    """Best-effort repair of LaTeX the model mangled, so the student never sees raw "frac34".
-    Strips stray math delimiters ($…$, \\(…\\)) that BlockMath doesn't want, and re-adds the
-    backslash on known commands where it was dropped (only when it isn't already there and the
-    command isn't part of a plain word like 'fractions')."""
-    if not s:
-        return s
-    t = s.strip()
-    for a, b in (("$$", "$$"), ("\\[", "\\]"), ("\\(", "\\)"), ("$", "$")):
-        if t.startswith(a) and t.endswith(b) and len(t) > len(a) + len(b):
-            t = t[len(a):len(t) - len(b)].strip()
-            break
-    for cmd in _LATEX_CMDS:
-        # add a backslash before the command when it's not already backslashed and not glued to
-        # surrounding letters (so 'frac34'/'frac{3}{4}' are fixed but 'fractions' is left alone).
-        t = re.sub(rf"(?<!\\)(?<![A-Za-z]){cmd}(?![A-Za-z])", "\\\\" + cmd, t)
-    return t
 
 
 def build_math(question: str, answer: str, *, mode: str = "latex",

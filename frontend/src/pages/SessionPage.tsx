@@ -523,7 +523,8 @@ export default function SessionPage() {
   // Bound once (via sendEventRef) so it survives re-renders.
   useEffect(() => {
     const handler = (e: SessionBusEvent) => {
-      const triggersReply = e.type === "lesson_end_request" || e.type === "student_idle";
+      const triggersReply =
+        e.type === "lesson_end_request" || e.type === "student_idle" || e.type === "latex_error";
       sendEventRef.current(e.type, e.data, triggersReply);
     };
     sessionBus.on("session", handler);
