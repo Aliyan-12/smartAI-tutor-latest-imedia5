@@ -24,7 +24,7 @@ from datetime import datetime, timedelta, timezone
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
 from app.core.config import settings
-from app.services import resource_sync_service
+from app.services.jobs import sync_service as resource_sync_service
 
 logger = logging.getLogger(__name__)
 

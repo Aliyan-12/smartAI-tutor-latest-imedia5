@@ -52,9 +52,15 @@ def render_history(history: list, limit: int = 8) -> str:
 
 
 def build_task_description(role: RoleSpec, lesson_context: str, history_block: str) -> str:
-    """Assemble the per-turn Task text: the narrow directive + recent conversation + the full
-    live lesson context (slide content, deck map, LESSON STATE anchor incl. the covered list)."""
-    parts = [f"YOUR JOB THIS TURN ({role.display}): {role.directive}"]
+    """Assemble the per-turn Task text: the Navigator's scope reinforcement + the narrow directive
+    + recent conversation + the full live lesson context (slide content, deck map, LESSON STATE
+    anchor incl. the covered list)."""
+    from app.services.agent_crew import navigator
+    parts = []
+    guard = navigator.reinforce(role)
+    if guard:
+        parts.append(guard)
+    parts.append(f"YOUR JOB THIS TURN ({role.display}): {role.directive}")
     if history_block:
         parts.append("=== RECENT CONVERSATION ===\n" + history_block)
     parts.append("=== CURRENT LESSON STATE & ON-SCREEN CONTENT (authoritative — trust this) ===\n"

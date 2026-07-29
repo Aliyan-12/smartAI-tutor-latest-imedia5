@@ -16,7 +16,8 @@ from app.core.config import settings
 from app.db.session import get_db
 from app.middleware.auth import require_any_authenticated, require_admin
 from app.models.user import User
-from app.services import curriculum_service, resource_sync_service
+from app.services import curriculum_service
+from app.services.jobs import sync_service as resource_sync_service
 
 logger = logging.getLogger(__name__)
 

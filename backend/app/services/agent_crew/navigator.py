@@ -59,3 +59,28 @@ def select_role(
 def log_selection(appt_id: int, role: RoleSpec, phase: Optional[str]) -> None:
     logger.info("NAVIGATOR appt=%s phase=%s → agent=%s tools=%s",
                 appt_id, phase, role.name, list(role.tool_groups))
+
+
+# The Navigator's scope reinforcement, injected at the TOP of every agent's task so it can't
+# drift out of its remit. This is the "Navigator corrects/guides a sub-agent that tries to get
+# out of scope" — done as a per-turn instruction (no extra LLM call, so it never adds latency or
+# alters the agent's streamed answer).
+_SCOPE_GUARD = {
+    "intro": "You are the RECAP agent — a brief reconnection ONLY. Do NOT launch into full "
+             "teaching, do NOT quiz, do NOT close the lesson. Hand over to teaching quickly.",
+    "teacher": "You are the TEACHER — TEACH the slide/concept on screen, ONE idea, with one "
+               "visual. Do NOT drill, do NOT quiz, do NOT say goodbye. If you feel pulled "
+               "off-task, come straight back to teaching what is on the current slide.",
+    "practitioner": "You are the PRACTICE COACH — make the student DO what was already taught "
+                    "(see the covered list). Do NOT re-teach from scratch, do NOT re-ask a "
+                    "covered question, do NOT close the lesson. Set the ONE quiz only inside the "
+                    "quiz window.",
+    "summarizer": "You are the SUMMARISER — a concise, specific recap + the report + one next "
+                  "step. This is the ONLY place a sign-off belongs.",
+}
+
+
+def reinforce(role: RoleSpec) -> str:
+    """The Navigator's one-line scope reinforcement for the active agent this turn."""
+    guard = _SCOPE_GUARD.get(role.name, "")
+    return f"🧭 NAVIGATOR (stay in scope): {guard}" if guard else ""

@@ -2881,7 +2881,15 @@ async def _run_turn(send, chat_id, user_id, *, saved_user_text, ai_content,
                 _lc_tools = _make_tools(tool_context, _role.tool_groups)
                 _backstory = _role.backstory + "\n\n" + (session_system_prompt or "")
                 _hist_block = _crew_runner.render_history(history)
-                _task_desc = _crew_runner.build_task_description(_role, ai_content, _hist_block)
+                # Slide-based RAG content — the Practitioner explains/practises exactly what the
+                # Teacher taught, so both agents get the retrieved lesson material in-context.
+                try:
+                    from app.services.gemini_service import _format_rag_context as _fmt_rag
+                    _rag_block = _fmt_rag(rag_chunks) if rag_chunks else ""
+                except Exception:
+                    _rag_block = ""
+                _lesson_ctx = f"{_rag_block}\n\n{ai_content}" if _rag_block else ai_content
+                _task_desc = _crew_runner.build_task_description(_role, _lesson_ctx, _hist_block)
 
                 async def _emit(label):
                     await _emit_thinking(send, thinking_steps, label)
