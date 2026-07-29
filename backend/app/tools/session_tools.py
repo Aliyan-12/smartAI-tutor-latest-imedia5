@@ -52,7 +52,7 @@ async def _clear_puzzle_on_slide(ctx: "ToolContext") -> None:
     slide takes any on-screen puzzle off, so drop it from authoritative puzzle_state too.
     Keeps the per-turn LESSON STATE anchor honest (no 'puzzle still showing' after a slide
     move) and matches the frontend, which clears the puzzle overlay on any slide tool."""
-    from app.services import puzzle_service
+    from app.services import practice_service as puzzle_service
     try:
         await puzzle_service.clear_puzzle_state(ctx.db, ctx.appointment_id)
     except Exception as e:  # noqa: BLE001

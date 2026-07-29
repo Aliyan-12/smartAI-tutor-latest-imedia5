@@ -25,7 +25,7 @@ from typing import Union
 
 from langchain_core.tools import tool
 
-from app.services import image_gen_service, puzzle_service
+from app.services import image_gen_service, teacher_service as puzzle_service
 from app.tools.session_tools import ToolContext
 from app.tools.puzzle_tools import persist_and_return, _coerce_dict
 
@@ -123,7 +123,7 @@ def visual_tool_groups(ctx: ToolContext) -> dict:
         use that one. If none fits, use draw_svg (write your own) or mermaid_diagram (flows/cycles)
         instead. Call SILENTLY, then explain the diagram in a few plain sentences.
         """
-        from app.services import svg_diagram_service as sds
+        from app.services import teacher_service as sds
         k = (kind or "").strip().lower()
         avail = sds.available_kinds(ctx.key_stage, ctx.subject)
         if k not in sds.DIAGRAMS:
@@ -176,7 +176,7 @@ def visual_tool_groups(ctx: ToolContext) -> dict:
 
         Call SILENTLY, then explain it in a few plain sentences.
         """
-        from app.services import svg_diagram_service as sds
+        from app.services import teacher_service as sds
         try:
             clean = sds.sanitize_svg(svg)
         except sds.SvgError as e:
@@ -226,7 +226,7 @@ def visual_tool_groups(ctx: ToolContext) -> dict:
         The render takes a couple of seconds and this tool WAITS for it, so when it returns
         successfully the animation IS on screen — go straight into explaining it. Call SILENTLY.
         """
-        from app.services import manim_service as mms
+        from app.services import teacher_service as mms
         if not mms.MANIM_AVAILABLE:
             return {"action": "show_puzzle", "error": "animations_disabled",
                     "message": "Animations aren't enabled here — use draw_svg or mermaid_diagram instead."}

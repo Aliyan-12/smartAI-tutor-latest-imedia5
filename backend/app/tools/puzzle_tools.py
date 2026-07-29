@@ -15,7 +15,10 @@ from typing import Any, List, Optional, Union
 
 from langchain_core.tools import tool
 
-from app.services import image_gen_service, graph_service, puzzle_service, manipulative_service
+from app.services import image_gen_service, teacher_service
+from app.services import practice_service as puzzle_service
+from app.services import practice_service as graph_service
+from app.services import practice_service as manipulative_service
 from app.tools.session_tools import ToolContext
 
 logger = logging.getLogger(__name__)
@@ -322,7 +325,7 @@ def puzzle_tool_groups(ctx: ToolContext) -> dict:
             # as the picture, so what's written under it always matches what's drawn.
             caption = question.strip() or puzzle_service.diagram_example_caption(concept, clean, answer)
             return await _persist_and_return(
-                puzzle_service.build_explanatory(url, caption, title="")
+                teacher_service.build_explanatory(url, caption, title="")
             )
         return await _persist_and_return(
             puzzle_service.build_math(question or default_q, answer, mode="image", image_url=url)

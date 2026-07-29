@@ -52,7 +52,7 @@ async def get_resource_slides_pdf(hub_id: int):
 @router.get("/animations/{key}.mp4")
 async def get_animation(key: str):
     """Serve a rendered Manim animation MP4 from the cache (played in the session Learn panel)."""
-    from app.services.manim_service import ANIM_DIR
+    from app.services.teacher_service import ANIM_DIR
     # `key` is a server-generated hash slug; refuse traversal characters defensively.
     if "/" in key or "\\" in key or ".." in key:
         raise HTTPException(status_code=400, detail="bad key")

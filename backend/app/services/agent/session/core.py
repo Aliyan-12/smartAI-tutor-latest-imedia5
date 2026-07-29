@@ -2114,7 +2114,7 @@ async def build_lesson_state_anchor(
     next_style = ""
     next_kind = ""
     try:
-        from app.services import manipulative_service
+        from app.services import practice_service as manipulative_service
         _ks = getattr(appointment, "key_stage", None) if appointment is not None else None
         _subj = getattr(appointment, "subject", None) if appointment is not None else None
         if manipulative_service.manipulatives_enabled(_ks, _subj):
@@ -2137,14 +2137,14 @@ async def build_lesson_state_anchor(
     # animations exist, so it defaults to a generated image (which mislabels). Naming the ones
     # that match THIS lesson's topic is what actually gets the accurate visual on screen.
     try:
-        from app.services import svg_diagram_service as _sds
+        from app.services import teacher_service as _sds
         _subj_v = getattr(appointment, "subject", None) if appointment is not None else None
         _ks_v = getattr(appointment, "key_stage", None) if appointment is not None else None
         _topic_v = _lesson_topic_text(appointment)
         _svgs = _sds.pick_for_topic(_topic_v, _ks_v, _subj_v)
         _anim_ok = False
         try:
-            from app.services import manim_service as _mms
+            from app.services import teacher_service as _mms
             _anim_ok = _mms.MANIM_AVAILABLE
         except Exception:
             _anim_ok = False
@@ -2158,7 +2158,7 @@ async def build_lesson_state_anchor(
         # (~70/30) so the student is taught before being asked to solve anything, practice
         # flips it (~70/30 puzzles) so they actually do the work. Every tool stays bound in
         # every phase — this is priority, not a gate.
-        from app.services import puzzle_service as _pzv
+        from app.services import practice_service as _pzv
         _available = ["puzzle", "mermaid", "svg", "image"]
         if _anim_ok:
             _available.append("animation")
@@ -2657,7 +2657,7 @@ async def _run_turn(send, chat_id, user_id, *, saved_user_text, ai_content,
             # Also computes which tool GROUPS to bind this turn (anti-hallucination).
             if tool_context is not None:
                 try:
-                    from app.services import puzzle_service as _pzs
+                    from app.services import practice_service as _pzs
                     _pstate = await _pzs.get_puzzle_state(db, appt_id)
                 except Exception:
                     _pstate = None
@@ -2931,7 +2931,7 @@ async def _run_turn(send, chat_id, user_id, *, saved_user_text, ai_content,
             and not _end_allowed and not _closing
         ):
             try:
-                from app.services import puzzle_service as _pzs2
+                from app.services import practice_service as _pzs2
                 _ps_after = await _pzs2.get_puzzle_state(db, appt_id)
             except Exception:
                 _ps_after = None
@@ -3238,7 +3238,7 @@ async def _handle_puzzle_result(send, chat_id, user_id, data):
     # Record the submitted answer into authoritative lesson state so this turn's anchor +
     # the evaluator tool can mark it (solution is stored server-side).
     try:
-        from app.services import puzzle_service
+        from app.services import practice_service as puzzle_service
         async with async_session_factory() as _db:
             _appt_id = await _resolve_appt_id(_db, chat_id)
             if _appt_id:
@@ -3573,7 +3573,7 @@ async def _suggest_idle_quick_replies(send, chat_id: int, appt_id: int) -> None:
         key_stage = ""
         async with async_session_factory() as db:
             try:
-                from app.services import puzzle_service as _pzs
+                from app.services import practice_service as _pzs
                 ps = await _pzs.get_puzzle_state(db, appt_id)
                 if (ps or {}).get("status") in ("showing", "submitted"):
                     puzzle_up = True
