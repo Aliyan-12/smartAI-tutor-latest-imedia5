@@ -43,3 +43,8 @@ casbin-async-sqlalchemy-adapter>=1.4.0
 # it does NOT affect LaTeX in the app: equation puzzles still render LaTeX with KaTeX in the
 # browser (katex / react-katex + puzzle_service._repair_latex), which is untouched.
 manim>=0.18.1
+# CrewAI multi-agent tutoring pipeline (Navigator → Intro/Teacher/Practitioner/Summarizer),
+# gated behind USE_CREW_PIPELINE (default off). The [google-genai] extra pulls crewai's NATIVE
+# Gemini provider (required — the `gemini/` model prefix uses it; verified streaming + tool
+# calling on 1.15.8). Pinned to the version the integration was verified against.
+crewai[google-genai]==1.15.8

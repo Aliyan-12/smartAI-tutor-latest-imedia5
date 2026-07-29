@@ -113,42 +113,13 @@ async def persist_and_return(ctx: ToolContext, full: dict) -> dict:
     puzzle, diagram, animation — must land on screen through the SAME path, or the puzzle
     state, the hands-on quota and the visual-family counts drift apart.
 
-    ONE VISUAL PER REPLY IS ENFORCED HERE. The Learn panel shows a single thing, so a second
-    visual in the same reply silently REPLACES the first: a lesson fired explanatory_puzzle,
-    then animate_concept, then a puzzle, and only the puzzle was ever on screen — while the
-    reply cheerfully explained the image, then the animation, then the puzzle, two-thirds of it
-    describing things the student never saw. The prompt already asked for one-at-a-time and was
-    ignored, so it is a server guard now, like the slide-move guard. The refusal carries
-    `error` + `suppressed`, which makes `gemini_service` unbind the tool for the rest of the
-    turn, so the model can't burn its remaining rounds retrying.
+    The Learn panel shows ONE thing at a time, so whatever the agent shows LAST in a reply is
+    what the student sees. We no longer REFUSE a second visual (that server guard caused the
+    "I've put a puzzle" / nothing-on-screen mismatch); the agent is aligned to show one thing and
+    talk about that one thing. `visual_shown` is still tracked so the runner knows a visual
+    reached the screen this turn.
     """
     kind = full.get("render") or "visual"
-    already = getattr(ctx, "visual_shown", "")
-    if already:
-        logger.info("VISUAL refused (one per reply) tried=%s already=%s appt=%s",
-                    kind, already, ctx.appointment_id)
-        if already == "slide":
-            # The reported failure: advance_lesson_slide → math_puzzle in one reply. The puzzle
-            # covers the slide, so the student is asked to answer a question about content they
-            # were never shown or taught — "I haven't been taught this".
-            msg = (
-                "REFUSED — you have just moved to a NEW SLIDE, and it is what the student is "
-                "looking at. A puzzle or diagram would have covered it before they read a word "
-                "of it. Nothing was shown. TEACH THAT SLIDE FIRST: in this reply, explain the "
-                "slide_content you just received in your own warm words, with an example. THEN, "
-                "in your NEXT reply, set a puzzle on what you have just taught. Never ask a "
-                "student to practise something you have not explained yet."
-            )
-        else:
-            msg = (
-                f"REFUSED — you already put a '{already}' on the student's screen in this reply, "
-                "and the panel only shows ONE thing, so this would have replaced it before they "
-                "ever saw it. Nothing was shown. Now write your reply about the "
-                f"'{already}' that IS on screen — explain just that one thing. Show the next "
-                "visual in your NEXT reply, after they have responded."
-            )
-        return {"action": "show_puzzle", "error": "already_showed_visual",
-                "suppressed": True, "message": msg}
     try:
         ctx.visual_shown = kind
     except Exception:  # noqa: BLE001 — frozen/duck-typed ctx must never break a lesson
@@ -183,6 +154,21 @@ async def persist_and_return(ctx: ToolContext, full: dict) -> dict:
         )
     except Exception as e:  # noqa: BLE001
         logger.warning("bump_visual_family failed: %s", e)
+    # Coverage ledger — record the QUESTION asked and the activity played, so the tutor doesn't
+    # re-ask an identical question or replay the same puzzle (the exact KS1 repetition bug).
+    # Explanatory diagrams are teaching visuals, not questions, so they're not logged here.
+    if ptype != "explanatory":
+        try:
+            from app.services import coverage_ledger
+            _q = full.get("question") or full.get("prompt")
+            if _q:
+                await coverage_ledger.add_question_asked(ctx.db, ctx.appointment_id, str(_q))
+            _rk = full.get("render") or ptype or "puzzle"
+            _disc = full.get("target")
+            _pid = f"{_rk}:{_disc}" if _disc is not None else str(_rk)
+            await coverage_ledger.add_puzzle_done(ctx.db, ctx.appointment_id, _pid)
+        except Exception:  # noqa: BLE001 — ledger must never break puzzle display
+            logger.warning("ledger puzzle-record failed appt=%s", ctx.appointment_id, exc_info=True)
     client = puzzle_service._client_payload(full)
     client["instance_id"] = instance_id
     client["rendered"] = True
@@ -675,7 +661,7 @@ def puzzle_tool_groups(ctx: ToolContext) -> dict:
 
     puzzles = [
         labelling_puzzle, matching_puzzle,
-        math_puzzle, diagram_math_puzzle, graph_puzzle, clear_puzzle, quick_replies,
+        math_puzzle, diagram_math_puzzle, graph_puzzle, clear_puzzle,
         labelling_evaluator, matching_evaluator, math_evaluator, graph_evaluator,
     ]
     # Bind the hands-on tools only when this subject + key stage actually HAS activities (an
@@ -685,4 +671,7 @@ def puzzle_tool_groups(ctx: ToolContext) -> dict:
     # per registry entry.
     if manipulative_service.manipulatives_enabled(ctx.key_stage, ctx.subject):
         puzzles += [manipulative_puzzle, manipulative_evaluator]
-    return {"puzzles": puzzles}
+    # `quick_replies` (tap-to-answer chips) is its OWN group so EVERY agent can offer taps as part
+    # of its one response — the Teacher/Intro check understanding, not just the Practitioner — and
+    # it never double-binds with the drill puzzles.
+    return {"puzzles": puzzles, "interact": [quick_replies]}

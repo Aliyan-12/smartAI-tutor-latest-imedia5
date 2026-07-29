@@ -568,4 +568,13 @@ async def slide_action(
         plan.session_state = state
         await db.flush()
 
+    # Coverage ledger: record the slide as taught so the tutor doesn't re-teach it. Best-effort;
+    # re-shows of the same slide dedupe. (The ledger does its own read-modify-write of the SAME
+    # session_state row, re-reading after the flush above, so it never clobbers slide_state.)
+    try:
+        from app.services import coverage_ledger
+        await coverage_ledger.add_slide_taught(db, appointment_id, payload["slide_index"])
+    except Exception:  # noqa: BLE001 — ledger must never break slide navigation
+        logger.warning("ledger add_slide_taught failed appt=%s", appointment_id, exc_info=True)
+
     return payload

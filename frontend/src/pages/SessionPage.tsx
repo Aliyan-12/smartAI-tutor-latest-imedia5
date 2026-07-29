@@ -117,7 +117,7 @@ export default function SessionPage() {
   const [currentPuzzle, setCurrentPuzzle] = useState<PuzzlePayload | null>(null);
   // Tap-to-answer buttons the AI attached to its latest message (so students rarely type).
   const [quickReplies, setQuickReplies] = useState<string[]>([]);
-  const SLIDE_TOOLS = ["show_resource", "advance_lesson_slide", "retreat_lesson_slide"];
+  const SLIDE_TOOLS = ["show_resource", "advance_lesson_slide", "retreat_lesson_slide", "jump_to_slide"];
 
   // The last puzzle verdict, and a tick that fires the confetti/chime. A counter, not a
   // boolean: two correct answers in a row wouldn't change a boolean, so the second would

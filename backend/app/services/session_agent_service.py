@@ -2092,6 +2092,20 @@ async def build_lesson_state_anchor(
         except Exception:
             pass
 
+    # ✅ ALREADY COVERED — the structural cure for the tutor repeating itself. A compact,
+    # authoritative list of the slides taught, concepts explained, questions asked and puzzles
+    # played SO FAR (written deterministically by the tools, not self-reported). Injected at high
+    # recency so every turn the model can SEE what's done and build forward instead of re-teaching
+    # or re-asking. This replaces the old fuzzy sentence-dedup.
+    try:
+        from app.services import coverage_ledger as _cl
+        _led = await _cl.load(db, appt_id)
+        _covered = _cl.render_for_prompt(_led)
+        if _covered:
+            lines.append(_covered)
+    except Exception:
+        logger.warning("coverage-ledger anchor failed for appt %s", appt_id, exc_info=True)
+
     # Which style the NEXT puzzle should be. A lesson whose topic HAS a matching manipulative
     # gets a genuinely MIXED, non-repeating order (some hands-on, some classic — never all of
     # one); a topic with none gets classic only. Computed server-side from what's been shown so
@@ -2281,6 +2295,7 @@ _ACTION_LABELS = {
     "teaching": "show/advance/retreat slides",
     "visuals": "explain with a diagram/animation (mermaid_diagram, svg_diagram, draw_svg, animate_concept)",
     "puzzles": "set/clear a hands-on puzzle for the student to DO",
+    "interact": "offer tap-to-answer options (quick_replies)",
     "assessment": "set a quiz",
     "mastery": "check/update mastery + evaluate answers",
     "platform": "set homework, load a resource, advance the lesson step, pause/resume",
@@ -2343,6 +2358,7 @@ def select_tool_groups(
     # understanding with a quick puzzle.
     g.add("puzzles")
     g.add("visuals")
+    g.add("interact")   # quick_replies (tap chips) — always available, every phase
     if has_slides:
         g.add("teaching")
     # The QUIZ tool (generate_quiz) binds ONLY in the dedicated QUIZ phase — never during
@@ -2845,7 +2861,53 @@ async def _run_turn(send, chat_id, user_id, *, saved_user_text, ai_content,
             if suppress_text:
                 segmenter.flush()   # drain, don't show
 
-        await _consume(ai_content, with_image=True)
+        # ── CREW PIPELINE (multi-agent) — the primary path for EVERY lesson turn ──
+        # LangChain orchestrates (context + navigator); the navigator-selected CrewAI specialist
+        # (Intro/Teacher/Practitioner/Summarizer) runs the turn on Gemini. Same live context +
+        # anchor + ledger; the difference is a NARROW agent with only its phase's tools, which is
+        # what stops the overfitting/repetition/hallucination. On ANY failure we fall back to the
+        # single-agent path below, so a crew hiccup never produces a dead turn.
+        _crew_ran = False
+        if tool_context is not None and appt_id:
+            try:
+                from app.services.agent_crew import navigator as _nav, runner as _crew_runner
+                from app.tools.registry import make_tools as _make_tools
+                _role = _nav.select_role(
+                    phase=_phase_now, end_allowed=_end_allowed, closing_stage=_closing,
+                    quiz_phase=_quiz_phase, quiz_done=_quiz_done,
+                    intent_text=saved_user_text, event_kind=event_kind,
+                )
+                _nav.log_selection(appt_id, _role, _phase_now)
+                _lc_tools = _make_tools(tool_context, _role.tool_groups)
+                _backstory = _role.backstory + "\n\n" + (session_system_prompt or "")
+                _hist_block = _crew_runner.render_history(history)
+                _task_desc = _crew_runner.build_task_description(_role, ai_content, _hist_block)
+
+                async def _emit(label):
+                    await _emit_thinking(send, thinking_steps, label)
+
+                _crew_full, _crew_signals = await _crew_runner.stream_crew_turn(
+                    send=send, turn_id=turn_id, tts=tts, role=_role, backstory=_backstory,
+                    task_description=_task_desc, expected_output=_role.expected_output,
+                    lc_tools=_lc_tools, emit_thinking=_emit, appt_id=appt_id,
+                )
+                full.extend(_crew_full)
+                if _crew_signals.get("ended_appt"):
+                    _pending_ended_appt = _crew_signals["ended_appt"]
+                _crew_ran = True
+            except ImportError:
+                # crewai not installed yet (backend image not rebuilt) → single-agent path.
+                # One concise line, no traceback, so logs stay readable until the rebuild.
+                logger.warning("CREW unavailable (crewai not installed) — single-agent path. "
+                               "Rebuild backend to enable the multi-agent pipeline.")
+                _crew_ran = False
+            except Exception:
+                logger.warning("CREW turn failed appt=%s — falling back to single-agent path",
+                               appt_id, exc_info=True)
+                _crew_ran = False
+
+        if not _crew_ran:
+            await _consume(ai_content, with_image=True)
 
         # ── STRUCTURAL SAFETY NET ─────────────────────────────────────────────────
         # The tutor keeps inviting the student to do a puzzle and then ending the turn WITHOUT
@@ -2854,7 +2916,8 @@ async def _run_turn(send, chat_id, user_id, *, saved_user_text, ai_content,
         # forced recovery turn whose only job is to render the puzzle it just described. Guarded
         # so it can't fire while wrapping up, and never loops (single attempt).
         if (
-            not generator_shown_this_turn
+            not _crew_ran           # the crew path owns its own progression; no safety net
+            and not generator_shown_this_turn
             and appt_id and tool_context is not None
             and not _pending_ended_appt
             and not _end_allowed and not _closing

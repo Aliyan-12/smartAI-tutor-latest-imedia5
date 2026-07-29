@@ -81,6 +81,13 @@ def platform_tool_groups(ctx: ToolContext) -> dict:
             assessment_type=f"session_{difficulty}",
         )
         logger.info("generate_quiz: assessment=%s topic=%r diff=%s", assessment.id, topic, difficulty)
+        # Coverage ledger — one quiz per lesson. Flag it so the anchor's "ALREADY COVERED" block
+        # tells every agent the quiz is done and never to set another. Best-effort.
+        try:
+            from app.services import coverage_ledger
+            await coverage_ledger.set_flag(ctx.db, ctx.appointment_id, "quiz_done", True)
+        except Exception:  # noqa: BLE001 — ledger must never break quiz creation
+            logger.warning("ledger quiz_done flag failed appt=%s", ctx.appointment_id, exc_info=True)
         return {
             "assessment_id": assessment.id,
             "topic": topic,
