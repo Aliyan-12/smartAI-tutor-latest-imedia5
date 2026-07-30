@@ -80,6 +80,16 @@ class StudentIdleEvent(_Base):
     tts: bool = True
 
 
+class LatexErrorEvent(_Base):
+    """The frontend KaTeX validator could not render a maths puzzle's LaTeX. We bounce it back so
+    the AI re-emits corrected LaTeX (validate → fix → retry). No server-side repair."""
+    type: Literal["latex_error"]
+    latex: str = ""
+    error: str = ""
+    prompt: str = ""
+    tts: bool = False
+
+
 class PingEvent(_Base):
     type: Literal["ping"]
 
@@ -112,7 +122,7 @@ InboundEvent = Annotated[
     Union[
         UserMessageEvent, UserAudioEvent, PuzzleResultEvent, QuizResultEvent,
         LessonPauseEvent, LessonResumeEvent, LessonEndRequestEvent, StudentIdleEvent,
-        PingEvent, StopEvent, SpeakEvent, ActivityEvent,
+        LatexErrorEvent, PingEvent, StopEvent, SpeakEvent, ActivityEvent,
     ],
     Field(discriminator="type"),
 ]

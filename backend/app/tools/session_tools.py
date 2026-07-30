@@ -47,100 +47,12 @@ class ToolContext:
     slide_moved: bool = False
 
 
-def _slide_move_refused(payload: dict, verb: str) -> dict:
-    """Turn a blocked second slide-move into an UNMISTAKABLE refusal.
-
-    It used to return a normal, success-shaped payload with a soft "note", so the model didn't
-    realise it had been refused and simply called the tool again — four `advance_lesson_slide`
-    calls in one turn, each costing a full model round-trip (~30s wasted) and each printing
-    "Moving to the next slide" in the thinking strip, so it looked like the deck had jumped four
-    slides when it had actually moved once.
-
-    `error` makes the refusal legible to the model, and `suppressed` tells the turn loop not to
-    emit a WS frame or a thinking step for a call that changed nothing on screen.
-    """
-    out = dict(payload or {})
-    out["error"] = "already_moved"
-    out["suppressed"] = True
-    out["message"] = (
-        f"REFUSED — you already moved a slide this turn, so nothing changed on screen. Teaching "
-        f"is ONE slide per reply. Do NOT call {verb}_lesson_slide again in this reply: write your "
-        f"explanation of the slide that is on screen NOW, and move again on your next reply."
-    )
-    return out
-
-
-async def _answer_slide_gate(ctx: "ToolContext"):
-    """Stop the tutor advancing onto an ANSWER-REVEAL slide before the student has had a go.
-
-    Real decks pair a question slide with an identical-looking `✅` answer slide. Advancing
-    straight through hands the student the answer to a question they were never asked — the
-    single most damaging thing the slide tools can do unsupervised.
-
-    Deliberately gates ONCE per slide: the refusal makes the tutor ask the question, and if it
-    advances again on a LATER turn (i.e. after the student has replied) the move goes through.
-    A permanent block could deadlock the lesson when a student answers out loud, or refuses to
-    answer at all — a one-turn pause achieves the teaching goal without that risk.
-    """
-    from app.services import session_resource_service as srs
-    from app.models.resource_hub import RHResource
-    from app.models.lesson_plan import LessonPlan
-    from sqlalchemy import select
-    try:
-        cur = await srs.get_current_slide(ctx.db, ctx.appointment_id)
-        if not cur:
-            return None
-        nxt = int(cur.get("slide_index") or 1) + 1
-        res = (await ctx.db.execute(
-            select(RHResource).where(RHResource.hub_id == cur.get("resource_hub_id"))
-        )).scalar_one_or_none()
-        if not res:
-            return None
-        dmap = await srs.get_deck_map(ctx.db, ctx.appointment_id, res)
-        target = next((d for d in dmap if d["index"] == nxt), None)
-        if not target or target["kind"] != "answer":
-            return None
-
-        plan = (await ctx.db.execute(
-            select(LessonPlan).where(LessonPlan.appointment_id == ctx.appointment_id)
-        )).scalar_one_or_none()
-        state = dict(plan.session_state) if (plan is not None and plan.session_state) else {}
-        gated = list(state.get("answer_gate") or [])
-        if nxt in gated:
-            return None                     # already paused once here — let it through
-        if plan is not None:
-            state["answer_gate"] = (gated + [nxt])[-20:]
-            plan.session_state = state
-            await ctx.db.flush()
-        logger.info("ANSWER GATE held slide=%s appt=%s", nxt, ctx.appointment_id)
-
-        payload = await slide_action_show(ctx)
-        out = dict(payload or {})
-        out["error"] = "answer_slide_ahead"
-        out["suppressed"] = True
-        out["message"] = (
-            f"HELD — the next slide (#{nxt}) REVEALS THE ANSWERS to the question on screen. "
-            "Nothing moved. Ask the student for their answer to the question they can see and "
-            "WAIT for it. Once they have answered (or genuinely given up), call "
-            "advance_lesson_slide again and it will go through, so you can mark it together."
-        )
-        return out
-    except Exception:  # noqa: BLE001 — a guard must never break the lesson
-        logger.warning("answer-slide gate failed for appt %s", ctx.appointment_id, exc_info=True)
-        return None
-
-
-async def slide_action_show(ctx: "ToolContext"):
-    from app.services.session_resource_service import slide_action
-    return await slide_action(ctx.db, ctx.appointment_id, mode="show")
-
-
 async def _clear_puzzle_on_slide(ctx: "ToolContext") -> None:
     """Slides and puzzles are mutually-exclusive views of the Learn panel — moving to a
     slide takes any on-screen puzzle off, so drop it from authoritative puzzle_state too.
     Keeps the per-turn LESSON STATE anchor honest (no 'puzzle still showing' after a slide
     move) and matches the frontend, which clears the puzzle overlay on any slide tool."""
-    from app.services import puzzle_service
+    from app.services.agent import practice_service as puzzle_service
     try:
         await puzzle_service.clear_puzzle_state(ctx.db, ctx.appointment_id)
     except Exception as e:  # noqa: BLE001
@@ -161,7 +73,7 @@ def session_tool_groups(ctx: ToolContext) -> dict:
         instead. slide_index is 1-based. The returned slide_content is the text on that
         slide — teach from it.
         """
-        from app.services.session_resource_service import slide_action
+        from app.services.agent.session.resources import slide_action
         # An explicit, student-requested jump — allowed to span several slides in one
         # call. It still counts as this turn's slide move, so a stray sequential
         # advance/retreat afterwards is suppressed.
@@ -181,24 +93,16 @@ def session_tool_groups(ctx: ToolContext) -> dict:
         """
         Move the on-screen resource FORWARD by exactly ONE slide/page (or to the next
         resource when the current deck ends). This is the normal sequential teaching
-        step — call it ONCE per reply, only after the student has understood the current
-        slide and answered its question. The returned slide_content is the next slide's
-        text — teach from it. (To jump straight to a slide the student asked for by name,
-        use show_resource instead.)
+        step — call it once you've finished teaching the current slide. The returned
+        slide_content is the next slide's text — teach from it. (To jump straight to a
+        specific slide number, use jump_to_slide.)
+
+        Careful with question/answer slides: if the deck map shows the NEXT slide reveals
+        the answer, ask the student for their answer to the on-screen question FIRST and
+        only advance once they've had a go — you decide this, no one blocks you.
         """
-        from app.services.session_resource_service import slide_action
-        if ctx.slide_moved:
-            # Teaching advances one slide per turn — don't race ahead.
-            return _slide_move_refused(
-                await slide_action(ctx.db, ctx.appointment_id, mode="show"),
-                "advance",
-            )
-        gate = await _answer_slide_gate(ctx)
-        if gate:
-            return gate
+        from app.services.agent.session.resources import slide_action
         ctx.slide_moved = True
-        # The deck now owns the Learn panel this reply — see persist_and_return. Teaching the
-        # slide comes BEFORE anything overlays it.
         ctx.visual_shown = "slide"
         result = await slide_action(ctx.db, ctx.appointment_id, mode="advance")
         await _clear_puzzle_on_slide(ctx)
@@ -207,27 +111,42 @@ def session_tool_groups(ctx: ToolContext) -> dict:
     @tool
     async def retreat_lesson_slide() -> dict:
         """
-        Move the on-screen resource BACK by exactly ONE slide/page. Call ONCE when the
-        student did not understand the current slide or answered its question
-        incorrectly, so you can re-teach the earlier slide. The returned slide_content
-        is that slide's text — re-teach from it.
+        Move the on-screen resource BACK by exactly ONE slide/page. Call when the student
+        did not understand the current slide or answered its question incorrectly, so you
+        can re-teach the earlier slide. The returned slide_content is that slide's text —
+        re-teach from it.
         """
-        from app.services.session_resource_service import slide_action
-        if ctx.slide_moved:
-            return _slide_move_refused(
-                await slide_action(ctx.db, ctx.appointment_id, mode="show"),
-                "retreat",
-            )
+        from app.services.agent.session.resources import slide_action
         ctx.slide_moved = True
-        # The deck now owns the Learn panel this reply — see persist_and_return. Teaching the
-        # slide comes BEFORE anything overlays it.
         ctx.visual_shown = "slide"
         result = await slide_action(ctx.db, ctx.appointment_id, mode="retreat")
         await _clear_puzzle_on_slide(ctx)
         return result
 
+    @tool
+    async def jump_to_slide(slide_index: int) -> dict:
+        """
+        Jump DIRECTLY to slide number `slide_index` (1-based) in the CURRENT deck. Use this
+        when the slide that best explains the concept you're teaching now is elsewhere in the
+        deck, or when the student asks to see a particular slide ("go to the fractions one",
+        "back to slide 3"). Read the DECK MAP in the lesson state to choose the right number.
+        The returned slide_content is that slide's text — teach from it. (For step-by-step
+        teaching use advance_lesson_slide; to open a DIFFERENT resource use show_resource.)
+        """
+        from app.services.agent.session.resources import slide_action, get_current_slide
+        cur = await get_current_slide(ctx.db, ctx.appointment_id)
+        rid = cur.get("resource_hub_id") if cur else None
+        ctx.slide_moved = True
+        ctx.visual_shown = "slide"
+        result = await slide_action(
+            ctx.db, ctx.appointment_id, mode="show",
+            resource_hub_id=rid, slide_index=max(1, int(slide_index)),
+        )
+        await _clear_puzzle_on_slide(ctx)
+        return result
+
     return {
-        "teaching": [show_resource, advance_lesson_slide, retreat_lesson_slide],
+        "teaching": [show_resource, advance_lesson_slide, retreat_lesson_slide, jump_to_slide],
     }
 
 

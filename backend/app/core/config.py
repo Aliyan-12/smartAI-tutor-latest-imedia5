@@ -1,7 +1,6 @@
 from pathlib import Path
 from pydantic_settings import BaseSettings
 from typing import List
-import os
 
 BASE_DIR = Path(__file__).resolve().parent.parent.parent
 ROOT_DIR = BASE_DIR.parent
@@ -10,6 +9,9 @@ ENV_FILE = ROOT_DIR / ".env" if (ROOT_DIR / ".env").exists() else BASE_DIR / ".e
 
 class Settings(BaseSettings):
     app_name: str = "SmartAI Tutor"
+    # DEBUG=true turns on EXTREME step-by-step logging (each agent's task + final answer, every
+    # tool call + result, RAG chunks, deck map, slide moves, puzzle/image tools) so a lesson can be
+    # traced end to end. false = the normal concise logs. Env: DEBUG.
     debug: bool = False
 
     postgres_user: str = ""
@@ -19,24 +21,28 @@ class Settings(BaseSettings):
     postgres_port: int = 5432
 
     gemini_api_key: str = ""
-    gemini_model: str = "gemini-2.5-pro" #"gemini-2.5-flash"
-    gemini_model_fast: str = "gemini-2.5-flash"
+    gemini_model: str = "gemini-2.5-pro"   # legacy default (STT + one-shot briefing paths)
     # Per-pipeline LLMs: session vs free /chat.
     # LATENCY: the session model was gemini-2.5-pro, which is a deep-reasoning model and the main
     # reason a turn took 10-25s (the "blue blob"). 2.5-flash is ~3-5x faster to first token and
     # is more than capable here — the lesson is heavily scaffolded (state anchor, tool guards,
     # forced recoveries), so the model does less unaided reasoning than the tool count suggests.
     # Override with GEMINI_SESSION_MODEL=gemini-2.5-pro to trade speed back for reasoning depth.
-    gemini_session_model: str = "gemini-2.5-flash"
+    # SESSION (all lesson/crew agents + quiz/eval) uses a PRO model for accuracy — pro reasons
+    # better, hallucinates less and follows the teaching structure more reliably than flash.
+    # `gemini-pro-latest` tracks the latest GA Gemini pro (stable, high rate limits).
+    gemini_session_model: str = "gemini-pro-latest"
     gemini_chat_model: str = "gemini-2.5-flash"
     # Thinking tokens emitted BEFORE the answer on every round — directly additive latency.
     # Was hard-coded at 2048 (several seconds/round). A small budget keeps occasional thought
     # summaries for the thinking strip while cutting most of that delay; 0 disables thinking
     # entirely for the lowest latency. Env: GEMINI_THINKING_BUDGET.
     gemini_thinking_budget: int = 512
-    # "Nano Banana" — Gemini native image generation, used to create puzzle/explanatory
-    # images live during a lesson. Overridable via GEMINI_IMAGE_MODEL.
-    gemini_image_model: str = "gemini-2.5-flash-image"
+    # "Nano Banana Pro" — the latest PRO native image model, used for puzzle/explanatory teaching
+    # images (better labelling + accuracy than flash-image). Most explanatory images are PRE-SEEDED
+    # (app.seed_explanatory_images), so the higher per-image cost is paid once, not per lesson.
+    # Overridable via GEMINI_IMAGE_MODEL.
+    gemini_image_model: str = "gemini-3-pro-image"
     # Where generated puzzle media (Nano Banana PNGs + matplotlib graphs) are written,
     # then served publicly at /api/puzzles/media/{name}.
     puzzle_media_dir: str = "uploads/gen_puzzles"
@@ -57,11 +63,6 @@ class Settings(BaseSettings):
     frontend_base_url: str = "http://localhost:5173"
 
     backend_cors_origins: str = "http://localhost:5173,http://localhost:3000"
-    backend_host: str = "0.0.0.0"
-    backend_port: int = 8001
-
-    tts_provider: str = "google"
-    whisper_model: str = "base"
 
     embedding_model: str = "gemini-embedding-001"
     rag_chunk_size: int = 500
@@ -94,7 +95,6 @@ class Settings(BaseSettings):
     email_from_address: str = "noreply@smartai.com"
 
     max_appointments_per_week: int = 100
-    default_class_price: float = 25.00
 
     @property
     def database_url(self) -> str:

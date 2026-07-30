@@ -43,7 +43,7 @@ async def lifespan(app: FastAPI):
 
     # Pre-warm Kokoro TTS pipeline so the first voice request is not slow
     try:
-        from app.services.voice_agent_service import _get_kokoro
+        from app.services.agent.session.voice import _get_kokoro
         await asyncio.to_thread(_get_kokoro)
         logger.info("Kokoro TTS pipeline pre-warmed successfully.")
     except Exception as _kokoro_err:

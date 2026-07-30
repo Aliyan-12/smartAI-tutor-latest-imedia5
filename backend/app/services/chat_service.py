@@ -198,7 +198,7 @@ async def _run_chat_turn(send, chat_id: int, user_id: int, *, saved_user_text,
                          ai_content, image_b64=None, image_mime="image/jpeg",
                          research=False, tts=True):
     """One simple-chat turn: save user msg, stream + segment reply, save once, turn_end."""
-    from app.services import session_agent_service as _sa  # shared segment/thinking/turn helpers (lazy → no cycle)
+    from app.services.agent.session import core as _sa  # shared segment/thinking/turn helpers (lazy → no cycle)
 
     turn_id = uuid4().hex
     await send({"type": "turn_start", "turn_id": turn_id})
@@ -359,7 +359,7 @@ async def _handle_chat_audio(send, chat_id, user_id, data):
         await send({"type": "error", "message": "Bad audio data.", "recoverable": True})
         await send({"type": "turn_end", "message_id": None, "full_text": ""})
         return
-    from app.services.voice_agent_service import speech_to_text
+    from app.services.agent.session.voice import speech_to_text
     ext = (mime.split("/")[-1] or "webm").split(";")[0]
     transcript = await asyncio.to_thread(speech_to_text, audio_bytes, f"audio.{ext}")
     if not transcript:
@@ -421,7 +421,7 @@ async def run_chat_ws(websocket: WebSocket) -> None:
         await send({"type": "ready", "session_id": chat_session_id})
         logger.info("Chat WS ready: user=%s chat=%s", user_id, chat_id)
 
-        from app.services.session_agent_service import _guard_turn  # shared timeout/cancel guard
+        from app.services.agent.session.core import _guard_turn  # shared timeout/cancel guard
         _handlers = {"user_message": _handle_chat_message, "user_audio": _handle_chat_audio}
         while True:
             try:
@@ -444,7 +444,7 @@ async def run_chat_ws(websocket: WebSocket) -> None:
 
                 async def _speak_task(_t=_sp_text, _i=_sp_id):
                     try:
-                        from app.services.voice_agent_service import synth_speak_frame
+                        from app.services.agent.session.voice import synth_speak_frame
                         await send(await synth_speak_frame(_t, _i))
                     except Exception:  # noqa: BLE001
                         pass

@@ -834,20 +834,51 @@ _PHASE_BUDGET: Dict[int, Dict[str, int]] = {
 }
 
 
-def phase_budget(duration: int) -> Dict[str, int]:
+# Per-KEY-STAGE recap emphasis. The Session Agent gives younger students MORE scaffolding time
+# with the recap/intro agent and older students LESS (KS1 most → KS5 least). We shift minutes
+# ONLY between recap and teach, so `recap + teach` (and therefore the quiz start = recap+teach+
+# practice) is INVARIANT — the sensitive quiz-timing gate never moves. Positive = more recap.
+_KS_RECAP_SHIFT: Dict[str, int] = {"KS1": 3, "KS2": 2, "KS3": 0, "KS4": -1, "KS5": -2}
+
+
+def _apply_ks_emphasis(budget: Dict[str, int], key_stage: Optional[str]) -> Dict[str, int]:
+    """Shift recap↔teach by key stage (KS1 more recap, KS5 less). `recap+teach` is preserved so
+    quiz timing is untouched. Bounded: recap ≥ 2, teach ≥ 0."""
+    if not key_stage:
+        return budget
+    ks = str(key_stage).upper().replace(" ", "")
+    shift = _KS_RECAP_SHIFT.get(ks, 0)
+    if not shift:
+        return budget
+    recap, teach = budget.get("recap", 0), budget.get("teach", 0)
+    if shift > 0:                       # more recap, taken from teach
+        shift = min(shift, max(0, teach))
+    else:                               # less recap, given to teach
+        shift = -min(-shift, max(0, recap - 2))
+    if not shift:
+        return budget
+    out = dict(budget)
+    out["recap"] = recap + shift
+    out["teach"] = teach - shift
+    return out
+
+
+def phase_budget(duration: int, key_stage: Optional[str] = None) -> Dict[str, int]:
     """Minutes per phase for this lesson length. Exact for the four bookable lengths; any other
     duration is scaled from the nearest one, with the rounding remainder given to practice so the
-    total always equals the lesson length."""
+    total always equals the lesson length. `key_stage` shifts recap↔teach (younger = more recap)
+    without moving the quiz start."""
     if duration in _PHASE_BUDGET:
-        return dict(_PHASE_BUDGET[duration])
-    nearest = min(_PHASE_BUDGET, key=lambda d: abs(d - duration))
-    base = _PHASE_BUDGET[nearest]
-    scale = duration / nearest
-    out = {k: int(round(v * scale)) if v else 0 for k, v in base.items()}
-    drift = duration - sum(out.values())
-    if drift:
-        out["practice"] = max(0, out.get("practice", 0) + drift)
-    return out
+        out = dict(_PHASE_BUDGET[duration])
+    else:
+        nearest = min(_PHASE_BUDGET, key=lambda d: abs(d - duration))
+        base = _PHASE_BUDGET[nearest]
+        scale = duration / nearest
+        out = {k: int(round(v * scale)) if v else 0 for k, v in base.items()}
+        drift = duration - sum(out.values())
+        if drift:
+            out["practice"] = max(0, out.get("practice", 0) + drift)
+    return _apply_ks_emphasis(out, key_stage)
 
 
 def _split_evenly(total: int, n: int) -> List[int]:
@@ -864,6 +895,7 @@ def generate_plan_blocks(
     duration_minutes: int,
     topics: List[str],
     subject: str,
+    key_stage: Optional[str] = None,
 ) -> dict:
     """Returns a plan_blocks dict containing a 'steps' list of structured lesson steps."""
     mode = learn_mode or "ai_recommended"
@@ -902,7 +934,7 @@ def generate_plan_blocks(
                          meta[0] if meta else _DEFAULT_TYPE,
                          meta[1] if meta else _DEFAULT_AI_INSTRUCTION))
 
-    budget = phase_budget(duration_minutes)
+    budget = phase_budget(duration_minutes, key_stage)
     # A phase with a zero budget is DROPPED, not shrunk — a 20-minute lesson genuinely has no
     # teaching phase, and a 1-minute teach step would just invite the tutor to start teaching.
     kept = [r for r in resolved if budget.get(r[1], 0) > 0]
@@ -977,6 +1009,7 @@ async def auto_create_lesson_plan(db: AsyncSession, appointment, student_id: int
         learn_mode=learn_mode, goal=goal,
         duration_minutes=appointment.duration_minutes or 60,
         topics=topics, subject=appointment.subject,
+        key_stage=getattr(appointment, "key_stage", None),
     )
 
     result = await db.execute(select(LessonPlan).where(LessonPlan.appointment_id == appointment.id))

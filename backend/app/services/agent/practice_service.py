@@ -28,6 +28,7 @@ evaluator/XP path downstream is untouched:
 import logging
 import random
 import re
+from datetime import datetime, timezone   # used by set_puzzle_shown/record_puzzle_attempt timestamps
 from math import gcd
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
@@ -1951,7 +1952,12 @@ def manipulatives_enabled(key_stage: Optional[str], subject: Optional[str] = Non
     and LEVEL is enforced per entry: counting_bubbles/fraction_canvas are tagged KS1-KS3 so an
     older student can never be handed them, while algebra_tiles/probability_tree are tagged
     KS3-KS5 so a young one can never be handed those.
+    POLICY (curriculum team): KS4 and KS5 get NO manipulatives — they use the mature puzzle types
+    (math / graph / diagram / labelling / matching). KS1-KS2 get plenty; KS3 gets very few (see
+    _manip_lean — lowest in Years 8-9). Level is still enforced per registry entry on top of this.
     """
+    if _norm_ks(key_stage) in ("KS4", "KS5"):
+        return False
     return bool(allowed_kinds(key_stage, subject))
 
 
@@ -1974,19 +1980,40 @@ def next_puzzle_style(key_stage: Optional[str], mix: Optional[dict]) -> str:
     return "manipulative" if manip / (manip + classic + 1) < target else "classic"
 
 
-# How strongly each key stage leans toward hands-on manipulatives WITHIN the mix (only applies
-# to topics that HAVE a matching manipulative — younger students get more, but never all-or-none
-# so the lesson always varies between hands-on and classic puzzles).
-# KS5 is deliberately NOT 0 any more. The old rule ("A-Level students don't want counters") was
-# right about counters and wrong about hands-on: what a KS5 student gets is a Punnett square, an
-# atom builder or algebra tiles — never counting bubbles, because those are tagged KS1-KS3 on
-# their own registry entries. Level is enforced by the entry, not by switching the mix off.
-_MIX_LEAN = {"KS1": 0.6, "KS2": 0.6, "KS3": 0.5, "KS4": 0.45, "KS5": 0.4}
+# How strongly each stage leans toward hands-on manipulatives WITHIN the mix (only applies to
+# topics that HAVE a matching manipulative). Per the curriculum team: heavy for the youngest,
+# tapering to almost nothing by upper KS3, and none at all at KS4/KS5 (they're unbound there).
 _MAX_RUN = 3   # never more than this many of the SAME style in a row → the order stays varied
 
 
+def _year_num(year_group: Optional[str]) -> Optional[int]:
+    """'Year 7' / 'Y7' / '7' → 7."""
+    if not year_group:
+        return None
+    m = re.search(r"(\d{1,2})", str(year_group))
+    return int(m.group(1)) if m else None
+
+
+def _manip_lean(key_stage: Optional[str], year_group: Optional[str] = None) -> float:
+    """Share of puzzles that should be hands-on manipulatives, by key stage + year group.
+    KS1-KS2: most. KS3: very few — Year 7 a little, Years 8-9 almost none. KS4-KS5: none."""
+    ks = _norm_ks(key_stage)
+    if ks == "KS1":
+        return 0.80
+    if ks == "KS2":
+        return 0.75
+    if ks == "KS3":
+        y = _year_num(year_group)
+        if y == 7:
+            return 0.25            # Year 7 — a little hands-on
+        if y in (8, 9):
+            return 0.06            # Years 8-9 — almost none
+        return 0.12                # KS3, year unknown — low
+    return 0.0                     # KS4 / KS5 — none (also unbound in manipulatives_enabled)
+
+
 def next_style_mixed(key_stage: Optional[str], style_seq: Optional[List[str]],
-                     has_topic_manip: bool) -> str:
+                     has_topic_manip: bool, year_group: Optional[str] = None) -> str:
     """The NEXT puzzle style for a genuinely MIXED, non-repeating lesson.
 
     The rule the user asked for: when the topic HAS a matching manipulative, weave manipulatives
@@ -2003,7 +2030,9 @@ def next_style_mixed(key_stage: Optional[str], style_seq: Optional[List[str]],
     """
     if not has_topic_manip:
         return "classic"
-    lean = _MIX_LEAN.get(_norm_ks(key_stage), 0.5)
+    lean = _manip_lean(key_stage, year_group)
+    if lean <= 0.0:
+        return "classic"
     seq = [s for s in (style_seq or []) if s in ("manipulative", "classic")]
 
     # length of the current same-style streak
@@ -2209,3 +2238,944 @@ def pick_topic_kind(topic: Optional[str], key_stage: Optional[str],
     fewest = min(hist.count(k) for k in pool)
     least = [k for k in pool if hist.count(k) == fewest]
     return _rng().choice(least)
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# GRAPH PUZZLES (merged from the former graph_service.py)
+# ═══════════════════════════════════════════════════════════════════════════
+"""
+graph_service.py — render maths/science graphs with matplotlib for GRAPH puzzles.
+
+The AI supplies a small, safe spec (kind + data/expression + axis info); we draw a clean
+PNG to the served media dir and return its URL. Used for KS4/KS5 (and any graph/trig
+topic): reading coordinates, straight-line graphs, quadratics, sine/cos, bar/scatter.
+
+`function` specs evaluate a whitelisted maths expression over a range with numpy — no
+`eval` of arbitrary Python; only a fixed set of names (sin, cos, x, etc.) is exposed.
+"""
+import asyncio
+import logging
+import uuid
+from pathlib import Path
+from typing import Any, Dict, Optional
+
+import numpy as np
+import matplotlib
+matplotlib.use("Agg")  # headless — no display, thread-safe rendering
+import matplotlib.pyplot as plt  # noqa: E402
+import matplotlib.patches as mpatches  # noqa: E402
+from matplotlib.ticker import MultipleLocator  # noqa: E402
+
+from app.core.config import settings
+from app.services.image_gen_service import media_url
+
+logger = logging.getLogger(__name__)
+
+# Whitelisted names available to a `function` expression (numpy-backed, safe).
+_SAFE_NS = {
+    "sin": np.sin, "cos": np.cos, "tan": np.tan, "sqrt": np.sqrt, "exp": np.exp,
+    "log": np.log, "abs": np.abs, "pi": np.pi, "e": np.e,
+}
+
+
+def _media_dir() -> Path:
+    d = Path(settings.puzzle_media_dir)
+    d.mkdir(parents=True, exist_ok=True)
+    return d
+
+
+# Distinct, colour-blind-safe line colours. A two-line graph is useless if the student can't
+# tell the lines apart.
+_LINE_COLOURS = ["#2563eb", "#dc2626", "#059669", "#d97706", "#7c3aed"]
+
+
+def _normalise_functions(spec: Dict[str, Any]) -> list[Dict[str, Any]]:
+    """Every way the model might express "plot these curves" → one list of {expr, label}.
+
+    `kind="function"` originally accepted only a SINGLE `expr`, which made a whole class of
+    question — "where do these two lines intersect?" — impossible to draw correctly: the model
+    would ask about two lines and the renderer would plot one. So we now accept a list, and
+    keep the old single `expr` working.
+    """
+    raw = spec.get("functions") or spec.get("exprs") or spec.get("expr")
+    if raw is None:
+        raw = "x"
+    if isinstance(raw, (str, dict)):
+        raw = [raw]
+
+    out: list[Dict[str, Any]] = []
+    for item in raw:
+        if isinstance(item, str):
+            out.append({"expr": item, "label": item})
+        elif isinstance(item, dict) and item.get("expr"):
+            out.append({"expr": str(item["expr"]), "label": str(item.get("label") or item["expr"])})
+    return out
+
+
+def curve_count(spec: Dict[str, Any]) -> int:
+    """How many curves/series this spec will actually draw. The tool layer uses this to refuse
+    a question that talks about two lines when only one would appear on screen."""
+    spec = spec or {}
+    kind = str(spec.get("kind", "line")).lower()
+    if kind == "function":
+        return len(_normalise_functions(spec))
+    if kind == "line":
+        series = spec.get("series")
+        if series:
+            return len(series)
+        return 1 if spec.get("points") else 0
+    return 1 if (spec.get("values") or spec.get("points")) else 0
+
+
+def _tidy_axes(ax, spec: Dict[str, Any]) -> None:
+    """Readable gridlines. A coordinate-reading question is unanswerable if the student can't
+    count squares — so on a small range we force ticks every 1 unit."""
+    for axis, lo_key, hi_key in ((ax.xaxis, "xmin", "xmax"), (ax.yaxis, "ymin", "ymax")):
+        lo, hi = (spec.get(lo_key), spec.get(hi_key))
+        try:
+            span = abs(float(hi) - float(lo)) if lo is not None and hi is not None else None
+        except (TypeError, ValueError):
+            span = None
+        if span and span <= 12:
+            axis.set_major_locator(MultipleLocator(1))
+
+
+def _draw(spec: Dict[str, Any]) -> str:
+    kind = str(spec.get("kind", "line")).lower()
+    title = str(spec.get("title", "") or "")
+    xlabel = str(spec.get("xlabel", "x") or "x")
+    ylabel = str(spec.get("ylabel", "y") or "y")
+
+    fig, ax = plt.subplots(figsize=(5.2, 4.0), dpi=130)
+    try:
+        if kind == "function":
+            funcs = _normalise_functions(spec)
+            xmin = float(spec.get("xmin", -10))
+            xmax = float(spec.get("xmax", 10))
+            x = np.linspace(xmin, xmax, 400)
+            for i, f in enumerate(funcs):
+                # A failed expression must NOT silently vanish — a graph that's missing a line
+                # the question asks about is worse than no graph at all, because the student
+                # is then asked something unanswerable. Let it raise; the tool reports it.
+                y = eval(f["expr"], {"__builtins__": {}}, {**_SAFE_NS, "x": x})  # noqa: S307 — whitelisted ns only
+                y = np.broadcast_to(np.asarray(y, dtype=float), x.shape)  # constants, e.g. "3"
+                ax.plot(x, y, linewidth=2, color=_LINE_COLOURS[i % len(_LINE_COLOURS)],
+                        label=f["label"])
+            ax.axhline(0, color="#888", linewidth=0.8)
+            ax.axvline(0, color="#888", linewidth=0.8)
+            if len(funcs) > 1:
+                ax.legend()   # with 2+ lines the student MUST be able to tell which is which
+        elif kind == "bar":
+            labels = [str(l) for l in (spec.get("labels") or [])]
+            values = [float(v) for v in (spec.get("values") or [])]
+            ax.bar(labels, values, color="#7c3aed")
+        elif kind == "scatter":
+            pts = spec.get("points") or []
+            xs = [float(p[0]) for p in pts]
+            ys = [float(p[1]) for p in pts]
+            ax.scatter(xs, ys, color="#7c3aed", s=40)
+        else:  # line (default) — one or more series of [x,y] points
+            series = spec.get("series")
+            if not series and spec.get("points"):
+                series = [{"points": spec["points"]}]
+            for s in (series or []):
+                pts = s.get("points") or []
+                xs = [float(p[0]) for p in pts]
+                ys = [float(p[1]) for p in pts]
+                ax.plot(xs, ys, marker="o", linewidth=2, label=s.get("label"))
+            if any((s or {}).get("label") for s in (series or [])):
+                ax.legend()
+
+        ax.set_title(title)
+        ax.set_xlabel(xlabel)
+        ax.set_ylabel(ylabel)
+        ax.grid(True, linestyle="--", alpha=0.4)
+        if kind == "function":
+            _tidy_axes(ax, spec)
+        fig.tight_layout()
+
+        name = f"g_{uuid.uuid4().hex[:16]}.png"
+        path = _media_dir() / name
+        fig.savefig(str(path))
+        return name
+    finally:
+        plt.close(fig)
+
+
+async def generate_graph(spec: Dict[str, Any]) -> Optional[str]:
+    """Render `spec` to a PNG and return its served URL (or None on failure)."""
+    try:
+        name = await asyncio.to_thread(_draw, spec or {})
+        logger.info("GRAPH rendered %s kind=%s", name, (spec or {}).get("kind"))
+        return media_url(name)
+    except Exception as e:  # noqa: BLE001
+        logger.warning("GRAPH render failed: %s: %s", type(e).__name__, e)
+        return None
+
+
+# ── Deterministic maths diagrams (answer must EXACTLY match the picture) ───────────
+# Generated (Nano Banana) images can't render "exactly 1 of 8 shaded" or "3 o'clock"
+# reliably, so for fractions + telling the time we DRAW them precisely here and the
+# answer is computed from the same params (in puzzle_service) — they can never disagree.
+
+def _save_fig(fig, prefix: str) -> str:
+    name = f"{prefix}_{uuid.uuid4().hex[:16]}.png"
+    fig.savefig(str(_media_dir() / name), bbox_inches="tight")
+    return name
+
+
+def _draw_fraction(total: int, shaded: int) -> str:
+    """A circle split into `total` equal wedges, the first `shaded` filled."""
+    fig, ax = plt.subplots(figsize=(4.0, 4.0), dpi=130)
+    try:
+        for i in range(total):
+            t2 = 90 - i * 360.0 / total
+            t1 = 90 - (i + 1) * 360.0 / total
+            ax.add_patch(mpatches.Wedge(
+                (0, 0), 1.0, t1, t2,
+                facecolor=("#7c3aed" if i < shaded else "white"),
+                edgecolor="#334155", linewidth=2.2,
+            ))
+        ax.set_xlim(-1.15, 1.15)
+        ax.set_ylim(-1.15, 1.15)
+        ax.set_aspect("equal")
+        ax.axis("off")
+        return _save_fig(fig, "fr")
+    finally:
+        plt.close(fig)
+
+
+def _draw_clock(hour: int, minute: int) -> str:
+    """An analogue clock face with hour + minute hands at exactly hour:minute."""
+    fig, ax = plt.subplots(figsize=(4.0, 4.0), dpi=130)
+    try:
+        ax.add_patch(mpatches.Circle((0, 0), 1.0, fill=False, linewidth=2.4, edgecolor="#334155"))
+        for h in range(1, 13):
+            ang = np.deg2rad(90 - h * 30)
+            ax.text(0.82 * np.cos(ang), 0.82 * np.sin(ang), str(h),
+                    ha="center", va="center", fontsize=14, fontweight="bold", color="#334155")
+        m_ang = np.deg2rad(90 - minute * 6)
+        h_ang = np.deg2rad(90 - ((hour % 12) + minute / 60.0) * 30)
+        ax.plot([0, 0.48 * np.cos(h_ang)], [0, 0.48 * np.sin(h_ang)], linewidth=5, color="#334155",
+                solid_capstyle="round")          # hour hand
+        ax.plot([0, 0.78 * np.cos(m_ang)], [0, 0.78 * np.sin(m_ang)], linewidth=3, color="#7c3aed",
+                solid_capstyle="round")          # minute hand
+        ax.plot(0, 0, marker="o", markersize=7, color="#334155")
+        ax.set_xlim(-1.15, 1.15)
+        ax.set_ylim(-1.15, 1.15)
+        ax.set_aspect("equal")
+        ax.axis("off")
+        return _save_fig(fig, "cl")
+    finally:
+        plt.close(fig)
+
+
+def _draw_ruler(length_cm: int, object_name: str = "object", start: int = 0) -> str:
+    """A horizontal cm ruler (0…max) with an object bar spanning `start`→`start+length`."""
+    max_cm = min(30, max(15, start + length_cm + 1))
+    fig, ax = plt.subplots(figsize=(6.4, 2.4), dpi=130)
+    try:
+        ax.add_patch(mpatches.Rectangle((0, 0), max_cm, 1.0,
+                     facecolor="#fde68a", edgecolor="#334155", linewidth=1.6))
+        for cm in range(0, max_cm + 1):
+            ax.plot([cm, cm], [0.6, 1.0], color="#334155", linewidth=1.3)
+            ax.text(cm, 0.28, str(cm), ha="center", va="center", fontsize=9, color="#334155")
+            if cm < max_cm:  # mm ticks
+                for mm in range(1, 10):
+                    ax.plot([cm + mm / 10.0] * 2, [0.82, 1.0], color="#334155", linewidth=0.5)
+        # object above the ruler, aligned to the scale
+        ax.add_patch(mpatches.FancyBboxPatch((start, 1.32), length_cm, 0.5,
+                     boxstyle="round,pad=0.02", mutation_aspect=0.4,
+                     facecolor="#7c3aed", edgecolor="#4c1d95", linewidth=1.6))
+        ax.text(start + length_cm / 2.0, 1.57, object_name, ha="center", va="center",
+                color="white", fontsize=11, fontweight="bold")
+        ax.set_xlim(-0.6, max_cm + 0.6)
+        ax.set_ylim(-0.1, 2.15)
+        ax.axis("off")
+        return _save_fig(fig, "rl")
+    finally:
+        plt.close(fig)
+
+
+async def generate_math_diagram(concept: str, params: Dict[str, Any]) -> Optional[str]:
+    """Draw a deterministic maths diagram (fraction | clock | ruler) and return its served
+    URL. `params` are already validated/clamped by puzzle_service.diagram_math_spec, so the
+    picture matches the computed answer exactly."""
+    concept = (concept or "").strip().lower()
+    p = params or {}
+    try:
+        if concept == "fraction":
+            name = await asyncio.to_thread(_draw_fraction, int(p["total"]), int(p["shaded"]))
+        elif concept == "clock":
+            name = await asyncio.to_thread(_draw_clock, int(p["hour"]), int(p["minute"]))
+        elif concept == "ruler":
+            name = await asyncio.to_thread(
+                _draw_ruler, int(p["length_cm"]), str(p.get("object", "object")), int(p.get("start", 0)))
+        else:
+            return None
+        logger.info("MATH DIAGRAM rendered %s concept=%s params=%s", name, concept, p)
+        return media_url(name)
+    except Exception as e:  # noqa: BLE001
+        logger.warning("MATH DIAGRAM render failed (%s): %s: %s", concept, type(e).__name__, e)
+        return None
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# PUZZLE BUILDERS + MATH/LATEX + EVALUATION + PUZZLE STATE + VISUAL-FAMILY ROTATION
+# (merged from puzzle_service.py practice half. _clampi/_load_plan are identical to the
+# manipulative copies above — harmless redefinition. pick_background is duplicated below.)
+# ═══════════════════════════════════════════════════════════════════════════
+_LIGHT_BACKGROUNDS = ["aurora", "blueprint", "paper"]
+_DARK_BACKGROUNDS = ["mesh", "bubbles"]
+
+
+def pick_background(dark: bool = False) -> str:
+    return random.choice(_DARK_BACKGROUNDS if dark else _LIGHT_BACKGROUNDS)
+
+
+# ── Builders ─────────────────────────────────────────────────────────────────────
+# Each returns a full payload INCLUDING `solution` + `puzzle_type`. The tool persists
+# the whole thing, then strips `solution` before handing the client payload to the model.
+
+def build_labelling(items: List[Dict[str, str]], prompt: str = "") -> Dict[str, Any]:
+    """items: [{label, image_url}] — student names each image in turn."""
+    good = [it for it in items if it.get("image_url")]
+    if len(good) < 2:
+        return {"error": "image_gen_failed"}
+    imgs = [{"id": str(i), "image": it["image_url"]} for i, it in enumerate(good)]
+    solution = {str(i): (it.get("label") or "").strip() for i, it in enumerate(good)}
+    return {
+        "render": "labelling",
+        "puzzle_type": "labelling",
+        "title": "Name each picture",
+        "prompt": prompt or "Look at each picture and type what it is.",
+        "params": {"images": imgs},                 # no labels sent to the client
+        "solution": solution,
+        "answer_type": "labels",
+    }
+
+
+def build_matching(items: List[Dict[str, str]], prompt: str = "") -> Dict[str, Any]:
+    """items: [{label, image_url}] — student matches each image to its name."""
+    good = [it for it in items if it.get("image_url")]
+    if len(good) < 3:
+        return {"error": "image_gen_failed"}
+    imgs = [{"id": str(i), "image": it["image_url"]} for i, it in enumerate(good)]
+    solution = {str(i): (it.get("label") or "").strip() for i, it in enumerate(good)}
+    labels = [it["label"] for it in good]
+    random.shuffle(imgs)
+    random.shuffle(labels)
+    return {
+        "render": "matching",
+        "puzzle_type": "matching",
+        "title": "Match the pictures",
+        "prompt": prompt or "Match each picture to its name.",
+        "params": {"images": imgs, "labels": labels},
+        "solution": solution,
+        "answer_type": "match",
+    }
+
+
+def _auto_numeric_distractors(ans: str) -> List[str]:
+    """When the AI forgets to supply wrong answers, synthesise plausible near-misses for a
+    plain WHOLE-NUMBER answer so the puzzle still shows tappable bubbles (options) rather than
+    a bare text box. Only fires for integers — algebraic / worded answers stay typed."""
+    raw = ans.strip()
+    try:
+        n = int(raw.replace(",", ""))
+    except ValueError:
+        return []
+    use_commas = "," in raw
+    fmt = (lambda v: f"{v:,}") if use_commas else str
+    out: List[str] = []
+    seen = {n}
+    for d in (1, -1, 2, -2, 10, -10, 3, -3, 5, -5):
+        c = n + d
+        if c >= 0 and c not in seen:
+            seen.add(c)
+            out.append(fmt(c))
+        if len(out) >= 3:
+            break
+    return out
+
+
+# Things that must never reach KaTeX. A student saw a maths card render as
+# "textFindthelengthofsidex … dth = 200px]https://storage.googleapis.com/…" because the model
+# put prose AND a markdown image into `latex`; KaTeX has no idea what either is, so it set the
+# URL as maths, letter by letter.
+_MD_IMAGE = re.compile(r"!\[[^\]]*\]\([^)]*\)")
+_MD_LINK = re.compile(r"(?<!!)\[[^\]]*\]\([^)]*\)")
+_URL_RE = re.compile(r"(https?://|www\.)\S+", re.IGNORECASE)
+_HTML_TAG = re.compile(r"<[^>]+>")
+# Does what's left actually contain maths? A digit, an operator, or a LaTeX command.
+_HAS_MATH = re.compile(r"[0-9]|[+\-=<>^_/×÷≤≥≠±]|\\(?!text\b)[A-Za-z]+")
+
+
+def clean_math_latex(s: str) -> tuple:
+    """(latex, problem) for the KaTeX equation card.
+
+    `problem` is "" when the latex is usable, otherwise a short reason:
+      "figure" — it carried an image/URL, i.e. the model tried to SHOW something. That must be
+                 surfaced as a tool error, because silently dropping it leaves the student a
+                 question about a diagram that isn't on screen ("find the length of side x" with
+                 no triangle anywhere).
+      "prose"  — it was only words, which the prompt line already says. Safe to drop silently.
+    """
+    if not s or not str(s).strip():
+        return "", ""
+    t = str(s)
+    had_figure = bool(_MD_IMAGE.search(t) or _URL_RE.search(t))
+    t = _MD_IMAGE.sub(" ", t)
+    t = _MD_LINK.sub(" ", t)
+    t = _URL_RE.sub(" ", t)
+    t = _HTML_TAG.sub(" ", t)
+    t = re.sub(r"\s{2,}", " ", t).strip()
+    if had_figure:
+        return "", "figure"
+    # Decide prose-vs-maths on the RAW text. Doing it after the repairs is circular: they turn
+    # "times" into "\times", which then looks like maths, so the sentence "The times table is
+    # fun" would be typeset as an equation instead of being dropped.
+    if not _HAS_MATH.search(t):
+        return "", "prose"
+    # NO server-side LaTeX repair — the AI emits valid KaTeX directly (aligned in the agent
+    # prompts). A genuine parse error is caught by the frontend KaTeX validator, which bounces a
+    # `latex_error` event back so the AI re-emits corrected LaTeX (validate → fix → retry). We only
+    # strip the surrounding math delimiters that KaTeX's BlockMath doesn't accept.
+    t = t.strip()
+    for a, b in (("$$", "$$"), ("\\[", "\\]"), ("\\(", "\\)"), ("$", "$")):
+        if t.startswith(a) and t.endswith(b) and len(t) > len(a) + len(b):
+            t = t[len(a):len(t) - len(b)].strip()
+            break
+    if not t:
+        return "", "prose"
+    return t, ""
+
+
+def _latexish_to_plain(s: str) -> str:
+    """Turn simple LaTeX into plain reading text for places that are NOT rendered by KaTeX — the
+    question line and the tappable answer bubbles. The model sometimes writes options/answers as
+    "\\frac{3}{5}" or wraps the question in "\\(…\\)"; those show up as the raw string on a plain
+    button. Fractions become "3/5", common operators become their symbols, math delimiters are
+    dropped. (The main equation card gets the AI's raw LaTeX as-is, validated by KaTeX on the
+    client — an invalid one bounces a latex_error back for the AI to fix, no server repair.)"""
+    if not s:
+        return s
+    t = str(s)
+    t = re.sub(r"\\[dt]?frac\s*\{([^{}]*)\}\s*\{([^{}]*)\}", r"\1/\2", t)   # \frac{3}{5} → 3/5
+    t = re.sub(r"\\[dt]?frac\s*(\d)\s*(\d)", r"\1/\2", t)                    # \frac35 → 3/5
+    for a, b in (("\\times", "×"), ("\\div", "÷"), ("\\cdot", "·"),
+                 ("\\leq", "≤"), ("\\geq", "≥"), ("\\neq", "≠"),
+                 ("\\pm", "±"), ("\\degree", "°"), ("\\circ", "°")):
+        t = t.replace(a, b)
+    for d in ("\\(", "\\)", "\\[", "\\]"):
+        t = t.replace(d, "")
+    t = re.sub(r"\$+", "", t)
+    return re.sub(r"\s+", " ", t).strip()
+
+
+def build_math(question: str, answer: str, *, mode: str = "latex",
+               latex: str = "", image_url: str = "",
+               options: Optional[List[str]] = None) -> Dict[str, Any]:
+    mode = mode if mode in ("latex", "image") else "latex"
+    if mode == "image" and not image_url:
+        mode = "latex"
+    # Defence in depth: the tool already refuses a `latex` carrying a figure, so anything left
+    # here is either a real equation or prose worth dropping. Never hand raw model text to KaTeX.
+    latex, _latex_problem = clean_math_latex(latex)
+    # The question line and the answer bubbles are plain text (not KaTeX), so any LaTeX the model
+    # slipped into them ("\frac{3}{5}", "\(\frac{2}{3}\)") must be turned into readable text or it
+    # shows up raw on the button / in the prompt.
+    question = _latexish_to_plain(question)
+
+    # Multiple-choice: the AI gives wrong answers, the server builds the option set. Building it
+    # HERE (not trusting the AI's list) guarantees the correct answer is always present exactly
+    # once and its position is shuffled — so a student can't learn "it's always the 2nd bubble".
+    opts: List[str] = []
+    ans = _latexish_to_plain(str(answer).strip())
+    for o in (options or []):
+        s = _latexish_to_plain(str(o).strip())
+        if s and s.lower() != ans.lower() and s.lower() not in {x.lower() for x in opts}:
+            opts.append(s)
+    # No usable distractors from the AI → try to build them ourselves so a numeric maths
+    # problem is STILL multiple-choice (the friendlier path for young students).
+    if not opts:
+        opts = _auto_numeric_distractors(ans)
+    if opts:
+        opts = opts[:3] + [ans]
+        random.shuffle(opts)
+
+    return {
+        "render": "math",
+        "puzzle_type": "math",
+        "title": "Have a go",
+        "prompt": question or "Solve it.",
+        "params": {
+            "mode": mode, "latex": latex or "", "image": image_url or "",
+            "options": opts,                       # non-empty → the client shows tappable bubbles
+            "background": pick_background(dark=True),
+        },
+        "solution": ans,
+        # "choice" is only a hint to the UI (bubbles vs typing); marking is the same either way.
+        "answer_type": "choice" if opts else "text",
+    }
+
+
+def build_graph(question: str, answer: str, image_url: str) -> Dict[str, Any]:
+    return {
+        "render": "graph",
+        "puzzle_type": "graph",
+        "title": "Read the graph",
+        "prompt": question or "Answer from the graph.",
+        "params": {"image": image_url, "background": pick_background(dark=False)},
+        "solution": str(answer),
+        "answer_type": "text",
+    }
+
+
+def build_manipulative(kind: str, clean_params: Dict[str, Any], solution: Any,
+                       prompt: str, title: str) -> Dict[str, Any]:
+    """A deterministic interactive manipulative (place-value counters, fraction canvas,
+    times-table dash…). `render` IS the kind, so the frontend switches straight to the right
+    component. `puzzle_type` is always "manipulative" — that's what routes marking away from
+    the LLM judge and into manipulative_service.mark (see evaluate()).
+
+    prompt and solution are BOTH derived from clean_params by manipulative_service.build_spec,
+    so they cannot disagree with each other or with the picture. The AI supplies neither.
+    """
+    return {
+        "render": kind,
+        "puzzle_type": "manipulative",
+        "title": title or "Have a go",
+        "prompt": prompt or "",
+        "params": {"kind": kind, "background": pick_background(dark=False),
+                   **(clean_params or {})},
+        "solution": solution,
+        "answer_type": "manipulative",
+    }
+
+
+def _clampi(v: Any, lo: int, hi: int, default: int) -> int:
+    try:
+        n = int(v)
+    except (TypeError, ValueError):
+        n = default
+    return max(lo, min(hi, n))
+
+
+def diagram_math_spec(concept: str, params: Optional[dict]) -> tuple:
+    """For a DETERMINISTIC maths diagram (fraction | clock): validate/clamp the params,
+    then compute the EXACT answer server-side (so the AI's/evaluator's answer can never be
+    wrong or disagree with the picture) and give a default question. Returns
+    (clean_params, answer, default_question); answer='' if the concept is unknown."""
+    concept = (concept or "").strip().lower()
+    p = params or {}
+    if concept == "fraction":
+        total = _clampi(p.get("total", p.get("denominator", p.get("parts"))), 2, 12, 4)
+        shaded = _clampi(p.get("shaded", p.get("numerator", p.get("filled"))), 0, total, 1)
+        return ({"total": total, "shaded": shaded}, f"{shaded}/{total}",
+                "What fraction of the shape is shaded? Write it like 1/4.")
+    if concept == "clock":
+        hour = _clampi(p.get("hour", p.get("hours")), 1, 12, 3)
+        minute = _clampi(p.get("minute", p.get("minutes")), 0, 59, 0)
+        if minute == 0:
+            ans = f"{hour} o'clock"
+        elif minute == 30:
+            ans = f"half past {hour}"
+        else:
+            ans = f"{hour}:{minute:02d}"
+        return ({"hour": hour, "minute": minute}, ans, "What time does the clock show?")
+    if concept == "ruler":
+        length = _clampi(p.get("length_cm", p.get("length", p.get("cm"))), 1, 30, 8)
+        start = _clampi(p.get("start", 0), 0, 29, 0)
+        obj = str(p.get("object", p.get("name", "object")) or "object").strip() or "object"
+        return ({"length_cm": length, "start": start, "object": obj}, f"{length} cm",
+                f"How long is the {obj}? Give your answer in centimetres (cm).")
+    return ({}, "", "")
+
+
+def diagram_example_caption(concept: str, clean: dict, answer: str) -> str:
+    """A short caption for a DISPLAY-ONLY worked-example diagram, written from the SAME clamped
+    params the picture was drawn from — so the words under the diagram always match the drawing
+    (this is what a free-typed AI caption failed to guarantee, e.g. '2/6' over a 1/5 bar)."""
+    c = (concept or "").strip().lower()
+    if c == "fraction":
+        total = clean.get("total")
+        shaded = clean.get("shaded")
+        return f"{shaded} out of {total} equal parts are shaded — that is {answer}."
+    if c == "clock":
+        return f"The clock shows {answer}."
+    if c == "ruler":
+        obj = clean.get("object", "object")
+        return f"The {obj} measures {answer}."
+    return f"This shows {answer}."
+
+
+def _client_payload(full: Dict[str, Any]) -> Dict[str, Any]:
+    """Strip the server-only solution before the payload goes to the model / frontend."""
+    out = {k: v for k, v in full.items() if k != "solution"}
+    out["action"] = "show_puzzle"
+    return out
+
+
+# ── Semantic evaluation (fast model) ──────────────────────────────────────────────
+_JUDGE_SYS = (
+    "You are marking a young student's answer to a puzzle. Be encouraging but accurate. "
+    "Accept correct meaning regardless of spelling, case, synonyms, or equivalent form "
+    "(e.g. 'mitochondrion'='mitochondria', 'a half'='1/2'='0.5'). Reply ONLY as JSON."
+)
+
+
+def _judge_sync(puzzle_type: str, question: str, solution: Any, answer: Any) -> Dict[str, Any]:
+    from google import genai
+    client = genai.Client(api_key=settings.gemini_api_key)
+    payload = {
+        "puzzle_type": puzzle_type,
+        "question": question,
+        "correct_answer": solution,
+        "student_answer": answer,
+    }
+    instruction = (
+        _JUDGE_SYS
+        + "\nGiven this puzzle, mark the student's answer. For labelling/matching, "
+        "correct_answer and student_answer are {id: name} maps — mark each id. "
+        "Return JSON: {\"score\": <int 0-10>, \"correct\": <true|false>, "
+        "\"per_item\": {<id>: <true|false>}, \"feedback\": \"<one short, warm sentence: "
+        "praise if right; if wrong, a gentle hint toward the right idea WITHOUT stating "
+        "the full answer>\"}. per_item may be {} for single-answer puzzles.\n\nPUZZLE:\n"
+        + json.dumps(payload, ensure_ascii=False)
+    )
+    resp = client.models.generate_content(
+        model=settings.gemini_chat_model,
+        contents=instruction,
+        config={"response_mime_type": "application/json"},
+    )
+    txt = (getattr(resp, "text", "") or "").strip()
+    data = json.loads(txt)
+    score = int(data.get("score", 0))
+    return {
+        "score": max(0, min(10, score)),
+        "correct": bool(data.get("correct", score >= 7)),
+        "per_item": data.get("per_item") or {},
+        "feedback": str(data.get("feedback", "")).strip(),
+    }
+
+
+async def evaluate(puzzle_type: str, solution: Any, student_answer: Any,
+                   question: str = "", render: str = "") -> Dict[str, Any]:
+    """Mark the student's answer. Never raises — falls back to a neutral 'try again' verdict
+    so the tutor can still respond.
+
+    Manipulatives are marked DETERMINISTICALLY (exact comparison against a solution the
+    server derived from the same params it drew the puzzle from) — no model call, instant,
+    and it cannot disagree with what's on screen. Everything else is judged semantically by
+    the fast model, because "mitochondrion" ≈ "mitochondria" needs a language model.
+    """
+    if puzzle_type == "manipulative":
+        # `mark` is defined above (merged from the former manipulative_service).
+        return mark(render, solution, student_answer)
+
+    import asyncio
+    try:
+        return await asyncio.to_thread(
+            _judge_sync, puzzle_type, question, solution, student_answer
+        )
+    except Exception as e:  # noqa: BLE001
+        logger.warning("puzzle evaluate failed: %s: %s", type(e).__name__, e)
+        return {"score": 0, "correct": False, "per_item": {},
+                "feedback": "I couldn't quite mark that — let's talk it through together."}
+
+
+# ── Authoritative interactive state (LessonPlan.session_state["puzzle_state"]) ─────
+# Single source of truth for what puzzle is on screen, its SOLUTION (server-only), and
+# what the student has submitted. Injected into the model each turn via the anchor.
+
+async def _load_plan(db: AsyncSession, appointment_id: int):
+    from app.models.lesson_plan import LessonPlan
+    return (await db.execute(
+        select(LessonPlan).where(LessonPlan.appointment_id == appointment_id)
+    )).scalar_one_or_none()
+
+
+async def set_puzzle_shown(db: AsyncSession, appointment_id: int, full_payload: dict) -> str:
+    """Record a NEW puzzle on screen (incl. its server-only solution). Returns an
+    instance_id the frontend keys on so each fresh puzzle fully remounts."""
+    plan = await _load_plan(db, appointment_id)
+    if plan is None:
+        return ""
+    state = dict(plan.session_state) if plan.session_state else {}
+    instance_id = uuid.uuid4().hex[:12]
+    state["puzzle_state"] = {
+        "puzzle_type": full_payload.get("puzzle_type"),
+        "render": full_payload.get("render"),
+        "prompt": full_payload.get("prompt"),
+        "solution": full_payload.get("solution"),   # server-only
+        "instance_id": instance_id,
+        "status": "showing",
+        "attempts": 0,
+        "last_answer": None,
+        "shown_at": datetime.now(timezone.utc).isoformat(),
+    }
+    plan.session_state = state
+    await db.flush()
+    return instance_id
+
+
+async def record_puzzle_attempt(db: AsyncSession, appointment_id: int, answer: Any) -> None:
+    plan = await _load_plan(db, appointment_id)
+    if plan is None:
+        return
+    state = dict(plan.session_state) if plan.session_state else {}
+    ps = dict(state.get("puzzle_state") or {})
+    if not ps:
+        return
+    ps["attempts"] = int(ps.get("attempts", 0)) + 1
+    ps["status"] = "submitted"
+    ps["last_answer"] = answer
+    ps["answered_at"] = datetime.now(timezone.utc).isoformat()
+    state["puzzle_state"] = ps
+    plan.session_state = state
+    await db.flush()
+
+
+async def mark_puzzle_evaluated(db: AsyncSession, appointment_id: int,
+                                verdict: Optional[dict] = None) -> None:
+    """Flip the on-screen puzzle to 'evaluated' once it's been marked, so it is graded
+    EXACTLY ONCE. The lesson-state anchor then stops telling the AI to 'call the evaluator',
+    and a second evaluator call is refused — otherwise the AI re-checks an already-solved
+    puzzle turns later."""
+    plan = await _load_plan(db, appointment_id)
+    if plan is None:
+        return
+    state = dict(plan.session_state) if plan.session_state else {}
+    ps = dict(state.get("puzzle_state") or {})
+    if not ps:
+        return
+    ps["status"] = "evaluated"
+    if verdict is not None:
+        ps["verdict"] = {"score": verdict.get("score"), "correct": verdict.get("correct")}
+    state["puzzle_state"] = ps
+    plan.session_state = state
+    await db.flush()
+
+
+async def clear_puzzle_state(db: AsyncSession, appointment_id: int) -> None:
+    plan = await _load_plan(db, appointment_id)
+    if plan is None:
+        return
+    state = dict(plan.session_state) if plan.session_state else {}
+    state.pop("puzzle_state", None)
+    plan.session_state = state
+    await db.flush()
+
+
+# ── Visual-family rotation (puzzle · animation · svg · mermaid, evenly) ───────────
+# The tutor left to itself reaches for the same kind of visual all lesson. The target is an even
+# 25/25/25/25 split across the four families, so we record what has actually been shown and the
+# LESSON STATE anchor names the family that is furthest behind — the same running-quota approach
+# that made the manipulative/classic mix hold, rather than hoping a prompt line is obeyed.
+VISUAL_FAMILIES = ("puzzle", "animation", "svg", "mermaid", "image")
+
+
+def visual_family_for(render: Optional[str]) -> str:
+    """Which family a shown visual belongs to, from its render key."""
+    r = (render or "").strip().lower()
+    if r == "mermaid":
+        return "mermaid"
+    if r == "animation":
+        return "animation"
+    if r == "svg_diagram":
+        return "svg"
+    if r == "explanatory_image":
+        # A generated teaching picture is something the student LOOKS AT, not something they
+        # DO — it used to fall through to "puzzle", so showing one during a teaching phase
+        # spent the puzzle quota and the rotation then steered AWAY from explanatory content,
+        # the exact opposite of what a teaching phase wants.
+        return "image"
+    return "puzzle"          # math/graph/labelling/matching/manipulatives
+
+
+# The three EXPLANATORY families — things the student LOOKS AT while the tutor teaches — as
+# opposed to "puzzle", which is something they DO.
+EXPLANATORY_FAMILIES = ("mermaid", "svg", "animation", "image")
+
+# What the mix should be in each phase of the lesson. A lesson that opens with puzzles makes the
+# student solve before they have been taught anything; a practice phase full of diagrams never
+# lets them try it themselves. So the phase — not the tutor's mood — decides the balance, and
+# EVERY tool stays bound in every phase (this is priority, not a gate: a practice phase can still
+# draw a diagram when one genuinely helps, it just won't lead with one).
+#
+# The split is DECISIVE, not a gentle 70/30 blend, for two reasons. Pedagogically the phases mean
+# different things: a teaching phase is slides + the visual that explains them, a practice phase
+# is the student working. Arithmetically, real plan_blocks give recap ~2 turns and review ~3 —
+# a 30% target over 2 picks cannot be expressed at all (you get 0% or 50%), so a soft blend in a
+# short phase is decided entirely by rounding. Near the extremes the rounding stops mattering.
+VISUAL_PHASE_WEIGHTS: Dict[str, Dict[str, float]] = {
+    "recap":    {"puzzle": 0.15, "explanatory": 0.85},   # remind them how it works
+    "teach":    {"puzzle": 0.15, "explanatory": 0.85},   # explain first, practise second
+    "practice": {"puzzle": 0.85, "explanatory": 0.15},   # now they do it
+    "quiz":     {"puzzle": 0.90, "explanatory": 0.10},
+    "review":   {"puzzle": 0.30, "explanatory": 0.70},   # summarise, with a little recall
+}
+_DEFAULT_PHASE = "teach"
+
+# How the EXPLANATORY share is divided between the four teaching visuals. Not an even 4-way
+# split: an even split gave animation only ~20% of teaching turns and animations stayed rare,
+# even after the prompt was told to reach for them. Motion is what a still genuinely cannot do —
+# current flowing and splitting, a shape reflecting, a graph being traced — and it is the format
+# students learn most from here, so during TEACHING it leads. Review leans on mermaid instead,
+# because summarising what was covered is a structure job, not a motion one.
+_EXPL_BIAS: Dict[str, Dict[str, float]] = {
+    "recap":    {"animation": 0.40, "svg": 0.25, "mermaid": 0.20, "image": 0.15},
+    # TEACH is written as the share of the WHOLE turn budget, not of the explanatory slice —
+    # these four sum to 85, matching `explanatory: 0.85` above, and family_weights renormalises
+    # anyway. Written this way so the numbers here are the numbers you measure: animation 35%,
+    # svg 20%, mermaid 15%, image 15%, puzzle 15%.
+    # svg is nudged BELOW its nominal 20 because a teach phase is only ~4-5 picks long, and with
+    # so few picks the largest-deficit rounding consistently broke ties in svg's favour — it
+    # measured 25% at a raw 20. These raw numbers are tuned so the MEASURED mix matches the
+    # intent (animation 35 · svg 20 · mermaid 15 · image 15 · puzzle 15).
+    "teach":    {"animation": 35, "svg": 20, "mermaid": 15, "image": 15},
+    "practice": {"animation": 0.40, "svg": 0.30, "mermaid": 0.15, "image": 0.15},
+    "quiz":     {"animation": 0.35, "svg": 0.30, "mermaid": 0.20, "image": 0.15},
+    "review":   {"animation": 0.25, "svg": 0.20, "mermaid": 0.40, "image": 0.15},
+}
+
+
+def _split_entry(entry: str) -> tuple:
+    """A visual_seq entry is "phase:family" ("teach:mermaid"). Entries written before the mix
+    became phase-aware are bare family names — they carry no phase, so they are counted toward
+    no phase's target (they still age out of the capped window)."""
+    s = str(entry or "")
+    if ":" in s:
+        ph, _, fam = s.partition(":")
+        return ph.strip().lower(), fam.strip()
+    return None, s.strip()
+
+
+def family_weights(phase: Optional[str], available: Optional[List[str]] = None) -> Dict[str, float]:
+    """Per-family target shares for this phase, normalised over what's actually available.
+
+    The phase split is puzzle-vs-explanatory; the explanatory share is then divided among
+    whichever of mermaid/svg/animation/image can be offered, using the per-phase bias below, so
+    losing manim re-splits its share among the others instead of quietly handing it to puzzles.
+    """
+    avail = [f for f in (available or VISUAL_FAMILIES) if f in VISUAL_FAMILIES]
+    if not avail:
+        return {}
+    split = VISUAL_PHASE_WEIGHTS.get((phase or "").strip().lower()) \
+        or VISUAL_PHASE_WEIGHTS[_DEFAULT_PHASE]
+    expl = [f for f in avail if f in EXPLANATORY_FAMILIES]
+    bias = _EXPL_BIAS.get((phase or "").strip().lower()) or _EXPL_BIAS[_DEFAULT_PHASE]
+    out: Dict[str, float] = {}
+    if "puzzle" in avail:
+        out["puzzle"] = split["puzzle"] if expl else 1.0
+    expl_share = (split["explanatory"] if "puzzle" in avail else 1.0)
+    bias_total = sum(bias.get(f, 0.0) for f in expl) or 1.0
+    for f in expl:
+        out[f] = expl_share * (bias.get(f, 0.0) / bias_total)
+    total = sum(out.values()) or 1.0
+    return {f: w / total for f, w in out.items()}
+
+
+def pick_visual_family(seq: Optional[List[str]], available: Optional[List[str]] = None,
+                       phase: Optional[str] = None, seed: Optional[int] = None) -> str:
+    """The family to use next, so the running mix converges on this PHASE's target ratio.
+
+    Largest-deficit selection: pick whichever family is furthest below the share it should have
+    had by now (`weight × turns_so_far − times_used`). That converges on the target exactly AND
+    stays smooth — a 70% family comes up roughly two turns in three rather than in one long burst,
+    which a per-turn dice roll or a naive virtual-time scheduler would both get wrong.
+
+    A repeat is only broken on a TIE, never forbidden outright: an earlier version excluded the
+    previous family whenever any alternative existed, which silently capped every weight at 50%
+    and made a 70% practice phase impossible.
+
+    THE DEFICIT IS COUNTED WITHIN THE CURRENT PHASE ONLY. Counting it across the whole lesson
+    while applying a per-phase target is incoherent, and measurably broke the mix: a practice
+    phase (70% puzzle) drove the lesson-wide puzzle count so high that the following review phase
+    (40%) could never pick a puzzle again. Audited over 7,072 real lessons it produced
+    practice 97% / review 0% / recap 50% against targets of 70 / 40 / 30.
+
+    `available` limits it to what can actually be offered; `phase` comes from the lesson state
+    machine (plan_blocks step type). With no phase this falls back to the teaching mix.
+    """
+    avail = [f for f in (available or VISUAL_FAMILIES) if f in VISUAL_FAMILIES]
+    if not avail:
+        return "puzzle"
+    entries = [_split_entry(s) for s in (seq or [])]
+    entries = [(p, f) for p, f in entries if f in VISUAL_FAMILIES]
+    weights = family_weights(phase, avail)
+    ph = (phase or _DEFAULT_PHASE).strip().lower()
+    # Only this phase's history counts toward this phase's target. `last` deliberately ignores
+    # the phase, so we still avoid showing the same family twice in a row across a boundary.
+    hist = [f for p, f in entries if p == ph]
+    last = entries[-1][1] if entries else None
+    turn = len(hist) + 1
+
+    # STOCHASTIC ROUNDING (dithering). A teach phase is only ~4-5 picks, so starting every
+    # lesson's credit at exactly zero makes the result "the top-k families by weight" — the SAME
+    # k every lesson. Measured across lessons the mix then quantises to k/5 instead of the
+    # target: svg sat at 25% against a 20% target and no amount of weight-tuning fixed it
+    # (nudging svg down to 16 sent it to 12% and threw mermaid/image up to 22%).
+    # A per-lesson offset in [0,1) makes the expected count exactly n*weight, so the average
+    # over lessons hits the target while any single lesson still looks sensible. Seeded from the
+    # appointment so a turn is deterministic — replaying the same turn gives the same answer.
+    offset = {f: 0.0 for f in avail}
+    if seed is not None:
+        rnd = random.Random(f"{seed}:{ph}")
+        offset = {f: rnd.random() for f in avail}
+
+    best, best_score = [], None
+    for f in avail:
+        w = weights.get(f, 0.0)
+        if w <= 0:
+            continue
+        deficit = w * turn + offset[f] - hist.count(f)
+        if best_score is None or deficit > best_score + 1e-9:
+            best, best_score = [f], deficit
+        elif abs(deficit - best_score) <= 1e-9:
+            best.append(f)
+    if not best:
+        return random.choice(avail)
+    # Only when the leaders are tied do we steer away from repeating the last family.
+    alternatives = [f for f in best if f != last]
+    return random.choice(alternatives or best)
+
+
+async def get_visual_seq(db: AsyncSession, appointment_id: int) -> List[str]:
+    plan = await _load_plan(db, appointment_id)
+    if plan is None or not plan.session_state:
+        return []
+    return list(plan.session_state.get("visual_seq") or [])
+
+
+async def bump_visual_family(db: AsyncSession, appointment_id: int, family: str,
+                             phase: Optional[str] = None) -> None:
+    """Record that a visual of this family reached the screen, TAGGED WITH THE LESSON PHASE.
+
+    The phase has to be stored, not just used at pick time: each phase has its own target mix, so
+    the running count must be attributable to a phase or the targets cannot be held (see
+    pick_visual_family). Read-modify-write the whole session_state dict (JSONB) — mutating a
+    nested key in place isn't seen as dirty and would silently not save, the same trap as
+    puzzle_state/puzzle_mix.
+    """
+    if family not in VISUAL_FAMILIES:
+        return
+    plan = await _load_plan(db, appointment_id)
+    if plan is None:
+        return
+    state = dict(plan.session_state) if plan.session_state else {}
+    seq = list(state.get("visual_seq") or [])
+    seq.append(f"{(phase or _DEFAULT_PHASE).strip().lower()}:{family}")
+    # Window is per-lesson but the counts are read per-PHASE, so it has to be long enough that a
+    # single phase still has a usable history inside it.
+    state["visual_seq"] = seq[-40:]
+    plan.session_state = state
+    await db.flush()
+
+
+async def get_puzzle_state(db: AsyncSession, appointment_id: int) -> Optional[dict]:
+    plan = await _load_plan(db, appointment_id)
+    if plan is None or not plan.session_state:
+        return None
+    return plan.session_state.get("puzzle_state")

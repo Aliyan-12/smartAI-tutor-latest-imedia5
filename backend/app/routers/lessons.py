@@ -20,7 +20,8 @@ from app.schemas.lesson import (
     CheckpointSaveRequest,
     ContinuationResponse,
 )
-from app.services import lesson_service, platform_service
+from app.services import platform_service
+from app.services.agent.session import plan as lesson_service
 
 logger = logging.getLogger(__name__)
 
@@ -272,7 +273,7 @@ async def complete_lesson_plan(
         )
         client = _get_client()
         response = client.models.generate_content(
-            model=settings.gemini_model,
+            model=settings.gemini_session_model,
             contents=summary_prompt,
             config=genai_types.GenerateContentConfig(
                 system_instruction="You are a supportive AI tutor summarising a completed lesson session.",

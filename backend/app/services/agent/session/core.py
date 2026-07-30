@@ -683,7 +683,7 @@ async def build_session_system_prompt(
     # budget the plan and _is_quiz_phase use, so all three agree. The old per-tier time
     # thresholds (plus a "little time left" early-open) unlocked the quiz DURING practice.
     try:
-        from app.services.lesson_service import phase_budget as _pb
+        from app.services.agent.session.plan import phase_budget as _pb
         _b = _pb(duration_minutes)
         _quiz_start = _b.get("recap", 0) + _b.get("teach", 0) + _b.get("practice", 0)
     except Exception:
@@ -974,7 +974,7 @@ ALWAYS use this content as your PRIMARY teaching source when it is present.
     # when there are none. Mirrors the puzzle anchor's state-driven approach.
     has_slides = False
     try:
-        from app.services.session_resource_service import build_playlist
+        from app.services.agent.session.resources import build_playlist
         has_slides = bool(await build_playlist(db, appointment))
     except Exception:
         logger.warning("has_slides check failed for appt %s", appointment_id, exc_info=True)
@@ -1017,7 +1017,7 @@ ALWAYS use this content as your PRIMARY teaching source when it is present.
     # quiz-sheet-led for Exam Revision, and nothing at all for a 20-minute lesson.
     resource_style_note = ""
     try:
-        from app.services.session_resource_service import lesson_resource_policy
+        from app.services.agent.session.resources import lesson_resource_policy
         _goal_for_policy = None
         try:
             from app.models.lesson_plan import LessonPlan as _LPP
@@ -1641,7 +1641,7 @@ async def _tts_segment(send, seq: int, text: str, turn_id: str) -> None:
     duration_ms = 0
     if len(tts_src) >= _MIN_TTS_CHARS:
         try:
-            from app.services.voice_agent_service import text_to_speech
+            from app.services.agent.session.voice import text_to_speech
             async with _tts_semaphore:
                 wav, _mime = await asyncio.to_thread(text_to_speech, tts_src)
             audio_b64 = base64.b64encode(wav).decode("ascii")
@@ -2022,7 +2022,7 @@ async def build_lesson_state_anchor(
             # audible gear change. Compare against the last phase we told it about and, on the
             # turn the phase flips, make the transition an explicit instruction.
             try:
-                from app.services import session_state_service as _sss_ph
+                from app.services.agent.session import state as _sss_ph
                 _prev = await _sss_ph.get_flag(db, appt_id, "announced_phase")
                 if _prev and _prev != _phase_type:
                     _what = {
@@ -2092,6 +2092,20 @@ async def build_lesson_state_anchor(
         except Exception:
             pass
 
+    # ✅ ALREADY COVERED — the structural cure for the tutor repeating itself. A compact,
+    # authoritative list of the slides taught, concepts explained, questions asked and puzzles
+    # played SO FAR (written deterministically by the tools, not self-reported). Injected at high
+    # recency so every turn the model can SEE what's done and build forward instead of re-teaching
+    # or re-asking. This replaces the old fuzzy sentence-dedup.
+    try:
+        from app.services import coverage_ledger as _cl
+        _led = await _cl.load(db, appt_id)
+        _covered = _cl.render_for_prompt(_led)
+        if _covered:
+            lines.append(_covered)
+    except Exception:
+        logger.warning("coverage-ledger anchor failed for appt %s", appt_id, exc_info=True)
+
     # Which style the NEXT puzzle should be. A lesson whose topic HAS a matching manipulative
     # gets a genuinely MIXED, non-repeating order (some hands-on, some classic — never all of
     # one); a topic with none gets classic only. Computed server-side from what's been shown so
@@ -2100,9 +2114,15 @@ async def build_lesson_state_anchor(
     next_style = ""
     next_kind = ""
     try:
-        from app.services import manipulative_service
+        from app.services.agent import practice_service as manipulative_service
         _ks = getattr(appointment, "key_stage", None) if appointment is not None else None
         _subj = getattr(appointment, "subject", None) if appointment is not None else None
+        _yg = None
+        try:
+            from app.services.agent.session.resources import _parse_description as _pd_yg
+            _yg = _pd_yg(getattr(appointment, "description", "") or "").get("year_group")
+        except Exception:
+            _yg = None
         if manipulative_service.manipulatives_enabled(_ks, _subj):
             _topic = _lesson_topic_text(appointment)
             _hist = await manipulative_service.get_history(db, appt_id)
@@ -2111,7 +2131,8 @@ async def build_lesson_state_anchor(
             # topic → we never force one (classic puzzles only).
             _topic_kind = manipulative_service.pick_topic_kind(_topic, _ks, _hist, _subj)
             _seq = await manipulative_service.get_style_seq(db, appt_id)
-            next_style = manipulative_service.next_style_mixed(_ks, _seq, has_topic_manip=bool(_topic_kind))
+            next_style = manipulative_service.next_style_mixed(
+                _ks, _seq, has_topic_manip=bool(_topic_kind), year_group=_yg)
             if next_style == "manipulative":
                 next_kind = _topic_kind
     except Exception:
@@ -2123,14 +2144,14 @@ async def build_lesson_state_anchor(
     # animations exist, so it defaults to a generated image (which mislabels). Naming the ones
     # that match THIS lesson's topic is what actually gets the accurate visual on screen.
     try:
-        from app.services import svg_diagram_service as _sds
+        from app.services.agent import teacher_service as _sds
         _subj_v = getattr(appointment, "subject", None) if appointment is not None else None
         _ks_v = getattr(appointment, "key_stage", None) if appointment is not None else None
         _topic_v = _lesson_topic_text(appointment)
         _svgs = _sds.pick_for_topic(_topic_v, _ks_v, _subj_v)
         _anim_ok = False
         try:
-            from app.services import manim_service as _mms
+            from app.services.agent import teacher_service as _mms
             _anim_ok = _mms.MANIM_AVAILABLE
         except Exception:
             _anim_ok = False
@@ -2144,7 +2165,7 @@ async def build_lesson_state_anchor(
         # (~70/30) so the student is taught before being asked to solve anything, practice
         # flips it (~70/30 puzzles) so they actually do the work. Every tool stays bound in
         # every phase — this is priority, not a gate.
-        from app.services import puzzle_service as _pzv
+        from app.services.agent import practice_service as _pzv
         _available = ["puzzle", "mermaid", "svg", "image"]
         if _anim_ok:
             _available.append("animation")
@@ -2281,6 +2302,7 @@ _ACTION_LABELS = {
     "teaching": "show/advance/retreat slides",
     "visuals": "explain with a diagram/animation (mermaid_diagram, svg_diagram, draw_svg, animate_concept)",
     "puzzles": "set/clear a hands-on puzzle for the student to DO",
+    "interact": "offer tap-to-answer options (quick_replies)",
     "assessment": "set a quiz",
     "mastery": "check/update mastery + evaluate answers",
     "platform": "set homework, load a resource, advance the lesson step, pause/resume",
@@ -2299,7 +2321,7 @@ def _is_quiz_phase(appointment) -> bool:
     """
     elapsed, remaining, duration = _compute_lesson_clock(appointment)
     try:
-        from app.services.lesson_service import phase_budget
+        from app.services.agent.session.plan import phase_budget
         b = phase_budget(duration)
         quiz_start = b.get("recap", 0) + b.get("teach", 0) + b.get("practice", 0)
         return elapsed >= quiz_start
@@ -2343,6 +2365,7 @@ def select_tool_groups(
     # understanding with a quick puzzle.
     g.add("puzzles")
     g.add("visuals")
+    g.add("interact")   # quick_replies (tap chips) — always available, every phase
     if has_slides:
         g.add("teaching")
     # The QUIZ tool (generate_quiz) binds ONLY in the dedicated QUIZ phase — never during
@@ -2447,7 +2470,7 @@ async def _run_turn(send, chat_id, user_id, *, saved_user_text, ai_content,
             if _sc_appt_id:
                 _sc_appt = await _load_appointment(db, _sc_appt_id)
                 if _sc_appt is not None:
-                    from app.services.session_resource_service import _parse_description as _srs_parse
+                    from app.services.agent.session.resources import _parse_description as _srs_parse
                     _info = _srs_parse(getattr(_sc_appt, "description", "") or "")
                     _sc_sub = _info.get("subtopic") or ""
                     _sc_units = _info.get("topics") or []
@@ -2498,7 +2521,7 @@ async def _run_turn(send, chat_id, user_id, *, saved_user_text, ai_content,
                     # booking description, falling back to the student's profile.
                     _yg = None
                     try:
-                        from app.services.session_resource_service import _parse_description
+                        from app.services.agent.session.resources import _parse_description
                         _yg = _parse_description(getattr(appt, "description", "") or "").get("year_group")
                     except Exception:
                         _yg = None
@@ -2512,7 +2535,7 @@ async def _run_turn(send, chat_id, user_id, *, saved_user_text, ai_content,
                     _unit_title = None
                     _topic_title = None
                     try:
-                        from app.services.session_resource_service import _parse_description as _pd
+                        from app.services.agent.session.resources import _parse_description as _pd
                         _topics = _pd(getattr(appt, "description", "") or "").get("topics") or []
                         _unit_title = _topics[0] if _topics else None
                     except Exception:
@@ -2542,7 +2565,7 @@ async def _run_turn(send, chat_id, user_id, *, saved_user_text, ai_content,
             current_slide = None
             if tool_context is not None:
                 try:
-                    from app.services import session_resource_service as _srs
+                    from app.services.agent.session import resources as _srs
                     current_slide = await _srs.get_current_slide(db, appt_id)
                 except Exception:
                     current_slide = None
@@ -2576,7 +2599,7 @@ async def _run_turn(send, chat_id, user_id, *, saved_user_text, ai_content,
                 # DECK MAP — what is on every slide, so the tutor teaches in the deck's own order
                 # instead of improvising a concept whose slide is still ahead of it.
                 try:
-                    from app.services import session_resource_service as _srs_map
+                    from app.services.agent.session import resources as _srs_map
                     from app.models.resource_hub import RHResource as _RHR
                     _rid = current_slide.get("resource_hub_id")
                     _res = (await db.execute(select(_RHR).where(_RHR.hub_id == _rid))
@@ -2641,12 +2664,12 @@ async def _run_turn(send, chat_id, user_id, *, saved_user_text, ai_content,
             # Also computes which tool GROUPS to bind this turn (anti-hallucination).
             if tool_context is not None:
                 try:
-                    from app.services import puzzle_service as _pzs
+                    from app.services.agent import practice_service as _pzs
                     _pstate = await _pzs.get_puzzle_state(db, appt_id)
                 except Exception:
                     _pstate = None
                 try:
-                    from app.services import session_state_service as _sss
+                    from app.services.agent.session import state as _sss
                     _end_allowed = await _sss.is_end_allowed(db, appt_id)
                 except Exception:
                     _end_allowed = False
@@ -2811,7 +2834,7 @@ async def _run_turn(send, chat_id, user_id, *, saved_user_text, ai_content,
                         if _tool == "end_lesson" and _data.get("ended"):
                             if appt_id:
                                 try:
-                                    from app.services import lesson_service as _ls
+                                    from app.services.agent.session import plan as _ls
                                     await _ls.ensure_report_for_appointment(db, appt_id)
                                     await db.commit()
                                 except Exception as _rep_err:  # noqa: BLE001
@@ -2845,7 +2868,83 @@ async def _run_turn(send, chat_id, user_id, *, saved_user_text, ai_content,
             if suppress_text:
                 segmenter.flush()   # drain, don't show
 
-        await _consume(ai_content, with_image=True)
+        # ── CREW PIPELINE (multi-agent) — the primary path for EVERY lesson turn ──
+        # LangChain orchestrates (context + navigator); the navigator-selected CrewAI specialist
+        # (Intro/Teacher/Practitioner/Summarizer) runs the turn on Gemini. Same live context +
+        # anchor + ledger; the difference is a NARROW agent with only its phase's tools, which is
+        # what stops the overfitting/repetition/hallucination. On ANY failure we fall back to the
+        # single-agent path below, so a crew hiccup never produces a dead turn.
+        _crew_ran = False
+        if tool_context is not None and appt_id:
+            try:
+                from app.services.agent_crew import navigator as _nav, runner as _crew_runner
+                from app.tools.registry import make_tools as _make_tools
+                from app.services import coverage_ledger as _cl0
+                try:
+                    _recap_done = bool((await _cl0.load(db, appt_id)).get("recap_done"))
+                except Exception:
+                    _recap_done = False
+                _role = _nav.select_role(
+                    phase=_phase_now, end_allowed=_end_allowed, closing_stage=_closing,
+                    quiz_phase=_quiz_phase, quiz_done=_quiz_done, recap_done=_recap_done,
+                    intent_text=saved_user_text, event_kind=event_kind,
+                )
+                _nav.log_selection(appt_id, _role, _phase_now)
+                # Teaching = teach from the slide in WORDS. The Teacher's visual tools (diagram /
+                # animation / picture) bind ONLY when the student asks to be re-explained / shown —
+                # so it can't spam animations/svgs during normal teaching.
+                _role_groups = list(_role.tool_groups)
+                if _role.name == "teacher" and "visuals" in _role_groups and not _nav.wants_visual(saved_user_text):
+                    _role_groups = [g for g in _role_groups if g != "visuals"]
+                _lc_tools = _make_tools(tool_context, _role_groups)
+                _backstory = _role.backstory + "\n\n" + (session_system_prompt or "")
+                _hist_block = _crew_runner.render_history(history)
+                # Slide-based RAG content — the Practitioner explains/practises exactly what the
+                # Teacher taught, so both agents get the retrieved lesson material in-context.
+                try:
+                    from app.services.gemini_service import _format_rag_context as _fmt_rag
+                    _rag_block = _fmt_rag(rag_chunks) if rag_chunks else ""
+                except Exception:
+                    _rag_block = ""
+                if getattr(settings, "debug", False):
+                    logger.info("DEBUG RAG appt=%s role=%s chunks=%d titles=%s", appt_id, _role.name,
+                                len(rag_chunks or []),
+                                [getattr(c, "document_title", "?") for c in (rag_chunks or [])[:5]])
+                _lesson_ctx = f"{_rag_block}\n\n{ai_content}" if _rag_block else ai_content
+                _task_desc = _crew_runner.build_task_description(_role, _lesson_ctx, _hist_block)
+
+                async def _emit(label):
+                    await _emit_thinking(send, thinking_steps, label)
+
+                _crew_full, _crew_signals = await _crew_runner.stream_crew_turn(
+                    send=send, turn_id=turn_id, tts=tts, role=_role, backstory=_backstory,
+                    task_description=_task_desc, expected_output=_role.expected_output,
+                    lc_tools=_lc_tools, emit_thinking=_emit, appt_id=appt_id,
+                )
+                full.extend(_crew_full)
+                if _crew_signals.get("ended_appt"):
+                    _pending_ended_appt = _crew_signals["ended_appt"]
+                # Recap is a single hand-off turn: once the Intro agent has run, mark it done so the
+                # navigator moves to the Teacher instead of re-greeting for the rest of recap.
+                if _role.name == "intro" and not _recap_done:
+                    try:
+                        await _cl0.set_flag(db, appt_id, "recap_done", True)
+                    except Exception:
+                        pass
+                _crew_ran = True
+            except ImportError:
+                # crewai not installed yet (backend image not rebuilt) → single-agent path.
+                # One concise line, no traceback, so logs stay readable until the rebuild.
+                logger.warning("CREW unavailable (crewai not installed) — single-agent path. "
+                               "Rebuild backend to enable the multi-agent pipeline.")
+                _crew_ran = False
+            except Exception:
+                logger.warning("CREW turn failed appt=%s — falling back to single-agent path",
+                               appt_id, exc_info=True)
+                _crew_ran = False
+
+        if not _crew_ran:
+            await _consume(ai_content, with_image=True)
 
         # ── STRUCTURAL SAFETY NET ─────────────────────────────────────────────────
         # The tutor keeps inviting the student to do a puzzle and then ending the turn WITHOUT
@@ -2854,13 +2953,14 @@ async def _run_turn(send, chat_id, user_id, *, saved_user_text, ai_content,
         # forced recovery turn whose only job is to render the puzzle it just described. Guarded
         # so it can't fire while wrapping up, and never loops (single attempt).
         if (
-            not generator_shown_this_turn
+            not _crew_ran           # the crew path owns its own progression; no safety net
+            and not generator_shown_this_turn
             and appt_id and tool_context is not None
             and not _pending_ended_appt
             and not _end_allowed and not _closing
         ):
             try:
-                from app.services import puzzle_service as _pzs2
+                from app.services.agent import practice_service as _pzs2
                 _ps_after = await _pzs2.get_puzzle_state(db, appt_id)
             except Exception:
                 _ps_after = None
@@ -3065,7 +3165,8 @@ async def _force_end_and_report(send, chat_id) -> None:
     the real session (conversation + this session's quiz score) and is immutable once
     saved — so on time-up the student always gets a real report, never a dummy/missing one.
     Idempotent."""
-    from app.services import appointment_service, lesson_service
+    from app.services import appointment_service
+    from app.services.agent.session import plan as lesson_service
     from app.schemas.session_events import lesson_ended_frame, EVENT_LESSON_ENDED
     try:
         async with async_session_factory() as db:
@@ -3167,7 +3268,7 @@ async def _handle_puzzle_result(send, chat_id, user_id, data):
     # Record the submitted answer into authoritative lesson state so this turn's anchor +
     # the evaluator tool can mark it (solution is stored server-side).
     try:
-        from app.services import puzzle_service
+        from app.services.agent import practice_service as puzzle_service
         async with async_session_factory() as _db:
             _appt_id = await _resolve_appt_id(_db, chat_id)
             if _appt_id:
@@ -3178,6 +3279,41 @@ async def _handle_puzzle_result(send, chat_id, user_id, data):
     ctx = _build_puzzle_ctx(puzzle_type, prompt, answer)
     await _run_turn(send, chat_id, user_id, saved_user_text=None, ai_content=ctx,
                     tts=bool(data.get("tts", True)), anchor_slides=False, event_kind="puzzle_result")
+
+
+# Validate → fix → retry: how many LaTeX re-emits we'll ask for in a session before giving up
+# (the frontend keeps a readable degraded form on screen meanwhile, so the student is never stuck).
+_LATEX_FIX_CAP = 3
+
+
+async def _handle_latex_error(send, chat_id, user_id, data):
+    """AI_REACTIVE: the frontend KaTeX validator rejected a maths puzzle's LaTeX. Ask the AI to
+    FIX the LaTeX and re-emit the puzzle — no server-side repair. Capped so it can't loop."""
+    bad_latex = (data.get("latex") or "").strip()
+    err = (data.get("error") or "").strip()
+    prompt = (data.get("prompt") or "").strip()
+    async with async_session_factory() as _db:
+        _appt_id = await _resolve_appt_id(_db, chat_id)
+        if _appt_id:
+            from app.services.agent.session import state as session_state_service
+            _n = int(await session_state_service.get_flag(_db, _appt_id, "latex_fix_count", 0) or 0)
+            if _n >= _LATEX_FIX_CAP:
+                logger.info("latex_error: fix cap (%d) reached appt=%s — not retrying", _n, _appt_id)
+                return
+            await session_state_service.set_flag(_db, _appt_id, "latex_fix_count", _n + 1)
+            await _db.commit()
+    logger.info("latex_error: re-asking AI to fix LaTeX (%r → %s)", bad_latex[:60], err[:80])
+    ai = (
+        "[SYSTEM — DO THIS NOW, silently] The maths puzzle you just set could NOT be displayed — its "
+        "LaTeX is invalid and KaTeX rejected it.\n"
+        f"The LaTeX was: {bad_latex!r}\nKaTeX error: {err}\n"
+        + (f"Question: {prompt}\n" if prompt else "")
+        + "Call math_puzzle AGAIN for the SAME question, with CORRECTED, valid KaTeX in `latex` "
+        "(proper braces, \\frac{a}{b}, \\times, backslashed commands). Do not apologise or explain — "
+        "just re-set the puzzle, then say ONE short new line like \"Let's try that one again!\"."
+    )
+    await _run_turn(send, chat_id, user_id, saved_user_text=None, ai_content=ai,
+                    tts=bool(data.get("tts", False)), anchor_slides=False, event_kind="latex_error")
 
 
 async def _handle_user_audio(send, chat_id, user_id, data):
@@ -3202,7 +3338,7 @@ async def _handle_user_audio(send, chat_id, user_id, data):
         await send({"type": "error", "message": "Bad audio data.", "recoverable": True})
         await send({"type": "turn_end", "message_id": None, "full_text": ""})
         return
-    from app.services.voice_agent_service import speech_to_text
+    from app.services.agent.session.voice import speech_to_text
     ext = (mime.split("/")[-1] or "webm").split(";")[0]
     transcript = await asyncio.to_thread(speech_to_text, audio_bytes, f"audio.{ext}")
     if not transcript:
@@ -3262,7 +3398,7 @@ async def _clear_pending_end(chat_id) -> None:
     """The student kept going after being asked to reconsider ending → cancel the pending
     end so their next End click starts the reconsider flow fresh (not an instant end)."""
     try:
-        from app.services import session_state_service
+        from app.services.agent.session import state as session_state_service
         async with async_session_factory() as db:
             appt_id = await _resolve_appt_id(db, chat_id)
             if appt_id and await session_state_service.get_flag(db, appt_id, "pending_end", False):
@@ -3283,7 +3419,8 @@ async def _handle_lesson_end_request(send, chat_id, user_id, data):
       • SECOND click (or little time left, or `confirmed`) → allow + end for real. When time
         still remained, an `ended_early` flag is set so the post-session pipeline docks XP.
     """
-    from app.services import session_state_service, appointment_service
+    from app.services import appointment_service
+    from app.services.agent.session import state as session_state_service
     from app.schemas.session_events import EVENT_LESSON_END_REQUEST
     # Show a centered event pill above the AI's reply — same treatment as puzzle/quiz/pause
     # events — so it's clear the student pressed End (and it survives a refresh).
@@ -3395,13 +3532,14 @@ _AI_HANDLERS = {
     "lesson_end_request": _handle_lesson_end_request,
     "lesson_timeout": _handle_lesson_timeout,
     "student_idle": _handle_student_idle,
+    "latex_error": _handle_latex_error,
 }
 _SIDE_HANDLERS = {
     "lesson_pause": _handle_lesson_pause,
     "lesson_resume": _handle_lesson_resume,
 }
 # AI-reactive events that may be queued (latest wins) when a turn is already running.
-_QUEUEABLE = {"puzzle_result", "quiz_result", "lesson_end_request", "student_idle"}
+_QUEUEABLE = {"puzzle_result", "quiz_result", "lesson_end_request", "student_idle", "latex_error"}
 
 
 async def _guard_side(send, chat_id, user_id, mtype, data):
@@ -3502,7 +3640,7 @@ async def _suggest_idle_quick_replies(send, chat_id: int, appt_id: int) -> None:
         key_stage = ""
         async with async_session_factory() as db:
             try:
-                from app.services import puzzle_service as _pzs
+                from app.services.agent import practice_service as _pzs
                 ps = await _pzs.get_puzzle_state(db, appt_id)
                 if (ps or {}).get("status") in ("showing", "submitted"):
                     puzzle_up = True
@@ -3607,7 +3745,7 @@ async def run_session_ws(websocket: WebSocket) -> None:
             # correctly stay paused.
             if appt_id is not None:
                 try:
-                    from app.services import session_state_service as _sssr
+                    from app.services.agent.session import state as _sssr
                     if await _sssr.get_flag(db, appt_id, "auto_paused", False):
                         _ra = await _load_appointment(db, appt_id)
                         if _ra and _ra.status == "paused":
@@ -3674,7 +3812,7 @@ async def run_session_ws(websocket: WebSocket) -> None:
         # ── per-session watchdog: soft `lesson.timeout` when the clock runs out ──
         async def _watchdog() -> None:
             nonlocal timeout_fired, idle_stage, idle_suggested
-            from app.services import session_state_service as _sss
+            from app.services.agent.session import state as _sss
             from app.schemas.session_events import lesson_timeout_frame, EVENT_LESSON_TIMEOUT
             while True:
                 await asyncio.sleep(_WATCHDOG_TICK_S)
@@ -3753,7 +3891,7 @@ async def run_session_ws(websocket: WebSocket) -> None:
 
                 async def _speak_task(_t=_sp_text, _i=_sp_id):
                     try:
-                        from app.services.voice_agent_service import synth_speak_frame
+                        from app.services.agent.session.voice import synth_speak_frame
                         await send(await synth_speak_frame(_t, _i))
                     except Exception:  # noqa: BLE001
                         pass
@@ -3790,7 +3928,7 @@ async def run_session_ws(websocket: WebSocket) -> None:
             try:
                 async with async_session_factory() as pdb:
                     from app.services import appointment_service as _apsvc
-                    from app.services import session_state_service as _sss2
+                    from app.services.agent.session import state as _sss2
                     appt = await _load_appointment(pdb, appt_id)
                     if appt and appt.status == "started":
                         await _apsvc.update_status(pdb, appt, "paused")

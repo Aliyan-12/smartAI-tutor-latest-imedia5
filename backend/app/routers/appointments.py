@@ -102,7 +102,7 @@ async def book_appointment(
         await db.flush()
         await db.refresh(appointment)
         try:
-            from app.services import lesson_service
+            from app.services.agent.session import plan as lesson_service
             await lesson_service.auto_create_lesson_plan(
                 db=db,
                 appointment=appointment,
@@ -249,7 +249,7 @@ async def get_session_briefing(
     db: AsyncSession = Depends(get_db),
 ):
     """Return (and cache) an AI-generated session briefing for the pre-lesson page."""
-    from app.services.session_agent_service import generate_session_briefing
+    from app.services.agent.session.core import generate_session_briefing
     return await generate_session_briefing(db, appointment_id)
 
 
@@ -366,7 +366,7 @@ async def get_appointment_report(
             "report": None,
         }
 
-    from app.services.lesson_service import get_appointment_report, generate_session_report
+    from app.services.agent.session.plan import get_appointment_report, generate_session_report
     from app.models.lesson_plan import LessonPlan
     from app.models.assessment import Assessment
     from app.models.chat import Chat, Message

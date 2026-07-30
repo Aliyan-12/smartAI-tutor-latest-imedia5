@@ -16,7 +16,8 @@ from app.core.config import settings
 from app.db.session import get_db
 from app.middleware.auth import require_any_authenticated, require_admin
 from app.models.user import User
-from app.services import curriculum_service, resource_sync_service
+from app.services import curriculum_service
+from app.services.jobs import sync_service as resource_sync_service
 
 logger = logging.getLogger(__name__)
 
@@ -51,7 +52,7 @@ async def get_resource_slides_pdf(hub_id: int):
 @router.get("/animations/{key}.mp4")
 async def get_animation(key: str):
     """Serve a rendered Manim animation MP4 from the cache (played in the session Learn panel)."""
-    from app.services.manim_service import ANIM_DIR
+    from app.services.agent.teacher_service import ANIM_DIR
     # `key` is a server-generated hash slug; refuse traversal characters defensively.
     if "/" in key or "\\" in key or ".." in key:
         raise HTTPException(status_code=400, detail="bad key")

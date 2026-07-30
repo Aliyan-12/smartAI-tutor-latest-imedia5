@@ -129,7 +129,8 @@ async def _run_post_session_pipeline(db: AsyncSession, appointment: Appointment)
     from app.models.lesson_plan import LessonPlan
     from app.models.assessment import Assessment
     from app.models.chat import Chat, Message
-    from app.services import lesson_service, platform_service
+    from app.services import platform_service
+    from app.services.agent.session import plan as lesson_service
 
     key_stage = appointment.key_stage or "KS4"
 
