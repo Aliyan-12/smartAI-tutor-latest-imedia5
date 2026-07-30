@@ -260,6 +260,19 @@ def puzzle_tool_groups(ctx: ToolContext) -> dict:
         diagram_math_puzzle), then ask about it. If the words alone are enough, leave `latex`
         empty and put everything in `question`.
 
+        WRITE VALID KaTeX (the server does NOT repair it — invalid LaTeX bounces back to you to
+        fix, so get it right first time):
+          • Backslash EVERY command: \\frac \\times \\div \\cdot \\sqrt \\pi \\theta \\sin \\cos
+            \\tan \\le \\ge \\neq \\pm \\approx \\infty  (never bare "frac", "times", "sin", "pi").
+          • Fractions need braces: \\frac{3}{4}  (NOT \\frac34 or frac34). Nested too: \\frac{x+1}{2}.
+          • Powers/indices: single char x^2 is fine; MULTI-char needs braces: x^{10}, 10^{-3}, x_{1}.
+          • Multiply with \\times or \\cdot — never "x" or "*". Roots: \\sqrt{2}, \\sqrt[3]{8}.
+          • Units go in \\text with a thin space: 6\\,\\text{cm}, 9.8\\,\\text{m/s}^2 (never a bare "6 cm").
+          • Escape percent: 20\\% of 50  (a bare % is a COMMENT and eats the rest of the line).
+          • NO $…$ or \\(…\\) delimiters, NO prose words inside — just the raw equation.
+          • Tables/value-grids: \\begin{array}{cc} x & y \\\\ 1 & 3 \\end{array} (never \\array|c|c|).
+          Example: "3/4 of 20" → latex="\\frac{3}{4}\\times 20 = \\;?", answer="15".
+
         After showing it, WAIT — on submit call math_evaluator. Not for graphs (use
         graph_puzzle). Call SILENTLY.
         """

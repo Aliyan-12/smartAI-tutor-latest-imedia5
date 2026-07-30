@@ -2,6 +2,8 @@
 
 AI-powered tutoring platform for UK GCSE curriculum (KS1–KS5) with structured AI lessons, text chat, real-time voice conversation, **interactive visual puzzles**, and RAG-based knowledge retrieval. Multi-tenant for schools, with Google OAuth + email-verified accounts and Casbin RBAC.
 
+Lessons run on a **multi-agent pipeline** (LangChain orchestration → CrewAI specialist agents → Gemini): a **Navigator** routes each turn by lesson phase to one of an **Intro / Teacher / Practitioner / Summarizer** agent, each with a narrow remit and only its phase's tools — which keeps the tutor accurate and stops the repetition/hallucination a single over-scoped agent falls into.
+
 ## Prerequisites
 
 - Python 3.11+
@@ -89,14 +91,16 @@ npm run dev
 - Frontend: http://localhost:5173
 - Backend API docs: http://localhost:8001/docs
 
-### 8. Login and upload content
+### 8. Log in and start a lesson
 
-1. Login as teacher: `teacher@smartai.com` / `teacher123`
-2. Go to **Knowledge Base** in the sidebar
-3. Upload PDF/DOCX/PPTX files with the correct Key Stage, Subject, Exam Board, and Tier
-4. Wait for status to change from "pending" to "ready"
-5. Login as student: `student@smartai.com` / `student123`
-6. Ask questions about the uploaded content - the AI will use document chunks as context
+Curriculum + teaching content sync **automatically** from the external **Resource Hub** into the
+`rh_*` tables (first sync runs ~1 minute after startup; tune with `RESOURCE_SYNC_*` in `.env`). No
+manual upload needed — the legacy admin-upload knowledge base is dormant.
+
+1. Log in as student: `student@smartai.com` / `student123`
+2. Go to **Subjects** → pick Key Stage / Year / Subject / Unit / Topic → start the lesson
+3. The AI teaches slide-by-slide from the synced content, with interactive puzzles, visuals, and
+   optional real-time voice
 
 ## Default Logins
 
@@ -121,16 +125,22 @@ backend/
     models/         # SQLAlchemy models (users, chats, documents, subscriptions)
     routers/        # API endpoints (auth, chat, voice, admin, teacher, documents)
     schemas/        # Pydantic request/response models
+    tools/          # Agentic tools bound per turn (see TOOLS.md): session_tools (slides),
+                    #   visual_tools, puzzle_tools, platform_tools, chat_tools, registry
     services/       # Business logic
+      agent/
+        session/    # The session pipeline (turn loop, anchor, prompt, resources, state,
+                    #   voice, lesson plan) — core.py · resources.py · state.py · voice.py · plan.py
+        teacher_service.py   # Teaching visuals: SVG diagrams + Manim animations + mermaid
+        practice_service.py  # Puzzles + manipulatives + graphs + math/eval/state
+        agent_crew/          # The crew: roles · navigator · runner · tool adapter · llm
+      jobs/sync_service.py   # Resource Hub client + curriculum/resource sync jobs
       chat_service.py        # Chat CRUD + RAG context building
-      gemini_service.py      # Gemini API (streaming, RAG injection)
-      embedding_service.py   # Gemini text-embedding-001
-      retrieval_service.py   # pgvector cosine similarity search
-      document_service.py    # PDF/DOCX/PPTX extraction, chunking
-      scraper_service.py     # Web scraping, OneDrive/GDocs download
-      voice_service.py       # TTS (gTTS)
-      credit_service.py      # Credit deduction, subscriptions
-      user_service.py        # User CRUD
+      gemini_service.py      # Gemini streaming + RAG injection + tool loop
+      rag_service.py         # Gemini embeddings + pgvector cosine retrieval
+      coverage_ledger.py     # Per-lesson "already covered" memory (anti-repetition)
+      platform_service.py    # Credits, XP/streaks, email
+      casbin_service.py · oauth_service.py · school_service.py · user_service.py
     setup.py        # Database table creation
     seed.py         # Default user seeding
     main.py         # FastAPI app entry point
@@ -159,10 +169,11 @@ docker-compose up --build
 # Backend: http://localhost:8001
 ```
 
-The Docker setup uses `pgvector/pgvector:pg16` image which includes pgvector pre-installed.
+The Docker setup uses the `pgvector/pgvector:pg17` image which includes pgvector pre-installed.
 
 ## Key Features
 
+- **Multi-agent lesson pipeline** (LangChain → CrewAI → Gemini): a **Navigator** routes each turn by lesson phase to a narrow specialist — **Intro/Recap → Teacher → Practitioner → Summarizer** — each bound to only its phase's tools. A shared per-lesson **coverage ledger** ("already covered") plus per-agent scope-guards stop repetition and hallucination; time per phase scales by Key Stage (KS1 most scaffolding → KS5 least). The AI works tool-first: think → call the right tool silently → speak from the result. See **`TOOLS.md`** for every tool.
 - **Structured AI Lessons + Lesson State Engine**: goal/duration-specific lesson plans; every session turn carries an authoritative, live **LESSON STATE** anchor (real-time server-computed clock, current phase/step + what's-next, student learning status, and the on-screen puzzle) injected at maximum recency so the AI never loses track or hallucinates tool state in long sessions. The AI teaches **slide-by-slide** from Resource Hub content (slide tools are gated on whether the lesson actually has resources)
 - **Interactive Visual Puzzles** (Synthesis-style): the AI selects a pre-authored template (Maths + Science, KS1–KS5) and shows it via `show_puzzle`; rendered as SVG + react-konva manipulatives, each tagged with a **category** chip (labelling, matching, recognition, …). Includes **image puzzles** — `identify_image` / `match_image` — that use real curriculum-topic images from a cached **topic-image catalog** (Wikipedia lead images per topic; seed with `python -m app.seed_topic_images`). Authoritative puzzle state (per-show `instance_id`, solved/attempted tracking) makes "show → solve → next puzzle → reset" reliable
 - **"Thinking" strip**: instead of voice fillers, each turn shows Claude-style one-line steps — what tool the tutor ran + a brief thought summary — persisted in the chat so they survive a refresh
@@ -183,11 +194,14 @@ The Docker setup uses `pgvector/pgvector:pg16` image which includes pgvector pre
 | POSTGRES_HOST | Database host | localhost |
 | POSTGRES_PORT | Database port | 5432 |
 | GEMINI_API_KEY | Google Gemini API key | - |
-| GEMINI_MODEL | Generation model | gemini-2.5-flash |
+| GEMINI_SESSION_MODEL | In-lesson session model | gemini-2.5-flash |
+| GEMINI_CHAT_MODEL | Free `/chat` model | gemini-2.5-flash |
+| GEMINI_THINKING_BUDGET | Thinking tokens before each answer (0 = off) | 512 |
+| GEMINI_IMAGE_MODEL | Native image generation ("Nano Banana") | gemini-2.5-flash-image |
 | JWT_SECRET_KEY | JWT signing secret | - |
 | JWT_EXPIRATION_MINUTES | Token expiry | 1440 |
 | BACKEND_CORS_ORIGINS | Allowed CORS origins | localhost |
-| BACKEND_PORT | Backend port | 8001 |
+| RESOURCEHUB_API_KEY / _URL | External Resource Hub (curriculum + content) | - / hub… |
 | EMBEDDING_MODEL | Embedding model | gemini-embedding-001 |
 | RAG_CHUNK_SIZE | Tokens per chunk | 500 |
 | RAG_CHUNK_OVERLAP | Overlap between chunks | 50 |

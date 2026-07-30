@@ -1,7 +1,6 @@
 from pathlib import Path
 from pydantic_settings import BaseSettings
 from typing import List
-import os
 
 BASE_DIR = Path(__file__).resolve().parent.parent.parent
 ROOT_DIR = BASE_DIR.parent
@@ -10,7 +9,6 @@ ENV_FILE = ROOT_DIR / ".env" if (ROOT_DIR / ".env").exists() else BASE_DIR / ".e
 
 class Settings(BaseSettings):
     app_name: str = "SmartAI Tutor"
-    debug: bool = False
 
     postgres_user: str = ""
     postgres_password: str = ""
@@ -19,8 +17,7 @@ class Settings(BaseSettings):
     postgres_port: int = 5432
 
     gemini_api_key: str = ""
-    gemini_model: str = "gemini-2.5-pro" #"gemini-2.5-flash"
-    gemini_model_fast: str = "gemini-2.5-flash"
+    gemini_model: str = "gemini-2.5-pro"   # legacy default (STT + one-shot briefing paths)
     # Per-pipeline LLMs: session vs free /chat.
     # LATENCY: the session model was gemini-2.5-pro, which is a deep-reasoning model and the main
     # reason a turn took 10-25s (the "blue blob"). 2.5-flash is ~3-5x faster to first token and
@@ -57,11 +54,6 @@ class Settings(BaseSettings):
     frontend_base_url: str = "http://localhost:5173"
 
     backend_cors_origins: str = "http://localhost:5173,http://localhost:3000"
-    backend_host: str = "0.0.0.0"
-    backend_port: int = 8001
-
-    tts_provider: str = "google"
-    whisper_model: str = "base"
 
     embedding_model: str = "gemini-embedding-001"
     rag_chunk_size: int = 500
@@ -94,7 +86,6 @@ class Settings(BaseSettings):
     email_from_address: str = "noreply@smartai.com"
 
     max_appointments_per_week: int = 100
-    default_class_price: float = 25.00
 
     @property
     def database_url(self) -> str:
