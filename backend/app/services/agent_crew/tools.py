@@ -143,7 +143,15 @@ class LangChainAdapterTool(BaseTool):
 
     async def _body(self, kwargs: dict) -> str:
         # Runs on the WS event loop (scheduled from the worker thread) — so ctx.db is safe here.
+        from app.core.config import settings
+        _dbg = getattr(settings, "debug", False)
+        if _dbg:
+            logger.info("DEBUG TOOL CALL %s args=%s", self.name, {k: str(v)[:120] for k, v in (kwargs or {}).items()})
         result = await self._lc_tool.ainvoke(kwargs or {})
+        if _dbg:
+            _r = result if isinstance(result, dict) else {"value": result}
+            _slim = {k: (str(v)[:100]) for k, v in _r.items() if k not in _DROP_KEYS}
+            logger.info("DEBUG TOOL RESULT %s → %s", self.name, _slim)
         try:
             await _emit_frame(self._bridge, self.name, result)
         except Exception:  # noqa: BLE001 — a frame hiccup must not fail the tool for the agent

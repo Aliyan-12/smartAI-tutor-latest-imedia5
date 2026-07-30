@@ -2872,9 +2872,14 @@ async def _run_turn(send, chat_id, user_id, *, saved_user_text, ai_content,
             try:
                 from app.services.agent_crew import navigator as _nav, runner as _crew_runner
                 from app.tools.registry import make_tools as _make_tools
+                from app.services import coverage_ledger as _cl0
+                try:
+                    _recap_done = bool((await _cl0.load(db, appt_id)).get("recap_done"))
+                except Exception:
+                    _recap_done = False
                 _role = _nav.select_role(
                     phase=_phase_now, end_allowed=_end_allowed, closing_stage=_closing,
-                    quiz_phase=_quiz_phase, quiz_done=_quiz_done,
+                    quiz_phase=_quiz_phase, quiz_done=_quiz_done, recap_done=_recap_done,
                     intent_text=saved_user_text, event_kind=event_kind,
                 )
                 _nav.log_selection(appt_id, _role, _phase_now)
@@ -2888,6 +2893,10 @@ async def _run_turn(send, chat_id, user_id, *, saved_user_text, ai_content,
                     _rag_block = _fmt_rag(rag_chunks) if rag_chunks else ""
                 except Exception:
                     _rag_block = ""
+                if getattr(settings, "debug", False):
+                    logger.info("DEBUG RAG appt=%s role=%s chunks=%d titles=%s", appt_id, _role.name,
+                                len(rag_chunks or []),
+                                [getattr(c, "document_title", "?") for c in (rag_chunks or [])[:5]])
                 _lesson_ctx = f"{_rag_block}\n\n{ai_content}" if _rag_block else ai_content
                 _task_desc = _crew_runner.build_task_description(_role, _lesson_ctx, _hist_block)
 
@@ -2902,6 +2911,13 @@ async def _run_turn(send, chat_id, user_id, *, saved_user_text, ai_content,
                 full.extend(_crew_full)
                 if _crew_signals.get("ended_appt"):
                     _pending_ended_appt = _crew_signals["ended_appt"]
+                # Recap is a single hand-off turn: once the Intro agent has run, mark it done so the
+                # navigator moves to the Teacher instead of re-greeting for the rest of recap.
+                if _role.name == "intro" and not _recap_done:
+                    try:
+                        await _cl0.set_flag(db, appt_id, "recap_done", True)
+                    except Exception:
+                        pass
                 _crew_ran = True
             except ImportError:
                 # crewai not installed yet (backend image not rebuilt) → single-agent path.

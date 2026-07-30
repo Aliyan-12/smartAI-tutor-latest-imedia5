@@ -577,4 +577,13 @@ async def slide_action(
     except Exception:  # noqa: BLE001 — ledger must never break slide navigation
         logger.warning("ledger add_slide_taught failed appt=%s", appointment_id, exc_info=True)
 
+    try:
+        from app.core.config import settings
+        if getattr(settings, "debug", False):
+            logger.info("DEBUG SLIDE %s appt=%s → slide %s/%s (%s): %r", mode, appointment_id,
+                        payload.get("slide_index"), payload.get("page_count"),
+                        payload.get("title"), (payload.get("slide_content") or "")[:150])
+    except Exception:  # noqa: BLE001
+        pass
+
     return payload

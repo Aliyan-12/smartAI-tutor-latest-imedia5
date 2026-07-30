@@ -9,6 +9,10 @@ ENV_FILE = ROOT_DIR / ".env" if (ROOT_DIR / ".env").exists() else BASE_DIR / ".e
 
 class Settings(BaseSettings):
     app_name: str = "SmartAI Tutor"
+    # DEBUG=true turns on EXTREME step-by-step logging (each agent's task + final answer, every
+    # tool call + result, RAG chunks, deck map, slide moves, puzzle/image tools) so a lesson can be
+    # traced end to end. false = the normal concise logs. Env: DEBUG.
+    debug: bool = False
 
     postgres_user: str = ""
     postgres_password: str = ""
@@ -24,7 +28,10 @@ class Settings(BaseSettings):
     # is more than capable here — the lesson is heavily scaffolded (state anchor, tool guards,
     # forced recoveries), so the model does less unaided reasoning than the tool count suggests.
     # Override with GEMINI_SESSION_MODEL=gemini-2.5-pro to trade speed back for reasoning depth.
-    gemini_session_model: str = "gemini-2.5-flash"
+    # SESSION (all lesson/crew agents + quiz/eval) uses a PRO model for accuracy — pro reasons
+    # better, hallucinates less and follows the teaching structure more reliably than flash.
+    # `gemini-pro-latest` tracks the latest GA Gemini pro (stable, high rate limits).
+    gemini_session_model: str = "gemini-pro-latest"
     gemini_chat_model: str = "gemini-2.5-flash"
     # Thinking tokens emitted BEFORE the answer on every round — directly additive latency.
     # Was hard-coded at 2048 (several seconds/round). A small budget keeps occasional thought

@@ -102,6 +102,10 @@ async def stream_crew_turn(
     task = Task(description=task_description, expected_output=expected_output, agent=agent)
     crew = Crew(agents=[agent], tasks=[task], stream=True, verbose=False)
 
+    from app.core.config import settings
+    if getattr(settings, "debug", False):
+        logger.info("CREW TASK appt=%s role=%s ↓↓↓\n%s\n↑↑↑ end task", appt_id, role.name, task_description)
+
     segmenter = SentenceSegmenter()
     seq = 0
     full: List[str] = []
@@ -112,19 +116,36 @@ async def stream_crew_turn(
         logger.warning("CREW akickoff failed (appt=%s role=%s)", appt_id, role.name, exc_info=True)
         raise
 
+    # THINK → ACT → SPEAK ONCE. crewai streams MANY text blocks per turn (its reasoning, drafts and
+    # the final answer), and streaming them all produced the doubled/garbled output. So we DRAIN the
+    # stream to drive the turn to completion — tools still execute and their WS frames still fire
+    # live (the adapter emits them, not these chunks) — then stream ONLY the single FINAL answer.
+    _fallback_chunks: List[str] = []
     async for chunk in streaming:
         if _is_tool_chunk(chunk):
-            continue  # tool ran + frame emitted inside the adapter
-        content = getattr(chunk, "content", "") or ""
-        if not content:
             continue
-        for sentence in segmenter.feed(content):
-            if not sentence.strip():
-                continue
+        c = getattr(chunk, "content", "") or ""
+        if c:
+            _fallback_chunks.append(c)
+
+    result = getattr(streaming, "result", None)
+    text = ""
+    try:
+        text = (getattr(result, "raw", None) or "").strip()
+    except Exception:  # noqa: BLE001
+        text = ""
+    if not text:                         # extreme fallback: last non-empty chunk block
+        text = (_fallback_chunks[-1] if _fallback_chunks else "").strip()
+    text = _strip_scaffolding(text)
+
+    if getattr(settings, "debug", False):
+        logger.info("CREW ANSWER appt=%s role=%s: %r", appt_id, role.name, text[:600])
+
+    for sentence in segmenter.feed(text):
+        if sentence.strip():
             await stream_segment(send, seq, sentence, tts=tts, turn_id=turn_id)
             full.append(sentence)
             seq += 1
-
     rem = segmenter.flush()
     if rem.strip():
         await stream_segment(send, seq, rem, tts=tts, turn_id=turn_id)
@@ -134,3 +155,17 @@ async def stream_crew_turn(
     logger.info("CREW turn done appt=%s role=%s sentences=%d signals=%s",
                 appt_id, role.name, len(full), bridge.signals)
     return full, bridge.signals
+
+
+def _strip_scaffolding(text: str) -> str:
+    """Belt-and-suspenders: strip any ReAct scaffolding crewai might leave on the final answer
+    ('Thought:' / 'Final Answer:' prefixes). The final answer is normally clean; this is a guard."""
+    if not text:
+        return text
+    t = text.strip()
+    for marker in ("Final Answer:", "final answer:", "FINAL ANSWER:"):
+        idx = t.rfind(marker)
+        if idx != -1:
+            t = t[idx + len(marker):].strip()
+            break
+    return t

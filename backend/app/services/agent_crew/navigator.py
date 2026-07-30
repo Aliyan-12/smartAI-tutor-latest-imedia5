@@ -20,7 +20,7 @@ import logging
 from typing import Optional
 
 from app.services.agent_crew.roles import (
-    RoleSpec, SUMMARIZER, PRACTITIONER, role_for_phase,
+    RoleSpec, SUMMARIZER, PRACTITIONER, TEACHER, role_for_phase,
 )
 
 logger = logging.getLogger(__name__)
@@ -36,6 +36,7 @@ def select_role(
     closing_stage: bool = False,
     quiz_phase: bool = False,
     quiz_done: bool = False,
+    recap_done: bool = False,
     intent_text: Optional[str] = None,
     event_kind: str = "user_message",
 ) -> RoleSpec:
@@ -57,7 +58,12 @@ def select_role(
     if quiz_phase and not quiz_done:
         return PRACTITIONER
 
-    # 3) Phase-driven default (recap→Intro, teach→Teacher, practice→Practitioner, review→Summarizer).
+    # 4) Recap is a SINGLE hand-off turn. Once it's done, don't keep the Intro agent re-greeting
+    #    for the rest of the recap phase (the "7 warm-ups in a row" bug) — move to teaching.
+    if (phase or "").lower() == "recap" and recap_done:
+        return TEACHER
+
+    # 5) Phase-driven default (recap→Intro, teach→Teacher, practice→Practitioner, review→Summarizer).
     return role_for_phase(phase)
 
 
