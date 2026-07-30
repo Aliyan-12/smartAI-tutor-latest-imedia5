@@ -2,17 +2,19 @@ fastapi==0.115.6
 uvicorn[standard]==0.34.0
 sqlalchemy==2.0.36
 asyncpg==0.30.0
-python-dotenv==1.0.1
-pydantic==2.10.4
-pydantic-settings==2.7.1
+# Loosened from exact pins so crewai's dependency tree can resolve (it needs newer
+# pydantic / pydantic-settings / python-dotenv). Floors keep the versions the app was tested on.
+python-dotenv>=1.0.1
+pydantic>=2.10.4,<3
+pydantic-settings>=2.14.2,<3
 pydantic[email]
 python-jose[cryptography]==3.3.0
 passlib[bcrypt]==1.7.4
 bcrypt==4.0.1
 python-multipart==0.0.20
-httpx==0.28.1
+httpx>=0.28.1
 google-genai>=1.0.0
-websockets==14.1
+websockets>=14.1
 gtts==2.5.4
 pgvector==0.3.6
 pypdf==5.1.0
@@ -40,11 +42,11 @@ casbin-async-sqlalchemy-adapter>=1.4.0
 #
 # NOTE: the animation scenes label with manim's Text (Pango) rather than MathTex, so this does not
 # pull the huge `texlive` SYSTEM package into the image. That is ONLY about the video renderer —
-# it does NOT affect LaTeX in the app: equation puzzles still render LaTeX with KaTeX in the
-# browser (katex / react-katex + puzzle_service._repair_latex), which is untouched.
+# it does NOT affect LaTeX in the app: equation puzzles render LaTeX with KaTeX in the browser
+# (katex / react-katex); the AI authors valid LaTeX itself (validate → fix → retry, no server repair).
 manim>=0.18.1
-# CrewAI multi-agent tutoring pipeline (Navigator → Intro/Teacher/Practitioner/Summarizer),
-# gated behind USE_CREW_PIPELINE (default off). The [google-genai] extra pulls crewai's NATIVE
-# Gemini provider (required — the `gemini/` model prefix uses it; verified streaming + tool
-# calling on 1.15.8). Pinned to the version the integration was verified against.
+# CrewAI multi-agent tutoring pipeline (Navigator → Intro/Teacher/Practitioner/Summarizer) — runs
+# in EVERY lesson. The [google-genai] extra pulls crewai's NATIVE Gemini provider (required — the
+# `gemini/` model prefix uses it; verified streaming + tool calling on 1.15.8). Pinned to the
+# version the integration was verified against.
 crewai[google-genai]==1.15.8
