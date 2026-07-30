@@ -28,6 +28,24 @@ logger = logging.getLogger(__name__)
 _END_INTENT = ("end the lesson", "finish the lesson", "i'm done", "im done", "stop the lesson",
                "that's all", "end lesson", "we're done", "were done", "bye")
 
+# The student is asking to be shown a visual / re-explained. Only THEN does the Teacher get its
+# visual tools (diagram / animation / picture) — otherwise teaching is words + the slide, so the
+# Teacher can't spam animations/svgs during teaching.
+_REEXPLAIN_INTENT = (
+    "explain again", "explain that", "explain it again", "explain better", "in a better way",
+    "don't understand", "dont understand", "didn't understand", "didnt understand", "didn't get",
+    "didnt get", "don't get", "dont get", "confused", "not clear", "make it clearer", "clearer",
+    "show me", "can you show", "draw", "diagram", "picture", "image", "animation", "animate",
+    "visual", "visualise", "visualize", "what do you mean", "give an example", "an example",
+    "i don't follow", "lost", "can you explain",
+)
+
+
+def wants_visual(text: Optional[str]) -> bool:
+    """Did the student ask to be shown a visual / re-explained? (Gates the Teacher's visual tools.)"""
+    t = (text or "").lower()
+    return any(k in t for k in _REEXPLAIN_INTENT)
+
 
 def select_role(
     *,

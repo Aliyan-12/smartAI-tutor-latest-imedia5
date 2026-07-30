@@ -2117,6 +2117,12 @@ async def build_lesson_state_anchor(
         from app.services.agent import practice_service as manipulative_service
         _ks = getattr(appointment, "key_stage", None) if appointment is not None else None
         _subj = getattr(appointment, "subject", None) if appointment is not None else None
+        _yg = None
+        try:
+            from app.services.agent.session.resources import _parse_description as _pd_yg
+            _yg = _pd_yg(getattr(appointment, "description", "") or "").get("year_group")
+        except Exception:
+            _yg = None
         if manipulative_service.manipulatives_enabled(_ks, _subj):
             _topic = _lesson_topic_text(appointment)
             _hist = await manipulative_service.get_history(db, appt_id)
@@ -2125,7 +2131,8 @@ async def build_lesson_state_anchor(
             # topic → we never force one (classic puzzles only).
             _topic_kind = manipulative_service.pick_topic_kind(_topic, _ks, _hist, _subj)
             _seq = await manipulative_service.get_style_seq(db, appt_id)
-            next_style = manipulative_service.next_style_mixed(_ks, _seq, has_topic_manip=bool(_topic_kind))
+            next_style = manipulative_service.next_style_mixed(
+                _ks, _seq, has_topic_manip=bool(_topic_kind), year_group=_yg)
             if next_style == "manipulative":
                 next_kind = _topic_kind
     except Exception:
@@ -2883,7 +2890,13 @@ async def _run_turn(send, chat_id, user_id, *, saved_user_text, ai_content,
                     intent_text=saved_user_text, event_kind=event_kind,
                 )
                 _nav.log_selection(appt_id, _role, _phase_now)
-                _lc_tools = _make_tools(tool_context, _role.tool_groups)
+                # Teaching = teach from the slide in WORDS. The Teacher's visual tools (diagram /
+                # animation / picture) bind ONLY when the student asks to be re-explained / shown —
+                # so it can't spam animations/svgs during normal teaching.
+                _role_groups = list(_role.tool_groups)
+                if _role.name == "teacher" and "visuals" in _role_groups and not _nav.wants_visual(saved_user_text):
+                    _role_groups = [g for g in _role_groups if g != "visuals"]
+                _lc_tools = _make_tools(tool_context, _role_groups)
                 _backstory = _role.backstory + "\n\n" + (session_system_prompt or "")
                 _hist_block = _crew_runner.render_history(history)
                 # Slide-based RAG content — the Practitioner explains/practises exactly what the

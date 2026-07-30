@@ -94,51 +94,62 @@ async def stream_crew_turn(
     bridge = ToolBridge(send=send, ws_loop=ws_loop, emit_thinking=emit_thinking, appt_id=appt_id)
     crew_tools = adapt_tools(lc_tools, bridge)
 
-    llm = build_agent_llm(stream=True)
-    agent = Agent(
-        role=role.role, goal=role.goal, backstory=backstory,
-        llm=llm, tools=crew_tools, verbose=False, allow_delegation=False,
-    )
-    task = Task(description=task_description, expected_output=expected_output, agent=agent)
-    crew = Crew(agents=[agent], tasks=[task], stream=True, verbose=False)
-
     from app.core.config import settings
-    if getattr(settings, "debug", False):
+    _dbg = getattr(settings, "debug", False)
+    if _dbg:
         logger.info("CREW TASK appt=%s role=%s ↓↓↓\n%s\n↑↑↑ end task", appt_id, role.name, task_description)
 
     segmenter = SentenceSegmenter()
     seq = 0
     full: List[str] = []
 
-    try:
-        streaming = await crew.akickoff(inputs={})
-    except Exception:
-        logger.warning("CREW akickoff failed (appt=%s role=%s)", appt_id, role.name, exc_info=True)
-        raise
+    async def _run_once() -> str:
+        # THINK → ACT → SPEAK ONCE. crewai streams MANY text blocks per turn (its reasoning, drafts
+        # and the final answer); streaming them all produced the doubled/garbled output. So we DRAIN
+        # the stream to drive the turn to completion — tools still execute and their WS frames fire
+        # live (the adapter emits them, not these chunks) — then use ONLY the single FINAL answer.
+        # A FRESH agent + crew each attempt (crewai agents carry per-run state).
+        _llm = build_agent_llm(stream=True)
+        _agent = Agent(role=role.role, goal=role.goal, backstory=backstory,
+                       llm=_llm, tools=crew_tools, verbose=False, allow_delegation=False)
+        _task = Task(description=task_description, expected_output=expected_output, agent=_agent)
+        _crew = Crew(agents=[_agent], tasks=[_task], stream=True, verbose=False)
+        _streaming = await _crew.akickoff(inputs={})
+        _chunks: List[str] = []
+        async for chunk in _streaming:
+            if _is_tool_chunk(chunk):
+                continue
+            c = getattr(chunk, "content", "") or ""
+            if c:
+                _chunks.append(c)
+        _result = getattr(_streaming, "result", None)
+        t = ""
+        try:
+            t = (getattr(_result, "raw", None) or "").strip()
+        except Exception:  # noqa: BLE001
+            t = ""
+        if not t:
+            t = (_chunks[-1] if _chunks else "").strip()
+        return _strip_scaffolding(t)
 
-    # THINK → ACT → SPEAK ONCE. crewai streams MANY text blocks per turn (its reasoning, drafts and
-    # the final answer), and streaming them all produced the doubled/garbled output. So we DRAIN the
-    # stream to drive the turn to completion — tools still execute and their WS frames still fire
-    # live (the adapter emits them, not these chunks) — then stream ONLY the single FINAL answer.
-    _fallback_chunks: List[str] = []
-    async for chunk in streaming:
-        if _is_tool_chunk(chunk):
-            continue
-        c = getattr(chunk, "content", "") or ""
-        if c:
-            _fallback_chunks.append(c)
-
-    result = getattr(streaming, "result", None)
+    # Gemini intermittently returns an empty response and crewai raises "Invalid response from LLM".
+    # Retry ONCE with a fresh crew before giving up (which would fall back to the single-agent path).
     text = ""
-    try:
-        text = (getattr(result, "raw", None) or "").strip()
-    except Exception:  # noqa: BLE001
-        text = ""
-    if not text:                         # extreme fallback: last non-empty chunk block
-        text = (_fallback_chunks[-1] if _fallback_chunks else "").strip()
-    text = _strip_scaffolding(text)
+    for _attempt in range(2):
+        try:
+            text = await _run_once()
+        except Exception:
+            if _attempt == 1:
+                logger.warning("CREW akickoff failed twice (appt=%s role=%s)", appt_id, role.name, exc_info=True)
+                raise
+            logger.warning("CREW retry after failed LLM response (appt=%s role=%s)", appt_id, role.name)
+            continue
+        if text.strip():
+            break
+        if _attempt == 0:
+            logger.warning("CREW empty answer — retrying once (appt=%s role=%s)", appt_id, role.name)
 
-    if getattr(settings, "debug", False):
+    if _dbg:
         logger.info("CREW ANSWER appt=%s role=%s: %r", appt_id, role.name, text[:600])
 
     for sentence in segmenter.feed(text):

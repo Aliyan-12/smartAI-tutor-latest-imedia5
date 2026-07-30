@@ -28,6 +28,7 @@ evaluator/XP path downstream is untouched:
 import logging
 import random
 import re
+from datetime import datetime, timezone   # used by set_puzzle_shown/record_puzzle_attempt timestamps
 from math import gcd
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
@@ -1951,7 +1952,12 @@ def manipulatives_enabled(key_stage: Optional[str], subject: Optional[str] = Non
     and LEVEL is enforced per entry: counting_bubbles/fraction_canvas are tagged KS1-KS3 so an
     older student can never be handed them, while algebra_tiles/probability_tree are tagged
     KS3-KS5 so a young one can never be handed those.
+    POLICY (curriculum team): KS4 and KS5 get NO manipulatives — they use the mature puzzle types
+    (math / graph / diagram / labelling / matching). KS1-KS2 get plenty; KS3 gets very few (see
+    _manip_lean — lowest in Years 8-9). Level is still enforced per registry entry on top of this.
     """
+    if _norm_ks(key_stage) in ("KS4", "KS5"):
+        return False
     return bool(allowed_kinds(key_stage, subject))
 
 
@@ -1974,19 +1980,40 @@ def next_puzzle_style(key_stage: Optional[str], mix: Optional[dict]) -> str:
     return "manipulative" if manip / (manip + classic + 1) < target else "classic"
 
 
-# How strongly each key stage leans toward hands-on manipulatives WITHIN the mix (only applies
-# to topics that HAVE a matching manipulative — younger students get more, but never all-or-none
-# so the lesson always varies between hands-on and classic puzzles).
-# KS5 is deliberately NOT 0 any more. The old rule ("A-Level students don't want counters") was
-# right about counters and wrong about hands-on: what a KS5 student gets is a Punnett square, an
-# atom builder or algebra tiles — never counting bubbles, because those are tagged KS1-KS3 on
-# their own registry entries. Level is enforced by the entry, not by switching the mix off.
-_MIX_LEAN = {"KS1": 0.6, "KS2": 0.6, "KS3": 0.5, "KS4": 0.45, "KS5": 0.4}
+# How strongly each stage leans toward hands-on manipulatives WITHIN the mix (only applies to
+# topics that HAVE a matching manipulative). Per the curriculum team: heavy for the youngest,
+# tapering to almost nothing by upper KS3, and none at all at KS4/KS5 (they're unbound there).
 _MAX_RUN = 3   # never more than this many of the SAME style in a row → the order stays varied
 
 
+def _year_num(year_group: Optional[str]) -> Optional[int]:
+    """'Year 7' / 'Y7' / '7' → 7."""
+    if not year_group:
+        return None
+    m = re.search(r"(\d{1,2})", str(year_group))
+    return int(m.group(1)) if m else None
+
+
+def _manip_lean(key_stage: Optional[str], year_group: Optional[str] = None) -> float:
+    """Share of puzzles that should be hands-on manipulatives, by key stage + year group.
+    KS1-KS2: most. KS3: very few — Year 7 a little, Years 8-9 almost none. KS4-KS5: none."""
+    ks = _norm_ks(key_stage)
+    if ks == "KS1":
+        return 0.80
+    if ks == "KS2":
+        return 0.75
+    if ks == "KS3":
+        y = _year_num(year_group)
+        if y == 7:
+            return 0.25            # Year 7 — a little hands-on
+        if y in (8, 9):
+            return 0.06            # Years 8-9 — almost none
+        return 0.12                # KS3, year unknown — low
+    return 0.0                     # KS4 / KS5 — none (also unbound in manipulatives_enabled)
+
+
 def next_style_mixed(key_stage: Optional[str], style_seq: Optional[List[str]],
-                     has_topic_manip: bool) -> str:
+                     has_topic_manip: bool, year_group: Optional[str] = None) -> str:
     """The NEXT puzzle style for a genuinely MIXED, non-repeating lesson.
 
     The rule the user asked for: when the topic HAS a matching manipulative, weave manipulatives
@@ -2003,7 +2030,9 @@ def next_style_mixed(key_stage: Optional[str], style_seq: Optional[List[str]],
     """
     if not has_topic_manip:
         return "classic"
-    lean = _MIX_LEAN.get(_norm_ks(key_stage), 0.5)
+    lean = _manip_lean(key_stage, year_group)
+    if lean <= 0.0:
+        return "classic"
     seq = [s for s in (style_seq or []) if s in ("manipulative", "classic")]
 
     # length of the current same-style streak
