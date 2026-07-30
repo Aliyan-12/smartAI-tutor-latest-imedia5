@@ -38,9 +38,11 @@ class Settings(BaseSettings):
     # summaries for the thinking strip while cutting most of that delay; 0 disables thinking
     # entirely for the lowest latency. Env: GEMINI_THINKING_BUDGET.
     gemini_thinking_budget: int = 512
-    # "Nano Banana" — Gemini native image generation, used to create puzzle/explanatory
-    # images live during a lesson. Overridable via GEMINI_IMAGE_MODEL.
-    gemini_image_model: str = "gemini-2.5-flash-image"
+    # "Nano Banana Pro" — the latest PRO native image model, used for puzzle/explanatory teaching
+    # images (better labelling + accuracy than flash-image). Most explanatory images are PRE-SEEDED
+    # (app.seed_explanatory_images), so the higher per-image cost is paid once, not per lesson.
+    # Overridable via GEMINI_IMAGE_MODEL.
+    gemini_image_model: str = "gemini-3-pro-image"
     # Where generated puzzle media (Nano Banana PNGs + matplotlib graphs) are written,
     # then served publicly at /api/puzzles/media/{name}.
     puzzle_media_dir: str = "uploads/gen_puzzles"

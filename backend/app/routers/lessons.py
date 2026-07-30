@@ -273,7 +273,7 @@ async def complete_lesson_plan(
         )
         client = _get_client()
         response = client.models.generate_content(
-            model=settings.gemini_model,
+            model=settings.gemini_session_model,
             contents=summary_prompt,
             config=genai_types.GenerateContentConfig(
                 system_instruction="You are a supportive AI tutor summarising a completed lesson session.",
