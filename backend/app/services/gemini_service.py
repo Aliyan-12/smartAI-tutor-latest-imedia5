@@ -467,12 +467,16 @@ async def stream_response_async(
         llm = get_chat_llm(tools=tools if tools else None)
     else:
         llm = get_llm(tools=tools if tools else None)
-    logger.info(
-        f"stream_response_async: history={len(history)} msgs, "
-        f"rag_chunks={len(rag_chunks) if rag_chunks else 0}, "
-        f"tools_bound={[t.name for t in tools]}, "
-        f"has_system_prompt={bool(system_prompt_override or student_preferences)}"
-    )
+    # DEBUG=true → detailed per-turn tracing (setup, tools bound, each tool result). false → only
+    # concise essentials (the NAVIGATOR line + warnings/errors), so normal logs stay readable.
+    _dbg = bool(getattr(settings, "debug", False))
+    if _dbg:
+        logger.info(
+            f"stream_response_async: history={len(history)} msgs, "
+            f"rag_chunks={len(rag_chunks) if rag_chunks else 0}, "
+            f"tools_bound={[t.name for t in tools]}, "
+            f"has_system_prompt={bool(system_prompt_override or student_preferences)}"
+        )
 
     _reset_tool_call_state()   # clear paren-tracking state for this stream
 
@@ -603,24 +607,47 @@ async def stream_response_async(
                 continue
             try:
                 result = await tool_fn.ainvoke(tc["args"])
-                tool_messages.append(
-                    ToolMessage(
-                        content=_json.dumps(result),
-                        tool_call_id=tc["id"],
-                        name=tool_name,
-                    )
-                )
-                # A hard refusal (nothing changed AND retrying can't succeed) retires the tool
-                # for the rest of this turn, so the model can't spend its remaining rounds on it.
-                if isinstance(result, dict) and result.get("suppressed") and result.get("error"):
-                    retired_tools.add(tool_name)
-                    logger.info("Tool retired for this turn after refusal: %s (%s)",
-                                tool_name, result.get("error"))
-                # Emit a structured tool-result token for the router to intercept
-                yield f"\n[TOOL_RESULT:{_json.dumps({'tool': tool_name, 'data': result})}]\n"
-                logger.info(f"Tool executed: {tool_name} → action={result.get('action', 'n/a')}")
             except Exception as e:
-                logger.error(f"Tool '{tool_name}' execution failed: {type(e).__name__}: {e}", exc_info=True)
+                # RETRY ONCE — most tool errors (image generation, a transient network blip) clear
+                # on a second attempt.
+                logger.warning(f"Tool '{tool_name}' failed (attempt 1): {type(e).__name__}: {e}")
+                try:
+                    result = await tool_fn.ainvoke(tc["args"])
+                    logger.info(f"Tool '{tool_name}' succeeded on retry")
+                except Exception as e2:
+                    # Still failing → do NOT surface it. Feed the model a CONTROLLED instruction so
+                    # it (a) knows the action did NOT happen and (b) must NOT tell the student — no
+                    # "the animation didn't work", no claiming anything is on screen. It carries on
+                    # in words or tries a different tool. Appending a ToolMessage (not silently
+                    # dropping) keeps the loop going for another round, so the model produces a clean
+                    # answer instead of its pre-tool preamble (which may already claim the visual).
+                    # Retire it so a failing tool can't burn the rest of the turn's rounds.
+                    logger.error(f"Tool '{tool_name}' failed twice: {type(e2).__name__}: {e2}", exc_info=True)
+                    retired_tools.add(tool_name)
+                    tool_messages.append(ToolMessage(
+                        content=_json.dumps({"error": "tool_failed", "message": (
+                            f"The tool '{tool_name}' hit an error and did NOT run — NOTHING changed "
+                            "on the student's screen. Do NOT mention this to the student (never say a "
+                            "tool / animation / diagram 'didn't work', and do NOT claim anything is on "
+                            "screen). Simply continue: explain this point clearly in words, or use a "
+                            "DIFFERENT tool that fits. Act as if you had chosen to explain it in words.")}),
+                        tool_call_id=tc["id"], name=tool_name))
+                    continue
+            # Success (first try or retry): record the result for the model + the router.
+            tool_messages.append(
+                ToolMessage(content=_json.dumps(result), tool_call_id=tc["id"], name=tool_name)
+            )
+            # A hard refusal (nothing changed AND retrying can't succeed) retires the tool
+            # for the rest of this turn, so the model can't spend its remaining rounds on it.
+            if isinstance(result, dict) and result.get("suppressed") and result.get("error"):
+                retired_tools.add(tool_name)
+                logger.info("Tool retired for this turn after refusal: %s (%s)",
+                            tool_name, result.get("error"))
+            # Emit a structured tool-result token for the router to intercept
+            yield f"\n[TOOL_RESULT:{_json.dumps({'tool': tool_name, 'data': result})}]\n"
+            if _dbg:
+                logger.info(f"Tool executed: {tool_name} → action="
+                            f"{result.get('action', 'n/a') if isinstance(result, dict) else 'n/a'}")
 
         if not tool_messages:
             # Couldn't run any tool — fall back to showing the preamble so the turn

@@ -25,6 +25,7 @@ Every `mark` returns the same verdict shape `puzzle_service.evaluate` returns, s
 evaluator/XP path downstream is untouched:
     {"score": 0-10, "correct": bool, "per_item": {id: bool}, "feedback": str}
 """
+import json
 import logging
 import random
 import re
