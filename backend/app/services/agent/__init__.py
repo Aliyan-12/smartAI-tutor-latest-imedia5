@@ -1,1 +1,1 @@
-"""agent — the tutoring agents (session pipeline, teacher/practice services, crew)."""
+"""agent — the tutoring agents (session pipeline, teacher/practice services, roles)."""

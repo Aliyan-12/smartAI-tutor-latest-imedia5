@@ -22,16 +22,12 @@ class Settings(BaseSettings):
 
     gemini_api_key: str = ""
     gemini_model: str = "gemini-2.5-pro"   # legacy default (STT + one-shot briefing paths)
-    # Per-pipeline LLMs: session vs free /chat.
-    # LATENCY: the session model was gemini-2.5-pro, which is a deep-reasoning model and the main
-    # reason a turn took 10-25s (the "blue blob"). 2.5-flash is ~3-5x faster to first token and
-    # is more than capable here — the lesson is heavily scaffolded (state anchor, tool guards,
-    # forced recoveries), so the model does less unaided reasoning than the tool count suggests.
-    # Override with GEMINI_SESSION_MODEL=gemini-2.5-pro to trade speed back for reasoning depth.
-    # SESSION (all lesson/crew agents + quiz/eval) uses a PRO model for accuracy — pro reasons
-    # better, hallucinates less and follows the teaching structure more reliably than flash.
-    # `gemini-pro-latest` tracks the latest GA Gemini pro (stable, high rate limits).
-    gemini_session_model: str = "gemini-pro-latest"
+    # Per-pipeline LLMs: in-lesson SESSION (all lesson agents + quiz/eval) vs free /chat.
+    # The session model is gemini-2.5-flash by default: ~3-5x faster to first token than pro, and
+    # more than capable here — the lesson is heavily scaffolded (state anchor, tool guards, forced
+    # recoveries), so the model does less unaided reasoning than the tool count suggests. Override
+    # with GEMINI_SESSION_MODEL=gemini-2.5-pro to trade speed for reasoning depth. Env: GEMINI_SESSION_MODEL.
+    gemini_session_model: str = "gemini-2.5-flash"
     gemini_chat_model: str = "gemini-2.5-flash"
     # Thinking tokens emitted BEFORE the answer on every round — directly additive latency.
     # Was hard-coded at 2048 (several seconds/round). A small budget keeps occasional thought

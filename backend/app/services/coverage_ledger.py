@@ -14,9 +14,8 @@ The ledger lives in `LessonPlan.session_state["ledger"]` (same JSONB store as
 quiz flips quiz_done) — never self-reported by the model. It is rendered into the
 LESSON STATE anchor every turn as an "ALREADY COVERED — do NOT repeat" block.
 
-Framework-agnostic on purpose: it helps the current single-agent path AND the
-crewai multi-agent path (where it is the hand-off memory from Teacher → Practitioner
-→ Summarizer). No crewai import here.
+It is the hand-off memory across the multi-agent role pipeline (Teacher → Practitioner
+→ Summarizer), so each specialist knows what the previous one already covered.
 """
 from __future__ import annotations
 

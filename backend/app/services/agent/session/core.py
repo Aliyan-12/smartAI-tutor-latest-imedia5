@@ -2763,7 +2763,12 @@ async def _run_turn(send, chat_id, user_id, *, saved_user_text, ai_content,
         # answer without typing). Used by the "don't force typing" safety net below.
         quick_replies_shown_this_turn = False
 
-        async def _consume(content_for_call, *, with_image: bool, suppress_text: bool = False):
+        async def _consume(content_for_call, *, with_image: bool, suppress_text: bool = False,
+                           sys_prompt=None, groups=None):
+            # `sys_prompt`/`groups` let the navigator-selected ROLE inject its own persona prompt
+            # and phase-scoped tool groups for the main turn; recovery turns omit them and fall
+            # back to the full session prompt + state-driven groups (which always carry the
+            # generator/interact tools a recovery needs).
             # `suppress_text` runs a turn for its TOOL CALLS ONLY and throws its prose away.
             # Used by the quick-replies safety net: the question was already asked and shown, so
             # that recovery exists purely to attach the buttons — any sentence it writes is a
@@ -2772,11 +2777,13 @@ async def _run_turn(send, chat_id, user_id, *, saved_user_text, ai_content,
             # reworded enough to slip past sentence dedup, so the only reliable fix is not to
             # emit them at all.
             nonlocal seq, generator_shown_this_turn, quick_replies_shown_this_turn, _pending_ended_appt
+            _sys = sys_prompt or session_system_prompt
+            _grp = groups if groups is not None else tool_groups_for_turn
             async for raw in gemini_service.stream_response_async(
                 hist_slice, content_for_call, rag_chunks=rag_chunks,
-                system_prompt_override=session_system_prompt, tool_context=tool_context,
+                system_prompt_override=_sys, tool_context=tool_context,
                 image_data=(image_b64 if with_image else None), image_mime=image_mime,
-                tool_groups=tool_groups_for_turn,
+                tool_groups=_grp,
             ):
                 token = _coerce_str(raw)
                 stripped = token.strip()
@@ -2868,82 +2875,47 @@ async def _run_turn(send, chat_id, user_id, *, saved_user_text, ai_content,
             if suppress_text:
                 segmenter.flush()   # drain, don't show
 
-        # ── CREW PIPELINE (multi-agent) — the primary path for EVERY lesson turn ──
-        # LangChain orchestrates (context + navigator); the navigator-selected CrewAI specialist
-        # (Intro/Teacher/Practitioner/Summarizer) runs the turn on Gemini. Same live context +
-        # anchor + ledger; the difference is a NARROW agent with only its phase's tools, which is
-        # what stops the overfitting/repetition/hallucination. On ANY failure we fall back to the
-        # single-agent path below, so a crew hiccup never produces a dead turn.
-        _crew_ran = False
+        # ── MULTI-AGENT ROLE PIPELINE (pure LangChain) — the path for EVERY lesson turn ──
+        # The Navigator picks ONE specialist for this turn (Teacher / Practitioner / Summarizer —
+        # the Teacher ALSO opens the lesson; the Intro agent is merged in). We run that role's
+        # persona + phase-scoped tools through the native Gemini tool-calling path (`_consume`):
+        #   • REAL token streaming via native Gemini function-calling (no ReAct middle layer, so no
+        #     "Invalid response from LLM" and no `{"thought":…}{"action":…}` scaffolding in chat),
+        #   • the conversation passed as ACTUAL messages → the tutor is genuinely history-aware
+        #     ("as we discussed") and query-driven (it answers the student's real message),
+        #   • tool results routed to WS frames ONLY (never JSON in chat text).
+        # The narrow, phase-scoped tool set is what stops the overfitting/repetition; the coverage
+        # ledger + LESSON STATE anchor (already folded into ai_content) keep it moving forward.
+        _role = None
         if tool_context is not None and appt_id:
             try:
-                from app.services.agent_crew import navigator as _nav, runner as _crew_runner
-                from app.tools.registry import make_tools as _make_tools
-                from app.services import coverage_ledger as _cl0
-                try:
-                    _recap_done = bool((await _cl0.load(db, appt_id)).get("recap_done"))
-                except Exception:
-                    _recap_done = False
+                from app.services.agent_roles import navigator as _nav
                 _role = _nav.select_role(
                     phase=_phase_now, end_allowed=_end_allowed, closing_stage=_closing,
-                    quiz_phase=_quiz_phase, quiz_done=_quiz_done, recap_done=_recap_done,
+                    quiz_phase=_quiz_phase, quiz_done=_quiz_done,
                     intent_text=saved_user_text, event_kind=event_kind,
                 )
                 _nav.log_selection(appt_id, _role, _phase_now)
-                # Teaching = teach from the slide in WORDS. The Teacher's visual tools (diagram /
-                # animation / picture) bind ONLY when the student asks to be re-explained / shown —
-                # so it can't spam animations/svgs during normal teaching.
-                _role_groups = list(_role.tool_groups)
-                if _role.name == "teacher" and "visuals" in _role_groups and not _nav.wants_visual(saved_user_text):
-                    _role_groups = [g for g in _role_groups if g != "visuals"]
-                _lc_tools = _make_tools(tool_context, _role_groups)
-                _backstory = _role.backstory + "\n\n" + (session_system_prompt or "")
-                _hist_block = _crew_runner.render_history(history)
-                # Slide-based RAG content — the Practitioner explains/practises exactly what the
-                # Teacher taught, so both agents get the retrieved lesson material in-context.
-                try:
-                    from app.services.gemini_service import _format_rag_context as _fmt_rag
-                    _rag_block = _fmt_rag(rag_chunks) if rag_chunks else ""
-                except Exception:
-                    _rag_block = ""
-                if getattr(settings, "debug", False):
-                    logger.info("DEBUG RAG appt=%s role=%s chunks=%d titles=%s", appt_id, _role.name,
-                                len(rag_chunks or []),
-                                [getattr(c, "document_title", "?") for c in (rag_chunks or [])[:5]])
-                _lesson_ctx = f"{_rag_block}\n\n{ai_content}" if _rag_block else ai_content
-                _task_desc = _crew_runner.build_task_description(_role, _lesson_ctx, _hist_block)
-
-                async def _emit(label):
-                    await _emit_thinking(send, thinking_steps, label)
-
-                _crew_full, _crew_signals = await _crew_runner.stream_crew_turn(
-                    send=send, turn_id=turn_id, tts=tts, role=_role, backstory=_backstory,
-                    task_description=_task_desc, expected_output=_role.expected_output,
-                    lc_tools=_lc_tools, emit_thinking=_emit, appt_id=appt_id,
-                )
-                full.extend(_crew_full)
-                if _crew_signals.get("ended_appt"):
-                    _pending_ended_appt = _crew_signals["ended_appt"]
-                # Recap is a single hand-off turn: once the Intro agent has run, mark it done so the
-                # navigator moves to the Teacher instead of re-greeting for the rest of recap.
-                if _role.name == "intro" and not _recap_done:
-                    try:
-                        await _cl0.set_flag(db, appt_id, "recap_done", True)
-                    except Exception:
-                        pass
-                _crew_ran = True
-            except ImportError:
-                # crewai not installed yet (backend image not rebuilt) → single-agent path.
-                # One concise line, no traceback, so logs stay readable until the rebuild.
-                logger.warning("CREW unavailable (crewai not installed) — single-agent path. "
-                               "Rebuild backend to enable the multi-agent pipeline.")
-                _crew_ran = False
             except Exception:
-                logger.warning("CREW turn failed appt=%s — falling back to single-agent path",
+                logger.warning("Navigator role-selection failed appt=%s — using full session set",
                                appt_id, exc_info=True)
-                _crew_ran = False
+                _role = None
 
-        if not _crew_ran:
+        if _role is not None:
+            # Phase-scoped tools straight from the role. The Teacher keeps its `visuals` group bound
+            # ALWAYS so any "here's a diagram/animation"
+            # is backed by a real tool call — the model can never narrate a visual it couldn't make.
+            _role_groups = set(_role.tool_groups)
+            _role_prompt = _role.backstory + "\n\n" + (session_system_prompt or "")
+            if getattr(settings, "debug", False):
+                logger.info(
+                    "ROLE TURN appt=%s role=%s groups=%s rag_chunks=%d titles=%s",
+                    appt_id, _role.name, sorted(_role_groups), len(rag_chunks or []),
+                    [getattr(c, "document_title", "?") for c in (rag_chunks or [])[:5]],
+                )
+            await _consume(ai_content, with_image=True, sys_prompt=_role_prompt, groups=_role_groups)
+        else:
+            # No appointment / no navigator (e.g. free-form) → full session prompt + state groups.
             await _consume(ai_content, with_image=True)
 
         # ── STRUCTURAL SAFETY NET ─────────────────────────────────────────────────
@@ -2953,8 +2925,7 @@ async def _run_turn(send, chat_id, user_id, *, saved_user_text, ai_content,
         # forced recovery turn whose only job is to render the puzzle it just described. Guarded
         # so it can't fire while wrapping up, and never loops (single attempt).
         if (
-            not _crew_ran           # the crew path owns its own progression; no safety net
-            and not generator_shown_this_turn
+            not generator_shown_this_turn
             and appt_id and tool_context is not None
             and not _pending_ended_appt
             and not _end_allowed and not _closing
@@ -3040,6 +3011,10 @@ async def _run_turn(send, chat_id, user_id, *, saved_user_text, ai_content,
 
         complete = "".join(full)
         clean = strip_display_markers(complete).replace("[SLIDE_TRIGGER]", "").strip()
+        # DEBUG=true → log the final answer preview + who produced it, for end-to-end lesson tracing.
+        if getattr(settings, "debug", False):
+            logger.info("ROLE ANSWER appt=%s role=%s: %r",
+                        appt_id, (_role.name if _role is not None else "single"), clean[:600])
         if not clean or "[Error:" in complete:
             await send({"type": "error", "message": "The tutor couldn't generate a reply — please try again.", "recoverable": True})
             await send({"type": "turn_end", "message_id": None, "full_text": ""})

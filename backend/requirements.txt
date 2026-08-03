@@ -2,8 +2,9 @@ fastapi==0.115.6
 uvicorn[standard]==0.34.0
 sqlalchemy==2.0.36
 asyncpg==0.30.0
-# Loosened from exact pins so crewai's dependency tree can resolve (it needs newer
-# pydantic / pydantic-settings / python-dotenv). Floors keep the versions the app was tested on.
+# Floors (not exact pins) so recent langchain / langchain-google-genai can resolve their
+# pydantic / pydantic-settings / python-dotenv requirements. Floors keep the versions the app
+# was tested on.
 python-dotenv>=1.0.1
 pydantic>=2.10.4,<3
 pydantic-settings>=2.14.2,<3
@@ -45,8 +46,3 @@ casbin-async-sqlalchemy-adapter>=1.4.0
 # it does NOT affect LaTeX in the app: equation puzzles render LaTeX with KaTeX in the browser
 # (katex / react-katex); the AI authors valid LaTeX itself (validate → fix → retry, no server repair).
 manim>=0.18.1
-# CrewAI multi-agent tutoring pipeline (Navigator → Intro/Teacher/Practitioner/Summarizer) — runs
-# in EVERY lesson. The [google-genai] extra pulls crewai's NATIVE Gemini provider (required — the
-# `gemini/` model prefix uses it; verified streaming + tool calling on 1.15.8). Pinned to the
-# version the integration was verified against.
-crewai[google-genai]==1.15.8
