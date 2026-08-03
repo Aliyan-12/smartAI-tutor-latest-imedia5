@@ -491,6 +491,7 @@ async def stream_response_async(
     # left ZERO rounds to draw a diagram or animation, so mermaid/svg/manim were never reached.
     # An instruction not to retry did not work; removing the tool does.
     retired_tools: set = set()
+    _tool_err_counts: dict = {}   # per-tool error count this turn → allow ONE self-correction retry
 
     for _round in range(4):   # max 4 tool-call rounds
         full_response = None
@@ -662,14 +663,29 @@ async def stream_response_async(
             # note instead, and RETIRE the tool so it can't loop on the same failure this turn.
             _err = result.get("error") if isinstance(result, dict) else None
             if _err:
-                retired_tools.add(tool_name)
-                logger.info("Tool failed/refused — retired this turn: %s (%s)", tool_name, _err)
+                _detail = result.get("message") if isinstance(result, dict) else None
+                _suppressed = isinstance(result, dict) and result.get("suppressed")
+                _tool_err_counts[tool_name] = _tool_err_counts.get(tool_name, 0) + 1
+                # Hard refusal (suppressed → retrying can't succeed) OR a 2nd failure of the same
+                # tool → retire it. A FIRST recoverable error (bad_code, render_failed) → keep it
+                # bound so the model can FIX its input and resend ONCE (it needs the specific reason,
+                # so we pass `_detail` through). Either way, never let the failure reach the student.
+                if _suppressed or _tool_err_counts[tool_name] >= 2:
+                    retired_tools.add(tool_name)
+                    _guidance = ("Do NOT tell the student about it — no 'that didn't work', no "
+                                 "claiming anything is on screen. Teach this point in words, or use "
+                                 "a DIFFERENT tool.")
+                    logger.info("Tool retired this turn: %s (%s, fails=%d)",
+                                tool_name, _err, _tool_err_counts[tool_name])
+                else:
+                    _guidance = ("You may FIX the input and call it ONE more time, or use a different "
+                                 "tool. Do NOT tell the student anything went wrong.")
+                    logger.info("Tool error — self-correction allowed: %s (%s)", tool_name, _err)
                 tool_messages.append(ToolMessage(
                     content=_json.dumps({"error": _err, "message": (
-                        f"'{tool_name}' did NOT work ({_err}) — NOTHING is on the student's screen. "
-                        "Do NOT tell the student about any animation / diagram / picture, and do NOT "
-                        "say a tool 'didn't work'. Just teach this point clearly in words, or try a "
-                        "DIFFERENT tool that fits.")}),
+                        f"'{tool_name}' did NOT run — NOTHING is on the student's screen. "
+                        + (f"Reason: {_detail} " if _detail else "")
+                        + _guidance)}),
                     tool_call_id=tc["id"], name=tool_name))
             else:
                 tool_messages.append(ToolMessage(
