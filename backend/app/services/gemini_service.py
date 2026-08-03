@@ -482,6 +482,7 @@ async def stream_response_async(
 
     emitted_text = False        # have we yielded any visible answer text yet?
     preamble_text = ""          # last tool-round's text, kept ONLY as a fallback
+    _empty_retries = 0          # Gemini occasionally returns an empty completion → nudge + retry
     # Tools that HARD-REFUSED this turn (returned error + suppressed, i.e. nothing changed on
     # screen and retrying cannot succeed because the guard is turn-scoped). They are unbound for
     # the rest of the loop. Without this the model re-called advance_lesson_slide after each
@@ -556,6 +557,20 @@ async def stream_response_async(
                 # student never gets a lead-in with no answer, and nothing is doubled.
                 yield preamble_text
                 emitted_text = True
+            elif not emitted_text and _empty_retries < 2 and _round < 3:
+                # EMPTY completion: Gemini returned no text AND no tool call (an empty candidate —
+                # e.g. a safety trim or the thinking budget ate the whole turn). Do NOT end the turn
+                # blank — nudge the model to actually answer and RETRY the round (bounded, so it can
+                # never loop). This is the source-level guarantee that a turn is never silent.
+                _empty_retries += 1
+                logger.warning(f"Empty completion (round {_round}) — nudging + retrying "
+                               f"({_empty_retries}/2)")
+                messages = messages + [HumanMessage(content=(
+                    "[SYSTEM] Your previous turn produced no visible reply — you were still working "
+                    "(your thinking used up the turn). CONTINUE from where you left off and output "
+                    "that reply to the student now. Finish the response you were composing; do not "
+                    "send an empty message."))]
+                continue
             if _round > 0:
                 logger.info(f"Tool loop completed after {_round + 1} round(s)")
             break
@@ -633,21 +648,32 @@ async def stream_response_async(
                             "DIFFERENT tool that fits. Act as if you had chosen to explain it in words.")}),
                         tool_call_id=tc["id"], name=tool_name))
                     continue
-            # Success (first try or retry): record the result for the model + the router.
-            tool_messages.append(
-                ToolMessage(content=_json.dumps(result), tool_call_id=tc["id"], name=tool_name)
-            )
-            # A hard refusal (nothing changed AND retrying can't succeed) retires the tool
-            # for the rest of this turn, so the model can't spend its remaining rounds on it.
-            if isinstance(result, dict) and result.get("suppressed") and result.get("error"):
-                retired_tools.add(tool_name)
-                logger.info("Tool retired for this turn after refusal: %s (%s)",
-                            tool_name, result.get("error"))
-            # Emit a structured tool-result token for the router to intercept
+            # The tool call returned without raising — but "no exception" is NOT "it worked". Emit
+            # the REAL result to the router/frontend (it handles error/suppressed payloads itself).
             yield f"\n[TOOL_RESULT:{_json.dumps({'tool': tool_name, 'data': result})}]\n"
             if _dbg:
                 logger.info(f"Tool executed: {tool_name} → action="
                             f"{result.get('action', 'n/a') if isinstance(result, dict) else 'n/a'}")
+            # What the MODEL is told back. A tool can return WITHOUT raising yet FAIL to produce
+            # anything: an error payload (animate_concept → {error:'bad_code', render:None}), a hard
+            # refusal (suppressed), or a soft miss (no_catalog_images). Handing back the raw dict is
+            # the bug behind "I've put an animation on your screen" when nothing rendered — its
+            # action:"show_puzzle" reads like SUCCESS. So on ANY error, give the model a plain failure
+            # note instead, and RETIRE the tool so it can't loop on the same failure this turn.
+            _err = result.get("error") if isinstance(result, dict) else None
+            if _err:
+                retired_tools.add(tool_name)
+                logger.info("Tool failed/refused — retired this turn: %s (%s)", tool_name, _err)
+                tool_messages.append(ToolMessage(
+                    content=_json.dumps({"error": _err, "message": (
+                        f"'{tool_name}' did NOT work ({_err}) — NOTHING is on the student's screen. "
+                        "Do NOT tell the student about any animation / diagram / picture, and do NOT "
+                        "say a tool 'didn't work'. Just teach this point clearly in words, or try a "
+                        "DIFFERENT tool that fits.")}),
+                    tool_call_id=tc["id"], name=tool_name))
+            else:
+                tool_messages.append(ToolMessage(
+                    content=_json.dumps(result), tool_call_id=tc["id"], name=tool_name))
 
         if not tool_messages:
             # Couldn't run any tool — fall back to showing the preamble so the turn
