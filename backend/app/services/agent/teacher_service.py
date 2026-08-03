@@ -997,6 +997,10 @@ _MANIM_CONSTANTS = {
     "PI", "TAU", "DEGREES", "UP", "DOWN", "LEFT", "RIGHT", "IN", "OUT", "ORIGIN",
     "UL", "UR", "DL", "DR", "X_AXIS", "Y_AXIS", "Z_AXIS",
     "SMALL_BUFF", "MED_SMALL_BUFF", "MED_LARGE_BUFF", "LARGE_BUFF",
+    # screen edges / frame geometry (real config-derived constants)
+    "TOP", "BOTTOM", "LEFT_SIDE", "RIGHT_SIDE",
+    "FRAME_WIDTH", "FRAME_HEIGHT", "FRAME_X_RADIUS", "FRAME_Y_RADIUS",
+    "DEFAULT_STROKE_WIDTH", "DEFAULT_DOT_RADIUS", "DEFAULT_FONT_SIZE",
 }
 
 _MANIM_COLORS = {
@@ -1004,6 +1008,8 @@ _MANIM_COLORS = {
     "GREY", "GRAY", "TEAL", "MAROON", "GOLD", "LIGHT_GREY", "DARK_GREY", "LIGHT_GRAY",
     "DARK_GRAY", "LIGHT_BROWN", "DARK_BROWN", "PURE_RED", "PURE_GREEN", "PURE_BLUE",
     "LIGHT_PINK", "DARKER_GREY", "DARKER_GRAY",
+    "LIGHTER_GREY", "LIGHTER_GRAY", "GREY_BROWN", "GRAY_BROWN",
+    "YELLOW_A", "YELLOW_E",  # (A..E for the main stems are added by the loop below)
 }
 # BLUE_A … GOLD_E etc.
 for _stem in ("BLUE", "RED", "GREEN", "YELLOW", "PURPLE", "GREY", "GRAY", "TEAL",
@@ -1019,8 +1025,10 @@ _MANIM_MOBJECTS = {
     "AnnularSector", "Star", "Cross", "Elbow", "Angle", "RightAngle", "Brace",
     "BraceBetweenPoints", "SurroundingRectangle", "Underline", "Cutout", "ArcPolygon",
     "CubicBezier", "ArrowVectorField", "Polyline", "DashedVMobject",
-    # text (LaTeX-free — see _BLOCKED_NAMES)
-    "Text", "MarkupText", "Paragraph",
+    # text — Text/MarkupText/Paragraph are Pango (no LaTeX); MathTex/Tex/Title need LaTeX (texlive)
+    "Text", "MarkupText", "Paragraph", "MathTex", "Tex", "SingleStringMathTex", "Title",
+    # numbers / counters — render via Text by default (see _LATEX_FREE_PREAMBLE)
+    "DecimalNumber", "Integer", "Variable",
     # containers
     "VGroup", "Group", "VDict", "VMobject", "Mobject",
     # graphing
@@ -1029,6 +1037,9 @@ _MANIM_MOBJECTS = {
     "always_redraw", "Table", "MobjectTable", "IntegerTable",
     # tables/braces helpers
     "Rectangle", "Square",
+    # extra shapes / arrows / annotations (render without LaTeX)
+    "Point", "CurvedArrow", "CurvedDoubleArrow", "TangentLine", "RegularPolygram",
+    "Polygram", "BackgroundRectangle", "DecimalTable",
 }
 
 _MANIM_ANIMATIONS = {
@@ -1039,7 +1050,13 @@ _MANIM_ANIMATIONS = {
     "Circumscribe", "FocusOn", "Wiggle", "ApplyWave", "ShowPassingFlash", "Blink",
     "LaggedStart", "LaggedStartMap", "AnimationGroup", "Succession", "Wait", "Restore",
     "ScaleInPlace", "ApplyMethod", "MoveToTarget", "CounterclockwiseTransform",
-    "ClockwiseTransform", "FadeTransform",
+    "ClockwiseTransform", "FadeTransform", "FadeTransformPieces",
+    # transforms / functions / updaters
+    "TransformFromCopy", "FadeToColor", "ApplyFunction", "ApplyPointwiseFunction",
+    "ApplyComplexFunction", "Homotopy", "MaintainPositionRelativeTo", "CyclicReplace",
+    "Swap", "UpdateFromFunc", "UpdateFromAlphaFunc", "ChangingDecimal",
+    "ChangeDecimalToValue", "ShowIncreasingSubsets", "ShowSubmobjectsOneByOne",
+    "AddTextWordByWord", "RemoveTextLetterByLetter", "Broadcast", "TransformMatchingTex",
     # rate functions
     "linear", "smooth", "there_and_back", "there_and_back_with_pause", "rush_into",
     "rush_from", "slow_into", "double_smooth", "wiggle", "ease_in_sine", "ease_out_sine",
@@ -1047,23 +1064,17 @@ _MANIM_ANIMATIONS = {
 }
 
 ALLOWED_NAMES = (
-    {"self"} | _SAFE_BUILTINS | _MANIM_CONSTANTS | _MANIM_COLORS
+    {"self", "np"} | _SAFE_BUILTINS | _MANIM_CONSTANTS | _MANIM_COLORS
     | _MANIM_MOBJECTS | _MANIM_ANIMATIONS
 )
 
 # Named explicitly so the refusal can say WHY and point at the alternative.
 _BLOCKED_NAMES = {
-    "MathTex": "MathTex needs LaTeX, which is not installed — use Text(\"x^2\") instead",
-    "Tex": "Tex needs LaTeX, which is not installed — use Text(...) instead",
-    "SingleStringMathTex": "LaTeX is not installed — use Text(...)",
-    "TexTemplate": "LaTeX is not installed — use Text(...)",
-    "Title": "Title renders via LaTeX — use Text(...) instead",
-    "DecimalNumber": "DecimalNumber renders via LaTeX — use Text(str(value)) instead",
-    "Integer": "Integer renders via LaTeX — use Text(str(value)) instead",
-    "Variable": "Variable renders via LaTeX — use Text(...) instead",
+    # NOTE: MathTex/Tex/Title/DecimalNumber/Integer/Variable are now ALLOWED — LaTeX (texlive) is
+    # installed in the image and numbers render via Text (see _LATEX_FREE_PREAMBLE). `np` is allowed
+    # too (numpy is installed + injected into the runner). These moved to the allow-list.
+    "TexTemplate": "don't build a TexTemplate — just call MathTex(...) / Tex(...) directly",
     "config": "the global config is not writable from a scene",
-    "np": "numpy is not available — build points as plain lists, e.g. [x, y, 0]",
-    "numpy": "numpy is not available — build points as plain lists, e.g. [x, y, 0]",
     "open": "file access is not allowed",
     "eval": "eval is not allowed",
     "exec": "exec is not allowed",
@@ -1087,11 +1098,15 @@ _BLOCKED_NAMES = {
     "__builtins__": "builtins access is not allowed",
 }
 
-# Attributes that expose frames/globals without a leading underscore.
+# Attributes that expose frames/globals without a leading underscore, plus numpy's file-I/O
+# helpers (now that `np` is allowed) — np.load can even execute pickled code, so these are shut off.
 _BLOCKED_ATTRS = {
     "gi_frame", "gi_code", "cr_frame", "cr_code", "ag_frame", "ag_code",
     "f_globals", "f_locals", "f_builtins", "f_back", "tb_frame", "tb_next",
     "func_globals", "func_code", "func_builtins", "im_func", "im_self",
+    # numpy file I/O (np.*) — no reading/writing files from an animation
+    "load", "save", "savez", "savez_compressed", "fromfile", "tofile", "memmap",
+    "genfromtxt", "loadtxt", "savetxt", "fromregex", "DataSource",
 }
 
 
@@ -1183,12 +1198,14 @@ _FSIZE_BYTES = 256 * 1024 * 1024
 # always fine, which is why this hid for so long.)
 _LATEX_FREE_PREAMBLE = """\
 DecimalNumber.set_default(mob_class=Text)
+Integer.set_default(mob_class=Text)
 NumberLine.set_default(label_constructor=Text)
 """
 
 _RUNNER = '''\
 from manim import *
 from manim import tempconfig
+import numpy as np
 
 {preamble}
 class Gen(Scene):

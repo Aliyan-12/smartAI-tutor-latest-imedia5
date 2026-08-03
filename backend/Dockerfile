@@ -13,14 +13,21 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libreoffice-writer \
     fonts-dejavu \
     fonts-liberation \
-    # ── Manim animation renderer (cairo/pango vector graphics + ffmpeg video). The scenes label
-    #    with Pango Text rather than MathTex, so the huge `texlive` package isn't needed here —
-    #    a ~150 MB add instead of ~1 GB. This is only about the VIDEO renderer; LaTeX equations
-    #    in puzzles are rendered by KaTeX in the browser and are unaffected. ──
+    # ── Manim animation renderer (cairo/pango vector graphics + ffmpeg video). ──
     pkg-config \
     libcairo2-dev \
     libpango1.0-dev \
     ffmpeg \
+    # ── LaTeX for manim MathTex/Tex in animations (latex → dvi → dvisvgm → SVG). This is a
+    #    ~0.5-1 GB add; it enables real maths typesetting inside animations. Number labels still
+    #    render via Pango Text (see _LATEX_FREE_PREAMBLE) — only genuine MathTex/Tex uses LaTeX.
+    #    (Puzzle equations in the browser are KaTeX and are separate from this.) ──
+    texlive-latex-base \
+    texlive-latex-recommended \
+    texlive-latex-extra \
+    texlive-fonts-recommended \
+    texlive-science \
+    dvisvgm \
     && rm -rf /var/lib/apt/lists/*
 
 COPY requirements.txt .

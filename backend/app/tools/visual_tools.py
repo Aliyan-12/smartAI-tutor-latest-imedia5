@@ -216,12 +216,14 @@ def visual_tool_groups(ctx: ToolContext) -> dict:
             self.wait(1)
 
         RULES (the server refuses anything else and tells you why):
-          • NO LaTeX — `MathTex`/`Tex` are unavailable. Use `Text("x squared")` / `Text("3/4")`.
-          • No imports, no def/class, no while-loops, no file access, no numpy. Points are plain
-            lists: `[x, y, 0]`. `for i in range(n)` is fine.
-          • Available: Circle, Square, Rectangle, Polygon, Line, Arrow, Dot, Text, VGroup, Axes,
-            NumberLine, NumberPlane, ParametricFunction, Brace, Angle … and Create, Write, FadeIn,
-            FadeOut, Transform, Rotate, Indicate, LaggedStart, `.animate`, self.play, self.wait.
+          • Maths typesetting IS available: `MathTex(r"\\frac{3}{4}")`, `Tex(...)` for real notation;
+            `Text(...)` for plain words. `DecimalNumber`/`Integer` for live-updating numbers.
+          • `numpy` is available as `np` (`np.array([x,y,0])`, `np.linspace`, `np.sin` …); plain
+            lists `[x, y, 0]` work too. No imports, no def/class, no while-loops, no file access.
+            `for i in range(n)` is fine.
+          • Available: Circle, Square, Rectangle, Polygon, Line, Arrow, Dot, Text, MathTex, VGroup,
+            Axes, NumberLine, NumberPlane, ParametricFunction, Brace, Angle … and Create, Write,
+            FadeIn, FadeOut, Transform, Rotate, Indicate, LaggedStart, `.animate`, self.play, self.wait.
           • Keep it SHORT — one idea, 5-15 seconds.
 
         The render takes a couple of seconds and this tool WAITS for it, so when it returns
@@ -234,9 +236,13 @@ def visual_tool_groups(ctx: ToolContext) -> dict:
         try:
             status, key = await mms.render_code(code)
         except mms.SceneCodeError as e:
+            # Log the ACTUAL rejection reason (which manim name/construct was refused) — the tool
+            # result carries it to the model, but without this it never reaches the server logs.
+            logger.warning("animate_concept bad_code: %s", e)
             return {"action": "show_puzzle", "error": "bad_code",
                     "message": f"{e}. Fix the animation code and resend, or use draw_svg instead."}
         if status == "failed":
+            logger.warning("animate_concept render_failed (code validated but manim render errored)")
             return {"action": "show_puzzle", "error": "render_failed",
                     "message": "That scene couldn't be rendered, so nothing is on screen. Draw the "
                                "idea with draw_svg or mermaid_diagram instead — don't refer to an "
