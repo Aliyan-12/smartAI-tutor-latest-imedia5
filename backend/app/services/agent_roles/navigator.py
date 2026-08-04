@@ -48,9 +48,12 @@ def select_role(
             or any(k in txt for k in _END_INTENT):
         return SUMMARIZER
 
-    # 2) A maths puzzle's LaTeX was rejected by the client → the Practitioner owns the puzzle
-    #    tools, so it must be the one to re-emit a corrected puzzle (validate → fix → retry).
-    if event_kind == "latex_error":
+    # 2) A submitted puzzle/quiz answer (or a rejected maths-puzzle LaTeX) → the Practitioner. It
+    #    OWNS the evaluators (matching_evaluator, math_evaluator, quiz…) and the puzzle tools; the
+    #    Teacher has none of them, so routing a puzzle_result to the Teacher (by phase) is exactly
+    #    why a matching answer came back "there was an issue submitting" and the Teacher tried, and
+    #    failed, to mark it. This is independent of the lesson phase.
+    if event_kind in ("puzzle_result", "quiz_result", "latex_error"):
         return PRACTITIONER
 
     # 3) Quiz window open and not yet done → the Practitioner sets the single quiz.
