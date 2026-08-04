@@ -243,6 +243,14 @@ def puzzle_tool_groups(ctx: ToolContext) -> dict:
         match your answer; use diagram_math_puzzle for those). `question` is the short
         instruction; `answer` is the correct answer (kept private, used to mark).
 
+        ⚠️ WHERE MATHS GOES — FOLLOW THIS EVERY TIME:
+          • The EQUATION goes in `latex` (typeset by KaTeX) — the ONLY place LaTeX commands belong.
+          • `question` is PLAIN spoken text — write fractions as "3/7", "one half", "x squared".
+            NEVER put a LaTeX command (\frac, \times, ^, _, curly braces) in `question`: it is NOT
+            typeset there, so `\frac{1}{2}` shows to the student as raw gibberish like "rac{1}{2}".
+          Example — "add 3/7 and 2/7":  question="What is 3/7 + 2/7?",
+                    latex="\\frac{3}{7}+\\frac{2}{7}=\\;?",  answer="5/7".
+
         MULTIPLE CHOICE — prefer this for younger students (KS1-KS3): pass `distractors` as a
         short COMMA-SEPARATED STRING of 2-3 PLAUSIBLE WRONG answers
         (e.g. answer="12", distractors="10, 14, 21"). The student then TAPS one of four

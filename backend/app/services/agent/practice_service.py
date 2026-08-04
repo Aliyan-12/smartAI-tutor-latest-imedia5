@@ -2612,6 +2612,33 @@ _HTML_TAG = re.compile(r"<[^>]+>")
 _HAS_MATH = re.compile(r"[0-9]|[+\-=<>^_/×÷≤≥≠±]|\\(?!text\b)[A-Za-z]+")
 
 
+# KaTeX commands the model commonly writes. When the tool-argument layer eats the leading backslash
+# (single-backslash `\frac` arrives as bare `frac`, which KaTeX happily renders as the letters
+# "frac" — so it never errors and never bounces back), we put the backslash back. Longest-first so
+# `cdots` matches before `cdot`, `dfrac` before `frac`. 2-letter tokens (pi, le, to…) are omitted:
+# too easy to hit inside a real word and not worth the false-positive risk.
+_LATEX_CMD_WORDS = sorted((
+    "dfrac", "tfrac", "frac", "binom", "sqrt", "times", "div", "cdots", "cdot", "ldots", "dots",
+    "leq", "geq", "neq", "approx", "equiv", "propto", "infty", "angle", "triangle", "perp",
+    "parallel", "circ", "degree", "pi", "tau", "theta", "alpha", "beta", "gamma", "delta",
+    "Delta", "sigma", "Sigma", "omega", "Omega", "lambda", "mu", "phi", "rho",
+    "sum", "prod", "int", "lim", "sin", "cos", "tan", "cot", "sec", "csc", "log", "ln",
+    "text", "mathrm", "mathbf", "left", "right", "overline", "vec", "hat", "bar",
+    "rightarrow", "Rightarrow", "leftarrow", "cup", "cap", "in", "forall", "exists",
+), key=len, reverse=True)
+# A command word NOT already preceded by a backslash and NOT part of a longer word.
+_BARE_CMD_RE = re.compile(r"(?<![\\A-Za-z])(" + "|".join(_LATEX_CMD_WORDS) + r")(?![A-Za-z])")
+
+
+def _rebackslash_commands(s: str) -> str:
+    """Repair KaTeX commands whose leading backslash was stripped by the tool-arg layer
+    (`frac{3}{7}` → `\\frac{3}{7}`). Idempotent: an already-backslashed `\\frac` is skipped by the
+    negative look-behind, so re-running never doubles it."""
+    if not s:
+        return s
+    return _BARE_CMD_RE.sub(lambda m: "\\" + m.group(1), s)
+
+
 def clean_math_latex(s: str) -> tuple:
     """(latex, problem) for the KaTeX equation card.
 
@@ -2647,6 +2674,15 @@ def clean_math_latex(s: str) -> tuple:
         if t.startswith(a) and t.endswith(b) and len(t) > len(a) + len(b):
             t = t[len(a):len(t) - len(b)].strip()
             break
+    if not t:
+        return "", "prose"
+    # SAFETY NET: the tool-argument layer sometimes strips the leading backslash off LaTeX commands
+    # (`\frac{3}{7}` arrives as `frac{3}{7}`), and control chars can leak in from escape mangling
+    # (`\f`→formfeed). KaTeX renders `frac{3}{7}` as the literal letters "frac37" WITHOUT erroring,
+    # so it never bounces back — the only place to fix it is here. Drop stray control chars, then
+    # re-backslash bare commands. Done AFTER the prose check above so real prose isn't mathified.
+    t = re.sub(r"[\x00-\x08\x0b\x0c\x0e-\x1f]", "", t)
+    t = _rebackslash_commands(t).strip()
     if not t:
         return "", "prose"
     return t, ""
