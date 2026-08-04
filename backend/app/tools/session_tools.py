@@ -47,6 +47,19 @@ class ToolContext:
     slide_moved: bool = False
 
 
+def _slide_move_refused(ctx: "ToolContext") -> Optional[dict]:
+    """ONE slide change per reply. If a slide tool already ran this turn, refuse a second move —
+    `suppressed` so it pushes no WS frame and gemini_service retires the tool. This stops the AI
+    racing several slides ahead in a single reply ('Moving to the next slide' 5× in one message):
+    it teaches the slide that's on screen now and only moves again on its NEXT reply."""
+    if ctx.slide_moved:
+        return {"action": "slide_refused", "error": "already_moved", "suppressed": True,
+                "message": ("You already changed the slide this reply. ONE slide per reply — teach "
+                            "the slide that is on screen NOW; move again on your NEXT reply after "
+                            "the student responds.")}
+    return None
+
+
 async def _clear_puzzle_on_slide(ctx: "ToolContext") -> None:
     """Slides and puzzles are mutually-exclusive views of the Learn panel — moving to a
     slide takes any on-screen puzzle off, so drop it from authoritative puzzle_state too.
@@ -77,6 +90,9 @@ def session_tool_groups(ctx: ToolContext) -> dict:
         # An explicit, student-requested jump — allowed to span several slides in one
         # call. It still counts as this turn's slide move, so a stray sequential
         # advance/retreat afterwards is suppressed.
+        _refused = _slide_move_refused(ctx)
+        if _refused:
+            return _refused
         ctx.slide_moved = True
         # The deck now owns the Learn panel this reply — see persist_and_return. Teaching the
         # slide comes BEFORE anything overlays it.
@@ -102,6 +118,9 @@ def session_tool_groups(ctx: ToolContext) -> dict:
         only advance once they've had a go — you decide this, no one blocks you.
         """
         from app.services.agent.session.resources import slide_action
+        _refused = _slide_move_refused(ctx)
+        if _refused:
+            return _refused
         ctx.slide_moved = True
         ctx.visual_shown = "slide"
         result = await slide_action(ctx.db, ctx.appointment_id, mode="advance")
@@ -117,6 +136,9 @@ def session_tool_groups(ctx: ToolContext) -> dict:
         re-teach from it.
         """
         from app.services.agent.session.resources import slide_action
+        _refused = _slide_move_refused(ctx)
+        if _refused:
+            return _refused
         ctx.slide_moved = True
         ctx.visual_shown = "slide"
         result = await slide_action(ctx.db, ctx.appointment_id, mode="retreat")
@@ -134,6 +156,9 @@ def session_tool_groups(ctx: ToolContext) -> dict:
         teaching use advance_lesson_slide; to open a DIFFERENT resource use show_resource.)
         """
         from app.services.agent.session.resources import slide_action, get_current_slide
+        _refused = _slide_move_refused(ctx)
+        if _refused:
+            return _refused
         cur = await get_current_slide(ctx.db, ctx.appointment_id)
         rid = cur.get("resource_hub_id") if cur else None
         ctx.slide_moved = True
