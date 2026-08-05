@@ -477,6 +477,28 @@ async def stream_response_async(
             f"tools_bound={[t.name for t in tools]}, "
             f"has_system_prompt={bool(system_prompt_override or student_preferences)}"
         )
+        # FULL context the model receives THIS turn — only when DEBUG=true. This is exactly what the
+        # AI 'sees': its system prompt (role persona + lesson prompt + alignment), the message/anchor
+        # for this turn, the conversation history it's aware of, and the RAG chunks retrieved.
+        logger.info("DEBUG ┃ SYSTEM PROMPT (%d chars) ┃\n%s", len(_system or ""), _system or "(none)")
+        logger.info("DEBUG ┃ THIS-TURN MESSAGE + LESSON-STATE ANCHOR ┃\n%s", user_message)
+        if history:
+            _hist = "\n".join(
+                f"  [{(m.get('role') if isinstance(m, dict) else getattr(m, 'type', '?'))}] "
+                f"{((m.get('content') if isinstance(m, dict) else getattr(m, 'content', '')) or '')[:600]}"
+                for m in history
+            )
+            logger.info("DEBUG ┃ HISTORY (%d msgs the AI is aware of) ┃\n%s", len(history), _hist)
+        if rag_chunks:
+            _rag_lines = []
+            for c in rag_chunks:
+                _sim = getattr(c, "similarity", None)
+                _simtxt = f" (sim={_sim})" if _sim is not None else ""
+                _rag_lines.append(
+                    f"  • {getattr(c, 'document_title', '?')}{_simtxt}: "
+                    f"{(getattr(c, 'content', '') or '')[:400]}"
+                )
+            logger.info("DEBUG ┃ RAG CONTEXT (%d chunks) ┃\n%s", len(rag_chunks), "\n".join(_rag_lines))
 
     _reset_tool_call_state()   # clear paren-tracking state for this stream
 
@@ -541,6 +563,8 @@ async def stream_response_async(
         _think = _condense_thought(thought_buf)
         if _think:
             yield f"\n[THINK:{_think}]\n"
+        if _dbg and thought_buf.strip():
+            logger.info("DEBUG ┃ THINKING (round %d) ┃\n%s", _round, thought_buf.strip()[:2000])
 
         round_text = "".join(round_parts)
         tool_calls = getattr(full_response, "tool_calls", None) if full_response is not None else None
@@ -590,6 +614,12 @@ async def stream_response_async(
 
         for tc in tool_calls:
             tool_name = tc["name"]
+            if _dbg:
+                try:
+                    _args_str = _json.dumps(tc.get("args", {}), ensure_ascii=False)
+                except Exception:  # noqa: BLE001
+                    _args_str = str(tc.get("args", {}))
+                logger.info("DEBUG ┃ TOOL CALL ┃ %s(%s)", tool_name, _args_str[:1200])
             tool_fn = tool_map.get(tool_name)
             if tool_fn is None:
                 # The model asked for a tool that isn't bound this turn. Feed the failure
@@ -655,6 +685,11 @@ async def stream_response_async(
             if _dbg:
                 logger.info(f"Tool executed: {tool_name} → action="
                             f"{result.get('action', 'n/a') if isinstance(result, dict) else 'n/a'}")
+                try:
+                    _res_str = _json.dumps(result, ensure_ascii=False)
+                except Exception:  # noqa: BLE001
+                    _res_str = str(result)
+                logger.info("DEBUG ┃ TOOL RESULT ┃ %s → %s", tool_name, _res_str[:1500])
             # What the MODEL is told back. A tool can return WITHOUT raising yet FAIL to produce
             # anything: an error payload (animate_concept → {error:'bad_code', render:None}), a hard
             # refusal (suppressed), or a soft miss (no_catalog_images). Handing back the raw dict is
