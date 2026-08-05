@@ -3123,7 +3123,7 @@ _THINKING_LABELS: dict = {
     "update_topic_mastery": "Updating progress",
     "advance_lesson_slide": "Moving to the next slide",
     "retreat_lesson_slide": "Going back a slide",
-    "jump_to_slide": "Skipping ahead to the next topic",
+    "jump_to_slide": "Moving to next topic slide",
     "show_resource": "Opening the slide",
     "load_resource": "Finding the right resource",
     "advance_lesson_phase": "Moving to the next part of the lesson",
