@@ -699,8 +699,19 @@ async def stream_response_async(
                 emitted_text = True
             break
 
-        # Append assistant message + tool results, then loop for the next LLM turn
-        messages = messages + [full_response] + tool_messages
+        # Append assistant message + tool results, then loop for the next LLM turn — but feed the
+        # tool-round message back MINUS its pre-tool prose. Otherwise the model RE-TRANSCRIBES that
+        # prose in the next round (the duplicated "That's a perfect way… You're absolutely right!…
+        # it looks like the previous message got a bit ahead of itself" reply). We keep the
+        # tool_calls (Gemini needs them to pair with the tool results); the prose stays in
+        # preamble_text as the silent-round fallback, so nothing is lost.
+        _ai_msg = full_response
+        try:
+            if getattr(full_response, "content", ""):
+                _ai_msg = full_response.model_copy(update={"content": ""})
+        except Exception:  # noqa: BLE001
+            _ai_msg = full_response
+        messages = messages + [_ai_msg] + tool_messages
     else:
         # Ran out of rounds while still calling tools — surface the last text we have.
         if not emitted_text and preamble_text:

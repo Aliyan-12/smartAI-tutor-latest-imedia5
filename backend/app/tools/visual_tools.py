@@ -211,13 +211,21 @@ def visual_tool_groups(ctx: ToolContext) -> dict:
             c = Circle(radius=1.5, color=BLUE)
             label = Text("radius", font_size=28).next_to(c, DOWN)
             self.play(Create(c), Write(label))
-            r = Line(c.get_center(), c.get_right(), color=YELLOW)
-            self.play(Create(r))
+            eq = MathTex(r"A = \pi r^2").next_to(c, UP)   # NOTE the r"..." — always
+            self.play(Create(c), Write(label), Write(eq))
             self.wait(1)
 
+        ⚠️ RAW STRINGS FOR MATHS — THE #1 CAUSE OF A FAILED ANIMATION. ANY string containing a
+        backslash (every LaTeX command: \frac \times \Delta \sqrt \pi \sin \theta \text …) MUST be a
+        RAW string — write the letter r immediately before the opening quote:
+            ✅ MathTex(r"\frac{\Delta C}{\Delta x}")        ✅ Tex(r"$x^2 + 1$")
+            ❌ MathTex("\frac{\Delta C}{\Delta x}")   ← WRONG: Python turns \f→formfeed, \t→tab,
+               \n→newline, so \frac becomes "rac", \times becomes "imes", and LaTeX errors out.
+        This applies to EVERY MathTex/Tex you write, every time — no exceptions. If in doubt, add r.
+
         RULES (the server refuses anything else and tells you why):
-          • Maths typesetting IS available: `MathTex(r"\\frac{3}{4}")`, `Tex(...)` for real notation;
-            `Text(...)` for plain words. `DecimalNumber`/`Integer` for live-updating numbers.
+          • Maths typesetting IS available via RAW strings: `MathTex(r"\\frac{3}{4}")`, `Tex(r"...")`
+            for real notation; `Text(...)` for plain words. `DecimalNumber`/`Integer` for live numbers.
           • `numpy` is available as `np` (`np.array([x,y,0])`, `np.linspace`, `np.sin` …); plain
             lists `[x, y, 0]` work too. No imports, no def/class, no while-loops, no file access.
             `for i in range(n)` is fine.

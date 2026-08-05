@@ -2941,8 +2941,13 @@ async def _run_turn(send, chat_id, user_id, *, saved_user_text, ai_content,
             _minimal_typing = _ks_norm2 in ("KS1", "KS2", "KS3")
             # Valid to invite when a puzzle IS already on screen (showing/submitted); only the
             # "nothing on screen" case needs recovery.
+            # The puzzle recovery binds the state-driven groups (which include `puzzles`), so it must
+            # only run for the PRACTITIONER — the coach whose job is puzzles. When it ran on a TEACHER
+            # that had merely INVITED practice, it force-generated a matching_puzzle the Teacher then
+            # couldn't mark (matching_evaluator isn't bound for it). The Teacher never makes puzzles.
+            _puzzle_role_ok = (_role is None or _role.name == "practitioner")
             if _status_after not in ("showing", "submitted"):
-                if _invites_practice(_said):
+                if _invites_practice(_said) and _puzzle_role_ok:
                     logger.info(
                         "SAFETY NET: invited practice with no puzzle on screen — forcing a "
                         "generator turn (appt=%s)", appt_id,
