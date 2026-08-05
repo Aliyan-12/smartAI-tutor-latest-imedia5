@@ -1313,8 +1313,12 @@ def _render_sync(code: str, key: str) -> bool:
                     "labels with MathTex despite the LaTeX-free preamble. Add its label "
                     "constructor to _LATEX_FREE_PREAMBLE (see the note there).", key)
                 return False
+            _detail = err[-1] if err else ""
             logger.warning("ANIMATION render failed key=%s rc=%s: %s",
-                           key, proc.returncode, err[-1] if err else "(no stderr)")
+                           key, proc.returncode, _detail or "(no stderr)")
+            # Stash the real manim error so animate_concept can hand it to the model for a fix
+            # (e.g. "Cannot call Mobject.get_start for a Mobject with no points").
+            _render_errors[key] = _detail
             return False
 
         matches = sorted(work.rglob(f"{key}.mp4"), key=lambda p: p.stat().st_mtime, reverse=True)
@@ -1336,6 +1340,9 @@ def _render_sync(code: str, key: str) -> bool:
 
 
 _inflight: dict = {}
+# key → the last manim render error string, so render_code can pass a model-actionable reason back
+# ("Cannot call Mobject.get_start for a Mobject with no points") for self-correction.
+_render_errors: dict = {}
 
 # How long a turn will wait for an animation before giving up on showing it THIS turn.
 # Measured renders are ~2-3s and a tool-using turn already takes 15-45s, so waiting is nearly
@@ -1343,8 +1350,9 @@ _inflight: dict = {}
 RENDER_WAIT_S = 30.0
 
 
-async def render_code(code: str, wait_s: float = RENDER_WAIT_S) -> Tuple[str, Optional[str]]:
-    """(status, key) — 'ready' | 'rendering' | 'failed' | 'unavailable'.
+async def render_code(code: str, wait_s: float = RENDER_WAIT_S) -> Tuple[str, Optional[str], str]:
+    """(status, key, detail) — status is 'ready' | 'rendering' | 'failed' | 'unavailable'; `detail`
+    is the real manim error on 'failed' (model-actionable, "" otherwise).
 
     WAITS for the render rather than firing it into the background. The old fire-and-forget
     version returned 'rendering' on a miss and promised the animation would be "instant next
@@ -1359,11 +1367,11 @@ async def render_code(code: str, wait_s: float = RENDER_WAIT_S) -> Tuple[str, Op
     Raises SceneCodeError if the code fails validation.
     """
     if not MANIM_AVAILABLE:
-        return "unavailable", None
+        return "unavailable", None, ""
     clean = validate_scene_code(code)
     key = code_key(clean)
     if cached_path(key):
-        return "ready", key
+        return "ready", key, ""
 
     task = _inflight.get(key)
     if task is None or task.done():
@@ -1382,11 +1390,14 @@ async def render_code(code: str, wait_s: float = RENDER_WAIT_S) -> Tuple[str, Op
     except asyncio.TimeoutError:
         logger.info("ANIMATION still rendering after %.0fs key=%s — continuing in background",
                     wait_s, key)
-        return "rendering", key
+        return "rendering", key, ""
     except Exception as e:  # noqa: BLE001
         logger.warning("ANIMATION render task error key=%s: %s", key, e)
-        return "failed", key
-    return ("ready", key) if ok else ("failed", key)
+        return "failed", key, str(e)
+    if ok:
+        _render_errors.pop(key, None)
+        return "ready", key, ""
+    return "failed", key, _render_errors.pop(key, "")
 
 
 def manim_available_kinds(key_stage: Optional[str] = None, subject: Optional[str] = None) -> List[str]:
