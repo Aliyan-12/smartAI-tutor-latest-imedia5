@@ -232,6 +232,12 @@ def visual_tool_groups(ctx: ToolContext) -> dict:
           • Available: Circle, Square, Rectangle, Polygon, Line, Arrow, Dot, Text, MathTex, VGroup,
             Axes, NumberLine, NumberPlane, ParametricFunction, Brace, Angle … and Create, Write,
             FadeIn, FadeOut, Transform, Rotate, Indicate, LaggedStart, `.animate`, self.play, self.wait.
+          • POINTS BEFORE POSITION: only call `.get_start()` / `.get_end()` / `.get_center()` /
+            `.next_to(x)` on a mobject that ALREADY has points. An empty `VGroup()`, or a shape you
+            haven't built yet, has NO points → the render errors ("Mobject with no points"). Build
+            the shape first, then read its position.
+          • Every `\` must live INSIDE a string (a raw string for LaTeX). A bare backslash in the
+            code itself is a Python syntax error ("unexpected character after line continuation").
           • Keep it SHORT — one idea, 5-15 seconds.
 
         The render takes a couple of seconds and this tool WAITS for it, so when it returns
@@ -242,7 +248,7 @@ def visual_tool_groups(ctx: ToolContext) -> dict:
             return {"action": "show_puzzle", "error": "animations_disabled",
                     "message": "Animations aren't enabled here — use draw_svg or mermaid_diagram instead."}
         try:
-            status, key = await mms.render_code(code)
+            status, key, detail = await mms.render_code(code)
         except mms.SceneCodeError as e:
             # Log the ACTUAL rejection reason (which manim name/construct was refused) — the tool
             # result carries it to the model, but without this it never reaches the server logs.
@@ -250,11 +256,17 @@ def visual_tool_groups(ctx: ToolContext) -> dict:
             return {"action": "show_puzzle", "error": "bad_code",
                     "message": f"{e}. Fix the animation code and resend, or use draw_svg instead."}
         if status == "failed":
-            logger.warning("animate_concept render_failed (code validated but manim render errored)")
+            # Hand the REAL manim error to the model so it can actually fix it (e.g. "Cannot call
+            # Mobject.get_start for a Mobject with no points" → give the mobject points first). This
+            # is what turns a dead-end render_failed into a successful self-correction retry.
+            logger.warning("animate_concept render_failed: %s", detail or "(no detail)")
+            _reason = f" ({detail})" if detail else ""
             return {"action": "show_puzzle", "error": "render_failed",
-                    "message": "That scene couldn't be rendered, so nothing is on screen. Draw the "
-                               "idea with draw_svg or mermaid_diagram instead — don't refer to an "
-                               "animation."}
+                    "message": f"The animation code ran but manim errored{_reason}, so nothing is on "
+                               "screen. Fix that specific error and resend (common causes: calling "
+                               ".get_start()/.get_end()/.get_center() on a mobject that has no points "
+                               "yet, or an empty VGroup) — or draw the idea with draw_svg / "
+                               "mermaid_diagram instead. Do NOT mention any animation to the student."}
         if status != "ready":
             return {"action": "show_puzzle", "error": "rendering",
                     "message": "That animation is taking unusually long and is NOT on screen — "
