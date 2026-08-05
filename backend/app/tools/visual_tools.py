@@ -238,6 +238,9 @@ def visual_tool_groups(ctx: ToolContext) -> dict:
             the shape first, then read its position.
           • Every `\` must live INSIDE a string (a raw string for LaTeX). A bare backslash in the
             code itself is a Python syntax error ("unexpected character after line continuation").
+          • NO external images or SVGs — no SVGMobject / ImageMobject (they load a file). Build any
+            object (a bottle, a cell, an arrow) out of primitives: Circle, Rectangle, Polygon, Line,
+            Dot, VGroup. If you want a ready-made static labelled picture instead, use draw_svg.
           • Keep it SHORT — one idea, 5-15 seconds.
 
         The render takes a couple of seconds and this tool WAITS for it, so when it returns

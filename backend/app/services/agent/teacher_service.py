@@ -1074,6 +1074,15 @@ _BLOCKED_NAMES = {
     # installed in the image and numbers render via Text (see _LATEX_FREE_PREAMBLE). `np` is allowed
     # too (numpy is installed + injected into the runner). These moved to the allow-list.
     "TexTemplate": "don't build a TexTemplate — just call MathTex(...) / Tex(...) directly",
+    # No loading images/SVGs into an animation (SVGMobject/ImageMobject load a FILE — not allowed,
+    # and they can't take a raw string anyway). Build the shape from primitives, or use draw_svg.
+    "SVGMobject": "SVGMobject is not available (it loads an external file). Build the shape from "
+                  "primitives — Circle, Rectangle, RoundedRectangle, Polygon, Line, Dot, VGroup — "
+                  "or, if you want a static labelled picture, use the draw_svg tool instead of an animation.",
+    "ImageMobject": "ImageMobject is not available (no external images). Build the picture from "
+                    "primitives (Circle/Rectangle/Polygon/Line/Dot/VGroup), or use draw_svg / "
+                    "explanatory_puzzle for a static picture.",
+    "SVGMobjectFromString": "not available — build the shape from primitives, or use draw_svg.",
     "config": "the global config is not writable from a scene",
     "open": "file access is not allowed",
     "eval": "eval is not allowed",
