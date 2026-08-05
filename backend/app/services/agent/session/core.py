@@ -2642,6 +2642,30 @@ async def _run_turn(send, chat_id, user_id, *, saved_user_text, ai_content,
                     if any(d["index"] == _n and d["kind"] == "answer" for d in _dmap):
                         _prog += ("\n   ✅ THIS IS THE ANSWER SLIDE — go through it now, "
                                   "confirming what they got right and correcting gently.")
+                    # BUILD SEQUENCE = one logical slide shown in steps: a question, then 'Why?',
+                    # then the ✅ reveal — all sharing the SAME heading. Teaching each re-explains the
+                    # SAME answer (the "explained 'why it's false' 3 times over slides 13/14/15" bug).
+                    # Detect a run of same-heading slides that is a question/answer reveal and tell
+                    # the tutor to handle it in ONE exchange, then JUMP past the duplicates to the
+                    # next NEW slide. (Guarded by kind so a series of different 'Worked Example'
+                    # slides that happen to share a heading is NOT skipped.)
+                    _label_by_idx = {d["index"]: (d.get("label") or "").strip().lower() for d in _dmap}
+                    _kind_by_idx = {d["index"]: d["kind"] for d in _dmap}
+                    _cur_label = _label_by_idx.get(_n, "")
+                    if len(_cur_label) >= 4:
+                        _k = _n + 1
+                        while _label_by_idx.get(_k) == _cur_label:
+                            _k += 1
+                        _is_qa = any(_kind_by_idx.get(i) in ("question", "answer") for i in range(_n, _k))
+                        if _k > _n + 1 and _k <= _tot and _is_qa:
+                            _disp = next((d.get("label", "") for d in _dmap if d["index"] == _n), "")
+                            _prog += (
+                                f"\n   ⏭ SLIDES {_n + 1}–{_k - 1} ARE THE SAME question/point as this "
+                                f"one (\"{_disp[:40]}\"), just revealed step by step — do NOT teach them "
+                                f"one at a time (that repeats the same answer). Ask + confirm the answer "
+                                f"ONCE here, then call jump_to_slide({_k}) to go STRAIGHT to the next NEW "
+                                f"slide (slide {_k}) — never re-explain the same answer on each reveal slide."
+                            )
                 ai_content = (
                     f"{ai_content}\n\n{_prog}\n"
                     f"━━━ ON-SCREEN SLIDE {_n} of {_tot} (showing on the student's screen right now) ━━━\n"
@@ -2652,7 +2676,10 @@ async def _run_turn(send, chat_id, user_id, *, saved_user_text, ai_content,
                     "words, then ask ONE short question about it. Never teach ahead of the slide on screen.\n"
                     "• When the student has engaged with this slide (answered it, or said \"ok / got it / "
                     "next / yes\"), call advance_lesson_slide ONCE *before* teaching, then teach the next "
-                    "slide it returns. Teaching always moves ONE slide forward per reply, in order.\n"
+                    "slide it returns. Teaching normally moves ONE slide forward per reply, in order — "
+                    "EXCEPT when the ⏭ note above flags that the next slides just repeat/answer THIS same "
+                    "point: then call jump_to_slide to that next-NEW slide and skip the duplicates, so you "
+                    "never explain the same answer two or three times.\n"
                     "• If the student is confused or answers wrong, call retreat_lesson_slide ONCE and re-teach.\n"
                     "• Only use show_resource when the student explicitly asks to jump to a specific slide.\n"
                     "Keep what you say in sync with the slide on screen."
@@ -3096,6 +3123,7 @@ _THINKING_LABELS: dict = {
     "update_topic_mastery": "Updating progress",
     "advance_lesson_slide": "Moving to the next slide",
     "retreat_lesson_slide": "Going back a slide",
+    "jump_to_slide": "Skipping ahead to the next topic",
     "show_resource": "Opening the slide",
     "load_resource": "Finding the right resource",
     "advance_lesson_phase": "Moving to the next part of the lesson",
