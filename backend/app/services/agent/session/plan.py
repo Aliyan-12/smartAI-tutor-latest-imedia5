@@ -819,15 +819,16 @@ _DEFAULT_TYPE = "teach"
 # wrong — a 20-minute plan allocated 25 minutes (so its review phase was unreachable) and a
 # 40-minute plan allocated 39.
 #
-# A 20-minute lesson has NO TEACHING PHASE by design: there isn't time to introduce new material
-# and practise it, so a Quick Boost recaps, practises, and reviews. A `0` here removes that
-# phase from the plan entirely rather than shrinking it to a token minute — the lesson state
-# machine then never enters it, and the tutor is told outright not to teach new content.
+# A 20-minute lesson is PRACTICE-ONLY by design — for ALL FOUR goals. It has NO recap and NO
+# teaching phase, so the navigator assigns the PRACTITIONER from the very first turn: no Teacher
+# ever runs and nothing new is taught. The recap/teach minutes are folded into practice, and the
+# whole session is hands-on practice → quiz → review. A `0` phase is dropped from the plan entirely
+# (the lesson state machine never enters it), which is what keeps the Teacher out completely.
 _PHASE_BUDGET: Dict[int, Dict[str, int]] = {
     # A QUIZ phase follows practice in every length (5/10/10/15 min). Its time is carved mostly
     # from practice; at 40 min practice alone isn't enough, so review also drops to 5 — a
     # 40-minute lesson can't fit 15 teach + 10 practice + 10 quiz + 10 review + 5 recap.
-    20: {"recap": 5, "teach": 0,  "practice": 5,  "quiz": 5,  "review": 5},
+    20: {"recap": 0, "teach": 0,  "practice": 10, "quiz": 5,  "review": 5},
     40: {"recap": 5, "teach": 15, "practice": 5,  "quiz": 10, "review": 5},
     60: {"recap": 5, "teach": 20, "practice": 15, "quiz": 10, "review": 10},
     90: {"recap": 5, "teach": 35, "practice": 25, "quiz": 15, "review": 10},
