@@ -50,8 +50,8 @@ def goal_resource_types(goal: Optional[str]) -> List[str]:
 # `style` is handed to the session prompt so the tutor teaches the material the right way.
 _POLICY_STYLES = {
     "slides": "Teach the SLIDES one at a time — show a slide, explain it briefly with an example, then move on.",
-    "worksheet": "WORKSHEET-LED: put the worksheet on screen and work through it WITH the student, question by question, then practice examples, a quiz and a summary.",
-    "quiz_sheet": "EXAM-STYLE: lead with the quiz/exam sheet, then the worksheet, working through questions with the student, then practice, quiz and summary.",
+    "worksheet": "WORKSHEET-LED: the WORKSHEET on screen is the whole lesson. Work through IT with the student, question by question, in its own order. Base EVERY question, example and explanation on THIS worksheet's actual content — do NOT invent your own questions or bring in examples from anywhere else (no slide/textbook examples like rivers or Robert Hooke). Only ask about what is on the worksheet. Then a quiz on the worksheet's topic and a summary.",
+    "quiz_sheet": "EXAM-STYLE: the quiz/exam sheet on screen is the lesson — work through ITS questions with the student, then the worksheet, in their own order. Base everything on the sheet's actual content — do NOT invent questions or import outside examples. Then practice, a quiz and a summary.",
     "none": "NO resources this session — teach directly, with hands-on puzzles and a quiz.",
 }
 

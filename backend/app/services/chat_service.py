@@ -141,11 +141,13 @@ async def build_context(
                     # unit — a "2. The sine ratio" lesson was fed tangent and cosine chunks and
                     # duly taught all three. Widen only if the tight scope finds nothing, so a
                     # subtopic with no vectorised slides still gets context instead of silence.
+                    # `resource_types` (worksheet-led lessons) is a HARD constraint — keep it at every
+                    # widening level, so a widen never pulls slide chunks back into a worksheet lesson.
                     ladder = [
                         dict(rag_scope),
                         {k: v for k, v in rag_scope.items() if k != "topic_title"},
                         {k: v for k, v in rag_scope.items()
-                         if k in ("subject", "key_stage")},
+                         if k in ("subject", "key_stage", "resource_types")},
                     ]
                     for i, flt in enumerate(ladder):
                         rag_chunks = await retrieve_hub_chunks(

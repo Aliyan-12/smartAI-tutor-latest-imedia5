@@ -864,11 +864,18 @@ def _apply_ks_emphasis(budget: Dict[str, int], key_stage: Optional[str]) -> Dict
     return out
 
 
-def phase_budget(duration: int, key_stage: Optional[str] = None) -> Dict[str, int]:
+# "Practice & Improve" is the homework goal — DIRECT PRACTICE at every length: no recap or teaching
+# phase and no Teacher, so those minutes fold into practice and the Practitioner runs the lesson.
+_PRACTICE_ONLY_GOALS = {"homework"}
+
+
+def phase_budget(duration: int, key_stage: Optional[str] = None,
+                 goal: Optional[str] = None) -> Dict[str, int]:
     """Minutes per phase for this lesson length. Exact for the four bookable lengths; any other
     duration is scaled from the nearest one, with the rounding remainder given to practice so the
     total always equals the lesson length. `key_stage` shifts recap↔teach (younger = more recap)
-    without moving the quiz start."""
+    without moving the quiz start. `goal` can drop the recap/teach phases entirely (practice-only
+    goals)."""
     if duration in _PHASE_BUDGET:
         out = dict(_PHASE_BUDGET[duration])
     else:
@@ -879,6 +886,14 @@ def phase_budget(duration: int, key_stage: Optional[str] = None) -> Dict[str, in
         drift = duration - sum(out.values())
         if drift:
             out["practice"] = max(0, out.get("practice", 0) + drift)
+    # Practice-only goals ("Practice & Improve"/homework): NO recap or teaching phase at ANY length.
+    # Fold recap+teach into practice so the Practitioner runs the whole lesson (no Teacher, no
+    # teaching). recap+teach+practice is preserved, so the quiz start time is unchanged.
+    if goal and str(goal).strip().lower() in _PRACTICE_ONLY_GOALS:
+        out = dict(out)
+        out["practice"] = out.get("practice", 0) + out.get("recap", 0) + out.get("teach", 0)
+        out["recap"] = 0
+        out["teach"] = 0
     return _apply_ks_emphasis(out, key_stage)
 
 
@@ -935,7 +950,7 @@ def generate_plan_blocks(
                          meta[0] if meta else _DEFAULT_TYPE,
                          meta[1] if meta else _DEFAULT_AI_INSTRUCTION))
 
-    budget = phase_budget(duration_minutes, key_stage)
+    budget = phase_budget(duration_minutes, key_stage, goal)
     # A phase with a zero budget is DROPPED, not shrunk — a 20-minute lesson genuinely has no
     # teaching phase, and a 1-minute teach step would just invite the tutor to start teaching.
     kept = [r for r in resolved if budget.get(r[1], 0) > 0]

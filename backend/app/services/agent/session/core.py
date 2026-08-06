@@ -2488,6 +2488,23 @@ async def _run_turn(send, chat_id, user_id, *, saved_user_text, ai_content,
                         "unit_title": _sc_units[0] if _sc_units else None,
                         "topic_title": _sc_sub or None,
                     }
+                    # WORKSHEET-LED / QUIZ-SHEET lessons (Practice&Improve/homework, catch_up,
+                    # revision) must ground RAG in the WORKSHEET (or quiz sheet), NOT the slide deck
+                    # — otherwise slide embeds (a 'river' example, 'Robert Hooke') leak into a
+                    # worksheet lesson. Restrict retrieval to the policy's resource types so the AI
+                    # only sees, asks about, and helps with the exact worksheet on screen.
+                    try:
+                        from app.services.agent.session.resources import lesson_resource_policy as _lrp
+                        from app.models.lesson_plan import LessonPlan as _LPg
+                        _lpg = (await db.execute(
+                            select(_LPg).where(_LPg.appointment_id == _sc_appt_id)
+                        )).scalar_one_or_none()
+                        _pol_sc = _lrp(_lpg.goal if _lpg else None,
+                                       getattr(_sc_appt, "duration_minutes", None) or 60)
+                        if _pol_sc.get("style") in ("worksheet", "quiz_sheet") and _pol_sc.get("types"):
+                            _scope["resource_types"] = _pol_sc["types"]
+                    except Exception:
+                        logger.warning("worksheet RAG scope failed for chat %s", chat_id, exc_info=True)
         except Exception:
             _scope = None
             logger.warning("RAG scope build failed for chat %s", chat_id, exc_info=True)
@@ -2944,6 +2961,12 @@ async def _run_turn(send, chat_id, user_id, *, saved_user_text, ai_content,
             # ALWAYS so any "here's a diagram/animation"
             # is backed by a real tool call — the model can never narrate a visual it couldn't make.
             _role_groups = set(_role.tool_groups)
+            # QUIZ ONLY IN THE QUIZ WINDOW. The Practitioner owns both practice and quiz, but the
+            # `assessment` group (generate_quiz) must bind ONLY once the quiz window is open —
+            # otherwise the coach offers "let me set you a quiz" mid-practice. During practice it
+            # keeps puzzles/interact/mastery; the quiz tool appears only when _quiz_phase is true.
+            if _role.name == "practitioner" and not _quiz_phase:
+                _role_groups.discard("assessment")
             _role_prompt = _role.backstory + "\n\n" + (session_system_prompt or "")
             if getattr(settings, "debug", False):
                 logger.info(
