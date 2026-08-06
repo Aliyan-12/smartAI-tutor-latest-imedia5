@@ -1737,8 +1737,9 @@ def _coerce_str(token) -> str:
 # STRONG imperatives ("have a go", "your turn") are invites on their own; the softer phrases
 # only count as an invite when the message is a question (ends with "?").
 _STRONG_INVITE_RE = _re.compile(
-    r"\b(have a go|give it a go|your turn|tap the|build (the|a|this)|put (these|them)|"
-    r"order (these|them)|see if you can|work (it|them|this|that) out)\b",
+    r"\b(have a go|give it a (go|try)|your turn|tap the|build (the|a|this)|put (these|them)|"
+    r"order (these|them)|match (these|them|the|up)|drag (the|these|them)|sort (these|them|the)|"
+    r"see if you can|work (it|them|this|that) out)\b",
     _re.IGNORECASE,
 )
 _QUESTION_INVITE_RE = _re.compile(
@@ -1754,7 +1755,11 @@ _QUESTION_INVITE_RE = _re.compile(
 # It needs to trigger recovery on its own, because the message may carry no invite phrase at all.
 _CLAIMS_ON_SCREEN_RE = _re.compile(
     r"\b(on|onto) your screen\b|\bon the screen\b|\bshould be (up|there|showing|visible)\b|"
-    r"\b(puzzle|activity|question|diagram) is (now )?(up|there|showing|ready)\b",
+    r"\b(puzzle|activity|question|diagram|challenge|match) is (now )?(up|there|showing|ready)\b|"
+    r"\bhere('?s| is| are)\s+(a|an|your|the|another|this|these|some)?\s*(new\s+)?"
+    r"(puzzle|activity|question|challenge|task|match|matching|exercise)\b|"
+    r"\bi('?ve| have)\s+(just\s+)?(put|set|got|added|created)\b.{0,40}"
+    r"\b(puzzle|activity|question|challenge|task|match|exercise)\b",
     _re.IGNORECASE,
 )
 
@@ -2816,6 +2821,11 @@ async def _run_turn(send, chat_id, user_id, *, saved_user_text, ai_content,
         # with no error). The safety net below uses it to catch "invited practice but showed
         # nothing" and force a recovery generation.
         generator_shown_this_turn = False
+        # True once a puzzle generator was CALLED this turn but returned an error (image gen
+        # failed, bad params, …) — i.e. the AI tried to put a puzzle up and nothing appeared.
+        # The safety net uses this to recover even when the reply text carries no invite phrase
+        # ("sometimes matching puzzle also donot work, and AI still says its on screen").
+        generator_error_this_turn = False
         # True once the AI attached tap-to-answer quick replies this turn (so the student can
         # answer without typing). Used by the "don't force typing" safety net below.
         quick_replies_shown_this_turn = False
@@ -2833,7 +2843,7 @@ async def _run_turn(send, chat_id, user_id, *, saved_user_text, ai_content,
             # on?" → "…let's start with the question you're stuck on."). Those restatements are
             # reworded enough to slip past sentence dedup, so the only reliable fix is not to
             # emit them at all.
-            nonlocal seq, generator_shown_this_turn, quick_replies_shown_this_turn, _pending_ended_appt
+            nonlocal seq, generator_shown_this_turn, generator_error_this_turn, quick_replies_shown_this_turn, _pending_ended_appt
             _sys = sys_prompt or session_system_prompt
             _grp = groups if groups is not None else tool_groups_for_turn
             async for raw in gemini_service.stream_response_async(
@@ -2870,6 +2880,11 @@ async def _run_turn(send, chat_id, user_id, *, saved_user_text, ai_content,
                         # A puzzle actually reached the screen (not an error payload).
                         if _action == "show_puzzle" and not _data.get("error"):
                             generator_shown_this_turn = True
+                        # A puzzle generator was called but FAILED — the AI tried to show a puzzle
+                        # and nothing appeared. Remember it so the safety net can recover even if
+                        # the reply text has no invite phrase.
+                        if _action == "show_puzzle" and _data.get("error"):
+                            generator_error_this_turn = True
                         # Tap-to-answer buttons were attached (student won't have to type).
                         if _action == "quick_replies" and not _data.get("error"):
                             quick_replies_shown_this_turn = True
@@ -3009,11 +3024,15 @@ async def _run_turn(send, chat_id, user_id, *, saved_user_text, ai_content,
             # that had merely INVITED practice, it force-generated a matching_puzzle the Teacher then
             # couldn't mark (matching_evaluator isn't bound for it). The Teacher never makes puzzles.
             _puzzle_role_ok = (_role is None or _role.name == "practitioner")
+            # Recover when the practitioner EITHER claimed/invited a puzzle in words, OR actually
+            # tried a generator that failed — both leave the student with nothing to do.
+            _needs_puzzle = _invites_practice(_said) or generator_error_this_turn
             if _status_after not in ("showing", "submitted"):
-                if _invites_practice(_said) and _puzzle_role_ok:
+                if _needs_puzzle and _puzzle_role_ok:
                     logger.info(
-                        "SAFETY NET: invited practice with no puzzle on screen — forcing a "
-                        "generator turn (appt=%s)", appt_id,
+                        "SAFETY NET: no puzzle on screen (invited=%s gen_error=%s) — forcing a "
+                        "generator turn (appt=%s)",
+                        _invites_practice(_said), generator_error_this_turn, appt_id,
                     )
                     _recovery = (
                         "[SYSTEM — DO THIS NOW, silently] Your last message to the student was:\n"
@@ -3021,17 +3040,19 @@ async def _run_turn(send, chat_id, user_id, *, saved_user_text, ai_content,
                         "But there is NO puzzle on their screen, so they can see nothing to do "
                         "(they will ask 'where is it?'). NOTE: moving to a slide CLEARS any puzzle, "
                         "so if you showed one earlier it is gone — you must generate it AGAIN. "
-                        "Call the generator that matches what you just asked, RIGHT NOW:\n"
-                        "  • naming/identifying parts of pictures → labelling_puzzle\n"
+                        "Call the PUZZLE generator that matches what you just asked, RIGHT NOW:\n"
+                        "  • naming/identifying pictures → labelling_puzzle\n"
                         "  • pairing things up → matching_puzzle\n"
-                        "  • a labelled structure to study (cell, circuit, wave, forces) → svg_diagram\n"
-                        "  • a flow/cycle/relationship → mermaid_diagram\n"
                         "  • an exact fraction / clock / ruler reading → diagram_math_puzzle\n"
                         "  • a sum, equation or algebra → math_puzzle (tappable answer buttons)\n"
                         "  • a hands-on maths activity → manipulative_puzzle (compare_numbers · "
                         "order_numbers · place_value_counters · counting_bubbles · dot_array · "
                         "times_table_dash · fraction_canvas · column_addition · number_grid_sums)\n"
                         "  • reading a graph → graph_puzzle\n"
+                        "If one generator returns an error, it did NOT appear — immediately call a "
+                        "DIFFERENT puzzle generator from this list in this SAME reply (a picture "
+                        "puzzle can fail, but math_puzzle / manipulative_puzzle / diagram_math_puzzle "
+                        "never need pictures). Do NOT stop until one succeeds.\n"
                         "⚠️ YOUR PREVIOUS MESSAGE HAS ALREADY BEEN SHOWN TO THE STUDENT and is on "
                         "their chat right now. Do NOT greet them again, do NOT re-introduce the "
                         "topic, do NOT restate or re-word ANY part of it — that would appear twice "
@@ -3045,7 +3066,15 @@ async def _run_turn(send, chat_id, user_id, *, saved_user_text, ai_content,
                         # guard for it, or a teaching diagram earlier in this same turn would
                         # silently block the recovery and the safety net would stop working.
                         tool_context.visual_shown = ""
-                        await _consume(_recovery, with_image=False)
+                        # Bind PUZZLE-GENERATING groups only (no `interact`) so the recovery MUST
+                        # put a real puzzle up. With `interact` bound it could "recover" by
+                        # attaching quick_replies tap-buttons instead of a puzzle — which is not a
+                        # puzzle, so the student's screen stays effectively blank and the claim
+                        # ("have a go") is still a lie. Puzzle generators + evaluators live in
+                        # `puzzles`; `mastery` carries the marking tools they may need.
+                        await _consume(
+                            _recovery, with_image=False, groups={"puzzles", "mastery"},
+                        )
                     except Exception:
                         logger.warning("safety-net recovery turn failed for appt %s", appt_id, exc_info=True)
                 elif _minimal_typing and not quick_replies_shown_this_turn and _expects_reply(_said):

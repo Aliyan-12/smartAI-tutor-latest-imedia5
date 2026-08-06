@@ -526,18 +526,26 @@ def puzzle_tool_groups(ctx: ToolContext) -> dict:
         available = manipulative_service.allowed_kinds(ctx.key_stage, ctx.subject)
         if not available:
             return {"action": "show_puzzle", "error": "not_for_key_stage",
-                    "message": f"There's no hands-on activity for {ctx.subject} at "
-                               f"{ctx.key_stage} — set a math_puzzle or graph_puzzle instead."}
+                    "message": (f"NOTHING is on the student's screen — there's no hands-on activity "
+                                f"for {ctx.subject} at {ctx.key_stage}. Do NOT tell the student and "
+                                f"do NOT say a puzzle is on screen. Set a math_puzzle, matching_puzzle, "
+                                f"labelling_puzzle or quick_replies instead.")}
         if k not in manipulative_service.MANIPULATIVES:
             return {"action": "show_puzzle", "error": "bad_kind",
-                    "message": f"Unknown kind {kind!r}. For {ctx.subject} at {ctx.key_stage} "
-                               f"choose one of: {', '.join(available)}."}
+                    "message": (f"NOTHING is on the student's screen — {kind!r} isn't a real activity. "
+                                f"Do NOT tell the student and do NOT say a puzzle is on screen. "
+                                f"For {ctx.subject} at {ctx.key_stage} either call manipulative_puzzle "
+                                f"again with one of: {', '.join(available)} — or set a different "
+                                f"puzzle (matching_puzzle, labelling_puzzle, math_puzzle, quick_replies).")}
         # Right kind, wrong audience — e.g. counting_bubbles in a KS4 lesson, or an atom builder
         # in a Maths lesson. Say so plainly so the model re-picks instead of guessing again.
         if k not in available:
             return {"action": "show_puzzle", "error": "not_for_key_stage",
-                    "message": f"{k!r} isn't suitable for {ctx.subject} at {ctx.key_stage}. "
-                               f"Choose one of: {', '.join(available)}."}
+                    "message": (f"NOTHING is on the student's screen — {k!r} isn't suitable for "
+                                f"{ctx.subject} at {ctx.key_stage}. Do NOT tell the student and do NOT "
+                                f"say a puzzle is on screen. Call manipulative_puzzle again with one of: "
+                                f"{', '.join(available)} — or set a different puzzle "
+                                f"(matching_puzzle, labelling_puzzle, math_puzzle, quick_replies).")}
 
         try:
             clean, solution, prompt, title = manipulative_service.build_spec(
@@ -550,11 +558,19 @@ def puzzle_tool_groups(ctx: ToolContext) -> dict:
             topic = f" This lesson's topic is {ctx.topic_title!r}." if ctx.topic_title else ""
             logger.info("MANIPULATIVE bad params kind=%s: %s", k, e)
             return {"action": "show_puzzle", "error": "bad_params",
-                    "message": f"{e}{topic} Fix the params and call manipulative_puzzle again."}
+                    "message": (f"The activity could NOT be built, so NOTHING is on the student's "
+                                f"screen. Do NOT tell the student and do NOT say 'here's a puzzle' / "
+                                f"'have a go' / 'it's on your screen'. Reason: {e}{topic} "
+                                f"Either call manipulative_puzzle again with a VALID choice from that "
+                                f"list, OR — if none of them fit this topic — set a DIFFERENT puzzle "
+                                f"instead: matching_puzzle, labelling_puzzle, math_puzzle or "
+                                f"quick_replies.")}
         if solution is None:
             return {"action": "show_puzzle", "error": "bad_kind",
-                    "message": f"Unknown kind {kind!r}. Choose one of: "
-                               f"{', '.join(available)}."}
+                    "message": (f"NOTHING is on the student's screen — {kind!r} couldn't be built. "
+                                f"Do NOT tell the student a puzzle is up. Choose one of: "
+                                f"{', '.join(available)} — or set a different puzzle "
+                                f"(matching_puzzle, labelling_puzzle, math_puzzle, quick_replies).")}
         full = puzzle_service.build_manipulative(k, clean, solution, prompt, title)
         return await _persist_and_return(full)
 
