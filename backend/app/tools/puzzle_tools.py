@@ -209,7 +209,12 @@ def puzzle_tool_groups(ctx: ToolContext) -> dict:
         full = puzzle_service.build_labelling(merged, prompt)
         if full.get("error"):
             return {"action": "show_puzzle", "error": full["error"],
-                    "message": "Couldn't generate enough images — ask a quick spoken question instead."}
+                    "message": ("The picture puzzle could NOT be built (image generation failed), so "
+                                "NOTHING is on the student's screen. Do NOT tell the student and do "
+                                "NOT say 'here's a puzzle' / 'tap the option' / 'it's on your screen'. "
+                                "Set a DIFFERENT puzzle that needs NO pictures: math_puzzle (tappable "
+                                "answer buttons), manipulative_puzzle, or diagram_math_puzzle — or ask "
+                                "ONE quick question with quick_replies tap options.")}
         return await _persist_and_return(full)
 
     @tool
@@ -227,7 +232,12 @@ def puzzle_tool_groups(ctx: ToolContext) -> dict:
         full = puzzle_service.build_matching(merged, prompt)
         if full.get("error"):
             return {"action": "show_puzzle", "error": full["error"],
-                    "message": "Couldn't generate enough images — ask a quick spoken question instead."}
+                    "message": ("The picture puzzle could NOT be built (image generation failed), so "
+                                "NOTHING is on the student's screen. Do NOT tell the student and do "
+                                "NOT say 'here's a puzzle' / 'tap the option' / 'it's on your screen'. "
+                                "Set a DIFFERENT puzzle that needs NO pictures: math_puzzle (tappable "
+                                "answer buttons), manipulative_puzzle, or diagram_math_puzzle — or ask "
+                                "ONE quick question with quick_replies tap options.")}
         return await _persist_and_return(full)
 
     @tool
