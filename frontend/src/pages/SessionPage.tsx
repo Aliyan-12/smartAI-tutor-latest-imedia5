@@ -8,7 +8,7 @@ import ChatInput from "../components/ChatInput";
 import QuickReplies from "../components/QuickReplies";
 import ResourceViewer, { type ResourceSlide } from "../components/ResourceViewer";
 import PuzzlePlayer from "../components/PuzzlePlayer";
-import { phaseTimeline } from "../lib/lessonPhases";
+import { phaseTimeline, goalFromDescription } from "../lib/lessonPhases";
 import LearnIdle from "../components/LearnIdle";
 import Celebration from "../components/puzzles/Celebration";
 import type { PuzzlePayload } from "../components/puzzles/types";
@@ -166,7 +166,7 @@ export default function SessionPage() {
 
   const apptId = appointmentId ? parseInt(appointmentId) : 0;
 
-  const sessionPhases = getPhasesForDuration(durationMinutes);
+  const sessionPhases = getPhasesForDuration(durationMinutes, goalFromDescription(previewAppt?.description));
   const phaseElapsedSeconds = durationMinutes * 60 - timeRemaining;
   const phaseElapsedMin = Math.floor(phaseElapsedSeconds / 60);
   const currentPhaseIdx = getCurrentPhaseIndex(phaseElapsedMin, sessionPhases);
@@ -802,7 +802,7 @@ export default function SessionPage() {
     const sessionTypeMatch = desc.match(/Session type:\s*([^\n]+)/);
     const previewTopics = topicsMatch?.[1] ?? null;
     const previewSessionType = sessionTypeMatch?.[1] ?? null;
-    const phases = getPhasesForDuration(dur);
+    const phases = getPhasesForDuration(dur, goalFromDescription(desc));
 
     return (
       <div style={{ minHeight: "100vh", background: "var(--bg-primary)", display: "flex", flexDirection: "column" }}>
