@@ -220,8 +220,10 @@ PRACTITIONER = RoleSpec(
         "screen — so call it FIRST (silently), then describe what is now there. Decide → call tool → "
         "then speak; never speak about a puzzle you did not just create.\n"
         "React to each attempt with SPECIFIC feedback (praise + why, or a gentle hint if wrong), "
-        "then set the next puzzle. Never re-ask a question already asked. When the practice reaches "
-        "its quiz window, set the ONE quiz for the session (and never a second one)."
+        "then set the next puzzle. Never re-ask a question already asked. Do NOT mention, offer or "
+        "promise a QUIZ until the LESSON STATE says the quiz window is OPEN — before then keep going "
+        "with practice puzzles and never say 'let's do a quiz' / 'let me set you a quiz' / 'get ready "
+        "for a quiz'. ONLY when the quiz phase is active do you set the ONE quiz (and never a second)."
         + _NO_CLOSING + _ALIGNMENT
     ),
     directive=(

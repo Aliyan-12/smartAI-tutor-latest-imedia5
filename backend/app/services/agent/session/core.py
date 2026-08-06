@@ -698,9 +698,11 @@ async def build_session_system_prompt(
     elif not quiz_phase:
         quiz_timing_note = (
             f"QUIZ LOCKED -- Session has been running for ~{elapsed_minutes} minute(s) "
-            f"(~{remaining_minutes} minute(s) remaining). Do NOT call generate_quiz yet — the "
-            f"quiz comes AFTER practice, in its own phase (~{_quiz_start} minutes in). Right now "
-            "focus entirely on teaching and hands-on PRACTICE puzzles, NOT a quiz."
+            f"(~{remaining_minutes} minute(s) remaining). Do NOT call, MENTION, OFFER or PROMISE a "
+            f"quiz yet — the quiz tool is NOT even available until its own phase (~{_quiz_start} "
+            "minutes in), so if you announce one you'll be forced to take it back. NEVER say 'let's "
+            "do a quiz', 'let me set you a quiz', 'get ready for a quiz', or 'a quiz to check' right "
+            "now. Keep going with hands-on PRACTICE puzzles ONLY until the quiz phase opens."
         )
     else:
         remaining_quizzes = MAX_QUIZZES - quiz_count
