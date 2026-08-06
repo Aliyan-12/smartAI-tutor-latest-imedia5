@@ -282,9 +282,15 @@ async def build_playlist(db: AsyncSession, appointment) -> List[RHResource]:
                 except Exception:  # noqa: BLE001
                     logger.warning("failed to persist auto subtopic", exc_info=True)
 
-    # 2. Policy types (fall back to whatever exists rather than showing nothing).
+    # 2. Policy types. Fallback rule: ONLY a SLIDE-led lesson (Learn from Scratch) may fall back to
+    #    whatever exists when its preferred types aren't present — it needs *a* deck to teach from.
+    #    A WORKSHEET-led / QUIZ-SHEET lesson (Practice & Improve/homework, catch_up, revision) must
+    #    NEVER fall back to the slide deck: if there's no worksheet/quiz sheet, the Learn tab stays
+    #    EMPTY and the lesson runs on PRACTICE puzzles. Otherwise a "Practice & Improve" lesson with
+    #    no worksheet wrongly loaded the PowerPoint slides. (Slides only ever appear for Learn from
+    #    Scratch.)
     preferred = [r for r in resources if (r.resource_type or "").lower() in types]
-    chosen = preferred if preferred else resources
+    chosen = preferred if preferred else (resources if policy["style"] == "slides" else [])
     if not chosen:
         return []
 
