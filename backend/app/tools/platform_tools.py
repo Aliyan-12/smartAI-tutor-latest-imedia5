@@ -399,6 +399,20 @@ def platform_tool_groups(ctx: ToolContext) -> dict:
         return {"action": "end_lesson", "ended": True, "closing_note": closing_note}
 
     @tool
+    async def allow_end_lesson() -> dict:
+        """
+        Unlock ending. Call this ONCE at the very end of the lesson — after you have
+        delivered the recap AND written the report — to sanction the student ending the
+        session. It does NOT end the lesson itself: it flips the `end_allowed` flag so the
+        student may click 'End Lesson' whenever they're ready. After calling it, tell the
+        student the lesson is complete and they can end it when they like. Call silently.
+        """
+        from app.services.agent.session import state as session_state_service
+        await session_state_service.set_end_allowed(ctx.db, ctx.appointment_id, True)
+        logger.info("allow_end_lesson → end_allowed=True appt=%s", ctx.appointment_id)
+        return {"action": "allow_end_lesson", "ok": True}
+
+    @tool
     async def generate_session_report(
         topics_covered: List[str],
         student_performance: str = "good",
@@ -613,7 +627,7 @@ def platform_tool_groups(ctx: ToolContext) -> dict:
         "assessment": [generate_quiz],
         "mastery": [get_student_mastery, update_topic_mastery, evaluate_answer],
         "platform": [advance_lesson_phase, create_assignment, load_resource, pause_lesson, resume_lesson],
-        "lifecycle": [end_lesson, generate_session_report],
+        "lifecycle": [end_lesson, allow_end_lesson, generate_session_report],
         "research": [web_search, deep_research],
     }
 

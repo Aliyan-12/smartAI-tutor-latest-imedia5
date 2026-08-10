@@ -2062,13 +2062,14 @@ async def build_lesson_state_anchor(
         # anything the student said. Most-urgent first.
         if end_allowed:
             lines.append(
-                "⚡ DO NOW: time is up — give a short 2–3 sentence recap of what they learned, "
-                "then call generate_session_report and end_lesson. Do NOT start new teaching."
+                "⚡ DO NOW: the lesson is closing — follow your SUMMARY STEP instructions above. Do "
+                "NOT start new teaching, do NOT set a puzzle, and do NOT call end_lesson yourself."
             )
         elif closing_stage:
             lines.append(
-                "⚡ DO NOW: the lesson is in its final minutes — start wrapping up with a quick "
-                "recap and ONE last piece of practice. Don't open a brand-new topic."
+                "⚡ DO NOW: the lesson is in its final minutes — begin the wrap-up by following your "
+                "SUMMARY STEP instructions above (a short recap first). Do NOT open a new topic and "
+                "do NOT set another puzzle."
             )
         elif quiz_phase and not quiz_done:
             lines.append(
@@ -2831,11 +2832,13 @@ async def _run_turn(send, chat_id, user_id, *, saved_user_text, ai_content,
         quick_replies_shown_this_turn = False
 
         async def _consume(content_for_call, *, with_image: bool, suppress_text: bool = False,
-                           sys_prompt=None, groups=None):
+                           sys_prompt=None, groups=None, rag=None):
             # `sys_prompt`/`groups` let the navigator-selected ROLE inject its own persona prompt
             # and phase-scoped tool groups for the main turn; recovery turns omit them and fall
             # back to the full session prompt + state-driven groups (which always carry the
             # generator/interact tools a recovery needs).
+            # `rag` overrides the retrieved study-material chunks for this call — the Summarizer
+            # passes [] because closing the lesson needs the CHAT history, not the textbook.
             # `suppress_text` runs a turn for its TOOL CALLS ONLY and throws its prose away.
             # Used by the quick-replies safety net: the question was already asked and shown, so
             # that recovery exists purely to attach the buttons — any sentence it writes is a
@@ -2846,8 +2849,9 @@ async def _run_turn(send, chat_id, user_id, *, saved_user_text, ai_content,
             nonlocal seq, generator_shown_this_turn, generator_error_this_turn, quick_replies_shown_this_turn, _pending_ended_appt
             _sys = sys_prompt or session_system_prompt
             _grp = groups if groups is not None else tool_groups_for_turn
+            _rag = rag if rag is not None else rag_chunks
             async for raw in gemini_service.stream_response_async(
-                hist_slice, content_for_call, rag_chunks=rag_chunks,
+                hist_slice, content_for_call, rag_chunks=_rag,
                 system_prompt_override=_sys, tool_context=tool_context,
                 image_data=(image_b64 if with_image else None), image_mime=image_mime,
                 tool_groups=_grp,
@@ -2907,6 +2911,14 @@ async def _run_turn(send, chat_id, user_id, *, saved_user_text, ai_content,
                         _xp = _data.get("xp_awarded")
                         if isinstance(_xp, (int, float)) and _xp > 0:
                             await _emit_thinking(send, thinking_steps, f"🌟 +{int(_xp)} XP earned")
+                            # Keep a running per-lesson XP total so the Summarizer can tell the
+                            # student what they earned today (the header shows LIFETIME XP, not this).
+                            if appt_id:
+                                try:
+                                    from app.services.agent.session import state as _sss_xp
+                                    await _sss_xp.bump_session_xp(db, appt_id, int(_xp))
+                                except Exception:
+                                    logger.debug("bump_session_xp failed appt=%s", appt_id, exc_info=True)
                         # end_lesson succeeded → GUARANTEE a real report exists (server-side,
                         # from the actual session), then tell the client to open it. Immutable:
                         # if the AI already called generate_session_report, this returns it.
@@ -2984,14 +2996,85 @@ async def _run_turn(send, chat_id, user_id, *, saved_user_text, ai_content,
             # keeps puzzles/interact/mastery; the quiz tool appears only when _quiz_phase is true.
             if _role.name == "practitioner" and not _quiz_phase:
                 _role_groups.discard("assessment")
+
+            # ── SUMMARIZER: a deliberate TWO-step close, driven by state (never a loop) ──
+            # Step 1 (summary not yet given): short recap + XP, then WAIT — bind NO tools so it
+            #   physically cannot write the report or set a puzzle early.
+            # Step 2 (summary given, ending not yet unlocked): bind `lifecycle` so it MUST call
+            #   generate_session_report + allow_end_lesson, then invite the student to end.
+            # Step 3 (ending already unlocked): nothing left to do — no tools, no re-summarising.
+            # The Summarizer ALWAYS runs on CHAT history only (no study material), so pass rag=[].
+            # This proactive two-step machine drives the NATURAL close only. The End-button and
+            # time-up handlers (lesson_end_request / lesson_timeout) inject their OWN closing
+            # instructions (reconsider / confirm-and-end) and are backed by the force-end fallback,
+            # so we must NOT overwrite them here — defer to the role's default + injected ai_content.
+            _summary_stage = None
+            _summary_rag = [] if _role.name == "summarizer" else None
+            if (_role.name == "summarizer" and appt_id
+                    and event_kind not in ("lesson_end_request", "lesson_timeout")):
+                try:
+                    from app.services.agent.session import state as _sss_sum
+                    _summary_given = await _sss_sum.is_summary_given(db, appt_id)
+                    _session_xp = await _sss_sum.get_session_xp(db, appt_id)
+                except Exception:
+                    _summary_given, _session_xp = False, 0
+                _xp_line = (f"They earned about {int(_session_xp)} XP this lesson."
+                            if _session_xp > 0 else
+                            "Mention the effort they put in (XP wasn't tracked this lesson).")
+                if _end_allowed:
+                    # Ending is already unlocked (student confirmed End, time-up, or Step 2 done):
+                    # the server force-ends + writes the report — the AI just closes warmly. No wait.
+                    _summary_stage = "done"
+                    _role_groups = set()  # nothing more to do
+                    _stage_note = (
+                        "[SUMMARY — LESSON COMPLETE] The lesson is finished and ending is unlocked. "
+                        "Do NOT summarise again and do NOT repeat earlier praise. Reply in ONE short "
+                        "warm sentence and remind them they can click the 'End Lesson' button "
+                        "whenever they're ready. Call NO tools, set NO puzzle."
+                    )
+                elif not _summary_given:
+                    _summary_stage = "summary"
+                    _role_groups = set()  # STEP 1 is talk-only — bind no tools
+                    _stage_note = (
+                        "[SUMMARY — STEP 1 OF 2] Give ONE short, genuine recap of what THIS student "
+                        "actually worked on and solved today — be specific (name the real "
+                        f"problems/topics from the conversation), not generic. {_xp_line} Then STOP "
+                        "and invite a brief reply, e.g. 'Anything you'd like me to go over before we "
+                        "finish?'. Do NOT call any tool, do NOT write the report, do NOT set a puzzle "
+                        "or question, and do NOT say goodbye or mention ending yet."
+                    )
+                else:
+                    _summary_stage = "finalize"
+                    _role_groups = {"lifecycle"}  # STEP 2 needs report + allow_end_lesson
+                    _stage_note = (
+                        "[SUMMARY — STEP 2 OF 2] You already gave the recap last turn — do NOT repeat "
+                        "it and do NOT re-praise. In THIS reply you MUST call TWO tools SILENTLY: "
+                        "(1) generate_session_report and (2) allow_end_lesson. Then, in one or two "
+                        "short sentences, tell the student the lesson is complete and they can click "
+                        "the 'End Lesson' button whenever they're ready. Do NOT call end_lesson "
+                        "yourself and do NOT set any puzzle."
+                    )
+
             _role_prompt = _role.backstory + "\n\n" + (session_system_prompt or "")
+            if _summary_stage is not None:
+                # Per-turn imperative goes FIRST so it dominates the static backstory.
+                _role_prompt = _stage_note + "\n\n" + _role_prompt
             if getattr(settings, "debug", False):
                 logger.info(
-                    "ROLE TURN appt=%s role=%s groups=%s rag_chunks=%d titles=%s",
-                    appt_id, _role.name, sorted(_role_groups), len(rag_chunks or []),
+                    "ROLE TURN appt=%s role=%s groups=%s rag_chunks=%d summary_stage=%s titles=%s",
+                    appt_id, _role.name, sorted(_role_groups),
+                    len(rag_chunks or []) if _summary_rag is None else 0, _summary_stage,
                     [getattr(c, "document_title", "?") for c in (rag_chunks or [])[:5]],
                 )
-            await _consume(ai_content, with_image=True, sys_prompt=_role_prompt, groups=_role_groups)
+            await _consume(ai_content, with_image=True, sys_prompt=_role_prompt,
+                           groups=_role_groups, rag=_summary_rag)
+            # After STEP 1 actually ran, remember it so the NEXT summarizer turn is STEP 2.
+            if _summary_stage == "summary" and appt_id:
+                try:
+                    from app.services.agent.session import state as _sss_sg
+                    await _sss_sg.set_summary_given(db, appt_id, True)
+                except Exception:
+                    logger.debug("set_summary_given failed appt=%s", appt_id, exc_info=True)
         else:
             # No appointment / no navigator (e.g. free-form) → full session prompt + state groups.
             await _consume(ai_content, with_image=True)
@@ -3077,9 +3160,11 @@ async def _run_turn(send, chat_id, user_id, *, saved_user_text, ai_content,
                         )
                     except Exception:
                         logger.warning("safety-net recovery turn failed for appt %s", appt_id, exc_info=True)
-                elif _minimal_typing and not quick_replies_shown_this_turn and _expects_reply(_said):
+                elif (_minimal_typing and not quick_replies_shown_this_turn and _expects_reply(_said)
+                      and (_role is None or _role.name != "summarizer")):
                     # KS1-KS3 asked a plain question with nothing to tap — a young child should
-                    # not have to type. Force tap-to-answer buttons (or a puzzle).
+                    # not have to type. Force tap-to-answer buttons (or a puzzle). NOT for the
+                    # Summarizer: its Step-1 "anything to go over?" is a deliberate talk-only wait.
                     logger.info(
                         "SAFETY NET: KS1-KS3 question with no tap options — forcing quick_replies "
                         "(appt=%s)", appt_id,
@@ -3194,6 +3279,7 @@ _THINKING_LABELS: dict = {
     "advance_lesson_phase": "Moving to the next part of the lesson",
     "create_assignment": "Setting some homework",
     "generate_session_report": "Writing the lesson report",
+    "allow_end_lesson": "Wrapping up the lesson",
     "web_search": "Searching the web",
     "deep_research": "Researching that in depth",
 }

@@ -48,3 +48,29 @@ async def set_end_allowed(db: AsyncSession, appointment_id: int, value: bool = T
 
 async def is_end_allowed(db: AsyncSession, appointment_id: int) -> bool:
     return bool(await get_flag(db, appointment_id, "end_allowed", False))
+
+
+# ── summary / closing flags ──────────────────────────────────────────────────
+# The Summarizer runs a deliberate TWO-step close: step 1 = a short recap + XP and
+# WAIT for the student; step 2 = write the report + unlock ending. `summary_given`
+# is what tells the two steps apart across turns so it never re-summarises in a loop.
+async def set_summary_given(db: AsyncSession, appointment_id: int, value: bool = True) -> None:
+    await set_flag(db, appointment_id, "summary_given", bool(value))
+    logger.info("session_state: summary_given=%s appt=%s", bool(value), appointment_id)
+
+
+async def is_summary_given(db: AsyncSession, appointment_id: int) -> bool:
+    return bool(await get_flag(db, appointment_id, "summary_given", False))
+
+
+# Running XP earned in THIS lesson (accumulated as puzzles/quiz award it), so the
+# Summarizer can tell the student how much they earned today without a separate query.
+async def bump_session_xp(db: AsyncSession, appointment_id: int, amount: int) -> int:
+    current = int(await get_flag(db, appointment_id, "session_xp", 0) or 0)
+    total = current + int(amount or 0)
+    await set_flag(db, appointment_id, "session_xp", total)
+    return total
+
+
+async def get_session_xp(db: AsyncSession, appointment_id: int) -> int:
+    return int(await get_flag(db, appointment_id, "session_xp", 0) or 0)

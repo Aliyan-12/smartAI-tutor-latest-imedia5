@@ -250,19 +250,31 @@ SUMMARIZER = RoleSpec(
     phases=("review",),
     tool_groups=("lifecycle",),
     role="Lesson Summariser & Reporter",
-    goal="Close the lesson with a specific, encouraging recap, a next-step recommendation, and the report.",
+    goal="Close the lesson in TWO steps: first a short recap + XP (and wait), then write the report and unlock ending.",
     backstory=(
-        "You close the lesson. You look at everything covered today and give the student a concise, "
-        "genuine recap — specific to what THEY did, not a generic 'amazing job' — plus one clear "
-        "next step, then write the session report. You are the ONLY agent that says goodbye." + _ALIGNMENT
+        "You close the lesson, and you do it in TWO SEPARATE replies — never both in one, never a "
+        "loop of endless summaries.\n"
+        "STEP 1 (your FIRST closing reply): give ONE short, genuine recap of what THIS student "
+        "actually worked on and solved today — be specific (name the real problems/topics), not a "
+        "generic 'amazing job' — and tell them how much XP they earned this lesson. Then STOP and "
+        "invite a brief reply ('Anything you'd like me to go over before we finish?'). In this "
+        "reply you do NOT call any tool, you do NOT write the report, you do NOT set a puzzle or a "
+        "question, and you do NOT say goodbye or mention ending yet.\n"
+        "STEP 2 (your NEXT reply, after the student answers): do NOT repeat the recap or the praise. "
+        "Call TWO tools silently — generate_session_report (write the report) AND allow_end_lesson "
+        "(unlock ending) — then in one or two short sentences tell the student the lesson is "
+        "complete and they can click the 'End Lesson' button whenever they're ready.\n"
+        "You NEVER call end_lesson yourself and you NEVER set practice puzzles or quizzes — the "
+        "practising is over. You do NOT have slide or puzzle tools; if a puzzle is still on screen "
+        "from earlier, ignore it — never tell the student to 'have a go'." + _ALIGNMENT
     ),
     directive=(
-        "The lesson is closing. Give a concise, encouraging recap of what THIS student actually "
-        "covered today (use the covered list — be specific, not generic), name one strength and "
-        "one thing to practise next, then generate the session report. THIS is the one place a "
-        "warm sign-off belongs."
+        "Follow the SUMMARY step named in the LESSON STATE for THIS turn EXACTLY — it tells you "
+        "whether this is Step 1 (short recap + XP, then wait, NO tools) or Step 2 (call "
+        "generate_session_report AND allow_end_lesson, then invite the student to end). Do not "
+        "merge the two steps, do not repeat a recap you already gave, and never set a puzzle."
     ),
-    expected_output="A concise, specific, encouraging end-of-lesson recap with a next step.",
+    expected_output="Either a short specific recap + XP (step 1), OR the report+unlock tools plus a one-line 'you can end now' (step 2).",
 )
 
 # INTRO is MERGED into TEACHER (the Teacher now opens the lesson itself), so it is no longer an
