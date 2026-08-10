@@ -3045,9 +3045,10 @@ async def _run_turn(send, chat_id, user_id, *, saved_user_text, ai_content,
                     _role_groups = set()  # nothing more to do
                     _stage_note = (
                         "[SUMMARY — LESSON COMPLETE] The lesson is finished and ending is unlocked. "
-                        "Do NOT summarise again and do NOT repeat earlier praise. Reply in ONE short "
-                        "warm sentence and remind them they can click the 'End Lesson' button "
-                        "whenever they're ready. Call NO tools, set NO puzzle."
+                        "Do NOT summarise again, do NOT repeat earlier praise, and do NOT reuse the "
+                        "same sentence you sent last time. Reply in ONE short, FRESH warm sentence "
+                        "that answers whatever they just said and reminds them they can click the "
+                        "'End Lesson' button whenever they're ready. Call NO tools, set NO puzzle."
                     )
                 elif not _summary_given:
                     _summary_stage = "summary"
@@ -3588,7 +3589,10 @@ async def _clear_pending_end(chat_id) -> None:
 async def _handle_lesson_end_request(send, chat_id, user_id, data):
     """AI_REACTIVE: the student clicked End Lesson.
 
-    Two-stage so students aren't nudged out of a lesson they've barely started:
+      • POST-SUMMARY (summary given / ending already unlocked by allow_end_lesson) → the lesson
+        is effectively over, so this is a CLEAN finish: write the report + terminate immediately,
+        with NO reconsider prompt and NO early-XP penalty.
+    Otherwise two-stage, so students aren't nudged out of a lesson they've barely started:
       • FIRST click with real time left → the AI pushes back — encourages continuing (names
         the next thing) and warns that ending early means less XP. It does NOT end; a
         `pending_end` flag is set so the next click confirms.
@@ -3604,6 +3608,7 @@ async def _handle_lesson_end_request(send, chat_id, user_id, data):
     appt_id = None
     remaining = 0
     pending = False
+    already_unlocked = False
     async with async_session_factory() as db:
         appt_id = await _resolve_appt_id(db, chat_id)
         if appt_id:
@@ -3611,7 +3616,25 @@ async def _handle_lesson_end_request(send, chat_id, user_id, data):
             if appt:
                 _, remaining, _dur = _compute_lesson_clock(appt)
             pending = bool(await session_state_service.get_flag(db, appt_id, "pending_end", False))
+            # Once the closer has run (summary delivered, or ending already unlocked by
+            # allow_end_lesson), the lesson is effectively OVER — clicking End is a clean finish,
+            # NOT an early exit. So skip the reconsider/XP-penalty flow entirely.
+            already_unlocked = (
+                bool(await session_state_service.is_end_allowed(db, appt_id))
+                or bool(await session_state_service.is_summary_given(db, appt_id))
+            )
     confirmed = bool(data.get("confirmed"))
+
+    # Post-summary end → just write the report + terminate. No reconsider, no XP dock.
+    if appt_id and already_unlocked:
+        async with async_session_factory() as db:
+            await session_state_service.set_end_allowed(db, appt_id, True)
+            await session_state_service.set_flag(db, appt_id, "pending_end", False)
+            await db.commit()
+        logger.info("lesson_end_request: appt=%s already unlocked (summary given) → clean end, "
+                    "no XP penalty", appt_id)
+        await _force_end_and_report(send, chat_id)
+        return
 
     # Stage 1 — plenty of time left and they haven't been asked yet → reconsider, don't end.
     if appt_id and remaining > _END_GRACE_MIN and not pending and not confirmed:
