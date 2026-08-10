@@ -1849,9 +1849,10 @@ def _puzzle_state_lines(pstate: Optional[dict], next_style: str = "",
             style_line = (
                 "• 🧩 NEXT PRACTICE PUZZLE = CLASSIC (this is the classic turn in the mix, or no "
                 "hands-on manipulative fits this topic). Use a NON-manipulative puzzle — do NOT call "
-                "manipulative_puzzle for it. Prefer a still-tappable one where the topic allows "
-                "(diagram_math_puzzle for a fraction/clock/ruler/shape, labelling_puzzle, "
-                "matching_puzzle) and fall back to math_puzzle / graph_puzzle otherwise.\n"
+                "manipulative_puzzle for it. PREFER the more engaging kinds: math_puzzle (tappable "
+                "answers), diagram_math_puzzle (a fraction/clock/ruler/shape), or graph_puzzle. "
+                "Use matching_puzzle / labelling_puzzle only occasionally for variety — NOT as your "
+                "default and never twice in a row.\n"
             )
         return (
             "Puzzle: NONE on screen right now.\n"
@@ -2105,14 +2106,30 @@ async def build_lesson_state_anchor(
     # played SO FAR (written deterministically by the tools, not self-reported). Injected at high
     # recency so every turn the model can SEE what's done and build forward instead of re-teaching
     # or re-asking. This replaces the old fuzzy sentence-dedup.
+    _recent_puzzle_kinds: list = []
     try:
         from app.services import coverage_ledger as _cl
         _led = await _cl.load(db, appt_id)
         _covered = _cl.render_for_prompt(_led)
         if _covered:
             lines.append(_covered)
+        # Puzzle kinds already played (ledger stores "matching:…", "math:…", …), newest last.
+        _recent_puzzle_kinds = [str(p).split(":")[0] for p in (_led.get("puzzles_done") or [])]
     except Exception:
         logger.warning("coverage-ledger anchor failed for appt %s", appt_id, exc_info=True)
+
+    # PUZZLE VARIETY GUARD — matching/labelling were dominating the practice. If a
+    # matching/labelling puzzle was used in the last few, forbid it THIS turn so the practitioner
+    # reaches for a more interesting kind. Keeps them for occasional variety, not every turn.
+    _pic_family = {"matching", "labelling"}
+    if any(k in _pic_family for k in _recent_puzzle_kinds[-3:]):
+        lines.append(
+            "⚠️ PUZZLE VARIETY: you've recently used a matching/labelling puzzle. Do NOT use "
+            "matching_puzzle or labelling_puzzle again this turn — pick a DIFFERENT, more engaging "
+            "kind instead (math_puzzle, diagram_math_puzzle, graph_puzzle, or the hands-on "
+            "manipulative_puzzle if the NEXT PRACTICE PUZZLE line below calls for one). "
+            "Matching/labelling are for occasional variety only, never back-to-back."
+        )
 
     # Which style the NEXT puzzle should be. A lesson whose topic HAS a matching manipulative
     # gets a genuinely MIXED, non-repeating order (some hands-on, some classic — never all of
