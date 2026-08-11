@@ -105,32 +105,41 @@ export function useSessionChannel(opts: SessionChannelOpts) {
   // short tail after the last clip. The voice-capture mic is muted while this is true so
   // it never records the tutor's own voice (which caused an endless self-talk loop).
   const [audioActive, setAudioActive] = useState(false);
-  // Unlike `audioActive` (which drops in the gap between clips so the mic can un-mute), this
-  // stays TRUE across inter-chunk gaps and only clears once the WHOLE turn's speech has drained.
-  // It's what the puzzle/tap-option gate waits on so buttons don't flicker enabled between chunks.
+  // `ttsSpeaking` gates the puzzle/tap-options together with `busy` (which covers the text-
+  // streaming phase). It is driven by the TURN's segment audio (not the student-initiated "Listen"),
+  // and a SELF-HEALING poll re-checks the REAL audio state: it reads the actual <audio> element and
+  // the pending-clip queue — never a manual counter — so it can NEVER get stuck if an 'ended'/'pause'
+  // event is ever missed (that was the "Loading…" that never cleared). Once nothing is playing AND
+  // nothing is queued, it releases; while audio is in progress it stays true across chunk gaps.
   const [ttsSpeaking, setTtsSpeaking] = useState(false);
-  const turnEndedRef = useRef(false);      // turn_end frame received for the current turn
-  const allAudioSentRef = useRef(false);   // backend `tts_done` received → NO more audio is coming
-  const ttsSafetyTimerRef = useRef<number | null>(null); // absolute cap so speech can't stick "on"
   const audioPlayingCountRef = useRef(0);
-  const audioTailTimerRef = useRef<number | null>(null);
-  const clearTtsSafety = () => {
-    if (ttsSafetyTimerRef.current) { clearTimeout(ttsSafetyTimerRef.current); ttsSafetyTimerRef.current = null; }
+  const audioTailTimerRef = useRef<number | null>(null);       // 700ms mic tail (for audioActive)
+  const ttsHealRef = useRef<number | null>(null);              // self-healing "is the turn still speaking?" poll
+  const lastAudioAtRef = useRef(0);                            // timestamp of the last real clip start
+  const clearTtsHeal = () => {
+    if (ttsHealRef.current) { clearTimeout(ttsHealRef.current); ttsHealRef.current = null; }
   };
-  // The tutor has fully finished speaking once the backend says every clip was SENT (`tts_done`,
-  // which the WS orders AFTER all segment_audio frames) AND the audio pump has drained them all
-  // (nothing playing, nothing queued). Authoritative — it never clears between chunks, only when
-  // the whole turn's audio is genuinely done, so the gate can't flicker mid-speech.
-  const maybeSpeechDone = () => {
-    if (allAudioSentRef.current
-        && audioPlayingCountRef.current === 0
-        && audioMapRef.current.size === 0) {
-      clearTtsSafety();
-      setTtsSpeaking(false);
-    }
+  const scheduleTtsHeal = () => {
+    clearTtsHeal();
+    ttsHealRef.current = window.setTimeout(() => {
+      ttsHealRef.current = null;
+      // Read the REAL audio state, never a manual counter (a counter can stick if an 'ended'/
+      // 'pause' event is missed — that was the "Loading…" that never cleared).
+      const a = audioRef.current;
+      const playing = !!(a && !a.paused && !a.ended);
+      if (playing) { scheduleTtsHeal(); return; }                    // actively speaking → stay locked
+      // Not playing right now. Stay locked only if clips are still draining AND a clip actually
+      // played recently (bridges the gap between chunks). Otherwise release — this HARD-caps any
+      // stalled/stuck queue to ~6s so the gate can never hang.
+      const drainingRecently = audioMapRef.current.size > 0
+        && (Date.now() - lastAudioAtRef.current) < 6000;
+      if (drainingRecently) { scheduleTtsHeal(); return; }
+      setTtsSpeaking(false);                                          // idle → unlock
+    }, 1500);
   };
   const markAudioStart = () => {
     audioPlayingCountRef.current += 1;
+    lastAudioAtRef.current = Date.now();
     if (audioTailTimerRef.current) { clearTimeout(audioTailTimerRef.current); audioTailTimerRef.current = null; }
     setAudioActive(true);
   };
@@ -182,9 +191,7 @@ export function useSessionChannel(opts: SessionChannelOpts) {
     audioMapRef.current.clear();
     nextAudioSeqRef.current = 0;
     audioPumpingRef.current = false;
-    turnEndedRef.current = false;
-    allAudioSentRef.current = false;
-    clearTtsSafety();
+    clearTtsHeal();
     setTtsSpeaking(false);
     liveTextRef.current = "";
     setLiveText("");
@@ -281,7 +288,8 @@ export function useSessionChannel(opts: SessionChannelOpts) {
       audio.onerror = done;
       audio.onpause = done; // resolves at once if muted-stop pauses it
       markAudioStart();
-      setTtsSpeaking(true); // a real clip is playing → speech is in progress for this turn
+      setTtsSpeaking(true); // the turn is audibly speaking → lock the puzzle/tap-options
+      scheduleTtsHeal();    // arm the self-heal poll that releases once audio truly stops
       audio.play().catch(done);
     });
 
@@ -297,8 +305,6 @@ export function useSessionChannel(opts: SessionChannelOpts) {
       await playAudioClip(seg.audio_b64);
     }
     audioPumpingRef.current = false;
-    // Pump idled — if the turn has ended and this was the last clip, speech is fully delivered.
-    maybeSpeechDone();
   };
 
   const finalizeTurn = (forced: boolean) => {
@@ -376,11 +382,9 @@ export function useSessionChannel(opts: SessionChannelOpts) {
       case "turn_start":
         currentTurnIdRef.current = d.turn_id ?? null;
         resetTurnPlayback();       // drop any leftover audio/text from a previous turn
-        // With Read Aloud on, this turn WILL be spoken — mark speech in-progress from the VERY
-        // FIRST frame (before any text/puzzle/tap-option arrives), so a puzzle that mounts early
-        // is already locked. It clears only when the backend's `tts_done` arrives AND the audio
-        // queue has drained — so there is no window where it reads false mid-turn.
-        if (ttsEnabledRef.current) setTtsSpeaking(true);
+        // NOTE: we do NOT optimistically mark speaking here. The gate stays closed during the
+        // streaming phase via `busy`; `ttsSpeaking` is driven by ACTUAL audio (markAudioStart) so
+        // a turn that never produces audio never locks the puzzle/tap-options.
         thinkingStepsRef.current = [];
         setThinkingSteps([]);      // fresh thinking strip for this turn
         setStatus("waiting");
@@ -400,10 +404,6 @@ export function useSessionChannel(opts: SessionChannelOpts) {
       case "segment":
         // Text only — revealed immediately (no wait for TTS). Ignore stale-turn frames.
         if (currentTurnIdRef.current && d.turn_id && d.turn_id !== currentTurnIdRef.current) break;
-        // With Read Aloud on, this turn WILL be spoken — mark speech in-progress NOW (before the
-        // first audio clip even arrives) so the gate is closed for the whole message. It clears
-        // only when the backend's `tts_done` arrives AND the audio queue has drained.
-        if (ttsEnabledRef.current) setTtsSpeaking(true);
         textQueueRef.current.push({ seq: d.seq, text: d.text || "" });
         void pumpText();
         break;
@@ -466,23 +466,10 @@ export function useSessionChannel(opts: SessionChannelOpts) {
         break;
       case "turn_end":
         pendingCommitRef.current = { message_id: d.message_id ?? null, full_text: d.full_text || "" };
-        // Text streaming is done; audio (if any) is still draining, and `tts_done` will follow
-        // once every clip has been sent. Mark the turn ended (the safety timer arms from here).
-        turnEndedRef.current = true;
-        // Absolute safety cap: if `tts_done` or a final audio frame were ever lost, don't leave
-        // the gate stuck "speaking" forever. 90s > any single spoken message, so the normal
-        // `tts_done`-driven drain always wins in practice.
-        clearTtsSafety();
-        ttsSafetyTimerRef.current = window.setTimeout(() => { setTtsSpeaking(false); }, 90000);
+        // Text streaming is done. `busy` clears here (via finalizeTurn); `ttsSpeaking` is left to
+        // the audio-driven self-heal poll — it stays true only while audio actually plays and
+        // releases shortly after it stops, so a turn with no audio never keeps the gate closed.
         finalizeTurn(false);
-        break;
-      case "tts_done":
-        // Authoritative from the backend: every TTS clip for this turn has been generated + sent
-        // (ordered after all segment_audio frames). Drop stale-turn signals, then release the gate
-        // as soon as the audio queue has drained.
-        if (currentTurnIdRef.current && d.turn_id && d.turn_id !== currentTurnIdRef.current) break;
-        allAudioSentRef.current = true;
-        maybeSpeechDone();
         break;
       case "error":
         setError(d.message || "Something went wrong.");

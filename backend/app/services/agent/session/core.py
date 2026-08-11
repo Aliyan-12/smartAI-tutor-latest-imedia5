@@ -2862,7 +2862,6 @@ async def _run_turn(send, chat_id, user_id, *, saved_user_text, ai_content,
         segmenter = SentenceSegmenter()
         seq = 0
         full: list = []          # the deduped sentences actually shown (also persisted)
-        _turn_tts_tasks: list = []  # THIS turn's TTS tasks → awaited before the tts_done frame
         _seen_norm: set = set()  # normalised sentences already streamed THIS turn
         # If end_lesson runs this turn, we DON'T open the report immediately — we hold the
         # navigation until the AI's closing message has fully streamed (see after turn_end).
@@ -3018,8 +3017,7 @@ async def _run_turn(send, chat_id, user_id, *, saved_user_text, ai_content,
                     sentence = clean_reasoning_leak(sentence)
                     if not sentence.strip() or _dup(sentence):
                         continue
-                    await stream_segment(send, seq, sentence, tts=tts, turn_id=turn_id,
-                                         tts_tasks=_turn_tts_tasks)
+                    await stream_segment(send, seq, sentence, tts=tts, turn_id=turn_id)
                     full.append(sentence)
                     seq += 1
 
@@ -3027,8 +3025,7 @@ async def _run_turn(send, chat_id, user_id, *, saved_user_text, ai_content,
             if rem and not suppress_text:
                 rem = clean_reasoning_leak(rem)
                 if rem.strip() and not _dup(rem):
-                    await stream_segment(send, seq, rem, tts=tts, turn_id=turn_id,
-                                         tts_tasks=_turn_tts_tasks)
+                    await stream_segment(send, seq, rem, tts=tts, turn_id=turn_id)
                     full.append(rem)
                     seq += 1
             if suppress_text:
@@ -3079,14 +3076,16 @@ async def _run_turn(send, chat_id, user_id, *, saved_user_text, ai_content,
             #   generate_session_report + allow_end_lesson, then invite the student to end.
             # Step 3 (ending already unlocked): nothing left to do — no tools, no re-summarising.
             # The Summarizer ALWAYS runs on CHAT history only (no study material), so pass rag=[].
-            # This proactive two-step machine drives the NATURAL close only. The End-button and
-            # time-up handlers (lesson_end_request / lesson_timeout) inject their OWN closing
-            # instructions (reconsider / confirm-and-end) and are backed by the force-end fallback,
-            # so we must NOT overwrite them here — defer to the role's default + injected ai_content.
+            # This proactive two-step machine drives the NATURAL close only. Events that inject their
+            # OWN instruction — the End-button / time-up handlers (reconsider / confirm-and-end) AND
+            # the idle check-in ("still there?") — must NOT be treated as a summary step: doing so
+            # once let a "still there?" idle turn count as STEP 1 and flip summary_given=True, so the
+            # real recap was skipped and the next turn jumped to the report. Defer to the injected
+            # ai_content for all of them.
             _summary_stage = None
             _summary_rag = [] if _role.name == "summarizer" else None
             if (_role.name == "summarizer" and appt_id
-                    and event_kind not in ("lesson_end_request", "lesson_timeout")):
+                    and event_kind not in ("lesson_end_request", "lesson_timeout", "student_idle")):
                 try:
                     from app.services.agent.session import state as _sss_sum
                     _summary_given = await _sss_sum.is_summary_given(db, appt_id)
@@ -3313,23 +3312,7 @@ async def _run_turn(send, chat_id, user_id, *, saved_user_text, ai_content,
     await send({"type": "turn_end", "message_id": message_id, "full_text": clean})
 
     # The closing message has now fully streamed — NOW open the report (deferred navigation).
-    # Done BEFORE the tts_done wait below so an end-of-lesson report never waits on TTS.
     await _open_report_if_ended(send, chat_id, _pending_ended_appt)
-
-    # Authoritative "the tutor has finished SPEAKING" signal: wait for every one of this turn's
-    # TTS clips to be generated + sent (segment_audio frames are ordered before this), THEN emit
-    # tts_done. The client keeps puzzles blurred / tap-options disabled until it arrives AND its
-    # audio queue has drained — so they never enable mid-speech or flicker between chunks. Sent
-    # even when there was no TTS (empty task list) so the client always gets the release signal.
-    if _turn_tts_tasks:
-        try:
-            await asyncio.gather(*_turn_tts_tasks, return_exceptions=True)
-        except Exception:  # noqa: BLE001 — a failed clip must never hold up the signal
-            pass
-    try:
-        await send({"type": "tts_done", "turn_id": turn_id})
-    except Exception:
-        pass
 
 
 async def _open_report_if_ended(send, chat_id, appt_id) -> None:
