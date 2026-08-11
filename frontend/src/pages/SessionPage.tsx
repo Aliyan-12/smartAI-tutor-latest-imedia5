@@ -122,12 +122,11 @@ export default function SessionPage() {
   // ── Interaction gate ──────────────────────────────────────────────────────
   // A freshly-shown puzzle stays blurred, and tap-options stay disabled, until the AI has
   // FINISHED SPEAKING this turn's message — TTS completion, NOT text streaming. Driven by the
-  // channel's `audioActive` (true while any TTS clip plays, with a short tail). When TTS is off
-  // there is nothing to wait for, so it never gates.
+  // channel's `ttsSpeaking`, which stays TRUE across the gaps between TTS chunks and only clears
+  // once the WHOLE turn's speech has drained (so buttons don't flicker enabled mid-message).
+  // When Read Aloud is off there is nothing to wait for, so it never gates.
   const [interactionLocked, setInteractionLocked] = useState(false);
-  const audioActiveRef = useRef(false);
   const gateArmedRef = useRef(false);      // an interactive element is waiting on TTS
-  const gateAudioSeenRef = useRef(false);  // TTS actually started playing since it armed
   const gateFallbackRef = useRef<number | null>(null);
 
   // The last puzzle verdict, and a tick that fires the confetti/chime. A counter, not a
@@ -188,7 +187,6 @@ export default function SessionPage() {
 
   const releaseInteractionGate = useCallback(() => {
     gateArmedRef.current = false;
-    gateAudioSeenRef.current = false;
     if (gateFallbackRef.current) { clearTimeout(gateFallbackRef.current); gateFallbackRef.current = null; }
     setInteractionLocked(false);
   }, []);
@@ -197,14 +195,13 @@ export default function SessionPage() {
   const armInteractionGate = useCallback(() => {
     if (!ttsEnabledRef.current) { releaseInteractionGate(); return; }
     gateArmedRef.current = true;
-    gateAudioSeenRef.current = audioActiveRef.current; // already-playing audio counts as "started"
     setInteractionLocked(true);
     if (gateFallbackRef.current) clearTimeout(gateFallbackRef.current);
-    // Safety valve: if TTS never actually produces audio (all null clips / failure), don't stay
-    // blurred forever — release after a grace, but ONLY if no audio was ever heard.
+    // Hard safety cap: if a speech signal ever gets stuck, never stay locked forever. Generous
+    // so it can't cut off a genuinely long spoken message (the real release is speech-driven).
     gateFallbackRef.current = window.setTimeout(() => {
-      if (gateArmedRef.current && !gateAudioSeenRef.current) releaseInteractionGate();
-    }, 6000);
+      if (gateArmedRef.current) releaseInteractionGate();
+    }, 45000);
   }, [releaseInteractionGate]);
 
   // ── Unified session chat pipeline (single WebSocket) ──────────────────────
@@ -328,24 +325,18 @@ export default function SessionPage() {
   // Stable ref so the session event-bus subscription doesn't re-bind each render.
   const sendEventRef = useRef(channel.sendEvent);
   sendEventRef.current = channel.sendEvent;
-  const { messages, liveText, thinkingSteps, liveParts, busy, status: liveStatus, audioActive } = channel;
+  const { messages, liveText, thinkingSteps, liveParts, busy, status: liveStatus, audioActive, ttsSpeaking } = channel;
   const messagesLenRef = useRef(0);
   messagesLenRef.current = messages.length;
   const clearQuizOffer = useCallback(() => setQuizOffer(null), []);
 
-  // Release the interaction gate once TTS has finished. audioActive is true while any clip plays
-  // (with a short tail across clip gaps). Unlock when the turn is done (`!busy`) AND the speech
-  // that actually started has now stopped — so a mid-turn audio stall never unlocks early.
+  // Release the interaction gate only once the turn is over (`!busy`) AND all of its speech has
+  // drained (`!ttsSpeaking`). ttsSpeaking stays true across the gaps between TTS chunks, so the
+  // buttons unlock ONLY after the LAST chunk — never flickering enabled between chunks.
   useEffect(() => {
-    audioActiveRef.current = audioActive;
     if (!gateArmedRef.current) return;
-    if (audioActive) {
-      gateAudioSeenRef.current = true;
-      if (gateFallbackRef.current) { clearTimeout(gateFallbackRef.current); gateFallbackRef.current = null; }
-    } else if (!busy && gateAudioSeenRef.current) {
-      releaseInteractionGate();
-    }
-  }, [audioActive, busy, releaseInteractionGate]);
+    if (!ttsSpeaking && !busy) releaseInteractionGate();
+  }, [ttsSpeaking, busy, interactionLocked, releaseInteractionGate]);
   // Muting mid-turn removes the speech we were waiting for → release immediately.
   useEffect(() => {
     if (!ttsEnabled && gateArmedRef.current) releaseInteractionGate();

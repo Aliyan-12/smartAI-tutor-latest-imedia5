@@ -517,11 +517,44 @@ async def build_session_system_prompt(
     else:
         topics_str += "\n\n  (No subtopic chosen — start from the BEGINNING of the topic.)"
 
-    # Strip the Topics/Session type/Subtopic lines from description so only actual notes remain
+    # The student's OWN words at booking about what they're struggling with (the "Add more
+    # details" box → "Notes:" line). When present it becomes the lesson's PRIMARY objective —
+    # every agent teaches/practises/closes around making THIS specific thing click. When absent
+    # the lesson runs exactly as before.
+    _focus_match = _re.search(r"Notes:\s*([^\n]+)", description, _re.IGNORECASE)
+    student_focus = _focus_match.group(1).strip() if _focus_match else ""
+
+    # Strip the structured lines from description so only genuinely free-form notes remain.
     tutor_notes = _re.sub(r"Topics?:\s*[^\n]+\n?", "", description, flags=_re.IGNORECASE)
     tutor_notes = _re.sub(r"Session type:\s*[^\n]+\n?", "", tutor_notes, flags=_re.IGNORECASE)
-    tutor_notes = _re.sub(r"Subtopic:\s*[^\n]+\n?", "", tutor_notes, flags=_re.IGNORECASE).strip()
+    tutor_notes = _re.sub(r"Subtopic:\s*[^\n]+\n?", "", tutor_notes, flags=_re.IGNORECASE)
+    tutor_notes = _re.sub(r"Learning mode:\s*[^\n]+\n?", "", tutor_notes, flags=_re.IGNORECASE)
+    tutor_notes = _re.sub(r"Year group:\s*[^\n]+\n?", "", tutor_notes, flags=_re.IGNORECASE)
+    tutor_notes = _re.sub(r"Notes:\s*[^\n]+\n?", "", tutor_notes, flags=_re.IGNORECASE).strip()
     tutor_notes = tutor_notes if tutor_notes else "None"
+
+    # The high-priority objective block, injected near the TOP of the prompt so every agent —
+    # Teacher, Practitioner and Summarizer — treats the student's stated difficulty as the goal.
+    if student_focus:
+        focus_block = (
+            "🎯 STUDENT'S OWN FOCUS FOR THIS LESSON — THIS IS THE PRIMARY OBJECTIVE:\n"
+            f"At booking, the student told us, in their own words, what they are struggling with:\n"
+            f"    \"{student_focus}\"\n"
+            "They are WEAK on this and booked this lesson specifically to fix it. So for the WHOLE "
+            "lesson:\n"
+            "• Aim every explanation, example, visual and puzzle at making THIS crystal clear — "
+            "diagnose exactly where their understanding of it breaks down, then rebuild it step by "
+            "step.\n"
+            "• Keep checking they're getting THIS specific thing, not just the topic in general. "
+            "Pitch practice at it.\n"
+            "• Do NOT drift onto unrelated sub-points or ignore it — this is the reason they are "
+            "here. Everything serves this goal.\n"
+            "• By the end they MUST be able to confidently understand and do this. The closing "
+            "summary will explicitly confirm they've now got THIS and invite any last questions.\n"
+        )
+    else:
+        # No note → no special objective; the lesson runs on the normal plan.
+        focus_block = ""
 
     # Map session type to specific AI behaviour instructions
     SESSION_TYPE_INSTRUCTIONS = {
@@ -1088,6 +1121,7 @@ ALWAYS use this content as your PRIMARY teaching source when it is present.
 
     prompt = f"""You are a live AI tutor conducting a real-time tutoring session on SmartAI Tutor.
 
+{focus_block}
 SESSION CONTEXT:
 - Subject: {subject} | Key Stage: {key_stage}
 - Session Title: {title}
@@ -2018,6 +2052,20 @@ async def build_lesson_state_anchor(
             f"⏱ Time: ~{elapsed} min elapsed · ~{remaining} min remaining (of {duration} min) — "
             "pace the plan to fit the time left."
         )
+        # STUDENT'S STATED FOCUS — the difficulty they named at booking. Repeated here at max
+        # recency so every agent keeps the lesson pointed at it. Absent → nothing added.
+        try:
+            _focus_m = _re.search(r"Notes:\s*([^\n]+)",
+                                  getattr(appointment, "description", "") or "", _re.IGNORECASE)
+            _focus_txt = _focus_m.group(1).strip() if _focus_m else ""
+            if _focus_txt:
+                lines.append(
+                    f"🎯 STUDENT'S FOCUS (their words at booking): \"{_focus_txt}\". This is the "
+                    "lesson's MAIN objective — steer teaching + practice to make THIS click, and "
+                    "keep checking they're getting it. The closing summary confirms they've got it."
+                )
+        except Exception:
+            pass
         try:
             phase_line, next_line, _phase_type = await _phase_and_next(db, appt_id, elapsed, duration)
             lines.append(phase_line)
@@ -3056,8 +3104,12 @@ async def _run_turn(send, chat_id, user_id, *, saved_user_text, ai_content,
                     _stage_note = (
                         "[SUMMARY — STEP 1 OF 2] Give ONE short, genuine recap of what THIS student "
                         "actually worked on and solved today — be specific (name the real "
-                        f"problems/topics from the conversation), not generic. {_xp_line} Then STOP "
-                        "and invite a brief reply, e.g. 'Anything you'd like me to go over before we "
+                        f"problems/topics from the conversation), not generic. {_xp_line} If the "
+                        "student named a FOCUS / difficulty at booking (see the 🎯 STUDENT'S FOCUS "
+                        "line in the lesson state), explicitly CONFIRM they've now understood and can "
+                        "do THAT specific thing, using its actual words (e.g. 'you've now got how "
+                        "diffusion works across permeable membranes'). Then STOP and invite any last "
+                        "questions, e.g. 'Does that all make sense now — any questions before we "
                         "finish?'. Do NOT call any tool, do NOT write the report, do NOT set a puzzle "
                         "or question, and do NOT say goodbye or mention ending yet."
                     )

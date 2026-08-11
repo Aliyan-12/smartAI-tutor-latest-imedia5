@@ -105,8 +105,23 @@ export function useSessionChannel(opts: SessionChannelOpts) {
   // short tail after the last clip. The voice-capture mic is muted while this is true so
   // it never records the tutor's own voice (which caused an endless self-talk loop).
   const [audioActive, setAudioActive] = useState(false);
+  // Unlike `audioActive` (which drops in the gap between clips so the mic can un-mute), this
+  // stays TRUE across inter-chunk gaps and only clears once the WHOLE turn's speech has drained.
+  // It's what the puzzle/tap-option gate waits on so buttons don't flicker enabled between chunks.
+  const [ttsSpeaking, setTtsSpeaking] = useState(false);
+  const turnTextMaxSeqRef = useRef(-1);  // highest text-segment seq this turn (audio mirrors it)
+  const turnEndedRef = useRef(false);    // turn_end frame received for the current turn
   const audioPlayingCountRef = useRef(0);
   const audioTailTimerRef = useRef<number | null>(null);
+  // The turn's speech is fully delivered once: the turn has ended AND nothing is playing AND the
+  // audio pump has advanced past the last segment (every clip, incl. null ones, has been consumed).
+  const maybeSpeechDone = () => {
+    if (turnEndedRef.current
+        && audioPlayingCountRef.current === 0
+        && nextAudioSeqRef.current > turnTextMaxSeqRef.current) {
+      setTtsSpeaking(false);
+    }
+  };
   const markAudioStart = () => {
     audioPlayingCountRef.current += 1;
     if (audioTailTimerRef.current) { clearTimeout(audioTailTimerRef.current); audioTailTimerRef.current = null; }
@@ -160,6 +175,9 @@ export function useSessionChannel(opts: SessionChannelOpts) {
     audioMapRef.current.clear();
     nextAudioSeqRef.current = 0;
     audioPumpingRef.current = false;
+    turnTextMaxSeqRef.current = -1;
+    turnEndedRef.current = false;
+    setTtsSpeaking(false);
     liveTextRef.current = "";
     setLiveText("");
     livePartsRef.current = [];
@@ -255,6 +273,7 @@ export function useSessionChannel(opts: SessionChannelOpts) {
       audio.onerror = done;
       audio.onpause = done; // resolves at once if muted-stop pauses it
       markAudioStart();
+      setTtsSpeaking(true); // a real clip is playing → speech is in progress for this turn
       audio.play().catch(done);
     });
 
@@ -270,6 +289,8 @@ export function useSessionChannel(opts: SessionChannelOpts) {
       await playAudioClip(seg.audio_b64);
     }
     audioPumpingRef.current = false;
+    // Pump idled — if the turn has ended and this was the last clip, speech is fully delivered.
+    maybeSpeechDone();
   };
 
   const finalizeTurn = (forced: boolean) => {
@@ -366,6 +387,15 @@ export function useSessionChannel(opts: SessionChannelOpts) {
       case "segment":
         // Text only — revealed immediately (no wait for TTS). Ignore stale-turn frames.
         if (currentTurnIdRef.current && d.turn_id && d.turn_id !== currentTurnIdRef.current) break;
+        // Text segments all arrive before turn_end (not gated on TTS), so this becomes the
+        // definitive count of clips the audio pump must play before the turn is fully spoken.
+        if (typeof d.seq === "number") turnTextMaxSeqRef.current = Math.max(turnTextMaxSeqRef.current, d.seq);
+        // With Read Aloud on, this turn WILL be spoken — mark speech in-progress NOW (before the
+        // first audio clip). Crucial: the first sentence is often too short for TTS (a null clip),
+        // so waiting for a clip to actually play would leave `ttsSpeaking` false during the gap
+        // before the real audio arrives — and the gate would open early. It clears only via
+        // maybeSpeechDone once every chunk (incl. null ones) has been consumed.
+        if (ttsEnabledRef.current) setTtsSpeaking(true);
         textQueueRef.current.push({ seq: d.seq, text: d.text || "" });
         void pumpText();
         break;
@@ -428,6 +458,10 @@ export function useSessionChannel(opts: SessionChannelOpts) {
         break;
       case "turn_end":
         pendingCommitRef.current = { message_id: d.message_id ?? null, full_text: d.full_text || "" };
+        // No more segments will be generated — audio (if any) may still be draining in the
+        // background. Mark the turn ended and check whether speech has already finished.
+        turnEndedRef.current = true;
+        maybeSpeechDone();
         finalizeTurn(false);
         break;
       case "error":
@@ -666,7 +700,7 @@ export function useSessionChannel(opts: SessionChannelOpts) {
 
   return {
     connected, status, messages, liveText, thinkingSteps, liveParts, busy, error,
-    audioActive,
+    audioActive, ttsSpeaking,
     connect, disconnect, pause, resume,
     sendMessage, sendQuizResult, sendPuzzleResult, sendAudio, sendEvent, stopTurn,
     speak, sendActivity,

@@ -489,7 +489,9 @@ export default function LessonSetupPage() {
     ];
     if (subtopic) descParts.push(`Subtopic: ${subtopic}`);
     if (yearGroup) descParts.push(`Year group: ${yearGroup}`);
-    if (extraDetails.trim()) descParts.push(extraDetails.trim());
+    // The student's own words about what they're struggling with. Labelled so the tutor can
+    // lift it out and treat it as the lesson's primary objective (see build_session_system_prompt).
+    if (extraDetails.trim()) descParts.push(`Notes: ${extraDetails.trim()}`);
 
     try {
       const appointment = await appointmentsApi.book({

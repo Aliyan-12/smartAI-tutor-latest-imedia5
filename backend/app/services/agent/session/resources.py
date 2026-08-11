@@ -81,7 +81,7 @@ def lesson_resource_policy(goal: Optional[str], duration_minutes: Optional[int])
 
 
 def _parse_description(description: Optional[str]) -> Dict[str, Any]:
-    out: Dict[str, Any] = {"topics": [], "year_group": None, "subtopic": None}
+    out: Dict[str, Any] = {"topics": [], "year_group": None, "subtopic": None, "student_focus": None}
     if not description:
         return out
     m = re.search(r"Topics?:\s*([^\n]+)", description, re.IGNORECASE)
@@ -98,6 +98,12 @@ def _parse_description(description: Optional[str]) -> Dict[str, Any]:
     m = re.search(r"Subtopic:\s*([^\n]+)", description, re.IGNORECASE)
     if m:
         out["subtopic"] = m.group(1).strip()
+    # The student's own words at booking about what they're struggling with — becomes the
+    # lesson's primary objective. Labelled "Notes:" by the setup form.
+    m = re.search(r"Notes:\s*([^\n]+)", description, re.IGNORECASE)
+    if m:
+        focus = m.group(1).strip()
+        out["student_focus"] = focus or None
     return out
 
 
