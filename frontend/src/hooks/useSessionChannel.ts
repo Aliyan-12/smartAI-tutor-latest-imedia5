@@ -109,20 +109,22 @@ export function useSessionChannel(opts: SessionChannelOpts) {
   // stays TRUE across inter-chunk gaps and only clears once the WHOLE turn's speech has drained.
   // It's what the puzzle/tap-option gate waits on so buttons don't flicker enabled between chunks.
   const [ttsSpeaking, setTtsSpeaking] = useState(false);
-  const turnTextMaxSeqRef = useRef(-1);  // highest text-segment seq this turn (audio mirrors it)
-  const turnEndedRef = useRef(false);    // turn_end frame received for the current turn
+  const turnEndedRef = useRef(false);      // turn_end frame received for the current turn
+  const allAudioSentRef = useRef(false);   // backend `tts_done` received → NO more audio is coming
   const ttsSafetyTimerRef = useRef<number | null>(null); // absolute cap so speech can't stick "on"
   const audioPlayingCountRef = useRef(0);
   const audioTailTimerRef = useRef<number | null>(null);
   const clearTtsSafety = () => {
     if (ttsSafetyTimerRef.current) { clearTimeout(ttsSafetyTimerRef.current); ttsSafetyTimerRef.current = null; }
   };
-  // The turn's speech is fully delivered once: the turn has ended AND nothing is playing AND the
-  // audio pump has advanced past the last segment (every clip, incl. null ones, has been consumed).
+  // The tutor has fully finished speaking once the backend says every clip was SENT (`tts_done`,
+  // which the WS orders AFTER all segment_audio frames) AND the audio pump has drained them all
+  // (nothing playing, nothing queued). Authoritative — it never clears between chunks, only when
+  // the whole turn's audio is genuinely done, so the gate can't flicker mid-speech.
   const maybeSpeechDone = () => {
-    if (turnEndedRef.current
+    if (allAudioSentRef.current
         && audioPlayingCountRef.current === 0
-        && nextAudioSeqRef.current > turnTextMaxSeqRef.current) {
+        && audioMapRef.current.size === 0) {
       clearTtsSafety();
       setTtsSpeaking(false);
     }
@@ -180,8 +182,8 @@ export function useSessionChannel(opts: SessionChannelOpts) {
     audioMapRef.current.clear();
     nextAudioSeqRef.current = 0;
     audioPumpingRef.current = false;
-    turnTextMaxSeqRef.current = -1;
     turnEndedRef.current = false;
+    allAudioSentRef.current = false;
     clearTtsSafety();
     setTtsSpeaking(false);
     liveTextRef.current = "";
@@ -393,14 +395,9 @@ export function useSessionChannel(opts: SessionChannelOpts) {
       case "segment":
         // Text only — revealed immediately (no wait for TTS). Ignore stale-turn frames.
         if (currentTurnIdRef.current && d.turn_id && d.turn_id !== currentTurnIdRef.current) break;
-        // Text segments all arrive before turn_end (not gated on TTS), so this becomes the
-        // definitive count of clips the audio pump must play before the turn is fully spoken.
-        if (typeof d.seq === "number") turnTextMaxSeqRef.current = Math.max(turnTextMaxSeqRef.current, d.seq);
         // With Read Aloud on, this turn WILL be spoken — mark speech in-progress NOW (before the
-        // first audio clip). Crucial: the first sentence is often too short for TTS (a null clip),
-        // so waiting for a clip to actually play would leave `ttsSpeaking` false during the gap
-        // before the real audio arrives — and the gate would open early. It clears only via
-        // maybeSpeechDone once every chunk (incl. null ones) has been consumed.
+        // first audio clip even arrives) so the gate is closed for the whole message. It clears
+        // only when the backend's `tts_done` arrives AND the audio queue has drained.
         if (ttsEnabledRef.current) setTtsSpeaking(true);
         textQueueRef.current.push({ seq: d.seq, text: d.text || "" });
         void pumpText();
@@ -464,16 +461,23 @@ export function useSessionChannel(opts: SessionChannelOpts) {
         break;
       case "turn_end":
         pendingCommitRef.current = { message_id: d.message_id ?? null, full_text: d.full_text || "" };
-        // No more segments will be generated — audio (if any) may still be draining in the
-        // background. Mark the turn ended and check whether speech has already finished.
+        // Text streaming is done; audio (if any) is still draining, and `tts_done` will follow
+        // once every clip has been sent. Mark the turn ended (the safety timer arms from here).
         turnEndedRef.current = true;
-        maybeSpeechDone();
-        // Absolute safety cap: if a dropped final audio frame ever left the pump unable to
-        // advance, don't leave the gate stuck "speaking" forever. 90s > any single spoken
-        // message, so the normal drain (maybeSpeechDone) always wins in practice.
+        // Absolute safety cap: if `tts_done` or a final audio frame were ever lost, don't leave
+        // the gate stuck "speaking" forever. 90s > any single spoken message, so the normal
+        // `tts_done`-driven drain always wins in practice.
         clearTtsSafety();
         ttsSafetyTimerRef.current = window.setTimeout(() => { setTtsSpeaking(false); }, 90000);
         finalizeTurn(false);
+        break;
+      case "tts_done":
+        // Authoritative from the backend: every TTS clip for this turn has been generated + sent
+        // (ordered after all segment_audio frames). Drop stale-turn signals, then release the gate
+        // as soon as the audio queue has drained.
+        if (currentTurnIdRef.current && d.turn_id && d.turn_id !== currentTurnIdRef.current) break;
+        allAudioSentRef.current = true;
+        maybeSpeechDone();
         break;
       case "error":
         setError(d.message || "Something went wrong.");

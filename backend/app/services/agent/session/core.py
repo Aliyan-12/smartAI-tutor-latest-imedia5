@@ -1692,11 +1692,16 @@ async def _tts_segment(send, seq: int, text: str, turn_id: str) -> None:
         pass
 
 
-async def stream_segment(send, seq: int, sentence: str, *, tts: bool, turn_id: str) -> None:
+async def stream_segment(send, seq: int, sentence: str, *, tts: bool, turn_id: str,
+                         tts_tasks: Optional[list] = None) -> None:
     """Send a segment's display TEXT immediately (GPT-style fast streaming), then — if
     TTS is on — synthesise its audio in the BACKGROUND and ship it as a later
     `segment_audio` frame (one per seq, possibly null). Text never waits on Kokoro.
-    Shared by the session and /chat turn pipelines."""
+    Shared by the session and /chat turn pipelines.
+
+    `tts_tasks`: when given, THIS turn's TTS tasks are collected into it so the caller can
+    await them all and then emit a `tts_done` frame — the authoritative "the tutor has
+    finished speaking" signal the client gates puzzles/tap-options on."""
     display = strip_display_markers(sentence)           # keep newlines/spacing for markdown
     await send({"type": "segment", "seq": seq, "turn_id": turn_id, "text": display})
     logger.debug("SEGMENT text seq=%s len=%s", seq, len(display))
@@ -1704,6 +1709,8 @@ async def stream_segment(send, seq: int, sentence: str, *, tts: bool, turn_id: s
         t = asyncio.create_task(_tts_segment(send, seq, display, turn_id))
         _bg_tts_tasks.add(t)
         t.add_done_callback(_bg_tts_tasks.discard)
+        if tts_tasks is not None:
+            tts_tasks.append(t)
 
 
 # ===========================================================================
@@ -2855,6 +2862,7 @@ async def _run_turn(send, chat_id, user_id, *, saved_user_text, ai_content,
         segmenter = SentenceSegmenter()
         seq = 0
         full: list = []          # the deduped sentences actually shown (also persisted)
+        _turn_tts_tasks: list = []  # THIS turn's TTS tasks → awaited before the tts_done frame
         _seen_norm: set = set()  # normalised sentences already streamed THIS turn
         # If end_lesson runs this turn, we DON'T open the report immediately — we hold the
         # navigation until the AI's closing message has fully streamed (see after turn_end).
@@ -3010,7 +3018,8 @@ async def _run_turn(send, chat_id, user_id, *, saved_user_text, ai_content,
                     sentence = clean_reasoning_leak(sentence)
                     if not sentence.strip() or _dup(sentence):
                         continue
-                    await stream_segment(send, seq, sentence, tts=tts, turn_id=turn_id)
+                    await stream_segment(send, seq, sentence, tts=tts, turn_id=turn_id,
+                                         tts_tasks=_turn_tts_tasks)
                     full.append(sentence)
                     seq += 1
 
@@ -3018,7 +3027,8 @@ async def _run_turn(send, chat_id, user_id, *, saved_user_text, ai_content,
             if rem and not suppress_text:
                 rem = clean_reasoning_leak(rem)
                 if rem.strip() and not _dup(rem):
-                    await stream_segment(send, seq, rem, tts=tts, turn_id=turn_id)
+                    await stream_segment(send, seq, rem, tts=tts, turn_id=turn_id,
+                                         tts_tasks=_turn_tts_tasks)
                     full.append(rem)
                     seq += 1
             if suppress_text:
@@ -3303,7 +3313,23 @@ async def _run_turn(send, chat_id, user_id, *, saved_user_text, ai_content,
     await send({"type": "turn_end", "message_id": message_id, "full_text": clean})
 
     # The closing message has now fully streamed — NOW open the report (deferred navigation).
+    # Done BEFORE the tts_done wait below so an end-of-lesson report never waits on TTS.
     await _open_report_if_ended(send, chat_id, _pending_ended_appt)
+
+    # Authoritative "the tutor has finished SPEAKING" signal: wait for every one of this turn's
+    # TTS clips to be generated + sent (segment_audio frames are ordered before this), THEN emit
+    # tts_done. The client keeps puzzles blurred / tap-options disabled until it arrives AND its
+    # audio queue has drained — so they never enable mid-speech or flicker between chunks. Sent
+    # even when there was no TTS (empty task list) so the client always gets the release signal.
+    if _turn_tts_tasks:
+        try:
+            await asyncio.gather(*_turn_tts_tasks, return_exceptions=True)
+        except Exception:  # noqa: BLE001 — a failed clip must never hold up the signal
+            pass
+    try:
+        await send({"type": "tts_done", "turn_id": turn_id})
+    except Exception:
+        pass
 
 
 async def _open_report_if_ended(send, chat_id, appt_id) -> None:
