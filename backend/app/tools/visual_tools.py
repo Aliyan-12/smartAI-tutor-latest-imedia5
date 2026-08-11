@@ -250,6 +250,13 @@ def visual_tool_groups(ctx: ToolContext) -> dict:
         if not mms.MANIM_AVAILABLE:
             return {"action": "show_puzzle", "error": "animations_disabled",
                     "message": "Animations aren't enabled here — use draw_svg or mermaid_diagram instead."}
+        # Some models escape the WHOLE body as a single line using literal "\n"/"\t" instead of
+        # real newlines → Python sees a bare backslash at column 1 ("unexpected character after
+        # line continuation character"). Only when there are NO real newlines but there ARE literal
+        # "\n" sequences (the exact broken shape) do we turn them back into real newlines/tabs;
+        # normal multi-line code (which already has real newlines) is left completely untouched.
+        if code and "\n" not in code and "\\n" in code:
+            code = code.replace("\\r\\n", "\n").replace("\\n", "\n").replace("\\t", "\t")
         try:
             status, key, detail = await mms.render_code(code)
         except mms.SceneCodeError as e:
