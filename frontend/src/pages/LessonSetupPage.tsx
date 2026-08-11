@@ -1075,22 +1075,41 @@ export default function LessonSetupPage() {
                 <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 10 }}>
                   {goalOptions.map((g) => {
                     const sel = goal === g.id;
+                    // Exam Revision isn't built yet — show it blurred + "Coming soon", not clickable.
+                    const comingSoon = g.id === "revision";
                     return (
                       <button
                         key={g.id}
                         type="button"
-                        onClick={() => setGoal(g.id)}
+                        onClick={() => { if (!comingSoon) setGoal(g.id); }}
+                        aria-disabled={comingSoon}
                         style={{
                           display: "flex", flexDirection: "column", alignItems: "center",
                           padding: "16px 10px 14px", gap: 8,
                           border: `2px solid ${sel ? "#1a73e8" : "#e2e8f0"}`,
                           borderRadius: 12,
                           background: sel ? "#eff6ff" : "#fff",
-                          cursor: "pointer", textAlign: "center", fontFamily: "inherit",
+                          cursor: comingSoon ? "not-allowed" : "pointer", textAlign: "center", fontFamily: "inherit",
                           position: "relative", transition: "all 0.15s",
                           boxShadow: sel ? "0 2px 8px rgba(26,115,232,0.12)" : "0 1px 3px rgba(0,0,0,0.06)",
                         }}
                       >
+                        {comingSoon && (
+                          <div style={{
+                            position: "absolute", inset: 0, zIndex: 5, borderRadius: 12,
+                            backdropFilter: "blur(3px)", WebkitBackdropFilter: "blur(3px)",
+                            background: "rgba(255,255,255,0.45)",
+                            display: "flex", alignItems: "center", justifyContent: "center",
+                          }}>
+                            <span style={{
+                              fontSize: 11, fontWeight: 800, color: "#64748b", background: "#fff",
+                              border: "1px solid #e2e8f0", padding: "4px 10px", borderRadius: 99,
+                              boxShadow: "0 1px 3px rgba(0,0,0,0.1)",
+                            }}>
+                              Coming soon
+                            </span>
+                          </div>
+                        )}
                         <div style={{
                           position: "absolute", top: 10, left: 10,
                           width: 16, height: 16, borderRadius: "50%",
@@ -1181,7 +1200,21 @@ export default function LessonSetupPage() {
                   </div>
                 </div>
 
-                <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 10 }}>
+                {/* The learn-mode picker isn't live yet — blur the whole window and mark it
+                    "Coming soon" (non-interactive). The default learnMode still applies underneath. */}
+                <div style={{ position: "relative" }}>
+                  <div style={{ position: "absolute", inset: 0, zIndex: 5, borderRadius: 12,
+                                display: "flex", alignItems: "center", justifyContent: "center" }}>
+                    <span style={{
+                      fontSize: 13, fontWeight: 800, color: "#475569", background: "#fff",
+                      border: "1px solid #e2e8f0", padding: "6px 14px", borderRadius: 99,
+                      boxShadow: "0 2px 8px rgba(0,0,0,0.12)",
+                    }}>
+                      Coming soon
+                    </span>
+                  </div>
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 10,
+                              filter: "blur(3px)", opacity: 0.7, pointerEvents: "none", userSelect: "none" }}>
                   {learnModeOptions.map((m) => {
                     const sel = learnMode === m.id;
                     return (
@@ -1230,10 +1263,12 @@ export default function LessonSetupPage() {
                     );
                   })}
                 </div>
+                </div>
               </div>
 
-              {/* STEP 5 — Upload materials */}
-              <div style={s.stepCard}>
+              {/* STEP 5 — Upload materials — HIDDEN (not yet available). Kept in code so the
+                  upload wiring stays intact; just not shown to students. */}
+              <div style={{ ...s.stepCard, display: "none" }}>
                 <div style={s.stepHeader}>
                   <span style={s.stepNum as React.CSSProperties}>5</span>
                   <div>
@@ -1314,10 +1349,10 @@ export default function LessonSetupPage() {
                 )}
               </div>
 
-              {/* STEP 6 — Additional Settings */}
+              {/* STEP 6 — Additional Settings (shown as step 5: Upload materials is hidden) */}
               <div style={s.stepCard}>
                 <div style={s.stepHeader}>
-                  <span style={s.stepNum as React.CSSProperties}>6</span>
+                  <span style={s.stepNum as React.CSSProperties}>5</span>
                   <div>
                     <div style={s.stepTitle}>Additional settings</div>
                     <div style={s.stepSubtitle}>Optional details and session access settings.</div>

@@ -57,8 +57,8 @@ const MANIPULATIVE_RENDERS = new Set([
 ]);
 
 export default function PuzzlePlayer({
-  payload, onSubmit,
-}: { payload: PuzzlePayload; onSubmit: (answer: unknown) => void }) {
+  payload, onSubmit, locked = false,
+}: { payload: PuzzlePayload; onSubmit: (answer: unknown) => void; locked?: boolean }) {
   const [submitted, setSubmitted] = useState(false);
 
   const handleSubmit = (answer: unknown) => {
@@ -159,7 +159,32 @@ export default function PuzzlePlayer({
   };
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", height: "100%", flex: 1, minHeight: 0, background: baseBg }}>
+    <div style={{ position: "relative", display: "flex", flexDirection: "column", height: "100%", flex: 1, minHeight: 0, background: baseBg }}>
+      {/* Loading veil: the puzzle is on screen but blurred + non-interactive until the tutor has
+          FINISHED SPEAKING this turn (TTS completion). Being on top, it also swallows clicks so
+          the student can't answer before it clears. Only shown when Read Aloud is on. */}
+      {locked && (
+        <div
+          aria-hidden
+          style={{
+            position: "absolute", inset: 0, zIndex: 30,
+            backdropFilter: "blur(7px)", WebkitBackdropFilter: "blur(7px)",
+            background: dark ? "rgba(6,21,33,0.35)" : "rgba(255,255,255,0.4)",
+            display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center",
+            gap: 12, cursor: "wait",
+          }}
+        >
+          <div style={{
+            width: 30, height: 30, borderRadius: "50%",
+            border: "3px solid rgba(124,58,237,0.25)", borderTopColor: "#7c3aed",
+            animation: "puzzleGateSpin 0.8s linear infinite",
+          }} />
+          <span style={{ fontSize: 13, fontWeight: 700, color: dark ? "rgba(255,255,255,0.9)" : "#475569" }}>
+            Loading…
+          </span>
+          <style>{"@keyframes puzzleGateSpin { to { transform: rotate(360deg); } }"}</style>
+        </div>
+      )}
       <div style={{ padding: "10px 14px", borderBottom: "1px solid #e2e8f0", flexShrink: 0, display: "flex", alignItems: "center", gap: 8, background: "#fff" }}>
         <span style={{ fontSize: 11, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.04em", color: "#7c3aed", background: "rgba(124,58,237,0.1)", padding: "3px 8px", borderRadius: 6 }}>
           {TYPE_LABEL[payload.puzzle_type] || "Puzzle"}
