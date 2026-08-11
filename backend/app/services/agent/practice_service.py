@@ -2682,6 +2682,12 @@ def clean_math_latex(s: str) -> tuple:
     # so it never bounces back — the only place to fix it is here. Drop stray control chars, then
     # re-backslash bare commands. Done AFTER the prose check above so real prose isn't mathified.
     t = re.sub(r"[\x00-\x08\x0b\x0c\x0e-\x1f]", "", t)
+    # The OPPOSITE mangling also happens: the model/SDK sometimes DOUBLES the backslash on a
+    # command (`\\frac` instead of `\frac`). KaTeX reads `\\` as a row break and then renders the
+    # bare word, so `\\frac{5}{8}` came out as the literal letters "frac58" (the reported bug).
+    # Collapse a run of 2+ backslashes that immediately precedes a command LETTER back to ONE. A
+    # real `\\` row break is followed by whitespace / `\end`, never a letter, so it's left alone.
+    t = re.sub(r"\\{2,}([A-Za-z])", r"\\\1", t)
     t = _rebackslash_commands(t).strip()
     if not t:
         return "", "prose"
