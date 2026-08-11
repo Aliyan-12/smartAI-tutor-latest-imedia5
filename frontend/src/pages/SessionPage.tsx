@@ -119,16 +119,6 @@ export default function SessionPage() {
   const [quickReplies, setQuickReplies] = useState<string[]>([]);
   const SLIDE_TOOLS = ["show_resource", "advance_lesson_slide", "retreat_lesson_slide", "jump_to_slide"];
 
-  // ── Interaction gate ──────────────────────────────────────────────────────
-  // A freshly-shown puzzle stays blurred, and tap-options stay disabled, until the AI has
-  // FINISHED SPEAKING this turn's message — TTS completion, NOT text streaming. Driven by the
-  // channel's `ttsSpeaking`, which stays TRUE across the gaps between TTS chunks and only clears
-  // once the WHOLE turn's speech has drained (so buttons don't flicker enabled mid-message).
-  // When Read Aloud is off there is nothing to wait for, so it never gates.
-  const [interactionLocked, setInteractionLocked] = useState(false);
-  const gateArmedRef = useRef(false);      // an interactive element is waiting on TTS
-  const gateFallbackRef = useRef<number | null>(null);
-
   // The last puzzle verdict, and a tick that fires the confetti/chime. A counter, not a
   // boolean: two correct answers in a row wouldn't change a boolean, so the second would
   // silently celebrate nothing.
@@ -185,25 +175,6 @@ export default function SessionPage() {
   const ttsEnabledRef = useRef(true);
   useEffect(() => { ttsEnabledRef.current = ttsEnabled; }, [ttsEnabled]);
 
-  const releaseInteractionGate = useCallback(() => {
-    gateArmedRef.current = false;
-    if (gateFallbackRef.current) { clearTimeout(gateFallbackRef.current); gateFallbackRef.current = null; }
-    setInteractionLocked(false);
-  }, []);
-  // Called when a puzzle / tap-options appear mid-turn: lock them until this turn's TTS finishes.
-  // ONLY gates when Read Aloud is on — muted means there's no speech to wait for, so show at once.
-  const armInteractionGate = useCallback(() => {
-    if (!ttsEnabledRef.current) { releaseInteractionGate(); return; }
-    gateArmedRef.current = true;
-    setInteractionLocked(true);
-    if (gateFallbackRef.current) clearTimeout(gateFallbackRef.current);
-    // Hard safety cap: if a speech signal ever gets stuck, never stay locked forever. Generous
-    // so it can't cut off a genuinely long spoken message (the real release is speech-driven).
-    gateFallbackRef.current = window.setTimeout(() => {
-      if (gateArmedRef.current) releaseInteractionGate();
-    }, 45000);
-  }, [releaseInteractionGate]);
-
   // ── Unified session chat pipeline (single WebSocket) ──────────────────────
   const reloadHistory = useCallback(async () => {
     if (!apptId) return;
@@ -234,7 +205,6 @@ export default function SessionPage() {
         // Tap-to-answer buttons for the AI's current question (no puzzle/quiz needed).
         if (!data.error && Array.isArray(data.options) && (data.options as string[]).length > 0) {
           setQuickReplies((data.options as string[]).slice(0, 5));
-          armInteractionGate(); // stay disabled until the AI finishes speaking this turn
         }
       } else if (tool === "show_puzzle") {
         if (data.error) {
@@ -244,7 +214,6 @@ export default function SessionPage() {
         } else {
           setQuickReplies([]); // the puzzle is the thing to answer now
           setCurrentPuzzle(data as unknown as PuzzlePayload);
-          armInteractionGate(); // blur it until the AI finishes speaking this turn
           // Everything the tutor GENERATES — puzzles, diagrams, animations, mermaid, svg — lives
           // in the PRACTICE tab now; the Learn tab is slides only. Surface it (desktop tab +
           // mobile panel) so the student sees what just appeared.
@@ -330,17 +299,14 @@ export default function SessionPage() {
   messagesLenRef.current = messages.length;
   const clearQuizOffer = useCallback(() => setQuizOffer(null), []);
 
-  // Release the interaction gate only once the turn is over (`!busy`) AND all of its speech has
-  // drained (`!ttsSpeaking`). ttsSpeaking stays true across the gaps between TTS chunks, so the
-  // buttons unlock ONLY after the LAST chunk — never flickering enabled between chunks.
-  useEffect(() => {
-    if (!gateArmedRef.current) return;
-    if (!ttsSpeaking && !busy) releaseInteractionGate();
-  }, [ttsSpeaking, busy, interactionLocked, releaseInteractionGate]);
-  // Muting mid-turn removes the speech we were waiting for → release immediately.
-  useEffect(() => {
-    if (!ttsEnabled && gateArmedRef.current) releaseInteractionGate();
-  }, [ttsEnabled, releaseInteractionGate]);
+  // ── Interaction gate (derived) ────────────────────────────────────────────
+  // The on-screen puzzle stays blurred, and tap-options stay disabled, the WHOLE time the tutor
+  // is delivering a turn with Read Aloud on — from the moment it starts (busy) right through the
+  // spoken audio (ttsSpeaking stays true across chunk gaps and only clears once the LAST chunk has
+  // played). It unlocks the instant the AI stops speaking. When Read Aloud is off there's nothing
+  // to wait for, so it never gates. No arming/timing — a plain derived value that can't get stuck
+  // on (it always reflects the live turn state).
+  const interactionLocked = ttsEnabled && (busy || ttsSpeaking);
 
   // Hands-free voice loop: capture the student's utterance and send it over the
   // SAME session WebSocket as `user_audio`. The mic is muted while a turn runs

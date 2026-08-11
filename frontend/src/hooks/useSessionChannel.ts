@@ -111,14 +111,19 @@ export function useSessionChannel(opts: SessionChannelOpts) {
   const [ttsSpeaking, setTtsSpeaking] = useState(false);
   const turnTextMaxSeqRef = useRef(-1);  // highest text-segment seq this turn (audio mirrors it)
   const turnEndedRef = useRef(false);    // turn_end frame received for the current turn
+  const ttsSafetyTimerRef = useRef<number | null>(null); // absolute cap so speech can't stick "on"
   const audioPlayingCountRef = useRef(0);
   const audioTailTimerRef = useRef<number | null>(null);
+  const clearTtsSafety = () => {
+    if (ttsSafetyTimerRef.current) { clearTimeout(ttsSafetyTimerRef.current); ttsSafetyTimerRef.current = null; }
+  };
   // The turn's speech is fully delivered once: the turn has ended AND nothing is playing AND the
   // audio pump has advanced past the last segment (every clip, incl. null ones, has been consumed).
   const maybeSpeechDone = () => {
     if (turnEndedRef.current
         && audioPlayingCountRef.current === 0
         && nextAudioSeqRef.current > turnTextMaxSeqRef.current) {
+      clearTtsSafety();
       setTtsSpeaking(false);
     }
   };
@@ -177,6 +182,7 @@ export function useSessionChannel(opts: SessionChannelOpts) {
     audioPumpingRef.current = false;
     turnTextMaxSeqRef.current = -1;
     turnEndedRef.current = false;
+    clearTtsSafety();
     setTtsSpeaking(false);
     liveTextRef.current = "";
     setLiveText("");
@@ -462,6 +468,11 @@ export function useSessionChannel(opts: SessionChannelOpts) {
         // background. Mark the turn ended and check whether speech has already finished.
         turnEndedRef.current = true;
         maybeSpeechDone();
+        // Absolute safety cap: if a dropped final audio frame ever left the pump unable to
+        // advance, don't leave the gate stuck "speaking" forever. 90s > any single spoken
+        // message, so the normal drain (maybeSpeechDone) always wins in practice.
+        clearTtsSafety();
+        ttsSafetyTimerRef.current = window.setTimeout(() => { setTtsSpeaking(false); }, 90000);
         finalizeTurn(false);
         break;
       case "error":
