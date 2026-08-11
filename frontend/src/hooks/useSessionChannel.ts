@@ -376,6 +376,11 @@ export function useSessionChannel(opts: SessionChannelOpts) {
       case "turn_start":
         currentTurnIdRef.current = d.turn_id ?? null;
         resetTurnPlayback();       // drop any leftover audio/text from a previous turn
+        // With Read Aloud on, this turn WILL be spoken — mark speech in-progress from the VERY
+        // FIRST frame (before any text/puzzle/tap-option arrives), so a puzzle that mounts early
+        // is already locked. It clears only when the backend's `tts_done` arrives AND the audio
+        // queue has drained — so there is no window where it reads false mid-turn.
+        if (ttsEnabledRef.current) setTtsSpeaking(true);
         thinkingStepsRef.current = [];
         setThinkingSteps([]);      // fresh thinking strip for this turn
         setStatus("waiting");
