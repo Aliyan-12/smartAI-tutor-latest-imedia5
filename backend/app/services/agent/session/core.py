@@ -556,6 +556,23 @@ async def build_session_system_prompt(
         # No note → no special objective; the lesson runs on the normal plan.
         focus_block = ""
 
+    # LESSON MEMORY — aggregate this student's COMPLETED prior lessons in this subject/unit into a
+    # brief that adapts the OBJECTIVE (weak-area focus, faster on strengths, varied puzzles, and the
+    # "re-taken subtopic" case). Built as a plain string OUTSIDE the big f-string (brace-safe), and
+    # never raises. Empty for a brand-new student → the lesson runs exactly as before.
+    memory_block = ""
+    try:
+        from app.services.agent.session import memory as _lm
+        _brief = await _lm.build_memory_brief(
+            db, student_id, subject,
+            unit_title=(topics_raw or None), current_subtopic=(subtopic_str or None),
+            exclude_appointment_id=appointment_id,
+        )
+        memory_block = _lm.render_memory_brief(_brief)
+    except Exception:
+        logger.warning("lesson-memory brief failed appt=%s", appointment_id, exc_info=True)
+        memory_block = ""
+
     # Map session type to specific AI behaviour instructions
     SESSION_TYPE_INSTRUCTIONS = {
         # Primary session modes (new)
@@ -1122,6 +1139,7 @@ ALWAYS use this content as your PRIMARY teaching source when it is present.
     prompt = f"""You are a live AI tutor conducting a real-time tutoring session on SmartAI Tutor.
 
 {focus_block}
+{memory_block}
 SESSION CONTEXT:
 - Subject: {subject} | Key Stage: {key_stage}
 - Session Title: {title}
@@ -3359,6 +3377,7 @@ _THINKING_LABELS: dict = {
     "create_assignment": "Setting some homework",
     "generate_session_report": "Writing the lesson report",
     "allow_end_lesson": "Wrapping up the lesson",
+    "recall_lesson_history": "Reviewing your past lessons",
     "web_search": "Searching the web",
     "deep_research": "Researching that in depth",
 }

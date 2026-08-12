@@ -133,7 +133,7 @@ TEACHER = RoleSpec(
     name="teacher",
     display="Teacher",
     phases=("recap", "teach"),   # merged: the Teacher is ALSO the opener (no separate Intro agent)
-    tool_groups=("teaching", "visuals", "interact"),
+    tool_groups=("teaching", "visuals", "interact", "history"),
     role="Subject Teacher",
     goal="Open the lesson briefly, then teach the lesson's SLIDES in order — one slide per reply — "
          "explaining the current slide clearly, then moving to the next. The slides are the material.",
@@ -260,7 +260,7 @@ SUMMARIZER = RoleSpec(
     name="summarizer",
     display="Summary & Report",
     phases=("review",),
-    tool_groups=("lifecycle",),
+    tool_groups=("lifecycle", "history"),
     role="Lesson Summariser & Reporter",
     goal="Close the lesson in TWO steps: first a short recap + XP (and wait), then write the report and unlock ending.",
     backstory=(

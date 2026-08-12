@@ -671,6 +671,14 @@ Output raw JSON only (no markdown fences):
         logger.info(f"Created stub LessonPlan for appointment_id={appointment.id}")
     else:
         lesson_plan.session_summary = report_json
+        # Snapshot the finalised coverage ledger into its OWN durable column, out of the live
+        # session_state scratchpad, so cross-lesson memory has a clean per-lesson record to read.
+        try:
+            _led = (lesson_plan.session_state or {}).get("ledger")
+            if _led:
+                lesson_plan.coverage = _led
+        except Exception:  # noqa: BLE001 — never let a snapshot break report saving
+            logger.debug("coverage snapshot failed for lesson_plan_id=%s", lesson_plan.id, exc_info=True)
         lesson_plan.updated_at = datetime.now(timezone.utc)
         await db.flush()
         await db.refresh(lesson_plan)

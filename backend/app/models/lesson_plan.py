@@ -36,8 +36,12 @@ class LessonPlan(Base):
     materials_uploaded: Mapped[Optional[list]] = mapped_column(JSONB, nullable=True)
     # Task 1: AI-generated lesson plan blocks
     plan_blocks: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True)
-    # Task 2: Session checkpoint state
+    # Task 2: Session checkpoint state (LIVE scratchpad: puzzle_state, end_allowed, ledger…)
     session_state: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True)
+    # Finalised coverage ledger for THIS lesson (slides/concepts/questions/puzzles + outcomes),
+    # snapshotted from session_state["ledger"] when the lesson completes. A durable, clean record
+    # (separate from the live session_state) that cross-lesson memory reads to adapt the next lesson.
+    coverage: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
     )

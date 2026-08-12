@@ -34,14 +34,17 @@ _CAP_SLIDES = 40      # slide numbers are tiny; a full deck is fine
 _CAP_CONCEPTS = 24
 _CAP_QUESTIONS = 16
 _CAP_PUZZLES = 24
+_CAP_OUTCOMES = 30
 
-_LIST_KEYS = ("slides_taught", "concepts_taught", "questions_asked", "puzzles_done")
+_LIST_KEYS = ("slides_taught", "concepts_taught", "questions_asked", "puzzles_done",
+              "puzzle_outcomes")
 _FLAG_KEYS = ("recap_done", "quiz_done", "report_done")
 _CAPS = {
     "slides_taught": _CAP_SLIDES,
     "concepts_taught": _CAP_CONCEPTS,
     "questions_asked": _CAP_QUESTIONS,
     "puzzles_done": _CAP_PUZZLES,
+    "puzzle_outcomes": _CAP_OUTCOMES,
 }
 
 
@@ -50,7 +53,8 @@ def empty_ledger() -> dict:
         "slides_taught": [],     # slide numbers / titles the Teacher has delivered
         "concepts_taught": [],   # short concept labels ("tens and ones")
         "questions_asked": [],   # short forms of questions already put to the student
-        "puzzles_done": [],      # puzzle ids/kinds already played ("place_value:32")
+        "puzzles_done": [],      # puzzle ids/kinds already SHOWN ("place_value:32")
+        "puzzle_outcomes": [],   # puzzle kind → result once MARKED ("matching:correct")
         "recap_done": False,
         "quiz_done": False,
         "report_done": False,
@@ -139,6 +143,16 @@ async def add_question_asked(db: AsyncSession, appointment_id: int, question: st
 async def add_puzzle_done(db: AsyncSession, appointment_id: int, puzzle: str) -> None:
     await _mutate(db, appointment_id, lambda l: _append_unique(l, "puzzles_done", puzzle))
     logger.info("ledger: puzzle done=%s appt=%s", puzzle, appointment_id)
+
+
+async def add_puzzle_outcome(db: AsyncSession, appointment_id: int, kind: str, correct: bool) -> None:
+    """Record how a puzzle went once it was MARKED (kind → correct/wrong). Not deduped — every
+    attempt counts, so lesson memory can tell "practised matching 4× and got 3 right". Feeds the
+    cross-lesson memory brief so a re-taken subtopic can re-drill what the student got wrong."""
+    entry = f"{(kind or 'puzzle').strip()}:{'correct' if correct else 'wrong'}"
+    # append (allow duplicates) then cap in _mutate
+    await _mutate(db, appointment_id, lambda l: l["puzzle_outcomes"].append(entry))
+    logger.info("ledger: puzzle outcome=%s appt=%s", entry, appointment_id)
 
 
 async def set_flag(db: AsyncSession, appointment_id: int, flag: str, value: bool = True) -> None:

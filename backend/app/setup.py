@@ -181,6 +181,8 @@ async def run_setup(fresh: bool = False, seed: bool = True):
         "ALTER TABLE student_profiles ADD COLUMN IF NOT EXISTS key_stage VARCHAR(20)",
         "ALTER TABLE appointments ADD COLUMN IF NOT EXISTS ai_briefing TEXT",
         "ALTER TABLE appointments ADD COLUMN IF NOT EXISTS learn_mode VARCHAR(20) NOT NULL DEFAULT 'ai_recommended'",
+        # Finalised per-lesson coverage ledger (snapshotted on completion) — read by cross-lesson memory
+        "ALTER TABLE lesson_plans ADD COLUMN IF NOT EXISTS coverage JSONB",
         # ================================================================
         # Resource Hub mirror — 9 tables (curriculum tree + resources + vectors).
         # Explicit, idempotent DDL (also created automatically by create_all above).

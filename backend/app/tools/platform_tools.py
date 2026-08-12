@@ -623,12 +623,36 @@ def platform_tool_groups(ctx: ToolContext) -> dict:
                 "action": "show_research",
             }
 
+    # ── history (lesson memory) ──────────────────────────────────────────────
+    @tool
+    async def recall_lesson_history() -> dict:
+        """
+        Recall what this student has done in PAST lessons on this subject: how many lessons and
+        subtopics they've covered, what they were WEAK vs STRONG on, their quiz history, the
+        recommended next step from last time, and which puzzle kinds they've already seen. Use it
+        at the START of a lesson (or when deciding what to focus on) to aim the objective — re-drill
+        weak areas, move faster through strengths, and pick fresh puzzle kinds. Read-only; the
+        student sees nothing. Call SILENTLY, then teach accordingly.
+        """
+        from app.services.agent.session import memory as _lm
+        brief = await _lm.build_memory_brief(
+            ctx.db, ctx.student_id, ctx.subject,
+            unit_title=ctx.unit_title, current_subtopic=None,
+            exclude_appointment_id=ctx.appointment_id,
+        )
+        return {
+            "action": "lesson_history",
+            "has_history": bool(brief.get("has_history")),
+            "summary": _lm.summary_text(brief),
+        }
+
     return {
         "assessment": [generate_quiz],
         "mastery": [get_student_mastery, update_topic_mastery, evaluate_answer],
         "platform": [advance_lesson_phase, create_assignment, load_resource, pause_lesson, resume_lesson],
         "lifecycle": [end_lesson, allow_end_lesson, generate_session_report],
         "research": [web_search, deep_research],
+        "history": [recall_lesson_history],
     }
 
 

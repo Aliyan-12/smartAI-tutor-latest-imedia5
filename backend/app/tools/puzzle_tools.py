@@ -660,6 +660,15 @@ def puzzle_tool_groups(ctx: ToolContext) -> dict:
             await puzzle_service.mark_puzzle_evaluated(ctx.db, ctx.appointment_id, verdict)
         except Exception as e:  # noqa: BLE001
             logger.warning("mark_puzzle_evaluated failed: %s", e)
+        # Record the outcome (kind → correct/wrong) in the coverage ledger so lesson memory knows
+        # what this student actually solved vs missed — a re-taken subtopic can re-drill the misses.
+        try:
+            from app.services import coverage_ledger as _cl_out
+            _kind = ps.get("render") or ps.get("puzzle_type") or "puzzle"
+            await _cl_out.add_puzzle_outcome(ctx.db, ctx.appointment_id, str(_kind),
+                                             bool(verdict.get("correct")))
+        except Exception:  # noqa: BLE001 — memory is a nicety, never break marking
+            logger.debug("ledger puzzle-outcome record failed appt=%s", ctx.appointment_id, exc_info=True)
         # Award XP for the attempt (correct → XP by difficulty; wrong → none). Once only.
         xp_awarded = 0
         try:

@@ -210,6 +210,18 @@ async def _run_post_session_pipeline(db: AsyncSession, appointment: Appointment)
             lesson_plan.updated_at = datetime.now(timezone.utc)
             await db.flush()
 
+        # SOLID snapshot: on completion, copy the finalised coverage ledger into its own durable
+        # `coverage` column (out of the live session_state scratchpad) so cross-lesson memory always
+        # has a clean per-lesson record — even when the report above came back cached.
+        try:
+            if lesson_plan is not None and getattr(lesson_plan, "coverage", None) is None:
+                _led = (lesson_plan.session_state or {}).get("ledger")
+                if _led:
+                    lesson_plan.coverage = _led
+                    await db.flush()
+        except Exception as _cex:  # noqa: BLE001 — never let a snapshot break completion
+            logger.warning(f"coverage snapshot skipped for appointment_id={appointment.id}: {_cex}")
+
         # Commit report immediately so it survives even if gamification fails
         await db.commit()
         logger.info(f"Report saved for appointment_id={appointment.id}")

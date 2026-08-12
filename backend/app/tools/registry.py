@@ -33,7 +33,7 @@ logger = logging.getLogger(__name__)
 # Stable bind order — keep view tools first, lifecycle last.
 GROUP_ORDER: List[str] = [
     "teaching", "visuals", "puzzles", "interact", "assessment", "mastery", "platform",
-    "lifecycle", "research",
+    "history", "lifecycle", "research",
 ]
 ALL_SESSION_GROUPS: Set[str] = set(GROUP_ORDER)
 
