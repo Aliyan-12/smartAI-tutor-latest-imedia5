@@ -534,23 +534,28 @@ async def build_session_system_prompt(
     tutor_notes = tutor_notes if tutor_notes else "None"
 
     # The high-priority objective block, injected near the TOP of the prompt so every agent —
-    # Teacher, Practitioner and Summarizer — treats the student's stated difficulty as the goal.
+    # Teacher, Practitioner and Summarizer — treats the student's booking note as BOTH the focus of
+    # the lesson AND a promise to keep. It is framed as a PLAN the AI announces up front and a
+    # QUESTION it commits to answering at the end, so the student always gets what they booked for.
     if student_focus:
         focus_block = (
-            "🎯 STUDENT'S OWN FOCUS FOR THIS LESSON — THIS IS THE PRIMARY OBJECTIVE:\n"
-            f"At booking, the student told us, in their own words, what they are struggling with:\n"
+            "🎯 STUDENT'S OWN NOTE FOR THIS LESSON — THE PRIMARY OBJECTIVE + A PROMISE TO KEEP:\n"
+            f"At booking, in their own words, the student told us what they want from today:\n"
             f"    \"{student_focus}\"\n"
-            "They are WEAK on this and booked this lesson specifically to fix it. So for the WHOLE "
-            "lesson:\n"
-            "• Aim every explanation, example, visual and puzzle at making THIS crystal clear — "
-            "diagnose exactly where their understanding of it breaks down, then rebuild it step by "
-            "step.\n"
-            "• Keep checking they're getting THIS specific thing, not just the topic in general. "
-            "Pitch practice at it.\n"
-            "• Do NOT drift onto unrelated sub-points or ignore it — this is the reason they are "
-            "here. Everything serves this goal.\n"
-            "• By the end they MUST be able to confidently understand and do this. The closing "
-            "summary will explicitly confirm they've now got THIS and invite any last questions.\n"
+            "Treat this as the lesson's main objective AND a question you have promised to answer. "
+            "Follow this plan and TELL the student the plan:\n"
+            "1) OPEN the lesson (your FIRST message, once only) by naming today's ROADMAP in one warm "
+            "sentence that matches this lesson's actual phases — e.g. \"First we'll go through the "
+            "slides together, then have a go at some practice, then a quick quiz to check it's all "
+            "stuck — and right at the end I'll make sure to answer what you asked about.\" (If this "
+            "lesson has no slides, say what it DOES have — e.g. 'we'll practise together, then a "
+            "quick quiz, then I'll answer your question'. Never promise slides you don't have.)\n"
+            "2) TEACH & PRACTISE around it: aim your explanations, examples, visuals and puzzles at "
+            "making THIS crystal clear — diagnose where their understanding breaks down and rebuild "
+            "it. Keep checking they're getting THIS specific thing, not just the topic in general.\n"
+            "3) ANSWER THE NOTE before the lesson wraps up: you PROMISED to, so in the review/closing "
+            "(after the quiz) directly and fully address exactly what they asked — do NOT let the "
+            "lesson end without answering it, and the closing summary confirms they've now got it.\n"
         )
     else:
         # No note → no special objective; the lesson runs on the normal plan.
@@ -2083,11 +2088,19 @@ async def build_lesson_state_anchor(
             _focus_m = _re.search(r"Notes:\s*([^\n]+)",
                                   getattr(appointment, "description", "") or "", _re.IGNORECASE)
             _focus_txt = _focus_m.group(1).strip() if _focus_m else ""
-            if _focus_txt:
+            if _focus_txt and (closing_stage or end_allowed):
+                # The lesson is wrapping up — the AI PROMISED to answer this. Make it a hard TO-DO
+                # so it can't slip out the end without being addressed.
+                lines.append(
+                    f"🎯 YOU PROMISED TO ANSWER THEIR NOTE: \"{_focus_txt}\". The lesson is wrapping "
+                    "up — BEFORE you finish, directly and fully answer exactly this now; do NOT let "
+                    "the lesson end without addressing it."
+                )
+            elif _focus_txt:
                 lines.append(
                     f"🎯 STUDENT'S FOCUS (their words at booking): \"{_focus_txt}\". This is the "
-                    "lesson's MAIN objective — steer teaching + practice to make THIS click, and "
-                    "keep checking they're getting it. The closing summary confirms they've got it."
+                    "lesson's MAIN objective — steer teaching + practice to make THIS click, and keep "
+                    "checking they're getting it. You'll directly ANSWER this note in the wrap-up."
                 )
         except Exception:
             pass
@@ -3132,13 +3145,14 @@ async def _run_turn(send, chat_id, user_id, *, saved_user_text, ai_content,
                         "[SUMMARY — STEP 1 OF 2] Give ONE short, genuine recap of what THIS student "
                         "actually worked on and solved today — be specific (name the real "
                         f"problems/topics from the conversation), not generic. {_xp_line} If the "
-                        "student named a FOCUS / difficulty at booking (see the 🎯 STUDENT'S FOCUS "
-                        "line in the lesson state), explicitly CONFIRM they've now understood and can "
-                        "do THAT specific thing, using its actual words (e.g. 'you've now got how "
-                        "diffusion works across permeable membranes'). Then STOP and invite any last "
-                        "questions, e.g. 'Does that all make sense now — any questions before we "
-                        "finish?'. Do NOT call any tool, do NOT write the report, do NOT set a puzzle "
-                        "or question, and do NOT say goodbye or mention ending yet."
+                        "student left a NOTE / question at booking (see the 🎯 line in the lesson "
+                        "state), NOW is when you keep your promise: DIRECTLY answer exactly what they "
+                        "asked in one or two clear sentences, using its actual words, and confirm "
+                        "they've now got it (e.g. 'and to answer what you asked — diffusion across a "
+                        "permeable membrane works by…; you've now got that'). Then STOP and invite "
+                        "any last questions, e.g. 'Does that all make sense now — anything else "
+                        "before we finish?'. Do NOT call any tool, do NOT write the report, do NOT "
+                        "set a puzzle or question, and do NOT say goodbye or mention ending yet."
                     )
                 else:
                     _summary_stage = "finalize"
