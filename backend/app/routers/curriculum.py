@@ -9,7 +9,7 @@ import logging
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, Response
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
@@ -26,6 +26,45 @@ router = APIRouter(prefix="/api/curriculum", tags=["curriculum"])
 
 def _rh_slides_dir() -> Path:
     return Path(settings.upload_dir).resolve().parent / "rh_slides"
+
+
+@router.get("/tutors")
+async def get_tutors(current_user: User = Depends(require_any_authenticated)):
+    """The AI tutor voice personas a booker can choose from (name + gender + emoji). The chosen
+    tutor id is written into the appointment description as `Tutor: <id>` and drives the lesson's
+    Kokoro voice."""
+    from app.services.agent.session.voice import list_tutors, DEFAULT_TUTOR
+    return {"tutors": list_tutors(), "default": DEFAULT_TUTOR}
+
+
+# Cache the synthesized sample per tutor — the line is fixed, so we only pay the
+# Kokoro cost once per tutor per process.
+_TUTOR_PREVIEW_CACHE: dict[str, bytes] = {}
+
+
+@router.get("/tutors/{tutor_id}/preview")
+async def preview_tutor_voice(tutor_id: str):
+    """Synthesize a short spoken sample in the chosen tutor's voice so a booker can
+    hear it before confirming. Public on purpose (a canned, non-sensitive line) so a
+    plain <audio>/Audio() element can play it without auth headers."""
+    from app.services.agent.session.voice import (
+        text_to_speech, tutor_voice, normalise_tutor_id, TUTORS,
+    )
+    tid = normalise_tutor_id(tutor_id)
+    if tid not in _TUTOR_PREVIEW_CACHE:
+        name = TUTORS[tid]["name"]
+        sample = f"Hi, I'm {name}. I'll be teaching you the lesson today!"
+        try:
+            wav, _mime = await asyncio.to_thread(text_to_speech, sample, "en", tutor_voice(tid))
+        except Exception as exc:
+            logger.warning("Tutor voice preview failed for %s: %s", tid, exc)
+            raise HTTPException(status_code=503, detail="Voice preview unavailable")
+        _TUTOR_PREVIEW_CACHE[tid] = wav
+    return Response(
+        content=_TUTOR_PREVIEW_CACHE[tid],
+        media_type="audio/wav",
+        headers={"Cache-Control": "public, max-age=86400"},
+    )
 
 
 @router.get("/resources/{hub_id}/slides.pdf")
