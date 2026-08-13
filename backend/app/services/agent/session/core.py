@@ -1688,13 +1688,13 @@ def _wav_duration_ms(wav: bytes) -> int:
         return 0
 
 
-async def _tts_segment(send, seq: int, text: str, turn_id: str) -> None:
+async def _tts_segment(send, seq: int, text: str, turn_id: str, voice: Optional[str] = None) -> None:
     """Synthesise ONE segment's Kokoro audio OFF the critical path and ship it as a
-    separate `segment_audio` frame. The text segment was already sent, so a slow or
-    failed clip never delays the on-screen reveal. ALWAYS emits exactly one frame per
-    seq (a null clip when the text is too short or Kokoro fails) so the client's in-order
-    audio queue never stalls waiting for a seq that will never come. Tagged with turn_id
-    so the client drops audio left over from a previous turn (seq restarts each turn)."""
+    separate `segment_audio` frame. `voice` is the lesson's selected TUTOR voice. The text
+    segment was already sent, so a slow or failed clip never delays the on-screen reveal.
+    ALWAYS emits exactly one frame per seq (a null clip when the text is too short or Kokoro
+    fails) so the client's in-order audio queue never stalls waiting for a seq that will never
+    come. Tagged with turn_id so the client drops audio left over from a previous turn."""
     tts_src = strip_display_markers(text).strip()       # Kokoro gets clean text only
     audio_b64 = None
     duration_ms = 0
@@ -1702,7 +1702,7 @@ async def _tts_segment(send, seq: int, text: str, turn_id: str) -> None:
         try:
             from app.services.agent.session.voice import text_to_speech
             async with _tts_semaphore:
-                wav, _mime = await asyncio.to_thread(text_to_speech, tts_src)
+                wav, _mime = await asyncio.to_thread(text_to_speech, tts_src, "en", voice)
             audio_b64 = base64.b64encode(wav).decode("ascii")
             duration_ms = _wav_duration_ms(wav)
             logger.debug("SEGMENT audio seq=%s ms=%s", seq, duration_ms)
@@ -1716,7 +1716,7 @@ async def _tts_segment(send, seq: int, text: str, turn_id: str) -> None:
 
 
 async def stream_segment(send, seq: int, sentence: str, *, tts: bool, turn_id: str,
-                         tts_tasks: Optional[list] = None) -> None:
+                         tts_tasks: Optional[list] = None, voice: Optional[str] = None) -> None:
     """Send a segment's display TEXT immediately (GPT-style fast streaming), then — if
     TTS is on — synthesise its audio in the BACKGROUND and ship it as a later
     `segment_audio` frame (one per seq, possibly null). Text never waits on Kokoro.
@@ -1729,7 +1729,7 @@ async def stream_segment(send, seq: int, sentence: str, *, tts: bool, turn_id: s
     await send({"type": "segment", "seq": seq, "turn_id": turn_id, "text": display})
     logger.debug("SEGMENT text seq=%s len=%s", seq, len(display))
     if tts:
-        t = asyncio.create_task(_tts_segment(send, seq, display, turn_id))
+        t = asyncio.create_task(_tts_segment(send, seq, display, turn_id, voice))
         _bg_tts_tasks.add(t)
         t.add_done_callback(_bg_tts_tasks.discard)
         if tts_tasks is not None:
@@ -2541,6 +2541,9 @@ async def _run_turn(send, chat_id, user_id, *, saved_user_text, ai_content,
     """
     turn_id = uuid4().hex
     await send({"type": "turn_start", "turn_id": turn_id})
+    # The TUTOR voice this lesson speaks in — resolved inside the db block below (needs `db`),
+    # then threaded into every segment's TTS. Default until resolved.
+    _tts_voice = None
 
     # Steps shown in the "thinking" strip this turn (tool labels + brief thought lines).
     # Persisted as a role="thinking" message at the end so they survive a refresh.
@@ -2581,6 +2584,14 @@ async def _run_turn(send, chat_id, user_id, *, saved_user_text, ai_content,
             if _sc_appt_id:
                 _sc_appt = await _load_appointment(db, _sc_appt_id)
                 if _sc_appt is not None:
+                    # Resolve the lesson's TUTOR voice (booker's choice in the description) here,
+                    # where the appointment is already loaded — threaded into TTS below.
+                    try:
+                        from app.services.agent.session.voice import (
+                            tutor_id_from_description as _tid, tutor_voice as _tvoice)
+                        _tts_voice = _tvoice(_tid(getattr(_sc_appt, "description", "") or ""))
+                    except Exception:
+                        _tts_voice = None
                     from app.services.agent.session.resources import _parse_description as _srs_parse
                     _info = _srs_parse(getattr(_sc_appt, "description", "") or "")
                     _sc_sub = _info.get("subtopic") or ""
@@ -3048,7 +3059,7 @@ async def _run_turn(send, chat_id, user_id, *, saved_user_text, ai_content,
                     sentence = clean_reasoning_leak(sentence)
                     if not sentence.strip() or _dup(sentence):
                         continue
-                    await stream_segment(send, seq, sentence, tts=tts, turn_id=turn_id)
+                    await stream_segment(send, seq, sentence, tts=tts, turn_id=turn_id, voice=_tts_voice)
                     full.append(sentence)
                     seq += 1
 
@@ -3056,7 +3067,7 @@ async def _run_turn(send, chat_id, user_id, *, saved_user_text, ai_content,
             if rem and not suppress_text:
                 rem = clean_reasoning_leak(rem)
                 if rem.strip() and not _dup(rem):
-                    await stream_segment(send, seq, rem, tts=tts, turn_id=turn_id)
+                    await stream_segment(send, seq, rem, tts=tts, turn_id=turn_id, voice=_tts_voice)
                     full.append(rem)
                     seq += 1
             if suppress_text:

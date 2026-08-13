@@ -41,11 +41,13 @@ async def lifespan(app: FastAPI):
     except Exception as _casbin_err:
         logger.warning(f"Casbin enforcer init failed (non-fatal): {_casbin_err}")
 
-    # Pre-warm Kokoro TTS pipeline so the first voice request is not slow
+    # Pre-warm Kokoro TTS pipeline AND download every tutor voice pack so the first voice
+    # request (and the first lesson using a given tutor's voice) is not slow.
     try:
-        from app.services.agent.session.voice import _get_kokoro
+        from app.services.agent.session.voice import _get_kokoro, prewarm_voices
         await asyncio.to_thread(_get_kokoro)
-        logger.info("Kokoro TTS pipeline pre-warmed successfully.")
+        await asyncio.to_thread(prewarm_voices)
+        logger.info("Kokoro TTS pipeline + tutor voices pre-warmed successfully.")
     except Exception as _kokoro_err:
         logger.warning(f"Kokoro TTS pre-warm failed (non-fatal): {_kokoro_err}")
 
