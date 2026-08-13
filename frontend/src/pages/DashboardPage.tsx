@@ -2,7 +2,6 @@ import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import Sidebar from "../components/Sidebar";
 import WelcomeScreen from "../components/WelcomeScreen";
-import TutorPreference from "../components/TutorPreference";
 import { useChat } from "../hooks/useChat";
 import { appointmentsApi } from "../services/api";
 import type { Appointment } from "../types";
@@ -102,10 +101,6 @@ export default function DashboardPage() {
             </div>
           </div>
 
-
-          <div style={{ padding: "18px 28px 0" }}>
-            <TutorPreference />
-          </div>
 
           <WelcomeScreen onPromptClick={handlePromptClick} onStatsLoaded={setHeroStats} />
         </div>
