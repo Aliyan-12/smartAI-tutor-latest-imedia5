@@ -321,9 +321,6 @@ export default function BookSessionPage() {
   const [success, setSuccess] = useState("");
 
   const selectedStudent = students.find((s) => String(s.id) === form.student_id);
-  const selectedTeacher = isTeacher
-    ? { name: user?.name ?? "You" }
-    : teachers.find((t) => String(t.id) === form.teacher_id);
 
   useEffect(() => {
     const load = async () => {
@@ -345,6 +342,11 @@ export default function BookSessionPage() {
           setStudents(studentList);
           setTeachers(teacherList);
           setKbStages(ks.keystages ?? []);
+          // The teacher picker was removed from the form — auto-assign the parent's
+          // first available teacher so the booking still has a valid teacher_id.
+          if (teacherList.length > 0) {
+            setForm((f) => (f.teacher_id ? f : { ...f, teacher_id: String(teacherList[0].id) }));
+          }
         }
       } catch {
         // ignore — the empty-state / validation handles a failed/empty load
@@ -737,33 +739,15 @@ export default function BookSessionPage() {
                     )}
                   </div>
 
-                  {/* Teacher */}
-                  {isParent ? (
-                    <div style={{ flex: 1, minWidth: 160 }}>
-                      <label style={s.label}>Teacher *</label>
-                      <select
-                        value={form.teacher_id}
-                        onChange={(e) => setForm((f) => ({ ...f, teacher_id: e.target.value }))}
-                        required
-                        style={selectStyle}
-                      >
-                        <option value="">Select teacher</option>
-                        {teachers.map((t) => (
-                          <option key={t.id} value={t.id}>{t.name}</option>
-                        ))}
-                      </select>
+                  {/* AI tutor (voice persona) — drives the lesson's spoken voice. */}
+                  <div style={{ flex: 1, minWidth: 220 }}>
+                    <label style={s.label}>
+                      AI tutor <span style={{ fontWeight: 400, color: "#94a3b8" }}>(voice — tap 🔊 to hear)</span>
+                    </label>
+                    <div style={{ marginTop: 4 }}>
+                      <TutorPickerPills tutors={tutors} value={tutorId} onChange={setTutorId} />
                     </div>
-                  ) : (
-                    <div style={{ flex: 1, minWidth: 160 }}>
-                      <label style={s.label}>Teacher</label>
-                      <input
-                        type="text"
-                        value={user?.name ?? "You (teacher)"}
-                        disabled
-                        style={{ ...inputStyle, background: "var(--bg-tertiary)", cursor: "not-allowed", opacity: 0.7 }}
-                      />
-                    </div>
-                  )}
+                  </div>
                 </div>
 
                 {/* Availability badge */}
@@ -782,15 +766,6 @@ export default function BookSessionPage() {
                   </div>
                 )}
 
-                {/* AI tutor (voice persona) — drives the lesson's spoken voice. */}
-                <div style={{ marginTop: 14 }}>
-                  <label style={s.label}>
-                    AI tutor <span style={{ fontWeight: 400, color: "#94a3b8" }}>(voice — tap 🔊 to hear)</span>
-                  </label>
-                  <div style={{ marginTop: 4 }}>
-                    <TutorPickerPills tutors={tutors} value={tutorId} onChange={setTutorId} />
-                  </div>
-                </div>
               </div>
 
               {/* STEP 2 — Session Details */}
@@ -1484,7 +1459,7 @@ export default function BookSessionPage() {
                   {(
                     [
                       { label: "Student", value: selectedStudent?.name },
-                      { label: "Teacher", value: selectedTeacher?.name },
+                      { label: "AI Tutor", value: tutors.find((t) => t.id === tutorId)?.name },
                       { label: "Key Stage", value: form.key_stage || undefined },
                       { label: "Year Group", value: form.year_group || undefined },
                       { label: "Subject", value: form.subject || undefined },
