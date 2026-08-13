@@ -707,6 +707,7 @@ export const lessonsApi = {
 
 // Curriculum sourced from the Resource Hub mirror (rh_* tables).
 export interface HubSubject { id: number; name: string; }
+export interface Tutor { id: string; name: string; gender: string; emoji: string; blurb: string; }
 export interface HubUnit { id: number; title: string; unit_number: number | null; has_resources: boolean; }
 export interface HubTopic { id: number; title: string; }
 
@@ -739,6 +740,14 @@ export const curriculumApi = {
     const query = new URLSearchParams({ unitId: String(unitId) });
     const res = await fetch(`${API_BASE}/curriculum/topics?${query}`, { headers: authHeaders() });
     return handleResponse<{ topics: HubTopic[] }>(res);
+  },
+  async getTutors() {
+    const res = await fetch(`${API_BASE}/curriculum/tutors`, { headers: authHeaders() });
+    return handleResponse<{ tutors: Tutor[]; default: string }>(res);
+  },
+  // Public URL for a short spoken sample in the tutor's voice (playable via <audio>).
+  tutorPreviewUrl(tutorId: string) {
+    return `${API_BASE}/curriculum/tutors/${encodeURIComponent(tutorId)}/preview`;
   },
   async triggerSync(target: "all" | "curriculum" | "resources" = "all") {
     const query = new URLSearchParams({ target });
