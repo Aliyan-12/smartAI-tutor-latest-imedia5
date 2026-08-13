@@ -8,7 +8,8 @@ import {
 import Sidebar from "../components/Sidebar";
 import { useAuth } from "../context/AuthContext";
 import { appointmentsApi, teacherApi, parentApi, curriculumApi } from "../services/api";
-import type { HubSubject } from "../services/api";
+import type { HubSubject, HubTopic, Tutor } from "../services/api";
+import TutorPickerPills from "../components/TutorPickerPills";
 import type { User as UserType } from "../types";
 
 // ── Session type constants ────────────────────────────────────────────────────
@@ -83,6 +84,38 @@ function sessionTypeToGoalId(sessionType: string): GoalId {
   if (sessionType === "Catch Up") return "catch_up";
   if (sessionType === "Revision") return "revision";
   return "learn_scratch";
+}
+
+// ── Goal × session-length rules (mirrors LessonSetupPage) ────────────────────
+// A slot is offered only when BOTH the key stage allows it AND the goal doesn't
+// block it. A 20-min slot can't teach a topic from scratch, so it's blocked for
+// "Learn from Scratch" and reduced-scope for the others.
+type DurationRule = { state: "full" | "limited" | "blocked"; note?: string; reason?: string };
+
+function goalDurationRule(goal: GoalId, mins: number): DurationRule {
+  if (mins !== 20) return { state: "full" };  // 40/60/90 work for every goal
+  switch (goal) {
+    case "learn_scratch":
+      return { state: "blocked", reason: "Learn from Scratch needs at least a 40-minute lesson to teach a topic properly." };
+    case "homework":   // Practice & Improve
+      return { state: "limited", note: "Quiz only" };
+    case "catch_up":
+      return { state: "limited", note: "Quick recap" };
+    default:           // Exam Revision
+      return { state: "full" };
+  }
+}
+
+// Deep Learning (60) suits learning from scratch; the balanced Core Learning (40)
+// is the default for the other goals.
+function recommendedDuration(goal: GoalId): number {
+  return goal === "learn_scratch" ? 60 : 40;
+}
+
+// A slot is offered when the key stage allows it AND the goal doesn't block it.
+function isDurationAllowed(goal: GoalId, mins: number, studentKeyStage: string): boolean {
+  return getAvailableDurations(studentKeyStage).includes(mins)
+    && goalDurationRule(goal, mins).state !== "blocked";
 }
 
 const LESSON_PLAN_DATA: Record<number, Record<GoalId, PlanStep[]>> = {
@@ -238,8 +271,12 @@ export default function BookSessionPage() {
   const navigate = useNavigate();
   const isParent = user?.role === "parent";
   const isTeacher = user?.role === "teacher";
+  // Both parent and teacher pick an existing student, so the curriculum key stage +
+  // year group are driven by (and locked to) that student's profile.
+  const autoCurriculum = isParent || isTeacher;
 
   const [students, setStudents] = useState<UserType[]>([]);
+  const [studentsLoaded, setStudentsLoaded] = useState(false);
   const [teachers, setTeachers] = useState<UserType[]>([]);
   const [availability, setAvailability] = useState<{ used: number; limit: number } | null>(null);
   const [loadingAvailability, setLoadingAvailability] = useState(false);
@@ -252,6 +289,10 @@ export default function BookSessionPage() {
   const [kbStages, setKbStages] = useState<string[]>([]);
   const [kbUnits, setKbUnits] = useState<Array<{ id: number; title: string; unit_name: string; has_resources: boolean }>>([]);
   const [selectedUnits, setSelectedUnits] = useState<string[]>([]);
+  const [subtopicOptions, setSubtopicOptions] = useState<HubTopic[]>([]);
+  const [selectedSubtopic, setSelectedSubtopic] = useState<string>("");
+  const [tutors, setTutors] = useState<Tutor[]>([]);
+  const [tutorId, setTutorId] = useState<string>(() => localStorage.getItem("preferredTutor") || "aria");
 
   const [form, setForm] = useState({
     student_id: "",
@@ -305,7 +346,11 @@ export default function BookSessionPage() {
           setTeachers(teacherList);
           setKbStages(ks.keystages ?? []);
         }
-      } catch {}
+      } catch {
+        // ignore — the empty-state / validation handles a failed/empty load
+      } finally {
+        setStudentsLoaded(true);
+      }
     };
     load();
   }, [isTeacher, isParent]);
@@ -326,6 +371,33 @@ export default function BookSessionPage() {
       .then((data) => setHubSubjects(data.subjects ?? []))
       .catch(() => setHubSubjects([]));
   }, [form.key_stage, form.year_group]);
+
+  // AI tutor catalogue (voice personas) — keep the remembered choice if still valid.
+  useEffect(() => {
+    curriculumApi.getTutors()
+      .then((r) => {
+        setTutors(r.tutors || []);
+        setTutorId((cur) => (r.tutors?.some((t) => t.id === cur) ? cur : (r.default || "aria")));
+      })
+      .catch(() => {});
+  }, []);
+  useEffect(() => { localStorage.setItem("preferredTutor", tutorId); }, [tutorId]);
+
+  // Subtopics for the chosen unit — only when EXACTLY ONE topic is selected (blank = whole topic).
+  useEffect(() => {
+    if (selectedUnits.length !== 1) { setSubtopicOptions([]); setSelectedSubtopic(""); return; }
+    const unit = kbUnits.find((u) => u.unit_name === selectedUnits[0]);
+    if (!unit) { setSubtopicOptions([]); setSelectedSubtopic(""); return; }
+    let cancelled = false;
+    curriculumApi.getTopics(unit.id)
+      .then((data) => {
+        if (cancelled) return;
+        setSubtopicOptions(data.topics ?? []);
+        setSelectedSubtopic((cur) => ((data.topics ?? []).some((t) => t.title === cur) ? cur : ""));
+      })
+      .catch(() => { if (!cancelled) setSubtopicOptions([]); });
+    return () => { cancelled = true; };
+  }, [selectedUnits, kbUnits]);
 
   // Resolve subjectId from the chosen subject name.
   useEffect(() => {
@@ -352,6 +424,35 @@ export default function BookSessionPage() {
       .catch(() => setKbUnits([]));
   }, [subjectId, form.key_stage, form.year_group]);
 
+  // Auto-derive the session title from subject + topic/subtopic (the manual title
+  // field was removed to mirror the student lesson-setup flow).
+  useEffect(() => {
+    const topicLabel = selectedSubtopic
+      || (selectedUnits.length === 1
+        ? (kbUnits.find((u) => u.unit_name === selectedUnits[0])?.title ?? selectedUnits[0])
+        : selectedUnits.length > 1
+          ? `${selectedUnits.length} topics`
+          : "");
+    const derived = [form.subject, topicLabel].filter(Boolean).join(" — ");
+    setForm((f) => (f.title === derived ? f : { ...f, title: derived }));
+  }, [form.subject, selectedUnits, selectedSubtopic, kbUnits]);
+
+  // Keep the chosen length valid for the chosen goal + key stage (mirrors LessonSetupPage).
+  // Switching to a goal that blocks the current slot snaps to that goal's recommended length
+  // (or the first allowed one), so the form never sits on a disabled combination.
+  useEffect(() => {
+    const goalId = sessionTypeToGoalId(form.session_type);
+    const mins = parseInt(form.duration_minutes);
+    if (isDurationAllowed(goalId, mins, studentKeyStage)) return;
+    const rec = recommendedDuration(goalId);
+    if (isDurationAllowed(goalId, rec, studentKeyStage)) {
+      setForm((f) => ({ ...f, duration_minutes: String(rec) }));
+      return;
+    }
+    const firstOk = [20, 40, 60, 90].find((m) => isDurationAllowed(goalId, m, studentKeyStage));
+    if (firstOk) setForm((f) => ({ ...f, duration_minutes: String(firstOk) }));
+  }, [form.session_type, form.duration_minutes, studentKeyStage]);
+
   useEffect(() => {
     if (!topicDropdownOpen) return;
     const handler = (e: MouseEvent) => {
@@ -375,7 +476,8 @@ export default function BookSessionPage() {
     try {
       const data = (await appointmentsApi.checkAvailability(studentId)) as {
         used: number; limit: number;
-        slots_used?: number; slots_remaining?: number; max_per_week?: number; key_stage?: string | null;
+        slots_used?: number; slots_remaining?: number; max_per_week?: number;
+        key_stage?: string | null; year_group?: string | null;
       };
       const used = data.used ?? data.slots_used ?? 0;
       const limit = data.limit ?? data.max_per_week ?? 0;
@@ -385,13 +487,17 @@ export default function BookSessionPage() {
         setAvailability(null);
       }
       const ks = data.key_stage ?? "";
+      const yg = data.year_group ?? "";
       setStudentKeyStage(ks);
       const available = getAvailableDurations(ks);
       setForm((f) => ({
         ...f,
-        // Default the curriculum key stage to the student's own, but don't override
-        // a key stage the teacher/parent already picked.
-        key_stage: f.key_stage || ks,
+        // Key stage + year group follow the chosen student and are locked to their
+        // profile for both parent and teacher — always override, and reset the subject
+        // since a different student means a different curriculum.
+        key_stage: autoCurriculum ? ks : (f.key_stage || ks),
+        year_group: autoCurriculum ? yg : (f.year_group || yg),
+        ...(autoCurriculum ? { subject: "", title: "" } : {}),
         duration_minutes: available.includes(parseInt(f.duration_minutes)) ? f.duration_minutes : "40",
       }));
     } catch {
@@ -450,8 +556,11 @@ export default function BookSessionPage() {
             selectedUnits.length > 0 ? `Topics: ${selectedUnits.join(", ")}` : "",
             form.session_type ? `Session type: ${form.session_type}` : "",
             form.year_group ? `Year group: ${form.year_group}` : "",
-            form.description || "",
+            selectedSubtopic ? `Subtopic: ${selectedSubtopic}` : "",
+            tutorId ? `Tutor: ${tutorId}` : "",
+            form.description ? `Notes: ${form.description}` : "",
           ].filter(Boolean).join("\n") || undefined,
+        subtopic: selectedSubtopic || undefined,
         payment_amount: form.payment_amount ? parseFloat(form.payment_amount) : undefined,
         learn_mode: learnMode,
         passcode: form.require_passcode && form.passcode ? form.passcode : undefined,
@@ -597,21 +706,35 @@ export default function BookSessionPage() {
                 <div style={{ display: "flex", gap: 12, flexWrap: "wrap", marginBottom: 0 }}>
                   {/* Student */}
                   <div style={{ flex: 1, minWidth: 160 }}>
-                    <label style={s.label}>Student *</label>
-                    <div style={{ position: "relative" }}>
-                      <User size={14} style={{ position: "absolute", left: 10, top: "50%", transform: "translateY(-50%)", color: "var(--text-muted)", pointerEvents: "none" }} />
-                      <select
-                        value={form.student_id}
-                        onChange={(e) => handleStudentChange(e.target.value)}
-                        required
-                        style={{ ...selectStyle, paddingLeft: 32 }}
-                      >
-                        <option value="">Select student</option>
-                        {students.map((s) => (
-                          <option key={s.id} value={s.id}>{s.name}</option>
-                        ))}
-                      </select>
-                    </div>
+                    <label style={s.label}>{isParent ? "Child *" : "Student *"}</label>
+                    {autoCurriculum && studentsLoaded && students.length === 0 ? (
+                      <div style={{
+                        display: "flex", alignItems: "flex-start", gap: 8,
+                        padding: "10px 12px", borderRadius: 8,
+                        background: "#fffbeb", border: "1px solid #fde68a",
+                        fontSize: 12.5, color: "#92400e", lineHeight: 1.45, fontWeight: 600,
+                      }}>
+                        <span style={{ fontSize: 14, lineHeight: 1.2 }}>⚠️</span>
+                        <span>{isParent
+                          ? "No children linked to your account. Ask your school admin to link your child before booking a session."
+                          : "No students assigned to you yet. Ask your school admin to add students before booking a session."}</span>
+                      </div>
+                    ) : (
+                      <div style={{ position: "relative" }}>
+                        <User size={14} style={{ position: "absolute", left: 10, top: "50%", transform: "translateY(-50%)", color: "var(--text-muted)", pointerEvents: "none" }} />
+                        <select
+                          value={form.student_id}
+                          onChange={(e) => handleStudentChange(e.target.value)}
+                          required
+                          style={{ ...selectStyle, paddingLeft: 32 }}
+                        >
+                          <option value="">{isParent ? "Select child" : "Select student"}</option>
+                          {students.map((s) => (
+                            <option key={s.id} value={s.id}>{s.name}</option>
+                          ))}
+                        </select>
+                      </div>
+                    )}
                   </div>
 
                   {/* Teacher */}
@@ -658,6 +781,16 @@ export default function BookSessionPage() {
                     {availability.used >= availability.limit && " — limit reached"}
                   </div>
                 )}
+
+                {/* AI tutor (voice persona) — drives the lesson's spoken voice. */}
+                <div style={{ marginTop: 14 }}>
+                  <label style={s.label}>
+                    AI tutor <span style={{ fontWeight: 400, color: "#94a3b8" }}>(voice — tap 🔊 to hear)</span>
+                  </label>
+                  <div style={{ marginTop: 4 }}>
+                    <TutorPickerPills tutors={tutors} value={tutorId} onChange={setTutorId} />
+                  </div>
+                </div>
               </div>
 
               {/* STEP 2 — Session Details */}
@@ -665,20 +798,24 @@ export default function BookSessionPage() {
                 <div style={s.stepHeader}>
                   <span style={s.stepNum as React.CSSProperties}>2</span>
                   <div>
-                    <div style={s.stepTitle}>What will this session cover?</div>
-                    <div style={s.stepSubtitle}>Choose the subject, key stage, and session goal.</div>
+                    <div style={s.stepTitle}>What do you want to learn?</div>
+                    <div style={s.stepSubtitle}>Pick the key stage, subject and topic for this session.</div>
                   </div>
                 </div>
 
-                {/* Key Stage · Year Group · Subject · Topic — single row (Resource Hub cascade) */}
+                {/* Key Stage · Year Group — compact line (auto-filled + locked from the child for parents) */}
                 <div style={{ display: "flex", gap: 12, marginBottom: 14, alignItems: "flex-start", flexWrap: "wrap" }}>
                   <div style={{ flex: 1, minWidth: 110 }}>
-                    <label style={s.label}>Key Stage *</label>
+                    <label style={s.label}>
+                      Key Stage *
+                      {autoCurriculum && <span style={{ fontWeight: 400, color: "#94a3b8", marginLeft: 6 }}>from {isParent ? "child" : "student"}</span>}
+                    </label>
                     <select
                       value={form.key_stage}
                       onChange={(e) => setForm((f) => ({ ...f, key_stage: e.target.value, year_group: "", subject: "", title: "" }))}
                       required
-                      style={selectStyle}
+                      disabled={autoCurriculum}
+                      style={{ ...selectStyle, opacity: autoCurriculum ? 0.7 : 1, cursor: autoCurriculum ? "not-allowed" : undefined }}
                     >
                       <option value="">Select key stage</option>
                       {kbStages.map((k) => (
@@ -687,12 +824,15 @@ export default function BookSessionPage() {
                     </select>
                   </div>
                   <div style={{ flex: 1, minWidth: 110 }}>
-                    <label style={s.label}>Year Group *</label>
+                    <label style={s.label}>
+                      Year Group *
+                      {autoCurriculum && <span style={{ fontWeight: 400, color: "#94a3b8", marginLeft: 6 }}>from {isParent ? "child" : "student"}</span>}
+                    </label>
                     <select
                       value={form.year_group}
                       onChange={(e) => setForm((f) => ({ ...f, year_group: e.target.value, subject: "", title: "" }))}
-                      style={{ ...selectStyle, opacity: form.key_stage ? 1 : 0.5 }}
-                      disabled={!form.key_stage}
+                      style={{ ...selectStyle, opacity: (autoCurriculum || !form.key_stage) ? (autoCurriculum ? 0.7 : 0.5) : 1, cursor: autoCurriculum ? "not-allowed" : undefined }}
+                      disabled={autoCurriculum || !form.key_stage}
                     >
                       <option value="">{form.key_stage ? "Select year group" : "Choose key stage first"}</option>
                       {hubYears.map((y) => (
@@ -700,6 +840,10 @@ export default function BookSessionPage() {
                       ))}
                     </select>
                   </div>
+                </div>
+
+                {/* Subject · Topic · Subtopic — one line, 25 / 25 / 50 */}
+                <div style={{ display: "flex", gap: 12, marginBottom: 14, alignItems: "flex-start", flexWrap: "wrap" }}>
                   <div style={{ flex: 1, minWidth: 120 }}>
                     <label style={s.label}>Subject *</label>
                     <select
@@ -716,7 +860,7 @@ export default function BookSessionPage() {
                     </select>
                   </div>
                   {/* Topic — always visible, disabled until subject + key stage chosen */}
-                  <div style={{ flex: 2, minWidth: 180 }} ref={topicDropdownRef}>
+                  <div style={{ flex: 1, minWidth: 180 }} ref={topicDropdownRef}>
                     <label style={s.label}>
                       Topic
                       {selectedUnits.length > 0 && (
@@ -858,6 +1002,42 @@ export default function BookSessionPage() {
                       )}
                     </div>
                   </div>
+
+                  {/* Subtopic — third column (50%). Disabled until exactly one topic with subtopics is chosen. */}
+                  <div style={{ flex: 2, minWidth: 150 }}>
+                    <label style={s.label}>Subtopic <span style={{ fontWeight: 400, color: "#94a3b8" }}>· optional</span></label>
+                    <select
+                      value={selectedSubtopic}
+                      onChange={(e) => setSelectedSubtopic(e.target.value)}
+                      disabled={!(selectedUnits.length === 1 && subtopicOptions.length > 0)}
+                      style={{
+                        ...selectStyle,
+                        opacity: (selectedUnits.length === 1 && subtopicOptions.length > 0) ? 1 : 0.5,
+                        cursor: (selectedUnits.length === 1 && subtopicOptions.length > 0) ? undefined : "not-allowed",
+                      }}
+                    >
+                      <option value="">
+                        {selectedUnits.length === 1 && subtopicOptions.length > 0
+                          ? "Start from the beginning of the topic"
+                          : "Pick one topic first"}
+                      </option>
+                      {subtopicOptions.map((st) => (
+                        <option key={st.id} value={st.title}>{st.title}</option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+
+              </div>
+
+              {/* STEP 3 — What help do you need today? */}
+              <div style={s.stepCard}>
+                <div style={s.stepHeader}>
+                  <span style={s.stepNum as React.CSSProperties}>3</span>
+                  <div>
+                    <div style={s.stepTitle}>What help do you need today?</div>
+                    <div style={s.stepSubtitle}>Choose the kind of support for this session.</div>
+                  </div>
                 </div>
 
                 {/* Session Goal compact cards */}
@@ -866,22 +1046,41 @@ export default function BookSessionPage() {
                   <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 10, marginTop: 6 }}>
                     {SESSION_GOAL_OPTIONS.map((g) => {
                       const sel = form.session_type === g.id;
+                      // Exam Revision isn't built yet — show it blurred + "Coming soon", not clickable.
+                      const comingSoon = g.id === "Revision";
                       return (
                         <button
                           key={g.id}
                           type="button"
-                          onClick={() => setForm((f) => ({ ...f, session_type: g.id }))}
+                          onClick={() => { if (!comingSoon) setForm((f) => ({ ...f, session_type: g.id })); }}
+                          aria-disabled={comingSoon}
                           style={{
                             display: "flex", flexDirection: "column", alignItems: "center",
                             padding: "16px 10px 14px", gap: 8,
                             border: `2px solid ${sel ? "#1a73e8" : "#e2e8f0"}`,
                             borderRadius: 12,
                             background: sel ? "#eff6ff" : "#fff",
-                            cursor: "pointer", textAlign: "center", fontFamily: "inherit",
+                            cursor: comingSoon ? "not-allowed" : "pointer", textAlign: "center", fontFamily: "inherit",
                             position: "relative", transition: "all 0.15s",
                             boxShadow: sel ? "0 2px 8px rgba(26,115,232,0.12)" : "0 1px 3px rgba(0,0,0,0.06)",
                           }}
                         >
+                          {comingSoon && (
+                            <div style={{
+                              position: "absolute", inset: 0, zIndex: 5, borderRadius: 12,
+                              backdropFilter: "blur(3px)", WebkitBackdropFilter: "blur(3px)",
+                              background: "rgba(255,255,255,0.45)",
+                              display: "flex", alignItems: "center", justifyContent: "center",
+                            }}>
+                              <span style={{
+                                fontSize: 11, fontWeight: 800, color: "#64748b", background: "#fff",
+                                border: "1px solid #e2e8f0", padding: "4px 10px", borderRadius: 99,
+                                boxShadow: "0 1px 3px rgba(0,0,0,0.1)",
+                              }}>
+                                Coming soon
+                              </span>
+                            </div>
+                          )}
                           <div style={{
                             position: "absolute", top: 10, left: 10,
                             width: 16, height: 16, borderRadius: "50%",
@@ -912,10 +1111,147 @@ export default function BookSessionPage() {
                   </div>
                 </div>
 
-                {/* Learn Mode cards */}
-                <div style={{ marginBottom: 14 }}>
-                  <label style={s.label}>How would you like to learn?</label>
-                  <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 10, marginTop: 6 }}>
+              </div>
+
+              {/* STEP 4 — Schedule & Duration */}
+              <div style={s.stepCard}>
+                <div style={s.stepHeader}>
+                  <span style={s.stepNum as React.CSSProperties}>4</span>
+                  <div>
+                    <div style={s.stepTitle}>How long would you like your session to be?</div>
+                    <div style={s.stepSubtitle}>Pick a date, time, and session duration.</div>
+                  </div>
+                </div>
+
+                <div style={{ display: "flex", gap: 12, flexWrap: "wrap", marginBottom: 20 }}>
+                  <div style={{ flex: 1, minWidth: 160 }}>
+                    <label style={s.label}>Date *</label>
+                    <input
+                      type="date"
+                      value={form.date}
+                      onChange={(e) => setForm((f) => ({ ...f, date: e.target.value }))}
+                      required
+                      style={inputStyle}
+                    />
+                  </div>
+                  <div style={{ flex: 1, minWidth: 140 }}>
+                    <label style={s.label}>Time *</label>
+                    <input
+                      type="time"
+                      value={form.time}
+                      onChange={(e) => setForm((f) => ({ ...f, time: e.target.value }))}
+                      required
+                      style={inputStyle}
+                    />
+                  </div>
+                  {isTeacher && (
+                    <div style={{ flex: 1, minWidth: 140 }}>
+                      <label style={s.label}>Payment amount (£)</label>
+                      <input
+                        type="number"
+                        placeholder="e.g. 25.00"
+                        value={form.payment_amount}
+                        onChange={(e) => setForm((f) => ({ ...f, payment_amount: e.target.value }))}
+                        min="0"
+                        step="0.01"
+                        style={inputStyle}
+                      />
+                    </div>
+                  )}
+                </div>
+
+                {/* Duration cards */}
+                <div>
+                  <label style={s.label}>Session Duration</label>
+                  <div className="bsp-dur-grid">
+                    {SESSION_TYPE_DURATIONS.map((d) => {
+                      const mins = parseInt(d.value);
+                      const goalId = sessionTypeToGoalId(form.session_type);
+                      const ksAllows = getAvailableDurations(studentKeyStage).includes(mins);
+                      const rule = goalDurationRule(goalId, mins);
+                      const isAvailable = ksAllows && rule.state !== "blocked";
+                      const isSelected = form.duration_minutes === d.value;
+                      const isRecommended = mins === recommendedDuration(goalId) && isAvailable;
+                      const reason = !ksAllows
+                        ? "Available for GCSE/A-Level and above."
+                        : rule.state === "blocked" ? rule.reason : undefined;
+                      return (
+                        <button
+                          key={d.value}
+                          type="button"
+                          className={`bsp-dur-card${isSelected ? " active" : ""}`}
+                          disabled={!isAvailable}
+                          onClick={() => isAvailable && setForm((f) => ({ ...f, duration_minutes: d.value }))}
+                          title={reason}
+                          aria-label={reason ? `${d.name} — ${reason}` : d.name}
+                          style={{ opacity: isAvailable ? 1 : 0.45 }}
+                        >
+                          {isRecommended && (
+                            <span style={{ position: "absolute", top: 8, right: 8, fontSize: 9, fontWeight: 800, background: "#10b981", color: "#fff", padding: "2px 7px", borderRadius: 999, textTransform: "uppercase" }}>
+                              Recommended
+                            </span>
+                          )}
+                          {isAvailable && rule.state === "limited" && rule.note && (
+                            <span style={{ position: "absolute", top: 8, right: 8, fontSize: 9, fontWeight: 800, background: "#f59e0b", color: "#fff", padding: "2px 7px", borderRadius: 999, textTransform: "uppercase" }}>
+                              {rule.note}
+                            </span>
+                          )}
+                          {!isAvailable && (
+                            <span style={{ position: "absolute", top: 8, right: 8, fontSize: 9, fontWeight: 700, background: "#e2e8f0", color: "#64748b", padding: "2px 7px", borderRadius: 999, textTransform: "uppercase" }}>
+                              Locked
+                            </span>
+                          )}
+                          <span style={{ fontSize: 22, filter: isAvailable ? "none" : "grayscale(1)" }}>{d.emoji}</span>
+                          <span style={{ fontSize: 14, fontWeight: 800, color: isAvailable ? "#0f172a" : "#94a3b8" }}>{d.name}</span>
+                          <span style={{ fontSize: 12, fontWeight: 600, color: isAvailable ? "#1a73e8" : "#94a3b8" }}>{d.sublabel}</span>
+                          <span style={{ fontSize: 11, color: "#64748b", lineHeight: 1.4 }}>{d.desc}</span>
+                          {!isAvailable && reason && (
+                            <span style={{ fontSize: 11, color: "#ef4444", fontWeight: 600, marginTop: 4, lineHeight: 1.4 }}>
+                              {reason}
+                            </span>
+                          )}
+                        </button>
+                      );
+                    })}
+                  </div>
+                  {studentKeyStage && getAvailableDurations(studentKeyStage).length < 4 && (
+                    <p style={{ fontSize: 12, color: "#64748b", marginTop: 8 }}>
+                      Showing sessions available for <strong>{studentKeyStage}</strong>. Locked options require a higher key stage.
+                    </p>
+                  )}
+                  {form.student_id && !studentKeyStage && (
+                    <p style={{ fontSize: 12, color: "#f59e0b", marginTop: 8 }}>
+                      Student has no key stage set — all durations available. They can set it in Settings → Profile.
+                    </p>
+                  )}
+                </div>
+              </div>
+
+              {/* STEP 5 — How would you like to learn? */}
+              <div style={s.stepCard}>
+                <div style={s.stepHeader}>
+                  <span style={s.stepNum as React.CSSProperties}>5</span>
+                  <div>
+                    <div style={s.stepTitle}>How would you like to learn?</div>
+                    <div style={s.stepSubtitle}>Choose the teaching style for this session.</div>
+                  </div>
+                </div>
+
+                {/* Learn Mode cards — the picker isn't live yet; blur the whole block + mark
+                    "Coming soon" (non-interactive). The default learn mode still applies underneath. */}
+                <div style={{ position: "relative" }}>
+                  <div style={{ position: "absolute", inset: 0, zIndex: 5, borderRadius: 12,
+                                display: "flex", alignItems: "center", justifyContent: "center" }}>
+                    <span style={{
+                      fontSize: 13, fontWeight: 800, color: "#475569", background: "#fff",
+                      border: "1px solid #e2e8f0", padding: "6px 14px", borderRadius: 99,
+                      boxShadow: "0 2px 8px rgba(0,0,0,0.12)",
+                    }}>
+                      Coming soon
+                    </span>
+                  </div>
+                  <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 10, marginTop: 6,
+                                filter: "blur(3px)", opacity: 0.7, pointerEvents: "none", userSelect: "none" }}>
                     {LEARN_MODE_OPTIONS.map((m) => {
                       const sel = learnMode === m.id;
                       return (
@@ -965,120 +1301,10 @@ export default function BookSessionPage() {
                     })}
                   </div>
                 </div>
-
-                {/* Session title */}
-                <div style={{ marginBottom: 0 }}>
-                  <label style={s.label}>Session Title *</label>
-                  <input
-                    type="text"
-                    placeholder="e.g. Cell Structure Revision"
-                    value={form.title}
-                    onChange={(e) => setForm((f) => ({ ...f, title: e.target.value }))}
-                    required
-                    style={inputStyle}
-                  />
-                </div>
-
               </div>
 
-              {/* STEP 3 — Schedule & Duration */}
-              <div style={s.stepCard}>
-                <div style={s.stepHeader}>
-                  <span style={s.stepNum as React.CSSProperties}>3</span>
-                  <div>
-                    <div style={s.stepTitle}>When and how long?</div>
-                    <div style={s.stepSubtitle}>Pick a date, time, and session duration.</div>
-                  </div>
-                </div>
-
-                <div style={{ display: "flex", gap: 12, flexWrap: "wrap", marginBottom: 20 }}>
-                  <div style={{ flex: 1, minWidth: 160 }}>
-                    <label style={s.label}>Date *</label>
-                    <input
-                      type="date"
-                      value={form.date}
-                      onChange={(e) => setForm((f) => ({ ...f, date: e.target.value }))}
-                      required
-                      style={inputStyle}
-                    />
-                  </div>
-                  <div style={{ flex: 1, minWidth: 140 }}>
-                    <label style={s.label}>Time *</label>
-                    <input
-                      type="time"
-                      value={form.time}
-                      onChange={(e) => setForm((f) => ({ ...f, time: e.target.value }))}
-                      required
-                      style={inputStyle}
-                    />
-                  </div>
-                  {isTeacher && (
-                    <div style={{ flex: 1, minWidth: 140 }}>
-                      <label style={s.label}>Payment amount (£)</label>
-                      <input
-                        type="number"
-                        placeholder="e.g. 25.00"
-                        value={form.payment_amount}
-                        onChange={(e) => setForm((f) => ({ ...f, payment_amount: e.target.value }))}
-                        min="0"
-                        step="0.01"
-                        style={inputStyle}
-                      />
-                    </div>
-                  )}
-                </div>
-
-                {/* Duration cards */}
-                <div>
-                  <label style={s.label}>Session Duration</label>
-                  <div className="bsp-dur-grid">
-                    {SESSION_TYPE_DURATIONS.map((d) => {
-                      const available = getAvailableDurations(studentKeyStage);
-                      const isAvailable = !studentKeyStage || available.includes(parseInt(d.value));
-                      const isSelected = form.duration_minutes === d.value;
-                      return (
-                        <button
-                          key={d.value}
-                          type="button"
-                          className={`bsp-dur-card${isSelected ? " active" : ""}`}
-                          disabled={!isAvailable}
-                          onClick={() => isAvailable && setForm((f) => ({ ...f, duration_minutes: d.value }))}
-                          title={!isAvailable ? `Not available for ${studentKeyStage}` : undefined}
-                          style={{ opacity: isAvailable ? 1 : 0.45 }}
-                        >
-                          {d.recommended && isAvailable && (
-                            <span style={{ position: "absolute", top: 8, right: 8, fontSize: 9, fontWeight: 800, background: "#10b981", color: "#fff", padding: "2px 7px", borderRadius: 999, textTransform: "uppercase" }}>
-                              Recommended
-                            </span>
-                          )}
-                          {!isAvailable && (
-                            <span style={{ position: "absolute", top: 8, right: 8, fontSize: 9, fontWeight: 700, background: "#e2e8f0", color: "#64748b", padding: "2px 7px", borderRadius: 999, textTransform: "uppercase" }}>
-                              Locked
-                            </span>
-                          )}
-                          <span style={{ fontSize: 22, filter: isAvailable ? "none" : "grayscale(1)" }}>{d.emoji}</span>
-                          <span style={{ fontSize: 14, fontWeight: 800, color: isAvailable ? "#0f172a" : "#94a3b8" }}>{d.name}</span>
-                          <span style={{ fontSize: 12, fontWeight: 600, color: isAvailable ? "#1a73e8" : "#94a3b8" }}>{d.sublabel}</span>
-                          <span style={{ fontSize: 11, color: "#64748b", lineHeight: 1.4 }}>{d.desc}</span>
-                        </button>
-                      );
-                    })}
-                  </div>
-                  {studentKeyStage && getAvailableDurations(studentKeyStage).length < 4 && (
-                    <p style={{ fontSize: 12, color: "#64748b", marginTop: 8 }}>
-                      Showing sessions available for <strong>{studentKeyStage}</strong>. Locked options require a higher key stage.
-                    </p>
-                  )}
-                  {form.student_id && !studentKeyStage && (
-                    <p style={{ fontSize: 12, color: "#f59e0b", marginTop: 8 }}>
-                      Student has no key stage set — all durations available. They can set it in Settings → Profile.
-                    </p>
-                  )}
-                </div>
-              </div>
-
-              {/* STEP 4 — Upload materials */}
-              <div style={s.stepCard}>
+              {/* Upload materials — hidden to mirror the student lesson-setup flow */}
+              <div style={{ ...(s.stepCard as React.CSSProperties), display: "none" }}>
                 <div style={s.stepHeader}>
                   <span style={s.stepNum as React.CSSProperties}>4</span>
                   <div>
@@ -1153,10 +1379,10 @@ export default function BookSessionPage() {
                 )}
               </div>
 
-              {/* STEP 5 — Additional Settings */}
+              {/* STEP 6 — Additional Settings */}
               <div style={s.stepCard}>
                 <div style={s.stepHeader}>
-                  <span style={s.stepNum as React.CSSProperties}>5</span>
+                  <span style={s.stepNum as React.CSSProperties}>6</span>
                   <div>
                     <div style={s.stepTitle}>Additional settings</div>
                     <div style={s.stepSubtitle}>Optional notes and passcode protection.</div>
