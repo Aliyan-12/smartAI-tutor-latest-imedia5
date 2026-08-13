@@ -3,6 +3,7 @@ import { useLocation } from "react-router-dom";
 import { Users, BookOpen, MessageSquare, Link, Eye, ChevronRight, ChevronLeft } from "lucide-react";
 import { parentApi } from "../services/api";
 import Sidebar from "../components/Sidebar";
+import TutorPreference from "../components/TutorPreference";
 import StudentProgress from "../components/StudentProgress";
 import type { User, Assessment, ChatListItem, Chat } from "../types";
 
@@ -556,6 +557,7 @@ export default function ParentDashboard() {
 
           {currentView === "dashboard" && (
             <>
+              <TutorPreference />
               <DashboardView data={dashboardData} />
               <StudentsView
                 students={students}
