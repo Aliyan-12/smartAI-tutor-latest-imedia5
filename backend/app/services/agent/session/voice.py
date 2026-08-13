@@ -53,6 +53,43 @@ TTS_VOICE = "af_heart"
 TTS_SPEED = 0.95
 
 
+# ── Tutors (named voice personas) ────────────────────────────────────────────
+# The AI tutor the student hears. Each is a Kokoro voice given a friendly NAME so the booker
+# picks a "tutor", not a raw voice id. All are lang_code "a" (American English) voices so they
+# share the ONE Kokoro pipeline — the voice is chosen per synthesis call. Add more here (any
+# af_*/am_* id) and they're instantly selectable everywhere; no pipeline change needed.
+TUTORS: dict = {
+    "aria": {"id": "aria", "name": "Aria", "gender": "female", "voice": "af_heart",
+             "emoji": "👩‍🏫", "blurb": "Warm, patient — the default voice."},
+    "leo":  {"id": "leo",  "name": "Leo",  "gender": "male",   "voice": "am_michael",
+             "emoji": "👨‍🏫", "blurb": "Clear, friendly male voice."},
+}
+DEFAULT_TUTOR = "aria"
+
+
+def normalise_tutor_id(tutor_id: Optional[str]) -> str:
+    tid = (tutor_id or "").strip().lower()
+    return tid if tid in TUTORS else DEFAULT_TUTOR
+
+
+def tutor_voice(tutor_id: Optional[str]) -> str:
+    """Kokoro voice id for a tutor id (falls back to the default tutor's voice)."""
+    return TUTORS[normalise_tutor_id(tutor_id)]["voice"]
+
+
+def tutor_id_from_description(description: Optional[str]) -> str:
+    """The tutor chosen at booking, stored as a `Tutor: <id>` line in the appointment
+    description (same mechanism as Notes/Topics). Missing/unknown → the default tutor."""
+    m = _re.search(r"Tutor:\s*([A-Za-z0-9_-]+)", description or "", _re.IGNORECASE)
+    return normalise_tutor_id(m.group(1) if m else None)
+
+
+def list_tutors() -> list:
+    """Public tutor catalogue for the picker (no raw voice ids leaked to the client)."""
+    return [{"id": t["id"], "name": t["name"], "gender": t["gender"],
+             "emoji": t["emoji"], "blurb": t["blurb"]} for t in TUTORS.values()]
+
+
 def _get_kokoro() -> KPipeline:
     """Lazy-init the Kokoro pipeline (American English; warm af_heart voice)."""
     global _kokoro
@@ -64,6 +101,23 @@ def _get_kokoro() -> KPipeline:
         _kokoro = KPipeline(lang_code="a")
         logger.info("Kokoro TTS pipeline ready.")
     return _kokoro
+
+
+def prewarm_voices() -> None:
+    """Force Kokoro to DOWNLOAD + load every TUTOR voice pack now (on startup), so the first
+    lesson using a given tutor isn't stalled by an on-demand weight download. Kokoro fetches a
+    voice pack the first time that voice id is synthesised, so we synthesise a tiny clip per
+    voice. Idempotent + non-fatal — a failed pre-warm just means that voice downloads on first use."""
+    pipeline = _get_kokoro()
+    for tid, t in TUTORS.items():
+        v = t["voice"]
+        try:
+            # Consume the generator so the voice pack is actually fetched + loaded.
+            for _ in pipeline("Hello.", voice=v, speed=TTS_SPEED):
+                pass
+            logger.info("Kokoro voice pre-warmed: tutor=%s voice=%s", tid, v)
+        except Exception as e:  # noqa: BLE001
+            logger.warning("Kokoro voice pre-warm failed for tutor=%s voice=%s: %s", tid, v, e)
 
 
 def _say_math(text: str) -> str:
@@ -156,14 +210,16 @@ def _pcm_to_wav(pcm_data: bytes, sample_rate: int = 24000, num_channels: int = 1
     return header + pcm_data
 
 
-def text_to_speech(text: str, lang: str = "en") -> tuple[bytes, str]:
-    """Kokoro TTS (af_sky). Returns (wav_bytes, "audio/wav")."""
+def text_to_speech(text: str, lang: str = "en", voice: Optional[str] = None) -> tuple[bytes, str]:
+    """Kokoro TTS. `voice` is a Kokoro voice id (e.g. af_heart / am_michael) chosen by the
+    lesson's selected TUTOR; defaults to the platform voice. Returns (wav_bytes, "audio/wav")."""
     clean = _prep_tts_text(text)
     if not clean or clean.startswith("[Error"):
         raise ValueError("Cannot generate speech for empty or error text")
 
     pipeline = _get_kokoro()
-    chunks = [audio for _, _, audio in pipeline(clean, voice=TTS_VOICE, speed=TTS_SPEED)]
+    _voice = voice or TTS_VOICE
+    chunks = [audio for _, _, audio in pipeline(clean, voice=_voice, speed=TTS_SPEED)]
     if not chunks:
         raise ValueError("Kokoro returned no audio for the provided text")
 
