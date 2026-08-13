@@ -7,10 +7,12 @@ import {
   Bot,
 } from "lucide-react";
 import Sidebar from "../components/Sidebar";
+import TutorPickerPills from "../components/TutorPickerPills";
 import { useAuth } from "../context/AuthContext";
 import { gamificationApi, assignmentsApi, appointmentsApi, curriculumApi, settingsApi } from "../services/api";
 import type { HubTopic } from "../services/api";
 import type { HubSubject } from "../services/api";
+import type { Tutor } from "../services/api";
 import type { StudentProfile, MyAssignment } from "../types";
 import { phasesFor, type PhaseKey } from "../lib/lessonPhases";
 
@@ -209,6 +211,9 @@ export default function LessonSetupPage() {
   const [learnMode, setLearnMode] = useState<LearnMode>("ai_recommended");
   const [duration, setDuration] = useState<number>(40);
   const [studentKeyStage, setStudentKeyStage] = useState<string>("");
+  // AI tutor (voice persona) the student picks. Remembered across bookings via localStorage.
+  const [tutors, setTutors] = useState<Tutor[]>([]);
+  const [tutorId, setTutorId] = useState<string>(() => localStorage.getItem("preferredTutor") || "aria");
   const [extraDetails, setExtraDetails] = useState("");
   const [requirePasscode, setRequirePasscode] = useState(false);
   const [bookingPasscode, setBookingPasscode] = useState("");
@@ -247,6 +252,17 @@ export default function LessonSetupPage() {
     const u = kbUnits.find((x) => x.unit_name === t);
     return u && !u.has_resources;
   });
+
+  // AI tutor catalogue — keep the remembered choice if it's still a valid tutor.
+  useEffect(() => {
+    curriculumApi.getTutors()
+      .then((r) => {
+        setTutors(r.tutors || []);
+        setTutorId((cur) => (r.tutors?.some((t) => t.id === cur) ? cur : (r.default || "aria")));
+      })
+      .catch(() => {});
+  }, []);
+  useEffect(() => { localStorage.setItem("preferredTutor", tutorId); }, [tutorId]);
 
   // Curriculum cascade (Resource Hub): KeyStage → Year → Subject → Unit/Topic.
   // 1. Key stages on mount.
@@ -489,6 +505,8 @@ export default function LessonSetupPage() {
     ];
     if (subtopic) descParts.push(`Subtopic: ${subtopic}`);
     if (yearGroup) descParts.push(`Year group: ${yearGroup}`);
+    // The chosen AI tutor (voice persona). Drives the lesson's Kokoro voice server-side.
+    if (tutorId) descParts.push(`Tutor: ${tutorId}`);
     // The student's own words about what they're struggling with. Labelled so the tutor can
     // lift it out and treat it as the lesson's primary objective (see build_session_system_prompt).
     if (extraDetails.trim()) descParts.push(`Notes: ${extraDetails.trim()}`);
@@ -774,55 +792,8 @@ export default function LessonSetupPage() {
 
                 {/* Key Stage · Year Group · Subject · Topic — single row */}
                 <div className="lsp-step1-row" style={{ display: "flex", gap: 12, alignItems: "flex-start" }}>
-                  {/* Key Stage — locked (set in Settings → Profile) */}
-                  <div style={{ flex: 1, minWidth: 110 }}>
-                    <label style={s.label} title="Set in Settings → Profile">
-                      Key Stage <span style={{ fontWeight: 400, color: "#94a3b8" }}>🔒</span>
-                    </label>
-                    <div style={s.selectWrap}>
-                      <select
-                        style={{ ...s.select as React.CSSProperties, background: "#f8fafc", cursor: "not-allowed", color: "#475569" }}
-                        value={keyStage}
-                        onChange={(e) => handleKeyStageChange(e.target.value)}
-                        disabled
-                        title="Set in Settings → Profile"
-                      >
-                        <option value="">Set in your profile</option>
-                        {kbStages.map((ks) => (
-                          <option key={ks} value={ks}>{ks}</option>
-                        ))}
-                      </select>
-                      <ChevronDown size={15} style={s.selectArrow as React.CSSProperties} />
-                    </div>
-                  </div>
-
-                  {/* Year Group — locked (set in Settings → Profile) */}
-                  <div style={{ flex: 1, minWidth: 110 }}>
-                    <label style={s.label} title="Set in Settings → Profile">
-                      Year Group <span style={{ fontWeight: 400, color: "#94a3b8" }}>🔒</span>
-                    </label>
-                    <div style={s.selectWrap}>
-                      <select
-                        style={{ ...s.select as React.CSSProperties, background: "#f8fafc", cursor: "not-allowed", color: "#475569" }}
-                        value={yearGroup}
-                        onChange={(e) => handleYearGroupChange(e.target.value)}
-                        disabled
-                        title="Set in Settings → Profile"
-                      >
-                        <option value="">Set in your profile</option>
-                        {/* Always include the locked value so it shows even before the
-                            year list has finished loading. */}
-                        {yearGroup && !hubYears.includes(yearGroup) && (
-                          <option value={yearGroup}>{yearGroup}</option>
-                        )}
-                        {hubYears.map((y) => (
-                          <option key={y} value={y}>{y}</option>
-                        ))}
-                      </select>
-                      <ChevronDown size={15} style={s.selectArrow as React.CSSProperties} />
-                    </div>
-                  </div>
-
+                  {/* Key Stage + Year Group are the student's own (from their profile) — not shown
+                      on the student form; they still drive the subject/topic cascade in state. */}
                   {/* Subject */}
                   <div style={{ flex: 1, minWidth: 120 }}>
                     <label style={s.label}>Subject</label>
@@ -851,7 +822,7 @@ export default function LessonSetupPage() {
                   </div>
 
                   {/* Topic — always visible, disabled until subject + key stage chosen */}
-                  <div style={{ flex: 2, minWidth: 180 }}>
+                  <div style={{ flex: 1, minWidth: 180 }}>
                     <label style={s.label}>
                       Topic
                       {selectedTopics.length > 0 && (
@@ -982,45 +953,6 @@ export default function LessonSetupPage() {
                       </div>
                     )}
 
-                    {/* Subtopic (optional) — only when a SINGLE topic is chosen and it has
-                        subtopics. Blank = start from the beginning of the topic. */}
-                    {selectedTopics.length === 1 && subtopicOptions.length > 0 && (
-                      <div style={{ marginTop: 10 }}>
-                        <label style={{ ...s.label, display: "flex", alignItems: "center", gap: 6 }}>
-                          Subtopic
-                          <span style={{ fontWeight: 400, color: "#64748b" }}>· recommended, optional</span>
-                        </label>
-                        <div style={{ position: "relative" }}>
-                          <select
-                            value={selectedSubtopic}
-                            onChange={(e) => setSelectedSubtopic(e.target.value)}
-                            style={{
-                              width: "100%", padding: "10px 36px 10px 12px", appearance: "none",
-                              border: `1.5px solid ${selectedSubtopic ? "#1a73e8" : "#e2e8f0"}`,
-                              borderRadius: 8, background: "#fff", cursor: "pointer",
-                              fontSize: 14, fontFamily: "inherit",
-                              color: selectedSubtopic ? "#0f172a" : "#475569",
-                            }}
-                          >
-                            <option value="">Start from the beginning of the topic</option>
-                            {subtopicOptions.map((st) => (
-                              <option key={st.id} value={st.title}>{st.title}</option>
-                            ))}
-                          </select>
-                          <ChevronDown
-                            size={15}
-                            style={{
-                              position: "absolute", right: 12, top: "50%",
-                              transform: "translateY(-50%)", color: "#64748b", pointerEvents: "none",
-                            }}
-                          />
-                        </div>
-                        <p style={{ margin: "6px 2px 0", fontSize: 11.5, color: "#94a3b8", lineHeight: 1.4 }}>
-                          Pick a subtopic to jump straight to it, or leave it to begin at the start of the topic.
-                        </p>
-                      </div>
-                    )}
-
                     {/* Warning: selected unit(s) have no Resource Hub material.
                         The session can still start — the AI uses general knowledge. */}
                     {topicsWithoutResources.length > 0 && (
@@ -1042,6 +974,33 @@ export default function LessonSetupPage() {
                       </div>
                     )}
                   </div>
+
+                  {/* Subtopic — third column of the one-line row (start-from-beginning by default) */}
+                  <div style={{ flex: 2, minWidth: 150 }}>
+                    <label style={s.label}>Subtopic <span style={{ fontWeight: 400, color: "#94a3b8" }}>· optional</span></label>
+                    <div style={s.selectWrap}>
+                      <select
+                        value={selectedSubtopic}
+                        onChange={(e) => setSelectedSubtopic(e.target.value)}
+                        disabled={!(selectedTopics.length === 1 && subtopicOptions.length > 0)}
+                        style={{
+                          ...s.select as React.CSSProperties,
+                          opacity: (selectedTopics.length === 1 && subtopicOptions.length > 0) ? 1 : 0.5,
+                          color: selectedSubtopic ? "#0f172a" : "#475569",
+                        }}
+                      >
+                        <option value="">
+                          {selectedTopics.length !== 1
+                            ? "Pick one topic first"
+                            : subtopicOptions.length === 0 ? "Whole topic" : "Start from the beginning"}
+                        </option>
+                        {subtopicOptions.map((st) => (
+                          <option key={st.id} value={st.title}>{st.title}</option>
+                        ))}
+                      </select>
+                      <ChevronDown size={15} style={s.selectArrow as React.CSSProperties} />
+                    </div>
+                  </div>
                 </div>
 
                 {/* Assignment recommended-by note */}
@@ -1062,6 +1021,16 @@ export default function LessonSetupPage() {
                     </span>
                   </div>
                 )}
+
+                {/* Choose your AI tutor (voice persona) — drives the lesson's spoken voice. */}
+                <div style={{ marginTop: 18 }}>
+                  <label style={s.label}>
+                    Your AI tutor <span style={{ fontWeight: 400, color: "#94a3b8" }}>(voice — tap 🔊 to hear)</span>
+                  </label>
+                  <div style={{ marginTop: 4 }}>
+                    <TutorPickerPills tutors={tutors} value={tutorId} onChange={setTutorId} />
+                  </div>
+                </div>
               </div>
 
               {/* STEP 2 — Goal / Focus */}
