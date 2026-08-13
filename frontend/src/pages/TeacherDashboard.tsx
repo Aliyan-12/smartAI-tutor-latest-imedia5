@@ -3,7 +3,6 @@ import { useLocation } from "react-router-dom";
 import { Users, MessageSquare, Eye, Activity, BookOpen } from "lucide-react";
 import { teacherApi, assessmentsApi } from "../services/api";
 import Sidebar from "../components/Sidebar";
-import TutorPreference from "../components/TutorPreference";
 import StudentProgress from "../components/StudentProgress";
 import type { User, DashboardStats, ChatListItem, Chat, Assessment } from "../types";
 
@@ -521,7 +520,6 @@ export default function TeacherDashboard() {
 
           {currentView === "dashboard" && (
             <>
-              <TutorPreference />
               <StatsCards stats={stats} />
               <StudentsView students={students} error={error} onStudentCreated={loadData} />
             </>
