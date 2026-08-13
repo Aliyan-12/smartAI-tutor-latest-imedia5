@@ -375,10 +375,12 @@ async def check_availability(db: AsyncSession, student_id: int) -> dict:
     )
     profile = profile_result.scalar_one_or_none()
     key_stage = profile.key_stage if profile else None
+    year_group = profile.year_group if profile else None
 
     return {
         "slots_used": used,
         "slots_remaining": max(0, max_pw - used),
         "max_per_week": max_pw,
         "key_stage": key_stage,
+        "year_group": year_group,
     }

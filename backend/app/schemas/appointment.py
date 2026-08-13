@@ -62,3 +62,4 @@ class AvailabilityResponse(BaseModel):
     slots_remaining: int
     max_per_week: int
     key_stage: Optional[str] = None
+    year_group: Optional[str] = None
