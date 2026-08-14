@@ -5,7 +5,8 @@ from typing import Optional, Literal
 
 class AppointmentCreate(BaseModel):
     student_id: int
-    teacher_id: int
+    # Optional: lessons are taught by the AI tutor (chosen at booking), not a human teacher.
+    teacher_id: Optional[int] = None
     subject: str
     key_stage: str
     title: str

@@ -38,7 +38,7 @@ async def count_weekly_appointments(db: AsyncSession, student_id: int, target_da
 async def book_appointment(
     db: AsyncSession,
     student_id: int,
-    teacher_id: int,
+    teacher_id: Optional[int],
     booked_by: int,
     subject: str,
     key_stage: str,
@@ -340,7 +340,9 @@ async def list_appointments(
     if role == "student":
         query = query.where(Appointment.student_id == user_id)
     elif role == "teacher":
-        query = query.where(Appointment.teacher_id == user_id)
+        # Teachers no longer "own" a session via teacher_id (lessons are AI-taught); they see
+        # the sessions they booked.
+        query = query.where(Appointment.booked_by == user_id)
     elif role == "parent":
         query = query.where(
             Appointment.student_id.in_(

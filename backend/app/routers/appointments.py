@@ -36,6 +36,14 @@ def _validate_goal_duration(description: Optional[str], duration_minutes: int) -
         )
 
 
+def _tutor_label(description: Optional[str]) -> str:
+    """Display name of the AI tutor chosen for a session (from its `Tutor:` line), used wherever
+    a lesson is labelled — emails, session cards, the API response. Deferred import so loading
+    this router never pulls in the (heavy) Kokoro voice module at import time."""
+    from app.services.agent.session.voice import tutor_name_from_description
+    return tutor_name_from_description(description)
+
+
 @router.get("/teachers", response_model=list[UserResponse])
 async def list_teachers(
     current_user: User = Depends(require_any_authenticated),
@@ -63,14 +71,8 @@ async def book_appointment(
     if not student:
         raise HTTPException(status_code=404, detail="Student not found")
 
-    # For parent/teacher bookings validate the teacher exists; for student AI sessions skip it
-    if not is_self_booking:
-        teacher = await get_user_by_id(db, payload.teacher_id)
-        if not teacher:
-            raise HTTPException(status_code=404, detail="Teacher not found")
-    else:
-        teacher = student  # AI session — student acts as their own booking owner
-
+    # Lessons are taught by the AI tutor (chosen at booking), not a human teacher — there is no
+    # teacher to validate or assign. teacher_id stays NULL.
     if current_user.role == ROLE_PARENT and student.parent_id != current_user.id:
         raise HTTPException(status_code=403, detail="Student is not linked to your account")
 
@@ -117,6 +119,9 @@ async def book_appointment(
     except Exception as _e:
         logger.warning(f"Auto lesson plan generation failed (non-fatal): {_e}")
 
+    # The lesson is taught by the chosen AI tutor — label everything (emails, cards) with its name.
+    tutor_label = _tutor_label(appointment.description)
+
     if not is_self_booking:
         parent_email = None
         if student.parent_id:
@@ -127,7 +132,7 @@ async def book_appointment(
         platform_service.send_booking_confirmation(
             student_email=student.email,
             student_name=student.name,
-            teacher_name=teacher.name,
+            teacher_name=tutor_label,
             subject=payload.subject,
             scheduled_at=payload.scheduled_at,
             parent_email=parent_email,
@@ -138,7 +143,7 @@ async def book_appointment(
 
     resp = AppointmentResponse.model_validate(appointment)
     resp.student_name = student.name
-    resp.teacher_name = teacher.name
+    resp.teacher_name = tutor_label
     return resp
 
 
@@ -155,9 +160,8 @@ async def list_appointments(
     for a in appointments:
         resp = AppointmentResponse.model_validate(a)
         student = await get_user_by_id(db, a.student_id)
-        teacher = await get_user_by_id(db, a.teacher_id)
         resp.student_name = student.name if student else None
-        resp.teacher_name = teacher.name if teacher else None
+        resp.teacher_name = _tutor_label(a.description)
         results.append(resp)
     return results
 
@@ -271,9 +275,8 @@ async def get_appointment(
 
     resp = AppointmentResponse.model_validate(appt)
     student = await get_user_by_id(db, appt.student_id)
-    teacher = await get_user_by_id(db, appt.teacher_id)
     resp.student_name = student.name if student else None
-    resp.teacher_name = teacher.name if teacher else None
+    resp.teacher_name = _tutor_label(appt.description)
     return resp
 
 
