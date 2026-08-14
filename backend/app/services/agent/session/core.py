@@ -791,6 +791,25 @@ async def build_session_system_prompt(
     except Exception as _lp_err:
         logger.warning(f"Could not load LessonPlan for appointment {appointment_id}: {_lp_err}")
 
+    # SELF-HEAL: older parent/teacher bookings (and any that missed plan creation at /book time)
+    # have no plan_blocks → the session would otherwise fall back to the generic structure instead
+    # of the booked goal×duration steps. Build the plan now from the appointment so EVERY session,
+    # no matter who booked it, teaches with the same slide → practice → quiz → summary structure.
+    # Runs at most once — once plan_blocks exist this is skipped on later turns.
+    if lesson_plan_obj is None or not lesson_plan_obj.plan_blocks:
+        try:
+            from app.services.agent.session import plan as _lesson_service
+            from app.models.lesson_plan import LessonPlan as _LP2
+            await _lesson_service.auto_create_lesson_plan(
+                db=db, appointment=appointment, student_id=student_id, subtopic=None,
+            )
+            lesson_plan_obj = (await db.execute(
+                select(_LP2).where(_LP2.appointment_id == appointment_id)
+            )).scalar_one_or_none()
+            logger.info(f"Self-healed missing LessonPlan for appointment {appointment_id}")
+        except Exception as _heal_err:
+            logger.warning(f"LessonPlan self-heal failed for appointment {appointment_id}: {_heal_err}")
+
     if lesson_plan_obj and lesson_plan_obj.plan_blocks:
         pb = lesson_plan_obj.plan_blocks
         steps = pb.get("steps", [])
