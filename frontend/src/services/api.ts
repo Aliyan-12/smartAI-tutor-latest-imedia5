@@ -846,7 +846,7 @@ export const appointmentsApi = {
     return handleResponse(res);
   },
   async book(data: {
-    student_id: number; teacher_id: number; subject: string; key_stage: string;
+    student_id: number; teacher_id?: number; subject: string; key_stage: string;
     title: string; scheduled_at: string; duration_minutes?: number;
     description?: string; payment_amount?: number; passcode?: string;
     learn_mode?: string; subtopic?: string;

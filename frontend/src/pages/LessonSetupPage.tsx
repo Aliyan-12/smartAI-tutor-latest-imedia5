@@ -514,7 +514,6 @@ export default function LessonSetupPage() {
     try {
       const appointment = await appointmentsApi.book({
         student_id: user.id,
-        teacher_id: user.id,
         subject,
         key_stage: keyStage,
         title: titleStr,

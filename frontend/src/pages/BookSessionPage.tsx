@@ -277,7 +277,6 @@ export default function BookSessionPage() {
 
   const [students, setStudents] = useState<UserType[]>([]);
   const [studentsLoaded, setStudentsLoaded] = useState(false);
-  const [teachers, setTeachers] = useState<UserType[]>([]);
   const [availability, setAvailability] = useState<{ used: number; limit: number } | null>(null);
   const [loadingAvailability, setLoadingAvailability] = useState(false);
   const [studentKeyStage, setStudentKeyStage] = useState("");
@@ -296,7 +295,6 @@ export default function BookSessionPage() {
 
   const [form, setForm] = useState({
     student_id: "",
-    teacher_id: isTeacher ? String(user?.id ?? "") : "",
     subject: "",
     key_stage: "",
     year_group: "",
@@ -334,19 +332,12 @@ export default function BookSessionPage() {
           setStudents(studentList);
           setKbStages(ks.keystages ?? []);
         } else if (isParent) {
-          const [studentList, teacherList, ks] = await Promise.all([
+          const [studentList, ks] = await Promise.all([
             parentApi.getStudents() as Promise<UserType[]>,
-            appointmentsApi.getTeachers() as Promise<UserType[]>,
             ksPromise,
           ]);
           setStudents(studentList);
-          setTeachers(teacherList);
           setKbStages(ks.keystages ?? []);
-          // The teacher picker was removed from the form — auto-assign the parent's
-          // first available teacher so the booking still has a valid teacher_id.
-          if (teacherList.length > 0) {
-            setForm((f) => (f.teacher_id ? f : { ...f, teacher_id: String(teacherList[0].id) }));
-          }
         }
       } catch {
         // ignore — the empty-state / validation handles a failed/empty load
@@ -537,7 +528,7 @@ export default function BookSessionPage() {
     setError("");
     setSuccess("");
 
-    if (!form.student_id || !form.teacher_id || !form.subject || !form.title || !form.date || !form.time) {
+    if (!form.student_id || !form.subject || !form.title || !form.date || !form.time) {
       setError("Please fill in all required fields.");
       return;
     }
@@ -547,7 +538,6 @@ export default function BookSessionPage() {
     try {
       await appointmentsApi.book({
         student_id: parseInt(form.student_id, 10),
-        teacher_id: parseInt(form.teacher_id, 10),
         subject: form.subject,
         key_stage: form.key_stage,
         title: form.title,

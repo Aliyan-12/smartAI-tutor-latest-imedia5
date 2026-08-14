@@ -187,7 +187,7 @@ function AppointmentCard({ appointment: a, userRole, onStatusUpdate, updating }:
             {a.teacher_name && (
               <span style={{ display: "flex", alignItems: "center", gap: 5 }}>
                 <Users size={12} />
-                Teacher: <strong style={{ color: "var(--text-primary)" }}>{a.teacher_name}</strong>
+                AI Tutor: <strong style={{ color: "var(--text-primary)" }}>{a.teacher_name}</strong>
               </span>
             )}
             <span style={{ display: "flex", alignItems: "center", gap: 5 }}>
