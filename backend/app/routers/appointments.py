@@ -99,19 +99,25 @@ async def book_appointment(
     # Auto-confirm AI sessions booked by students so they can join immediately
     if is_self_booking:
         appointment.status = "confirmed"
-        await db.flush()
-        await db.refresh(appointment)
-        try:
-            from app.services.agent.session import plan as lesson_service
-            await lesson_service.auto_create_lesson_plan(
-                db=db,
-                appointment=appointment,
-                student_id=current_user.id,
-                subtopic=payload.subtopic,
-            )
-        except Exception as _e:
-            logger.warning(f"Auto lesson plan generation failed (non-fatal): {_e}")
-    else:
+
+    # Build the goal-specific lesson plan for EVERY booking — student, parent OR teacher —
+    # so the session AI follows the exact same goal×duration structure (slides → practice →
+    # quiz → summary) no matter who booked it. student_id is always the STUDENT the session
+    # is for (payload.student_id), never the booker.
+    await db.flush()
+    await db.refresh(appointment)
+    try:
+        from app.services.agent.session import plan as lesson_service
+        await lesson_service.auto_create_lesson_plan(
+            db=db,
+            appointment=appointment,
+            student_id=payload.student_id,
+            subtopic=payload.subtopic,
+        )
+    except Exception as _e:
+        logger.warning(f"Auto lesson plan generation failed (non-fatal): {_e}")
+
+    if not is_self_booking:
         parent_email = None
         if student.parent_id:
             parent_user = await get_user_by_id(db, student.parent_id)
