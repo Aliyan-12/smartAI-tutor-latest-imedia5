@@ -77,6 +77,18 @@ def tutor_voice(tutor_id: Optional[str]) -> str:
     return TUTORS[normalise_tutor_id(tutor_id)]["voice"]
 
 
+def tutor_name(tutor_id: Optional[str]) -> str:
+    """Display name for a tutor id (e.g. 'Aria' / 'Leo'). Falls back to the default tutor."""
+    return TUTORS[normalise_tutor_id(tutor_id)]["name"]
+
+
+def tutor_name_from_description(description: Optional[str]) -> str:
+    """The chosen tutor's display name from the appointment's `Tutor: <id>` line — used
+    wherever a lesson is labelled (emails, session cards, logs) so it reads 'with Aria/Leo'
+    instead of a human teacher's name."""
+    return tutor_name(tutor_id_from_description(description))
+
+
 def tutor_id_from_description(description: Optional[str]) -> str:
     """The tutor chosen at booking, stored as a `Tutor: <id>` line in the appointment
     description (same mechanism as Notes/Topics). Missing/unknown → the default tutor."""
@@ -228,18 +240,20 @@ def text_to_speech(text: str, lang: str = "en", voice: Optional[str] = None) -> 
     return buf.getvalue(), "audio/wav"
 
 
-async def synth_speak_frame(text: str, req_id: str = "") -> dict:
+async def synth_speak_frame(text: str, req_id: str = "", voice: Optional[str] = None) -> dict:
     """One-shot TTS for a WS `speak` request → a `{type:"tts_audio"}` frame with the clip
     base64-encoded. ALL text-to-speech now goes through the WebSocket channel (the
-    /api/voice/speak REST endpoint is gone); the client plays this frame directly. Never
-    raises — on failure returns a null-audio frame so the caller's UI just stays silent."""
+    /api/voice/speak REST endpoint is gone); the client plays this frame directly. `voice`
+    is the lesson's selected TUTOR voice so the quiz read-aloud speaks in the SAME voice the
+    tutor teaches in (not the default). Never raises — on failure returns a null-audio frame
+    so the caller's UI just stays silent."""
     import asyncio as _asyncio
     import base64 as _base64
     clean = (text or "").strip()
     if not clean:
         return {"type": "tts_audio", "id": req_id, "audio_b64": None}
     try:
-        wav, mime = await _asyncio.to_thread(text_to_speech, clean)
+        wav, mime = await _asyncio.to_thread(text_to_speech, clean, "en", voice)
         return {
             "type": "tts_audio", "id": req_id,
             "audio_b64": _base64.b64encode(wav).decode("ascii"), "mime": mime,

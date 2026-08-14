@@ -4063,6 +4063,20 @@ async def run_session_ws(websocket: WebSocket) -> None:
             chat_session_id = chat.session_id
             if appt_id is None:
                 appt_id = _appt_id_from_chat(chat)
+
+            # Resolve the lesson's TUTOR voice ONCE for the whole connection. The quiz
+            # read-aloud (the "speak" one-shot TTS) must use the SAME voice the tutor teaches
+            # in — otherwise it defaults to the female voice regardless of the chosen tutor.
+            _ws_tutor_voice: Optional[str] = None
+            if appt_id is not None:
+                try:
+                    from app.services.agent.session.voice import (
+                        tutor_id_from_description as _ws_tid, tutor_voice as _ws_tvoice)
+                    _va = await _load_appointment(db, appt_id)
+                    if _va is not None:
+                        _ws_tutor_voice = _ws_tvoice(_ws_tid(getattr(_va, "description", "") or ""))
+                except Exception:
+                    _ws_tutor_voice = None
             # If a previous connection auto-paused on an unexpected close, resume now
             # (the student is back). User-initiated pauses don't set the flag, so they
             # correctly stay paused.
@@ -4212,10 +4226,10 @@ async def run_session_ws(websocket: WebSocket) -> None:
                 _sp_text = data.get("text") or ""
                 _sp_id = data.get("id") or ""
 
-                async def _speak_task(_t=_sp_text, _i=_sp_id):
+                async def _speak_task(_t=_sp_text, _i=_sp_id, _v=_ws_tutor_voice):
                     try:
                         from app.services.agent.session.voice import synth_speak_frame
-                        await send(await synth_speak_frame(_t, _i))
+                        await send(await synth_speak_frame(_t, _i, voice=_v))
                     except Exception:  # noqa: BLE001
                         pass
                 asyncio.create_task(_speak_task())
