@@ -34,7 +34,7 @@ class SessionJoinRequest(BaseModel):
 class AppointmentResponse(BaseModel):
     id: int
     student_id: int
-    teacher_id: int
+    teacher_id: Optional[int] = None
     booked_by: int
     subject: str
     key_stage: str
