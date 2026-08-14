@@ -14,8 +14,10 @@ class Appointment(Base):
     student_id: Mapped[int] = mapped_column(
         Integer, ForeignKey("users.id"), nullable=False, index=True
     )
-    teacher_id: Mapped[int] = mapped_column(
-        Integer, ForeignKey("users.id"), nullable=False, index=True
+    # Nullable: lessons are taught by the AI tutor (chosen at booking), not a human teacher.
+    # Kept as a column for legacy rows / optional teacher ownership, but never required.
+    teacher_id: Mapped[Optional[int]] = mapped_column(
+        Integer, ForeignKey("users.id"), nullable=True, index=True
     )
     booked_by: Mapped[int] = mapped_column(
         Integer, ForeignKey("users.id"), nullable=False

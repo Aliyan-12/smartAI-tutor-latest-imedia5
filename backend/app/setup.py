@@ -181,6 +181,9 @@ async def run_setup(fresh: bool = False, seed: bool = True):
         "ALTER TABLE student_profiles ADD COLUMN IF NOT EXISTS key_stage VARCHAR(20)",
         "ALTER TABLE appointments ADD COLUMN IF NOT EXISTS ai_briefing TEXT",
         "ALTER TABLE appointments ADD COLUMN IF NOT EXISTS learn_mode VARCHAR(20) NOT NULL DEFAULT 'ai_recommended'",
+        # Lessons are taught by the AI tutor (chosen at booking), not a human teacher, so a
+        # booking no longer requires a teacher — relax the legacy NOT NULL on teacher_id.
+        "ALTER TABLE appointments ALTER COLUMN teacher_id DROP NOT NULL",
         # Finalised per-lesson coverage ledger (snapshotted on completion) — read by cross-lesson memory
         "ALTER TABLE lesson_plans ADD COLUMN IF NOT EXISTS coverage JSONB",
         # ================================================================
