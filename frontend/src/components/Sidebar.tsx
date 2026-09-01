@@ -26,20 +26,20 @@ interface Props {
 const SHARED_STYLES = `
   .sb {
     width: 270px;
-    background: #ffffff;
-    border-right: 1px solid #e2e8f0;
+    background: var(--sidebar-bg);
+    border-right: 1px solid var(--border);
     display: flex;
     flex-direction: column;
     flex-shrink: 0;
     height: 100vh;
     overflow: hidden;
-    font-family: "DM Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    font-family: var(--font);
     transition: transform 0.27s cubic-bezier(0.4, 0, 0.2, 1);
   }
 
   .sb-header {
     padding: 10px 12px 12px;
-    border-bottom: 1px solid #e2e8f0;
+    border-bottom: 1px solid var(--border);
   }
 
   .sb-brand {
@@ -67,7 +67,7 @@ const SHARED_STYLES = `
   .sb-brand-name {
     font-size: 14px;
     font-weight: 800;
-    color: #0f172a;
+    color: var(--text-primary);
     line-height: 1.2;
     white-space: nowrap;
     overflow: hidden;
@@ -96,10 +96,10 @@ const SHARED_STYLES = `
     align-items: center;
     gap: 10px;
     padding: 9px 12px;
-    border-radius: 7px;
+    border-radius: 9px;
     font-size: 13.5px;
     font-weight: 500;
-    color: #64748b;
+    color: var(--sidebar-text);
     cursor: pointer;
     transition: background 0.15s, color 0.15s;
     position: relative;
@@ -112,16 +112,19 @@ const SHARED_STYLES = `
   }
 
   .sb-nav-item:hover {
-    background: rgba(26,115,232,0.06);
-    color: #1e293b;
+    background: var(--sidebar-hover);
+    color: var(--text-primary);
+  }
+
+  .sb-nav-item:focus-visible {
+    outline: none;
+    box-shadow: 0 0 0 2px var(--accent-muted);
   }
 
   .sb-nav-item.active {
-    background: rgba(26,115,232,0.1);
-    color: #1a73e8;
+    background: var(--sidebar-active);
+    color: var(--accent);
     font-weight: 700;
-    border-left: 3px solid #1a73e8;
-    padding-left: 9px;
   }
 
   .sb-nav-item.disabled {
@@ -155,7 +158,7 @@ const SHARED_STYLES = `
 
   .sb-divider {
     height: 1px;
-    background: #e2e8f0;
+    background: var(--border);
     margin: 6px 12px;
   }
 
@@ -178,7 +181,7 @@ const SHARED_STYLES = `
   .sb-time-widget {
     margin: 8px 12px;
     background: #f8fafc;
-    border: 1px solid #e2e8f0;
+    border: 1px solid var(--border);
     border-radius: 10px;
     padding: 14px;
   }
@@ -197,7 +200,7 @@ const SHARED_STYLES = `
 
   .sb-time-bar-track {
     height: 8px;
-    background: #e2e8f0;
+    background: var(--border);
     border-radius: 999px;
     overflow: hidden;
     margin-bottom: 7px;
@@ -216,7 +219,7 @@ const SHARED_STYLES = `
     margin-bottom: 10px;
   }
 
-  .sb-time-used { font-weight: 700; color: #0f172a; }
+  .sb-time-used { font-weight: 700; color: var(--text-primary); }
   .sb-time-total { color: #475569; }
 
   .sb-buy-btn {
@@ -239,7 +242,7 @@ const SHARED_STYLES = `
 
   .sb-footer {
     padding: 12px 14px;
-    border-top: 1px solid #e2e8f0;
+    border-top: 1px solid var(--border);
     display: flex;
     align-items: center;
     gap: 10px;
@@ -264,7 +267,7 @@ const SHARED_STYLES = `
   .sb-user-name {
     font-size: 13px;
     font-weight: 600;
-    color: #0f172a;
+    color: var(--text-primary);
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
@@ -302,7 +305,7 @@ const SHARED_STYLES = `
     left: 50%;
     transform: translateX(-50%);
     background: #1e293b;
-    color: #e2e8f0;
+    color: var(--border);
     padding: 10px 20px;
     border-radius: 8px;
     font-size: 13px;
@@ -321,17 +324,17 @@ const SHARED_STYLES = `
     left: 12px;
     z-index: 1001;
     background: #fff;
-    border: 1px solid #e2e8f0;
+    border: 1px solid var(--border);
     border-radius: 9px;
     padding: 8px 11px;
-    color: #0f172a;
+    color: var(--text-primary);
     cursor: pointer;
     align-items: center;
     justify-content: center;
     gap: 7px;
     font-size: 12px;
     font-weight: 700;
-    font-family: "DM Sans", sans-serif;
+    font-family: var(--font);
     box-shadow: 0 2px 14px rgba(0,0,0,0.45);
     transition: background 0.15s, border-color 0.15s;
   }
@@ -366,7 +369,7 @@ const SHARED_STYLES = `
     margin-left: auto;
     transition: color 0.15s, background 0.15s;
   }
-  .sb-close-btn:hover { color: #0f172a; background: rgba(0,0,0,0.05); }
+  .sb-close-btn:hover { color: var(--text-primary); background: rgba(0,0,0,0.05); }
 
   /* ── Responsive breakpoints ── */
   @media (max-width: 1023px) {
@@ -380,7 +383,7 @@ const SHARED_STYLES = `
       z-index: 999;
       transform: translateX(-100%);
       box-shadow: 6px 0 40px rgba(0,0,0,0.12);
-      border-right: 1px solid #e2e8f0;
+      border-right: 1px solid var(--border);
     }
     .sb.sb-open { transform: translateX(0); }
   }
@@ -521,7 +524,7 @@ export default function Sidebar({
       }}>
         <div style={{
           width: 38, height: 38, borderRadius: "50%",
-          background: "#fff", border: "1.5px solid #e2e8f0",
+          background: "#fff", border: "1.5px solid var(--border)",
           display: "flex", alignItems: "center", justifyContent: "center",
           flexShrink: 0, overflow: "hidden",
           boxShadow: "0 1px 4px rgba(0,0,0,0.08)",
@@ -529,7 +532,7 @@ export default function Sidebar({
           <img src="/images/smarttuition-logo.png" style={{ width: 32, height: 32, objectFit: "contain" }} alt={user?.school_name ?? "School"} />
         </div>
         <div style={{ minWidth: 0 }}>
-          <div style={{ fontSize: 12, fontWeight: 700, color: "#0f172a", lineHeight: 1.2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+          <div style={{ fontSize: 12, fontWeight: 700, color: "var(--text-primary)", lineHeight: 1.2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
             {user?.role === "administrator" ? "All Schools" : (user?.school_name ?? "Smart Tuition")}
           </div>
           <div style={{ fontSize: 10, color: "#64748b", lineHeight: 1.3, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
@@ -983,7 +986,7 @@ export default function Sidebar({
                   <Users size={13} /><span>Active Users</span>
                 </span>
                 {activeUsersCount != null && (
-                  <span style={{ fontSize: 10, fontWeight: 800, minWidth: 18, textAlign: "center", padding: "1px 6px", borderRadius: 999, background: "#e2e8f0", color: "#475569" }}>
+                  <span style={{ fontSize: 10, fontWeight: 800, minWidth: 18, textAlign: "center", padding: "1px 6px", borderRadius: 999, background: "var(--border)", color: "#475569" }}>
                     {activeUsersCount}
                   </span>
                 )}
