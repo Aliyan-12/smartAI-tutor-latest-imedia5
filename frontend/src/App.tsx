@@ -24,6 +24,9 @@ import DashboardPage from "./pages/DashboardPage";
 import VerifyEmailPage from "./pages/VerifyEmailPage";
 import OnboardingPage from "./pages/OnboardingPage";
 import OAuthCallbackPage from "./pages/OAuthCallbackPage";
+import LegalPage from "./pages/LegalPage";
+import PrivacyPage from "./pages/PrivacyPage";
+import { CookieConsent } from "./components/CookieConsent";
 import type { ReactNode } from "react";
 
 const Loading = () => (
@@ -223,8 +226,13 @@ export default function App() {
           <Route path="/oauth/callback" element={<OAuthCallbackPage />} />
           {/* Onboarding requires auth but not completed-onboarding (avoids a loop). */}
           <Route path="/onboarding" element={<RequireAuth><OnboardingPage /></RequireAuth>} />
+          {/* Public legal surface — readable without a session. */}
+          <Route path="/legal" element={<LegalPage />} />
+          <Route path="/legal/:docKey" element={<LegalPage />} />
+          <Route path="/privacy" element={<ProtectedRoute><PrivacyPage /></ProtectedRoute>} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
+        <CookieConsent />
       </AuthProvider>
     </BrowserRouter>
   );

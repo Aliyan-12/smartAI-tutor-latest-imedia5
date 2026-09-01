@@ -906,3 +906,19 @@ export const appointmentsApi = {
     });
   },
 };
+
+// ── Legal / privacy / compliance ────────────────────────────────────────────────────────
+export interface LegalDocSummary { doc_key: string; title: string; summary: string; version: string; requires_consent: boolean; is_draft: boolean; published_at: string | null; }
+export interface LegalDocFull extends LegalDocSummary { content: string; effective_at: string | null; }
+export interface PendingConsent { doc_key: string; version: string; title: string; summary: string; }
+export interface DataRequestT { id: number; request_type: string; status: string; details: string | null; resolution_note: string | null; created_at: string; resolved_at: string | null; }
+
+export const legalApi = {
+  async documents() { return handleResponse<{ documents: LegalDocSummary[] }>(await fetch(`${API_BASE}/legal/documents`)); },
+  async document(key: string) { return handleResponse<LegalDocFull>(await fetch(`${API_BASE}/legal/documents/${key}`)); },
+  async pendingConsents() { return handleResponse<{ pending: PendingConsent[] }>(await fetch(`${API_BASE}/legal/consents/pending`, { headers: authHeaders() })); },
+  async acceptAll(items: { doc_key: string; version: string }[]) { return handleResponse(await fetch(`${API_BASE}/legal/consents/accept-all`, { method: "POST", headers: authHeaders(), body: JSON.stringify({ items }) })); },
+  async myConsents() { return handleResponse<{ acceptances: { doc_key: string; version: string; accepted_at: string }[] }>(await fetch(`${API_BASE}/legal/consents/mine`, { headers: authHeaders() })); },
+  async createDataRequest(request_type: string, details?: string, subject_user_id?: number) { return handleResponse<{ id: number; status: string }>(await fetch(`${API_BASE}/legal/data-requests`, { method: "POST", headers: authHeaders(), body: JSON.stringify({ request_type, details, subject_user_id }) })); },
+  async dataRequests() { return handleResponse<{ requests: DataRequestT[] }>(await fetch(`${API_BASE}/legal/data-requests`, { headers: authHeaders() })); },
+};
