@@ -39,6 +39,15 @@ async def get_current_user(
             detail="User not found or inactive",
         )
 
+    # "Log out of all devices" bumps token_version; a token minted before that is stale.
+    # Legacy tokens (no "tv" claim) read as 0 and keep working until the first bump.
+    token_tv = int(payload.get("tv", 0) or 0)
+    if token_tv != int(getattr(user, "token_version", 0) or 0):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Session ended. Please sign in again.",
+        )
+
     return user
 
 
