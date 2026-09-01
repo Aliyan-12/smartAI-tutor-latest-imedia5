@@ -51,6 +51,9 @@ class User(Base):
     # School admins start "pending" until an administrator approves them; all other
     # accounts are "approved" by default.
     approval_status: Mapped[str] = mapped_column(String(20), default=APPROVAL_APPROVED, nullable=False)
+    # Bumped to revoke all existing sessions ("log out of all devices"). Access tokens
+    # carry the value they were minted with; get_current_user rejects a stale one.
+    token_version: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
     )
