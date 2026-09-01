@@ -52,14 +52,52 @@
 /* ── Typography hierarchy (feature 02) ──
    One consistent type scale for titles, body, labels and numeric KPIs. Use these classes (or the
    matching Tailwind text utilities) instead of ad-hoc per-page font sizes. */
-.t-page-title { font-size: 22px; font-weight: 800; line-height: 1.2; letter-spacing: -0.01em; color: var(--text-primary); }
-.t-section    { font-size: 16px; font-weight: 700; line-height: 1.3; color: var(--text-primary); }
-.t-card-title { font-size: 15px; font-weight: 700; line-height: 1.3; color: var(--text-primary); }
-.t-body       { font-size: 14px; font-weight: 400; line-height: 1.55; color: var(--text-secondary); }
-.t-helper     { font-size: 12.5px; font-weight: 400; line-height: 1.45; color: var(--text-muted); }
-.t-label      { font-size: 12px; font-weight: 600; line-height: 1.3; color: var(--text-secondary); }
-.t-eyebrow    { font-size: 11px; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase; color: var(--text-muted); }
-.t-kpi        { font-size: 28px; font-weight: 800; line-height: 1; color: var(--text-primary); font-variant-numeric: tabular-nums; }
+.t-page-title { font-size: calc(22px * var(--font-scale, 1)); font-weight: 800; line-height: 1.2; letter-spacing: -0.01em; color: var(--text-primary); }
+.t-section    { font-size: calc(16px * var(--font-scale, 1)); font-weight: 700; line-height: 1.3; color: var(--text-primary); }
+.t-card-title { font-size: calc(15px * var(--font-scale, 1)); font-weight: 700; line-height: 1.3; color: var(--text-primary); }
+.t-body       { font-size: calc(14px * var(--font-scale, 1)); font-weight: 400; line-height: 1.55; color: var(--text-secondary); }
+.t-helper     { font-size: calc(12.5px * var(--font-scale, 1)); font-weight: 400; line-height: 1.45; color: var(--text-muted); }
+.t-label      { font-size: calc(12px * var(--font-scale, 1)); font-weight: 600; line-height: 1.3; color: var(--text-secondary); }
+.t-eyebrow    { font-size: calc(11px * var(--font-scale, 1)); font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase; color: var(--text-muted); }
+.t-kpi        { font-size: calc(28px * var(--font-scale, 1)); font-weight: 800; line-height: 1; color: var(--text-primary); font-variant-numeric: tabular-nums; }
+
+/* ── Accessibility preferences (Feature 05) ─────────────────────────────
+   Applied by lib/accessibility.ts onto <html>. Text scale drives --font-scale
+   (typography classes above) plus the rem base for Tailwind utilities. */
+html[data-text-size="large"]  { --font-scale: 1.12; font-size: 17.5px; }
+html[data-text-size="larger"] { --font-scale: 1.25; font-size: 19px; }
+
+html.reduce-motion *,
+html.reduce-motion *::before,
+html.reduce-motion *::after {
+  animation-duration: 0.001ms !important;
+  animation-iteration-count: 1 !important;
+  transition-duration: 0.001ms !important;
+  scroll-behavior: auto !important;
+}
+/* Respect the OS setting even when the student hasn't chosen one. */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+  }
+}
+
+html.high-contrast {
+  --text-secondary: var(--text-primary);
+  --text-muted: #334155;
+  --border: #64748b;
+}
+html.high-contrast .dark,
+html.high-contrast.dark {
+  --text-muted: #cbd5e1;
+  --border: #94a3b8;
+}
+html.high-contrast :focus-visible {
+  outline: 3px solid var(--accent) !important;
+  outline-offset: 2px !important;
+}
 
 /* Dark palette — toggled by adding `.dark` to <html>. Every token flips, so any component
    built on the tokens (or the new Tailwind primitives) is dark-mode ready. */
