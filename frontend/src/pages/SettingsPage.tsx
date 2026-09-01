@@ -81,7 +81,7 @@ export default function SettingsPage() {
 
   useEffect(() => {
     settingsApi.getLearningPreferences().then((data) => {
-      const d = data as LearningPreferences;
+      const d = data as unknown as LearningPreferences;
       setPrefs(d);
       setLearningStyles(d.learning_style ?? []);
       setPace(d.teaching_pace ?? "just_right");
