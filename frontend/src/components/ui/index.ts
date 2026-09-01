@@ -9,3 +9,5 @@ export { Input, Textarea, Select, FormField, Switch } from "./form";
 export { Tabs } from "./Tabs";
 export type { TabItem } from "./Tabs";
 export { PageHeader } from "./PageHeader";
+export { Icon } from "./Icon";
+export { Emoji } from "./Emoji";
