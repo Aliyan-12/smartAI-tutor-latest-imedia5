@@ -6,7 +6,7 @@ import {
   BarChart2, ClipboardList,
   MessageCircle, Clock, GraduationCap, Bell,
   ShieldCheck, Database, MessageSquare, BarChart,
-  Menu, X, ChevronDown,
+  Menu, X, ChevronDown, Sparkles,
 } from "lucide-react";
 import { useAuth } from "../context/AuthContext";
 import { chatApi, adminApi } from "../services/api";
@@ -712,6 +712,12 @@ export default function Sidebar({
           <button className="sb-nav-item disabled">
             <MessageCircle size={16} /><span>Messages</span>
             <span className="sb-soon-badge">Soon</span>
+          </button>
+          <button
+            className={`sb-nav-item${isActive("/preferences") ? " active" : ""}`}
+            onClick={() => go("/preferences")}
+          >
+            <Sparkles size={16} /><span>Preferences</span>
           </button>
           <button
             className={`sb-nav-item${isActive("/settings") ? " active" : ""}`}
