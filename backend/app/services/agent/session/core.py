@@ -666,6 +666,19 @@ async def build_session_system_prompt(
         prefs_parts.append("short summaries")
     if teaching_prefs.get("analogies"):
         prefs_parts.append("analogies")
+    if teaching_prefs.get("worked_examples"):
+        prefs_parts.append("fully worked examples")
+    # Challenge level (bounded): support | core | stretch — only the non-default ends nudge.
+    _challenge = teaching_prefs.get("challenge_level")
+    if _challenge == "support":
+        prefs_parts.append("gentle, well-scaffolded challenge")
+    elif _challenge == "stretch":
+        prefs_parts.append("extra-challenging stretch questions")
+    if teaching_prefs.get("practice_after_explanation"):
+        prefs_parts.append("a quick practice question after each explanation")
+    _qtypes = teaching_prefs.get("question_types")
+    if isinstance(_qtypes, list) and _qtypes:
+        prefs_parts.append("mostly " + "/".join(str(q) for q in _qtypes[:4]) + " questions")
     preferences_str = ", ".join(prefs_parts) if prefs_parts else "not specified"
 
     # WHO we're teaching. Built as a plain string OUTSIDE the big f-string below: that
