@@ -1,10 +1,26 @@
 from datetime import datetime, timezone
 from typing import Optional
 
-from sqlalchemy import String, DateTime, Integer, Boolean, ForeignKey
+from sqlalchemy import String, DateTime, Integer, Boolean, ForeignKey, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.session import Base
+
+# ── School verification workflow (feature 04) ──
+VERIFICATION_STATES = (
+    "draft", "submitted", "under_review", "verified", "rejected", "changes_requested", "suspended",
+)
+# Allowed transitions. A school self-serves draft→submitted and (after changes) →submitted;
+# the platform administrator drives review outcomes.
+VERIFICATION_TRANSITIONS = {
+    "draft": {"submitted"},
+    "submitted": {"under_review", "verified", "rejected", "changes_requested"},
+    "under_review": {"verified", "rejected", "changes_requested"},
+    "changes_requested": {"submitted"},
+    "rejected": {"submitted"},           # allow resubmission
+    "verified": {"suspended"},
+    "suspended": {"under_review", "verified"},
+}
 
 # account_type values
 SCHOOL_ACCOUNT = "school"          # an institution that signed up
@@ -45,6 +61,24 @@ class School(Base):
         nullable=True,
     )
     is_default: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False, index=True)
+
+    # ── Verification workflow (feature 04) ── an email domain alone does NOT prove legitimacy;
+    # evidence + administrator review are required. The default school is treated as verified.
+    verification_status: Mapped[str] = mapped_column(String(20), default="draft", server_default="draft", nullable=False, index=True)
+    legal_name: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    website: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    domain: Mapped[Optional[str]] = mapped_column(String(120), nullable=True, index=True)
+    school_type: Mapped[Optional[str]] = mapped_column(String(60), nullable=True)   # primary/secondary/college/mat/other
+    identifier: Mapped[Optional[str]] = mapped_column(String(60), nullable=True, index=True)  # URN / UKPRN / other
+    address: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    contact_email: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    contact_phone: Mapped[Optional[str]] = mapped_column(String(40), nullable=True)
+    verification_notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)  # reviewer note / changes requested
+    suspended_reason: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    submitted_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    reviewed_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    reviewed_by: Mapped[Optional[int]] = mapped_column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
     )

@@ -15,9 +15,11 @@ from app.models.resource_hub import (
     RHAvailability, RHResource, RHDocument, RHDocumentChunk,
 )
 from app.models.legal import LegalDocument, LegalAcceptance, DataRequest
+from app.models.school_verification import SchoolVerificationEvent, SchoolVerificationDocument
 
 __all__ = [
     "LegalDocument", "LegalAcceptance", "DataRequest",
+    "SchoolVerificationEvent", "SchoolVerificationDocument",
     "User", "School", "EmailVerificationToken", "OAuthIdentity",
     "Chat", "Message",
     "Subscription", "CreditTransaction",
