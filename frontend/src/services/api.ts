@@ -922,3 +922,29 @@ export const legalApi = {
   async createDataRequest(request_type: string, details?: string, subject_user_id?: number) { return handleResponse<{ id: number; status: string }>(await fetch(`${API_BASE}/legal/data-requests`, { method: "POST", headers: authHeaders(), body: JSON.stringify({ request_type, details, subject_user_id }) })); },
   async dataRequests() { return handleResponse<{ requests: DataRequestT[] }>(await fetch(`${API_BASE}/legal/data-requests`, { headers: authHeaders() })); },
 };
+
+// ── School verification (feature 04) ────────────────────────────────────────────────────
+export interface SchoolVerification {
+  id: number; name: string; legal_name: string | null; country: string | null; website: string | null;
+  domain: string | null; school_type: string | null; identifier: string | null; address: string | null;
+  contact_email: string | null; contact_phone: string | null; verification_status: string;
+  verification_notes: string | null; suspended_reason: string | null; submitted_at: string | null; reviewed_at: string | null;
+}
+export interface VerificationEvent { from: string | null; to: string; note: string | null; actor_user_id: number | null; created_at: string; }
+export interface EvidenceDoc { id: number; filename: string; content_type: string; size: number; scan_status: string; uploaded_at: string; }
+
+export const schoolVerificationApi = {
+  async me() { return handleResponse<{ school: SchoolVerification; events: VerificationEvent[]; evidence: EvidenceDoc[]; editable: boolean }>(await fetch(`${API_BASE}/school-verification/me`, { headers: authHeaders() })); },
+  async updateMe(body: Partial<SchoolVerification>) { return handleResponse(await fetch(`${API_BASE}/school-verification/me`, { method: "PUT", headers: authHeaders(), body: JSON.stringify(body) })); },
+  async submit() { return handleResponse<{ status: string; warnings: string[] }>(await fetch(`${API_BASE}/school-verification/me/submit`, { method: "POST", headers: authHeaders() })); },
+  async uploadEvidence(file: File) {
+    const fd = new FormData(); fd.append("file", file);
+    const token = localStorage.getItem("token");
+    return handleResponse<{ id: number; scan_status: string }>(await fetch(`${API_BASE}/school-verification/me/evidence`, { method: "POST", headers: token ? { Authorization: `Bearer ${token}` } : {}, body: fd }));
+  },
+  evidenceDownloadUrl(docId: number) { return `${API_BASE}/school-verification/evidence/${docId}/download`; },
+  // administrator
+  async applications(status?: string) { const q = status ? `?status=${status}` : ""; return handleResponse<{ applications: SchoolVerification[] }>(await fetch(`${API_BASE}/school-verification/applications${q}`, { headers: authHeaders() })); },
+  async application(id: number) { return handleResponse<{ school: SchoolVerification; events: VerificationEvent[]; evidence: EvidenceDoc[]; duplicate_warnings: string[] }>(await fetch(`${API_BASE}/school-verification/applications/${id}`, { headers: authHeaders() })); },
+  async transition(id: number, to_status: string, note?: string) { return handleResponse<{ status: string }>(await fetch(`${API_BASE}/school-verification/applications/${id}/transition`, { method: "POST", headers: authHeaders(), body: JSON.stringify({ to_status, note }) })); },
+};
