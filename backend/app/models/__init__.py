@@ -6,6 +6,7 @@ from app.models.subscription import Subscription, CreditTransaction
 from app.models.documents import Document, DocumentChunk
 from app.models.parent_student import InviteCode, ParentChildEvent
 from app.models.parent_profile import ParentProfile
+from app.models.teacher_profile import TeacherProfile
 from app.models.assessment import Assessment, AssessmentQuestion
 from app.models.appointment import Appointment
 from app.models.student_profile import StudentProfile, TopicMastery
@@ -25,7 +26,7 @@ __all__ = [
     "Chat", "Message",
     "Subscription", "CreditTransaction",
     "Document", "DocumentChunk",
-    "InviteCode", "ParentChildEvent", "ParentProfile",
+    "InviteCode", "ParentChildEvent", "ParentProfile", "TeacherProfile",
     "Assessment", "AssessmentQuestion",
     "Appointment",
     "StudentProfile", "TopicMastery",
