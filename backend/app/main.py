@@ -13,6 +13,7 @@ from app.routers import auth, chat, health, admin, teacher, subscription, docume
 from app.routers import parent, appointments, assessments, gamification, lessons, assignments
 from app.routers import settings as settings_router
 from app.routers import sessions, curriculum, school, puzzles
+from app.routers import legal
 
 logging.basicConfig(
     level=logging.INFO,
@@ -127,3 +128,4 @@ app.include_router(sessions.router)
 app.include_router(curriculum.router)
 app.include_router(school.router)
 app.include_router(puzzles.router)
+app.include_router(legal.router)

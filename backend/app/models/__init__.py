@@ -14,8 +14,10 @@ from app.models.resource_hub import (
     RHKeyStage, RHYearGroup, RHSubject, RHUnit, RHTopic,
     RHAvailability, RHResource, RHDocument, RHDocumentChunk,
 )
+from app.models.legal import LegalDocument, LegalAcceptance, DataRequest
 
 __all__ = [
+    "LegalDocument", "LegalAcceptance", "DataRequest",
     "User", "School", "EmailVerificationToken", "OAuthIdentity",
     "Chat", "Message",
     "Subscription", "CreditTransaction",
