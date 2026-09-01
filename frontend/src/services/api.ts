@@ -745,6 +745,62 @@ export const parentSettingsApi = {
   },
 };
 
+export interface TeacherClassSettings {
+  default_session_length: number;
+  default_key_stage: string | null;
+  default_subjects: string[];
+  teaching_approach: string;
+  default_objectives: string;
+  report_visibility: string;
+  availability: Record<string, string[]>;
+}
+
+export const teacherSettingsApi = {
+  async getProfile() {
+    return handleResponse<{ name: string; email: string; phone: string | null; timezone: string }>(
+      await fetch(`${API_BASE}/teacher/settings/profile`, { headers: authHeaders() }));
+  },
+  async updateProfile(data: { name?: string; phone?: string; timezone?: string }) {
+    return handleResponse(await fetch(`${API_BASE}/teacher/settings/profile`, {
+      method: "PUT", headers: authHeaders(), body: JSON.stringify(data),
+    }));
+  },
+  async getClassSettings() {
+    return handleResponse<TeacherClassSettings>(await fetch(`${API_BASE}/teacher/settings/class`, { headers: authHeaders() }));
+  },
+  async updateClassSettings(data: Partial<TeacherClassSettings>) {
+    return handleResponse<TeacherClassSettings>(await fetch(`${API_BASE}/teacher/settings/class`, {
+      method: "PUT", headers: authHeaders(), body: JSON.stringify(data),
+    }));
+  },
+  async getNotifications() {
+    return handleResponse<{ prefs: Record<string, boolean> }>(await fetch(`${API_BASE}/teacher/settings/notifications`, { headers: authHeaders() }));
+  },
+  async updateNotifications(prefs: Record<string, boolean>) {
+    return handleResponse<{ prefs: Record<string, boolean> }>(await fetch(`${API_BASE}/teacher/settings/notifications`, {
+      method: "PUT", headers: authHeaders(), body: JSON.stringify({ prefs }),
+    }));
+  },
+  async getDefaults() {
+    return handleResponse<{ default_session_length: number; default_key_stage: string | null; default_subjects: string[]; default_objectives: string; teaching_approach: string }>(
+      await fetch(`${API_BASE}/teacher/settings/defaults`, { headers: authHeaders() }));
+  },
+  async getPolicy() {
+    return handleResponse<{ can_manage_assignments: boolean; report_visibility_locked: boolean; billing_managed_by: string }>(
+      await fetch(`${API_BASE}/teacher/settings/policy`, { headers: authHeaders() }));
+  },
+  async changePassword(current_password: string, new_password: string) {
+    return handleResponse<{ message: string }>(await fetch(`${API_BASE}/teacher/settings/account/change-password`, {
+      method: "POST", headers: authHeaders(), body: JSON.stringify({ current_password, new_password }),
+    }));
+  },
+  async logoutAll() {
+    return handleResponse<{ message: string }>(await fetch(`${API_BASE}/teacher/settings/account/logout-all`, {
+      method: "POST", headers: authHeaders(),
+    }));
+  },
+};
+
 export const lessonsApi = {
   async getAvailableFilters() {
     const res = await fetch(`${API_BASE}/lessons/available-filters`, { headers: authHeaders() });

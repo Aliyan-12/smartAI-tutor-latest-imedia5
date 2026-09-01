@@ -7,7 +7,7 @@ import {
 } from "lucide-react";
 import Sidebar from "../components/Sidebar";
 import { useAuth } from "../context/AuthContext";
-import { appointmentsApi, teacherApi, parentApi, curriculumApi } from "../services/api";
+import { appointmentsApi, teacherApi, teacherSettingsApi, parentApi, curriculumApi } from "../services/api";
 import type { HubSubject, HubTopic, Tutor } from "../services/api";
 import TutorPickerPills from "../components/TutorPickerPills";
 import type { User as UserType } from "../types";
@@ -331,6 +331,16 @@ export default function BookSessionPage() {
           ]);
           setStudents(studentList);
           setKbStages(ks.keystages ?? []);
+          // Pre-fill the form from the teacher's saved classroom defaults (feature 07).
+          const defaults = await teacherSettingsApi.getDefaults().catch(() => null);
+          if (defaults) {
+            setForm((f) => ({
+              ...f,
+              duration_minutes: String(defaults.default_session_length || f.duration_minutes),
+              key_stage: f.key_stage || defaults.default_key_stage || "",
+              description: f.description || defaults.default_objectives || "",
+            }));
+          }
         } else if (isParent) {
           const [studentList, ks] = await Promise.all([
             parentApi.getStudents() as Promise<UserType[]>,
