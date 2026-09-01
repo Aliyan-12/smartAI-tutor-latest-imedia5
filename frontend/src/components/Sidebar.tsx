@@ -6,7 +6,7 @@ import {
   BarChart2, ClipboardList,
   MessageCircle, Clock, GraduationCap, Bell,
   ShieldCheck, Database, MessageSquare, BarChart,
-  Menu, X,
+  Menu, X, ChevronDown,
 } from "lucide-react";
 import { useAuth } from "../context/AuthContext";
 import { chatApi, adminApi } from "../services/api";
@@ -618,7 +618,7 @@ export default function Sidebar({
             <span style={{ display: "flex", alignItems: "center", gap: 10 }}>
               <MessageCircle size={16} /><span>Chats</span>
             </span>
-            <span style={{ fontSize: 10, color: "#64748b", transition: "transform 0.2s", transform: openDropdown === "chats" ? "rotate(180deg)" : "none" }}>▼</span>
+            <ChevronDown size={14} style={{ color: "var(--text-muted)", transition: "transform 0.2s", transform: openDropdown === "chats" ? "rotate(180deg)" : "none" }} />
           </button>
 
           {openDropdown === "chats" && (
@@ -676,7 +676,7 @@ export default function Sidebar({
             <span style={{ display: "flex", alignItems: "center", gap: 10 }}>
               <BookOpen size={16} /><span>Sessions</span>
             </span>
-            <span style={{ fontSize: 10, color: "#64748b", transition: "transform 0.2s", transform: openDropdown === "sessions" ? "rotate(180deg)" : "none" }}>▼</span>
+            <ChevronDown size={14} style={{ color: "var(--text-muted)", transition: "transform 0.2s", transform: openDropdown === "sessions" ? "rotate(180deg)" : "none" }} />
           </button>
 
           {openDropdown === "sessions" && (
@@ -788,7 +788,7 @@ export default function Sidebar({
             <span style={{ display: "flex", alignItems: "center", gap: 10 }}>
               <Calendar size={16} /><span>Sessions</span>
             </span>
-            <span style={{ fontSize: 10, color: "#64748b", transition: "transform 0.2s", transform: openDropdown === "sessions" ? "rotate(180deg)" : "none" }}>▼</span>
+            <ChevronDown size={14} style={{ color: "var(--text-muted)", transition: "transform 0.2s", transform: openDropdown === "sessions" ? "rotate(180deg)" : "none" }} />
           </button>
 
           {openDropdown === "sessions" && (
@@ -890,7 +890,7 @@ export default function Sidebar({
             <span style={{ display: "flex", alignItems: "center", gap: 10 }}>
               <Calendar size={16} /><span>Sessions</span>
             </span>
-            <span style={{ fontSize: 10, color: "#64748b", transition: "transform 0.2s", transform: openDropdown === "sessions" ? "rotate(180deg)" : "none" }}>▼</span>
+            <ChevronDown size={14} style={{ color: "var(--text-muted)", transition: "transform 0.2s", transform: openDropdown === "sessions" ? "rotate(180deg)" : "none" }} />
           </button>
 
           {openDropdown === "sessions" && (
@@ -973,7 +973,7 @@ export default function Sidebar({
             <span style={{ display: "flex", alignItems: "center", gap: 10 }}>
               <Users size={16} /><span>Users</span>
             </span>
-            <span style={{ fontSize: 10, color: "#64748b", transition: "transform 0.2s", transform: openDropdown === "users" ? "rotate(180deg)" : "none" }}>▼</span>
+            <ChevronDown size={14} style={{ color: "var(--text-muted)", transition: "transform 0.2s", transform: openDropdown === "users" ? "rotate(180deg)" : "none" }} />
           </button>
           {openDropdown === "users" && (
             <div style={{ paddingLeft: 12, display: "flex", flexDirection: "column", gap: 1 }}>
