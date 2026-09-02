@@ -8,6 +8,10 @@ from app.models.parent_student import InviteCode, ParentChildEvent
 from app.models.parent_profile import ParentProfile
 from app.models.teacher_profile import TeacherProfile
 from app.models.platform_setting import PlatformSetting, SettingChange
+from app.models.billing import (
+    BillingCustomer, PaymentMethodRef, ProviderSubscription, InvoiceRef,
+    WebhookEvent, BillingWallet, BillingLedgerEntry,
+)
 from app.models.assessment import Assessment, AssessmentQuestion
 from app.models.appointment import Appointment
 from app.models.student_profile import StudentProfile, TopicMastery
@@ -29,6 +33,8 @@ __all__ = [
     "Document", "DocumentChunk",
     "InviteCode", "ParentChildEvent", "ParentProfile", "TeacherProfile",
     "PlatformSetting", "SettingChange",
+    "BillingCustomer", "PaymentMethodRef", "ProviderSubscription", "InvoiceRef",
+    "WebhookEvent", "BillingWallet", "BillingLedgerEntry",
     "Assessment", "AssessmentQuestion",
     "Appointment",
     "StudentProfile", "TopicMastery",
