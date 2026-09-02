@@ -44,6 +44,24 @@ async def audit_log(user: User = Depends(require_admin), db: AsyncSession = Depe
     return {"changes": await svc.audit_list(db, user)}
 
 
+@router.get("/audit/access")
+async def access_audit(user: User = Depends(require_admin), db: AsyncSession = Depends(get_db)):
+    """Recent access to sensitive child data (feature 14). School admins see their own school;
+    administrators see all."""
+    from sqlalchemy import select, desc
+    from app.models.notification import AccessAudit
+    from app.models.user import ROLE_ADMINISTRATOR
+    q = select(AccessAudit).order_by(desc(AccessAudit.created_at)).limit(100)
+    if user.role != ROLE_ADMINISTRATOR and user.school_id:
+        q = select(AccessAudit).where(AccessAudit.school_id == user.school_id) \
+            .order_by(desc(AccessAudit.created_at)).limit(100)
+    rows = (await db.execute(q)).scalars().all()
+    return {"access": [{
+        "actor_id": r.actor_id, "actor_role": r.actor_role, "subject_user_id": r.subject_user_id,
+        "resource": r.resource, "action": r.action, "created_at": r.created_at,
+    } for r in rows]}
+
+
 @router.get("/public/disclosure")
 async def ai_disclosure(db: AsyncSession = Depends(get_db)):
     """Unauthenticated: the AI disclosure text the frontend shows to learners."""

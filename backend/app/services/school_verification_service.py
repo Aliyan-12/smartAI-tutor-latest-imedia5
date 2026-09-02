@@ -120,6 +120,23 @@ async def transition(db: AsyncSession, school: School, to_status: str, actor_use
     await _sync_admin_approval(db, school, to_status)
     await db.flush()
     _notify(school, to_status)
+    # In-app notification to the school admin (best-effort). No sensitive data in the title.
+    if school.superadmin_user_id:
+        try:
+            from app.services import notification_service
+            _titles = {
+                "verified": "Your school is verified", "rejected": "School application rejected",
+                "changes_requested": "Changes requested on your application",
+                "suspended": "Your school has been suspended", "under_review": "Your application is under review",
+            }
+            title = _titles.get(to_status, f"School status: {to_status.replace('_', ' ')}")
+            await notification_service.notify(
+                db, user_id=school.superadmin_user_id, category="school_notices",
+                type=f"verification_{to_status}", title=title,
+                body=note or "", dedup_key=f"verif:{school.id}:{to_status}:{school.reviewed_at or school.submitted_at}",
+                link="/school/verification")
+        except Exception:
+            logger.exception("verification notification failed (non-fatal)")
     logger.info("School %s verification %s -> %s by %s", school.id, frm, to_status, actor_user_id)
 
 
