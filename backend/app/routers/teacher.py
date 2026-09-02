@@ -57,6 +57,12 @@ async def list_students(
     db: AsyncSession = Depends(get_db),
 ):
     query = select(User).where(User.role == ROLE_STUDENT)
+    # School scoping: teachers/admins see only their own school; administrators are cross-school.
+    from app.models.user import ROLE_ADMINISTRATOR
+    if teacher.role != ROLE_ADMINISTRATOR:
+        if not teacher.school_id:
+            return []
+        query = query.where(User.school_id == teacher.school_id)
     if is_active is not None:
         query = query.where(User.is_active == is_active)
     query = query.order_by(desc(User.created_at)).limit(limit).offset(offset)
@@ -196,6 +202,8 @@ async def generate_invite_code(
         code=InviteCode.generate_code(),
         student_id=student.id,
         used=False,
+        created_by_id=teacher.id,
+        expires_at=InviteCode.default_expiry(),
     )
     db.add(invite)
     await db.flush()
@@ -203,4 +211,58 @@ async def generate_invite_code(
     return {
         "invite_code": invite.code,
         "student_name": student.name,
+        "expires_at": invite.expires_at,
     }
+
+
+# ── Class progress tracker (feature 13) ───────────────────────────────────
+@router.get("/students/{student_id}/mastery")
+async def student_mastery(
+    student_id: int,
+    teacher: User = Depends(require_teacher),
+    db: AsyncSession = Depends(get_db),
+):
+    """Evidence-based mastery for a student the teacher is authorised to view."""
+    from app.services import teacher_progress_service, mastery_service
+    await teacher_progress_service.assert_can_view(db, teacher, student_id)
+    payload = await mastery_service.engine_payload(db, student_id)
+    await db.commit()
+    return payload
+
+
+@router.get("/students/{student_id}/mastery/topic")
+async def student_mastery_topic(
+    student_id: int, subject: str, topic: str,
+    teacher: User = Depends(require_teacher),
+    db: AsyncSession = Depends(get_db),
+):
+    from app.services import teacher_progress_service, mastery_service
+    await teacher_progress_service.assert_can_view(db, teacher, student_id)
+    result = await mastery_service.topic_breakdown(db, student_id, subject, topic)
+    await db.commit()
+    return result
+
+
+@router.get("/class/overview")
+async def class_overview(
+    teacher: User = Depends(require_teacher),
+    db: AsyncSession = Depends(get_db),
+):
+    """School-scoped class aggregates (average, mastery distribution, support/inactive/improving)."""
+    from app.services import teacher_progress_service
+    data = await teacher_progress_service.class_overview(db, teacher)
+    await db.commit()
+    return data
+
+
+@router.get("/class/heatmap")
+async def class_heatmap(
+    subject: Optional[str] = None,
+    teacher: User = Depends(require_teacher),
+    db: AsyncSession = Depends(get_db),
+):
+    """Students × topics mastery-state grid (aggregated server-side, bounded size)."""
+    from app.services import teacher_progress_service
+    data = await teacher_progress_service.class_heatmap(db, teacher, subject=subject)
+    await db.commit()
+    return data
