@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import Sidebar from "../components/Sidebar";
+import MasteryPanel from "../components/MasteryPanel";
 import { gamificationApi, assessmentsApi, appointmentsApi } from "../services/api";
 import { useAuth } from "../context/AuthContext";
 import type { TopicMastery, StudentProfile, Assessment, Appointment } from "../types";
@@ -346,6 +347,8 @@ export default function ProgressPage() {
               }}
             />
           </div>
+
+          <MasteryPanel />
 
           {error && (
             <div style={{ padding: 14, background: "#fef2f2", border: "1px solid #fecaca", borderRadius: 8, color: "#dc2626", fontSize: 13, marginBottom: 16 }}>

@@ -569,7 +569,30 @@ export const gamificationApi = {
     const res = await fetch(`${API_BASE}/gamification/next-topics${qs ? "?" + qs : ""}`, { headers: authHeaders() });
     return handleResponse(res);
   },
+  async masteryEngine() {
+    return handleResponse<MasteryEngine>(await fetch(`${API_BASE}/gamification/mastery-engine`, { headers: authHeaders() }));
+  },
+  async masteryTopic(subject: string, topic: string) {
+    const q = new URLSearchParams({ subject, topic }).toString();
+    return handleResponse<MasteryBreakdown>(await fetch(`${API_BASE}/gamification/mastery-engine/topic?${q}`, { headers: authHeaders() }));
+  },
+  async masteryBackfill() {
+    return handleResponse<{ evidence_created: number }>(await fetch(`${API_BASE}/gamification/mastery-engine/backfill`, { method: "POST", headers: authHeaders() }));
+  },
 };
+
+export interface MasteryTopicRow {
+  subject: string; key_stage: string; topic: string; state: string;
+  performance: number; confidence: number; evidence_count: number; last_computed_at: string | null;
+}
+export interface MasteryRecommendation { subject: string; topic: string; state: string; performance: number; confidence: number; reason: string }
+export interface MasteryEngine { algorithm_version: string; topics: MasteryTopicRow[]; recommendations: MasteryRecommendation[] }
+export interface MasteryBreakdown {
+  state: string; performance: number; confidence: number; evidence_count: number; distinct_sessions: number;
+  algorithm_version: string;
+  breakdown: { performance_pct: number; confidence_pct: number; evidence_by_type: Record<string, number>; notes: string[] };
+  evidence: Array<{ source_type: string; evaluator_type: string; normalized_score: number; difficulty: number; hints_used: number; when: string }>;
+}
 
 export const lessonApi = {
   async generatePlan(data: {
