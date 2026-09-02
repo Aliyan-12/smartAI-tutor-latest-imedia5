@@ -85,6 +85,8 @@ REGISTRY: List[Setting] = [
             "bool", True, scope_type="school"),
     Setting("school_default_session_length", "school_policy", "Default session length (min)",
             "int", 40, scope_type="school", min=20, max=90),
+    Setting("teachers_can_view_billing", "school_policy", "Teachers can view billing balance",
+            "bool", False, scope_type="school"),
 ]
 
 SECTIONS = [

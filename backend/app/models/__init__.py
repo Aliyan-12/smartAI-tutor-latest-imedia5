@@ -12,6 +12,7 @@ from app.models.billing import (
     BillingCustomer, PaymentMethodRef, ProviderSubscription, InvoiceRef,
     WebhookEvent, BillingWallet, BillingLedgerEntry,
 )
+from app.models.topup_request import SchoolTopupRequest
 from app.models.assessment import Assessment, AssessmentQuestion
 from app.models.appointment import Appointment
 from app.models.student_profile import StudentProfile, TopicMastery
@@ -34,7 +35,7 @@ __all__ = [
     "InviteCode", "ParentChildEvent", "ParentProfile", "TeacherProfile",
     "PlatformSetting", "SettingChange",
     "BillingCustomer", "PaymentMethodRef", "ProviderSubscription", "InvoiceRef",
-    "WebhookEvent", "BillingWallet", "BillingLedgerEntry",
+    "WebhookEvent", "BillingWallet", "BillingLedgerEntry", "SchoolTopupRequest",
     "Assessment", "AssessmentQuestion",
     "Appointment",
     "StudentProfile", "TopicMastery",
