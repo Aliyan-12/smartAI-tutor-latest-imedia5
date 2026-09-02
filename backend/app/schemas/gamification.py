@@ -31,6 +31,12 @@ class TopicMasteryResponse(BaseModel):
     score_history: Optional[List[Dict[str, Any]]] = None
     attempts: int
     last_practiced_at: Optional[datetime] = None
+    # Evidence-based mastery engine (feature 11).
+    state: str = "not_started"
+    performance: float = 0.0
+    confidence: float = 0.0
+    evidence_count: int = 0
+    last_computed_at: Optional[datetime] = None
 
 
 class DailyPlanResponse(BaseModel):

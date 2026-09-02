@@ -619,6 +619,22 @@ async def update_topic_mastery(
 
     await db.flush()
     await db.refresh(mastery)
+
+    # Feed the evidence-based mastery engine (feature 11). Best-effort: a failure here must
+    # never break the legacy update. Each call is a distinct attempt (unique source id).
+    try:
+        from app.services import mastery_service
+        student = await db.get(User, student_id)
+        if student is not None:
+            idx = len(mastery.score_history or [])
+            normalized = score / 100.0 if score > 1 else score
+            await mastery_service.record_evidence(
+                db, student=student, subject=subject, key_stage=key_stage, topic=topic,
+                source_type="quiz", source_id=f"tm:{mastery.id}:{idx}",
+                evaluator_type="quiz_exact", score=normalized, max_score=1.0)
+    except Exception:
+        logger.exception("mastery evidence hook failed (non-fatal)")
+
     return mastery
 
 
