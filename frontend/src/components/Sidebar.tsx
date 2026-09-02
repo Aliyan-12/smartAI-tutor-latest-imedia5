@@ -6,7 +6,7 @@ import {
   BarChart2, ClipboardList,
   MessageCircle, Clock, GraduationCap, Bell,
   ShieldCheck, Database, MessageSquare, BarChart,
-  Menu, X, ChevronDown, Sparkles,
+  Menu, X, ChevronDown, Sparkles, CreditCard,
 } from "lucide-react";
 import { useAuth } from "../context/AuthContext";
 import { chatApi, adminApi } from "../services/api";
@@ -933,6 +933,12 @@ export default function Sidebar({
           </button>
 
           <div className="sb-section-label">Account</div>
+          <button
+            className={`sb-nav-item${isActive("/billing") ? " active" : ""}`}
+            onClick={() => go("/billing")}
+          >
+            <CreditCard size={16} /><span>Billing</span>
+          </button>
           <button className="sb-nav-item disabled">
             <MessageSquare size={16} /><span>Messages</span>
           </button>
