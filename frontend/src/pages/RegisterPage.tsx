@@ -17,7 +17,7 @@ const HIGHLIGHTS = [
   { icon: "🎓", title: "Personalised Learning", desc: "AI adapts to your pace and learning style",  color: "#1a73e8" },
   { icon: "📊", title: "Track Your Progress",   desc: "XP, streaks, and detailed session reports",  color: "#f97316" },
   { icon: "🧠", title: "UK Curriculum Aligned", desc: "GCSE, A-Level, Key Stage content built-in",  color: "#10b981" },
-  { icon: "🔊", title: "Voice Tutoring",         desc: "Real-time AI voice sessions coming soon",    color: "#7c3aed" },
+  { icon: "🔊", title: "Voice Tutoring",         desc: "Real-time AI voice lessons with a warm tutor voice", color: "#7c3aed" },
 ];
 
 const TRUST_BADGES: { icon: ReactNode; title: string; desc: string }[] = [
