@@ -970,6 +970,27 @@ export const schoolBillingApi = {
   },
 };
 
+export interface AppNotification {
+  id: number; category: string; type: string; title: string; body: string;
+  read: boolean; link: string | null; created_at: string;
+}
+
+export const notificationsApi = {
+  async list(unreadOnly = false) {
+    const q = unreadOnly ? "?unread_only=true" : "";
+    return handleResponse<{ unread: number; notifications: AppNotification[] }>(await fetch(`${API_BASE}/notifications${q}`, { headers: authHeaders() }));
+  },
+  async unreadCount() {
+    return handleResponse<{ unread: number }>(await fetch(`${API_BASE}/notifications/unread-count`, { headers: authHeaders() }));
+  },
+  async markRead(id: number) {
+    return handleResponse(await fetch(`${API_BASE}/notifications/${id}/read`, { method: "POST", headers: authHeaders() }));
+  },
+  async markAllRead() {
+    return handleResponse(await fetch(`${API_BASE}/notifications/read-all`, { method: "POST", headers: authHeaders() }));
+  },
+};
+
 export const lessonsApi = {
   async getAvailableFilters() {
     const res = await fetch(`${API_BASE}/lessons/available-filters`, { headers: authHeaders() });
