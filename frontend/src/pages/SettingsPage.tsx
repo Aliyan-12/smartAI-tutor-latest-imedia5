@@ -1,9 +1,11 @@
 import { useState, useEffect } from "react";
+import { useNavigate } from "react-router-dom";
 import { User, Sliders, BookOpen, Bell, Shield, Save, LogOut, Eye, EyeOff } from "lucide-react";
 import Sidebar from "../components/Sidebar";
 import { settingsApi, curriculumApi } from "../services/api";
 import { useAuth } from "../context/AuthContext";
 import type { LearningPreferences } from "../types";
+import { readStoredA11y, applyAccessibility, type AccessibilityPrefs, type TextSize, type Theme } from "../lib/accessibility";
 
 type Tab = "profile" | "preferences" | "learning" | "notifications" | "account";
 
@@ -36,6 +38,7 @@ const TEACH_PREFS = [
 
 export default function SettingsPage() {
   const { user, logout } = useAuth();
+  const navigate = useNavigate();
   const [activeTab, setActiveTab] = useState<Tab>("profile");
   const [toast, setToast] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
@@ -48,10 +51,18 @@ export default function SettingsPage() {
   const [hubKeyStages, setHubKeyStages] = useState<string[]>([]);
   const [hubYears, setHubYears] = useState<string[]>([]);
 
-  // Preferences (local only for now)
+  // Display preferences — persisted per device and applied to the whole app via the shared
+  // accessibility system (no longer local-only, and consistent with the Preferences page).
   const [voiceResponses, setVoiceResponses] = useState(true);
-  const [textSize, setTextSize] = useState<"sm" | "md" | "lg">("md");
-  const [darkMode, setDarkMode] = useState(false);
+  const [a11y, setA11yState] = useState<AccessibilityPrefs>(() => readStoredA11y());
+  const textSize = a11y.text_size;
+  const darkMode = a11y.theme === "dark";
+  const setTextSize = (text_size: TextSize) => {
+    const next = { ...a11y, text_size }; setA11yState(next); applyAccessibility(next);
+  };
+  const setDarkMode = (on: boolean) => {
+    const next = { ...a11y, theme: (on ? "dark" : "system") as Theme }; setA11yState(next); applyAccessibility(next);
+  };
 
   // Learning prefs
   const [prefs, setPrefs] = useState<LearningPreferences | null>(null);
@@ -508,8 +519,8 @@ export default function SettingsPage() {
                     <div className="sett-row-sub">Choose the text size that works best for you</div>
                   </div>
                   <div className="sett-text-size-row">
-                    {(["sm", "md", "lg"] as const).map((s, i) => (
-                      <button key={s} className={`sett-text-btn${textSize === s ? " selected" : ""}`} onClick={() => setTextSize(s)} style={{ fontSize: [12, 15, 19][i] }}>A</button>
+                    {(["default", "large", "larger"] as const).map((s, i) => (
+                      <button key={s} className={`sett-text-btn${textSize === s ? " selected" : ""}`} onClick={() => setTextSize(s)} style={{ fontSize: [13, 16, 19][i] }} aria-label={["Default", "Large", "Largest"][i] + " text size"}>A</button>
                     ))}
                   </div>
                 </div>
@@ -703,17 +714,10 @@ export default function SettingsPage() {
 
                   <div className="sett-row">
                     <div>
-                      <div className="sett-row-label">Linked Accounts</div>
-                      <div className="sett-row-sub">Connect external accounts</div>
+                      <div className="sett-row-label">Privacy &amp; data</div>
+                      <div className="sett-row-sub">Manage your data, consents and privacy requests</div>
                     </div>
-                    <span style={{ fontSize: 12, color: "#94a3b8", fontWeight: 600 }}>Coming Soon</span>
-                  </div>
-                  <div className="sett-row">
-                    <div>
-                      <div className="sett-row-label">Privacy</div>
-                      <div className="sett-row-sub">Manage your data and privacy settings</div>
-                    </div>
-                    <span style={{ fontSize: 12, color: "#94a3b8", fontWeight: 600 }}>Coming Soon</span>
+                    <button className="sett-save-btn" style={{ padding: "7px 14px" }} onClick={() => navigate("/privacy")}>Manage</button>
                   </div>
                 </div>
 
