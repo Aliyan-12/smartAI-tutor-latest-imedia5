@@ -13,6 +13,7 @@ import {
   PageHeader, Card, CardBody, CardHeader, Button, Badge, Alert, Spinner, EmptyState,
   Input, FormField, Switch, Tabs,
 } from "../components/ui";
+import { SkeletonText, SkeletonCard, SkeletonStats, SkeletonTable, SkeletonList } from "../components/ui";
 
 const TABS = [
   { key: "profile", label: "Profile" },
@@ -81,7 +82,7 @@ function ProfileTab({ flash }: { flash: (m: string) => void }) {
   const [p, setP] = useState<ParentProfile | null>(null);
   const [saving, setSaving] = useState(false);
   useEffect(() => { parentSettingsApi.getProfile().then(setP).catch(() => setP(null)); }, []);
-  if (!p) return <Spinner />;
+  if (!p) return <SkeletonCard lines={5} />;
   const save = async () => {
     setSaving(true);
     try {
@@ -150,7 +151,7 @@ function ChildrenTab({ flash }: { flash: (m: string) => void }) {
     await parentSettingsApi.unlinkChild(c.id); await load(); flash(`Unlinked ${c.name}`);
   };
 
-  if (!children) return <Spinner />;
+  if (!children) return <SkeletonCard lines={5} />;
   return (
     <div className="flex flex-col gap-4 max-w-3xl">
       <div className="flex gap-2">
@@ -214,7 +215,7 @@ function NotificationsTab({ flash }: { flash: (m: string) => void }) {
   const [prefs, setPrefs] = useState<Record<string, boolean> | null>(null);
   const [saving, setSaving] = useState(false);
   useEffect(() => { parentSettingsApi.getNotifications().then((r) => setPrefs(r.prefs)).catch(() => setPrefs({})); }, []);
-  if (!prefs) return <Spinner />;
+  if (!prefs) return <SkeletonCard lines={5} />;
   const save = async () => {
     setSaving(true);
     try { const r = await parentSettingsApi.updateNotifications(prefs); setPrefs(r.prefs); flash("Notification preferences saved"); }
@@ -315,7 +316,7 @@ function PrivacyTab({ flash }: { flash: (m: string) => void }) {
 function BillingTab() {
   const [b, setB] = useState<ParentBilling | null>(null);
   useEffect(() => { parentSettingsApi.getBilling().then(setB).catch(() => setB(null)); }, []);
-  if (!b) return <Spinner />;
+  if (!b) return <SkeletonCard lines={5} />;
   return (
     <div className="flex flex-col gap-4 max-w-3xl">
       <div className="grid sm:grid-cols-2 gap-4">

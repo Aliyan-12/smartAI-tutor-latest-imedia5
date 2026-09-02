@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { Check, CreditCard, AlertTriangle, Sparkles, ExternalLink, RefreshCw, Send } from "lucide-react";
 import Sidebar from "../components/Sidebar";
 import { useAuth } from "../context/AuthContext";
+import PageLoading from "../components/PageLoading";
 import {
   billingApi, type BillingPlan, type BillingSummary, type InvoiceRow, type LedgerRow,
   type WalletMember, type CreditRequestRow,
@@ -52,7 +53,7 @@ export default function BillingPage() {
     if (r.url) window.location.href = r.url; else flash("Billing portal is available in live mode");
   };
 
-  if (!me) return <div className="app-layout"><Sidebar /><div className="main-content"><div className="dashboard-content flex justify-center py-16"><Spinner /></div></div></div>;
+  if (!me) return <PageLoading />;
 
   const sub = me.subscription;
   const currentPlan = plans.find((p) => p.slug === sub?.plan_slug);

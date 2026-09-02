@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { ShieldCheck, Upload, FileText, Clock } from "lucide-react";
 import Sidebar from "../components/Sidebar";
+import PageLoading from "../components/PageLoading";
 import { schoolVerificationApi, type SchoolVerification, type VerificationEvent, type EvidenceDoc } from "../services/api";
 import { PageHeader, Card, CardHeader, CardBody, Button, Badge, Input, Textarea, Select, FormField, Alert, Spinner } from "../components/ui";
 
@@ -34,7 +35,7 @@ export default function SchoolVerificationPage() {
   }, []);
   useEffect(() => { load().catch((e) => setErr((e as Error).message)); }, [load]);
 
-  if (!data) return <div className="app-layout"><Sidebar /><div className="main-content flex items-center justify-center"><Spinner /></div></div>;
+  if (!data) return <PageLoading />;
   const { school, events, evidence, editable } = data;
 
   const save = async () => { setErr(""); setMsg("");

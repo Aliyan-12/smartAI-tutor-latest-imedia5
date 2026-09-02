@@ -4,6 +4,7 @@ import { Bell, Check, CheckCheck } from "lucide-react";
 import Sidebar from "../components/Sidebar";
 import { notificationsApi, type AppNotification } from "../services/api";
 import { PageHeader, Card, CardBody, Button, Badge, Spinner, EmptyState } from "../components/ui";
+import { SkeletonText, SkeletonCard, SkeletonStats, SkeletonTable, SkeletonList } from "../components/ui";
 
 /**
  * Full-page notification centre. Renders the SAME data as the header bell (no new API,
@@ -51,7 +52,7 @@ export default function NotificationsPage() {
           />
 
           {!items ? (
-            <div className="flex justify-center py-16"><Spinner /></div>
+            <SkeletonList rows={6} />
           ) : items.length === 0 ? (
             <EmptyState icon={<Bell size={36} />} title="You're all caught up"
               description="New notifications will appear here." />

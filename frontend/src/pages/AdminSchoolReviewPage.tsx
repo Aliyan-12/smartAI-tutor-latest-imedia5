@@ -3,6 +3,7 @@ import { Building2, FileText, AlertTriangle, Clock } from "lucide-react";
 import Sidebar from "../components/Sidebar";
 import { schoolVerificationApi, type SchoolVerification, type VerificationEvent, type EvidenceDoc } from "../services/api";
 import { PageHeader, Card, CardHeader, CardBody, Button, Badge, Input, Tabs, EmptyState, Spinner } from "../components/ui";
+import { SkeletonText, SkeletonCard, SkeletonStats, SkeletonTable, SkeletonList } from "../components/ui";
 
 const STATUS_TONE: Record<string, "neutral" | "brand" | "success" | "warning" | "danger"> = {
   draft: "neutral", submitted: "brand", under_review: "brand", verified: "success",
@@ -46,7 +47,7 @@ export default function AdminSchoolReviewPage() {
 
           <div className="grid gap-5 lg:grid-cols-5">
             <div className="lg:col-span-2 flex flex-col gap-2">
-              {loading ? <div className="flex justify-center py-10"><Spinner /></div>
+              {loading ? <SkeletonList rows={6} />
                 : apps.length === 0 ? <EmptyState icon={<Building2 size={36} />} title="No applications" />
                 : apps.map((a) => (
                   <button key={a.id} onClick={() => openDetail(a.id)}

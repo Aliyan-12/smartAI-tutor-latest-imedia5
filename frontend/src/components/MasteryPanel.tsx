@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { Brain, ChevronDown, RefreshCw, Target } from "lucide-react";
 import { gamificationApi, type MasteryEngine, type MasteryBreakdown } from "../services/api";
-import { Card, CardBody, Badge, Button, Spinner } from "./ui";
+import { Card, CardBody, Badge, Button, Spinner, SkeletonText } from "./ui";
 
 /** A pluggable data source so the same panel serves the student's own view and a
  * parent/teacher's authorised view of a linked child. */
@@ -59,7 +59,7 @@ function TopicRow({ subject, topic, state, performance, confidence, source }:
       </button>
       {open && (
         <div className="pb-3 pl-1">
-          {!bd ? <Spinner /> : (
+          {!bd ? <SkeletonText lines={3} /> : (
             <div className="rounded-lg bg-surface-muted p-3">
               <div className="t-eyebrow mb-1">Why this score?</div>
               <ul className="t-helper list-disc pl-4 mb-2">{bd.breakdown.notes.map((n, i) => <li key={i}>{n}</li>)}</ul>

@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { Check, History, Save, AlertTriangle } from "lucide-react";
 import Sidebar from "../components/Sidebar";
+import PageLoading from "../components/PageLoading";
 import {
   adminSettingsApi, type SettingItem, type SettingSection, type SettingChangeRow,
 } from "../services/api";
@@ -8,6 +9,7 @@ import {
   PageHeader, Card, CardBody, CardHeader, Button, Badge, Alert, Spinner, EmptyState,
   Input, Select, Switch, Tabs,
 } from "../components/ui";
+import { SkeletonText, SkeletonCard, SkeletonStats, SkeletonTable, SkeletonList } from "../components/ui";
 
 function Toast({ msg }: { msg: string | null }) {
   if (!msg) return null;
@@ -138,7 +140,7 @@ export default function AdminSettingsPage() {
     }) ?? prev);
   };
 
-  if (!sections) return <div className="app-layout"><Sidebar /><div className="main-content"><div className="dashboard-content flex justify-center py-16"><Spinner /></div></div></div>;
+  if (!sections) return <PageLoading />;
 
   const tabs = [...sections.map((s) => ({ key: s.key, label: s.label })), { key: "audit", label: "Audit log" }];
   const current = sections.find((s) => s.key === active);
@@ -155,7 +157,7 @@ export default function AdminSettingsPage() {
             <Card>
               <CardHeader title="Recent changes" />
               <CardBody className="pt-0">
-                {!audit ? <Spinner /> : audit.length === 0 ? <EmptyState icon={<History size={32} />} title="No changes yet" /> : (
+                {!audit ? <SkeletonTable rows={6} cols={4} /> : audit.length === 0 ? <EmptyState icon={<History size={32} />} title="No changes yet" /> : (
                   <div className="overflow-x-auto">
                     <table className="w-full text-[13px]">
                       <thead><tr className="text-left t-eyebrow border-b border-line">

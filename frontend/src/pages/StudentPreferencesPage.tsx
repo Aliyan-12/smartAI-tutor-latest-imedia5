@@ -10,6 +10,7 @@ import {
   applyAccessibility, coerceA11y, type AccessibilityPrefs, type TextSize,
 } from "../lib/accessibility";
 import { PageHeader, Card, CardBody, Button, Badge, Switch, Alert, Spinner } from "../components/ui";
+import { SkeletonText, SkeletonCard, SkeletonStats, SkeletonTable, SkeletonList } from "../components/ui";
 
 /* ── Option catalogues (bounded — must match backend _ALLOWED_STYLES / prompt keys) ── */
 const LEARNING_STYLES: { key: string; label: string; hint: string }[] = [
@@ -306,7 +307,7 @@ export default function StudentPreferencesPage() {
           />
 
           {loading ? (
-            <div className="flex justify-center py-16"><Spinner /></div>
+            <div className="flex flex-col gap-5"><SkeletonStats /><SkeletonCard lines={5} /></div>
           ) : !draft ? (
             <Alert tone="danger" title="Couldn't load preferences">{error}</Alert>
           ) : (

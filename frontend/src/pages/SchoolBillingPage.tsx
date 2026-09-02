@@ -13,6 +13,7 @@ import {
   Input, FormField, Select, Tabs,
 } from "../components/ui";
 import { MemberFundingCard } from "./BillingPage";
+import { SkeletonText, SkeletonCard, SkeletonStats, SkeletonTable, SkeletonList } from "../components/ui";
 
 const TABS = [
   { key: "wallet", label: "Wallet" },
@@ -78,7 +79,7 @@ function WalletTab({ flash }: { flash: (m: string) => void }) {
   const [busy, setBusy] = useState(false);
   const load = useCallback(() => billingApi.ledger(filter || undefined).then(setData).catch(() => setData(null)), [filter]);
   useEffect(() => { load(); }, [load]);
-  if (!data) return <Spinner />;
+  if (!data) return <SkeletonTable rows={6} cols={5} />;
 
   const applyCredit = async (sign: 1 | -1) => {
     const amt = parseFloat(credit.amount);
@@ -277,7 +278,7 @@ function TopupsTab({ flash, onChange }: { flash: (m: string) => void; onChange: 
 function InvoicesTab() {
   const [invoices, setInvoices] = useState<InvoiceRow[] | null>(null);
   useEffect(() => { billingApi.invoices().then((r) => setInvoices(r.invoices)).catch(() => setInvoices([])); }, []);
-  if (!invoices) return <Spinner />;
+  if (!invoices) return <SkeletonTable rows={5} cols={4} />;
   return (
     <Card className="max-w-4xl">
       <CardHeader title="Invoices" />
@@ -312,7 +313,7 @@ function SettingsTab({ flash }: { flash: (m: string) => void }) {
   const [s, setS] = useState<SchoolBillingSettings | null>(null);
   const [saving, setSaving] = useState(false);
   useEffect(() => { schoolBillingApi.settings().then(setS).catch(() => setS(null)); }, []);
-  if (!s) return <Spinner />;
+  if (!s) return <SkeletonCard lines={5} />;
   const save = async () => {
     setSaving(true);
     try { await schoolBillingApi.updateSettings({ billing_contact_email: s.billing_contact_email ?? "", billing_address: s.billing_address ?? "" }); flash("Billing settings saved"); }
