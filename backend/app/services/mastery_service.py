@@ -135,7 +135,26 @@ async def topic_breakdown(db: AsyncSession, student_id: int, subject: str, topic
     return result
 
 
+async def ensure_backfilled(db: AsyncSession, student_id: int) -> None:
+    """Make history-based mastery dynamic: if a student has legacy TopicMastery history but no
+    evidence rows yet, seed evidence once (idempotent). Called from mastery_overview so every
+    consumer (the student view, parent/teacher views, recommendations) lights up automatically
+    on first access — no manual 'build from history' step required."""
+    has_evidence = await db.scalar(
+        select(MasteryEvidence.id).where(MasteryEvidence.student_id == student_id).limit(1))
+    if has_evidence is not None:
+        return
+    has_history = await db.scalar(
+        select(TopicMastery.id).where(TopicMastery.student_id == student_id).limit(1))
+    if has_history is None:
+        return
+    student = await db.get(User, student_id)
+    if student is not None:
+        await backfill_student(db, student)
+
+
 async def mastery_overview(db: AsyncSession, student_id: int) -> List[TopicMastery]:
+    await ensure_backfilled(db, student_id)
     res = await db.execute(select(TopicMastery).where(TopicMastery.student_id == student_id)
                            .order_by(desc(TopicMastery.last_computed_at)))
     return list(res.scalars().all())
