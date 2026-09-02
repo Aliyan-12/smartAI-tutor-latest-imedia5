@@ -843,7 +843,6 @@ export default function Sidebar({
             onClick={() => go("/teacher/progress")}
           >
             <BarChart size={16} /><span>Class Progress</span>
-            <span className="sb-soon-badge">Soon</span>
           </button>
           <button className="sb-nav-item disabled">
             <Bell size={16} /><span>Notifications</span>
