@@ -1,18 +1,15 @@
 import { useEffect, useState } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
-import {
-  LogOut, LayoutDashboard, Users, Activity,
-  BookOpen, Settings, Calendar, FileText,
-  BarChart2, ClipboardList,
-  MessageCircle, Clock, GraduationCap, Bell,
-  ShieldCheck, Database, MessageSquare, BarChart,
-  Menu, X, ChevronDown, Sparkles, CreditCard,
-} from "lucide-react";
+import { LogOut, Menu, X } from "lucide-react";
 import { useAuth } from "../context/AuthContext";
-import { chatApi, adminApi } from "../services/api";
+import { adminApi } from "../services/api";
 import NotificationBell from "./NotificationBell";
+import { getNavForRole, roleLabel, type NavItem } from "../lib/navigation";
 import type { ChatListItem, Appointment } from "../types";
 
+// Props are accepted for backwards-compatibility with existing callers (e.g. ChatPage still
+// passes chat props). The sidebar no longer renders an inline chat list — "Chats" is a single
+// destination in the registry — so these are intentionally unused here.
 interface Props {
   chatList?: ChatListItem[];
   activeSessionId?: string | null;
@@ -409,34 +406,9 @@ export default function Sidebar({
   const { user, logout } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
-  const [buyToast, setBuyToast] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
-  const [openDropdown, setOpenDropdown] = useState<string | null>(null);
-  const [internalChats, setInternalChats] = useState<ChatListItem[]>(chatList);
   const [activeUsersCount, setActiveUsersCount] = useState<number | null>(null);
   const [pendingCount, setPendingCount] = useState<number | null>(null);
-
-  const loadInternalChats = () => {
-    if (user?.role === "student") {
-      chatApi.listChats()
-        .then((data) => setInternalChats(data as ChatListItem[]))
-        .catch(() => {});
-    }
-  };
-
-  // Sync from prop when parent (ChatPage) refreshes its list via useChat
-  useEffect(() => {
-    if (chatList.length > 0) {
-      setInternalChats(chatList);
-    }
-  }, [chatList]);
-
-  // Fetch independently on page navigation (for pages that don't pass chatList)
-  useEffect(() => {
-    loadInternalChats();
-    if (onLoadChats) onLoadChats();
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [user?.role, location.pathname]);
 
   // Admin/administrator sidebar count badges (active users + pending approvals).
   // Re-fetched on navigation so they refresh after approve/reject + add/remove.
@@ -453,42 +425,19 @@ export default function Sidebar({
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user?.role, location.pathname]);
 
-  const handleDeleteChat = async (sessionId: string) => {
-    try {
-      if (onDeleteChat) {
-        // Parent (ChatPage) handles the API call + navigation + state reset
-        onDeleteChat(sessionId);
-      } else {
-        await chatApi.deleteChat(sessionId);
-        if (activeSessionId === sessionId) navigate("/chat");
-      }
-      setInternalChats((prev) => prev.filter((c) => c.session_id !== sessionId));
-    } catch (_) {}
-  };
-
-  // Auto-close sidebar when route changes (e.g. browser back/forward)
+  // Auto-close the mobile drawer when the route changes (e.g. browser back/forward).
   useEffect(() => {
     setMobileOpen(false);
   }, [location.pathname]);
 
-  // Prevent body scroll when sidebar is open on mobile
+  // Prevent body scroll when the drawer is open on mobile.
   useEffect(() => {
-    if (mobileOpen) {
-      document.body.style.overflow = "hidden";
-    } else {
-      document.body.style.overflow = "";
-    }
+    document.body.style.overflow = mobileOpen ? "hidden" : "";
     return () => { document.body.style.overflow = ""; };
   }, [mobileOpen]);
 
   const isActive = (path: string) => location.pathname === path;
   const avatarLetter = user?.name ? user.name.charAt(0).toUpperCase() : "?";
-  const toggleDropdown = (id: string) => setOpenDropdown((prev) => (prev === id ? null : id));
-
-  const handleBuyTime = () => {
-    setBuyToast(true);
-    setTimeout(() => setBuyToast(false), 3000);
-  };
 
   const go = (path: string) => {
     navigate(path);
@@ -582,12 +531,6 @@ export default function Sidebar({
         aria-hidden="true"
       />
 
-      {buyToast && (
-        <div className="sb-toast">
-          Subscription page coming soon — ask your school admin.
-        </div>
-      )}
-
       {/* Sidebar panel */}
       <div className={`sb${mobileOpen ? " sb-open" : ""}`}>
         {children}
@@ -595,526 +538,47 @@ export default function Sidebar({
     </>
   );
 
-  /* ═══════════════════════════════════════
-     STUDENT
-  ═══════════════════════════════════════ */
-  if (user?.role === "student") {
-    return (
-      <Wrapper>
-        <BrandHeader />
+  // Runtime badge values, resolved from a NavItem's badgeKey.
+  const badges: Record<string, number | null> = {
+    activeUsers: activeUsersCount,
+    pendingApprovals: pendingCount,
+  };
+  const itemActive = (it: NavItem) =>
+    it.activePrefix ? location.pathname.startsWith(it.path) : isActive(it.path);
 
-        <nav className="sb-nav">
-          <button
-            className={`sb-nav-item${isActive("/student/dashboard") ? " active" : ""}`}
-            onClick={() => go("/student/dashboard")}
-          >
-            <LayoutDashboard size={16} /><span>Dashboard</span>
-          </button>
+  // Sidebar is now a RENDERER over the central navigation registry (lib/navigation).
+  const sections = getNavForRole(user?.role);
+  if (sections.length === 0) return null;
 
-          {/* Chats dropdown */}
-          <button
-            className={`sb-nav-item${location.pathname.startsWith("/chat") ? " active" : ""}`}
-            onClick={() => toggleDropdown("chats")}
-            style={{ justifyContent: "space-between" }}
-          >
-            <span style={{ display: "flex", alignItems: "center", gap: 10 }}>
-              <MessageCircle size={16} /><span>Chats</span>
-            </span>
-            <ChevronDown size={14} style={{ color: "var(--text-muted)", transition: "transform 0.2s", transform: openDropdown === "chats" ? "rotate(180deg)" : "none" }} />
-          </button>
-
-          {openDropdown === "chats" && (
-            <div style={{ paddingLeft: 12, display: "flex", flexDirection: "column", gap: 1 }}>
-              <button
-                className="sb-nav-item"
-                style={{ fontSize: 12, color: "#1a73e8", paddingTop: 6, paddingBottom: 6 }}
-                onClick={() => { navigate("/chat"); if (onNewChat) onNewChat(); }}
-              >
-                <span style={{ fontSize: 14 }}>＋</span><span>New Chat</span>
-              </button>
-              {(() => {
-                const regularChats = internalChats.filter((c) => !c.title.toLowerCase().startsWith("[session:"));
-                if (regularChats.length === 0) {
-                  return <div style={{ fontSize: 12, color: "#475569", padding: "6px 12px" }}>No chats yet</div>;
-                }
-                return regularChats.slice(0, 10).map((chat) => (
-                <div key={chat.session_id} style={{ display: "flex", alignItems: "center", gap: 2 }}>
-                  <button
-                    className={`sb-nav-item${activeSessionId === chat.session_id ? " active" : ""}`}
-                    style={{ fontSize: 12, paddingTop: 6, paddingBottom: 6, flex: 1, minWidth: 0 }}
-                    onClick={() => { navigate(`/chat/${chat.session_id}`); if (onSelectChat) onSelectChat(chat.session_id); }}
-                    title={chat.title || "Chat"}
-                  >
-                    <MessageSquare size={13} />
-                    <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", flex: 1 }}>
-                      {chat.title || "Untitled Chat"}
-                    </span>
-                  </button>
-                  <button
-                    onClick={(e) => { e.stopPropagation(); handleDeleteChat(chat.session_id); }}
-                    title="Delete chat"
-                    style={{
-                      background: "none", border: "none", color: "#cbd5e1",
-                      cursor: "pointer", padding: "4px 5px", borderRadius: 5, flexShrink: 0,
-                      fontSize: 13, lineHeight: 1, transition: "color 0.15s",
-                    }}
-                    onMouseEnter={(e) => (e.currentTarget.style.color = "#ef4444")}
-                    onMouseLeave={(e) => (e.currentTarget.style.color = "#cbd5e1")}
-                  >
-                    ×
-                  </button>
-                </div>
-                ));
-              })()}
-            </div>
-          )}
-
-          {/* Sessions dropdown */}
-          <button
-            className={`sb-nav-item${location.pathname.startsWith("/sessions") || location.pathname.startsWith("/session") || isActive("/lesson/setup") ? " active" : ""}`}
-            onClick={() => toggleDropdown("sessions")}
-            style={{ justifyContent: "space-between" }}
-          >
-            <span style={{ display: "flex", alignItems: "center", gap: 10 }}>
-              <BookOpen size={16} /><span>Sessions</span>
-            </span>
-            <ChevronDown size={14} style={{ color: "var(--text-muted)", transition: "transform 0.2s", transform: openDropdown === "sessions" ? "rotate(180deg)" : "none" }} />
-          </button>
-
-          {openDropdown === "sessions" && (
-            <div style={{ paddingLeft: 12, display: "flex", flexDirection: "column", gap: 1 }}>
-              <button
-                className={`sb-nav-item${isActive("/lesson/setup") ? " active" : ""}`}
-                style={{ fontSize: 12, color: "#1a73e8", paddingTop: 6, paddingBottom: 6 }}
-                onClick={() => go("/lesson/setup")}
-              >
-                <span style={{ fontSize: 14 }}>＋</span><span>Start a Lesson</span>
-              </button>
-              <button
-                className={`sb-nav-item${isActive("/sessions") ? " active" : ""}`}
-                style={{ fontSize: 12, paddingTop: 6, paddingBottom: 6 }}
-                onClick={() => go("/sessions")}
-              >
-                <Calendar size={13} /><span>My Sessions</span>
-              </button>
-            </div>
-          )}
-          <button
-            className={`sb-nav-item${isActive("/progress") ? " active" : ""}`}
-            onClick={() => go("/progress")}
-          >
-            <BarChart2 size={16} /><span>My Progress</span>
-          </button>
-          <button
-            className={`sb-nav-item${isActive("/assignments") ? " active" : ""}`}
-            onClick={() => go("/assignments")}
-          >
-            <ClipboardList size={16} /><span>Assignments</span>
-          </button>
-          <button className="sb-nav-item disabled">
-            <MessageCircle size={16} /><span>Messages</span>
-            <span className="sb-soon-badge">Soon</span>
-          </button>
-          <button
-            className={`sb-nav-item${isActive("/preferences") ? " active" : ""}`}
-            onClick={() => go("/preferences")}
-          >
-            <Sparkles size={16} /><span>Preferences</span>
-          </button>
-          <button
-            className={`sb-nav-item${isActive("/settings") ? " active" : ""}`}
-            onClick={() => go("/settings")}
-          >
-            <Settings size={16} /><span>Settings</span>
-          </button>
-        </nav>
-
-        <div className="sb-divider" />
-
-        <div className="sb-scroll">
-          <div className="sb-spacer" />
-
-          {/* Learning time widget */}
-          <div className="sb-time-widget">
-            <div className="sb-time-label">
-              <Clock size={12} />Learning Time This Week
-            </div>
-            <div className="sb-time-bar-track">
-              <div className="sb-time-bar-fill" style={{ width: "75%" }} />
-            </div>
-            <div className="sb-time-stats">
-              <span className="sb-time-used">7h 30m</span>
-              <span className="sb-time-total">/ 10h goal</span>
-            </div>
-            <button className="sb-buy-btn" onClick={handleBuyTime}>
-              Buy More Time
-            </button>
-          </div>
-        </div>
-
-        <Footer roleLabel="Student" />
-      </Wrapper>
-    );
-  }
-
-  /* ═══════════════════════════════════════
-     TEACHER
-  ═══════════════════════════════════════ */
-  if (user?.role === "teacher") {
-    return (
-      <Wrapper>
-        <BrandHeader />
-
-        <nav className="sb-nav">
-          <div className="sb-section-label">Overview</div>
-          <button
-            className={`sb-nav-item${isActive("/teacher/dashboard") ? " active" : ""}`}
-            onClick={() => go("/teacher/dashboard")}
-          >
-            <LayoutDashboard size={16} /><span>Dashboard</span>
-          </button>
-          <button
-            className={`sb-nav-item${isActive("/teacher/students") ? " active" : ""}`}
-            onClick={() => go("/teacher/students")}
-          >
-            <Users size={16} /><span>Students</span>
-          </button>
-          <button
-            className={`sb-nav-item${isActive("/teacher/activity") ? " active" : ""}`}
-            onClick={() => go("/teacher/activity")}
-          >
-            <Activity size={16} /><span>Activity</span>
-          </button>
-
-          <div className="sb-section-label">Teaching</div>
-          {/* Sessions dropdown */}
-          <button
-            className={`sb-nav-item${(location.pathname.startsWith("/appointments") || isActive("/teacher/reports")) ? " active" : ""}`}
-            onClick={() => toggleDropdown("sessions")}
-            style={{ justifyContent: "space-between" }}
-          >
-            <span style={{ display: "flex", alignItems: "center", gap: 10 }}>
-              <Calendar size={16} /><span>Sessions</span>
-            </span>
-            <ChevronDown size={14} style={{ color: "var(--text-muted)", transition: "transform 0.2s", transform: openDropdown === "sessions" ? "rotate(180deg)" : "none" }} />
-          </button>
-
-          {openDropdown === "sessions" && (
-            <div style={{ paddingLeft: 12, display: "flex", flexDirection: "column", gap: 1 }}>
-              <button
-                className={`sb-nav-item${isActive("/appointments/new") ? " active" : ""}`}
-                style={{ fontSize: 12, color: "#1a73e8", paddingTop: 6, paddingBottom: 6 }}
-                onClick={() => go("/appointments/new")}
-              >
-                <span style={{ fontSize: 14 }}>＋</span><span>New Session</span>
-              </button>
-              <button
-                className={`sb-nav-item${isActive("/appointments") ? " active" : ""}`}
-                style={{ fontSize: 12, paddingTop: 6, paddingBottom: 6 }}
-                onClick={() => go("/appointments")}
-              >
-                <Calendar size={13} /><span>All Sessions</span>
-              </button>
-              <button
-                className={`sb-nav-item${isActive("/teacher/reports") ? " active" : ""}`}
-                style={{ fontSize: 12, paddingTop: 6, paddingBottom: 6 }}
-                onClick={() => go("/teacher/reports")}
-              >
-                <FileText size={13} /><span>Session Reports</span>
-              </button>
-            </div>
-          )}
-
-          <button
-            className={`sb-nav-item${isActive("/teacher/assignments") ? " active" : ""}`}
-            onClick={() => go("/teacher/assignments")}
-          >
-            <ClipboardList size={16} /><span>Assignments</span>
-            <span className="sb-soon-badge">Soon</span>
-          </button>
-          <button
-            className={`sb-nav-item${isActive("/teacher/knowledge") ? " active" : ""}`}
-            onClick={() => go("/teacher/knowledge")}
-          >
-            <Database size={16} /><span>Knowledge Base</span>
-          </button>
-
-          <div className="sb-section-label">Tools</div>
-          <button
-            className={`sb-nav-item${isActive("/teacher/progress") ? " active" : ""}`}
-            onClick={() => go("/teacher/progress")}
-          >
-            <BarChart size={16} /><span>Class Progress</span>
-          </button>
-          <button className="sb-nav-item disabled">
-            <Bell size={16} /><span>Notifications</span>
-          </button>
-          <button
-            className={`sb-nav-item${isActive("/teacher/settings") ? " active" : ""}`}
-            onClick={() => go("/teacher/settings")}
-          >
-            <Settings size={16} /><span>Settings</span>
-          </button>
-        </nav>
-
-        <div className="sb-scroll"><div className="sb-spacer" /></div>
-
-        <Footer roleLabel="Teacher" />
-      </Wrapper>
-    );
-  }
-
-  /* ═══════════════════════════════════════
-     PARENT
-  ═══════════════════════════════════════ */
-  if (user?.role === "parent") {
-    return (
-      <Wrapper>
-        <BrandHeader />
-
-        <nav className="sb-nav">
-          <div className="sb-section-label">Overview</div>
-          <button
-            className={`sb-nav-item${isActive("/parent/dashboard") ? " active" : ""}`}
-            onClick={() => go("/parent/dashboard")}
-          >
-            <LayoutDashboard size={16} /><span>Dashboard</span>
-          </button>
-          <button
-            className={`sb-nav-item${isActive("/parent/students") ? " active" : ""}`}
-            onClick={() => go("/parent/students")}
-          >
-            <Users size={16} /><span>My Children</span>
-          </button>
-
-          <div className="sb-section-label">Learning</div>
-          {/* Sessions dropdown */}
-          <button
-            className={`sb-nav-item${(location.pathname.startsWith("/appointments") || isActive("/parent/reports")) ? " active" : ""}`}
-            onClick={() => toggleDropdown("sessions")}
-            style={{ justifyContent: "space-between" }}
-          >
-            <span style={{ display: "flex", alignItems: "center", gap: 10 }}>
-              <Calendar size={16} /><span>Sessions</span>
-            </span>
-            <ChevronDown size={14} style={{ color: "var(--text-muted)", transition: "transform 0.2s", transform: openDropdown === "sessions" ? "rotate(180deg)" : "none" }} />
-          </button>
-
-          {openDropdown === "sessions" && (
-            <div style={{ paddingLeft: 12, display: "flex", flexDirection: "column", gap: 1 }}>
-              <button
-                className={`sb-nav-item${isActive("/appointments/new") ? " active" : ""}`}
-                style={{ fontSize: 12, color: "#1a73e8", paddingTop: 6, paddingBottom: 6 }}
-                onClick={() => go("/appointments/new")}
-              >
-                <span style={{ fontSize: 14 }}>＋</span><span>New Session</span>
-              </button>
-              <button
-                className={`sb-nav-item${isActive("/appointments") ? " active" : ""}`}
-                style={{ fontSize: 12, paddingTop: 6, paddingBottom: 6 }}
-                onClick={() => go("/appointments")}
-              >
-                <Calendar size={13} /><span>All Sessions</span>
-              </button>
-              <button
-                className={`sb-nav-item${isActive("/parent/reports") ? " active" : ""}`}
-                style={{ fontSize: 12, paddingTop: 6, paddingBottom: 6 }}
-                onClick={() => go("/parent/reports")}
-              >
-                <FileText size={13} /><span>Session Reports</span>
-              </button>
-            </div>
-          )}
-          <button
-            className={`sb-nav-item${isActive("/parent/progress") ? " active" : ""}`}
-            onClick={() => go("/parent/progress")}
-          >
-            <BarChart2 size={16} /><span>Progress Tracker</span>
-          </button>
-
-          <div className="sb-section-label">Account</div>
-          <button
-            className={`sb-nav-item${isActive("/billing") ? " active" : ""}`}
-            onClick={() => go("/billing")}
-          >
-            <CreditCard size={16} /><span>Billing</span>
-          </button>
-          <button className="sb-nav-item disabled">
-            <MessageSquare size={16} /><span>Messages</span>
-          </button>
-          <button className="sb-nav-item disabled">
-            <Bell size={16} /><span>Notifications</span>
-          </button>
-          <button
-            className={`sb-nav-item${isActive("/parent/settings") ? " active" : ""}`}
-            onClick={() => go("/parent/settings")}
-          >
-            <Settings size={16} /><span>Settings</span>
-          </button>
-        </nav>
-
-        <div className="sb-scroll"><div className="sb-spacer" /></div>
-
-        <Footer roleLabel="Parent" />
-      </Wrapper>
-    );
-  }
-
-  /* ═══════════════════════════════════════
-     ADMIN  (and platform ADMINISTRATOR — same nav, unscoped)
-  ═══════════════════════════════════════ */
-  if (user?.role === "admin" || user?.role === "administrator") {
-    return (
-      <Wrapper>
-        <BrandHeader />
-
-        <nav className="sb-nav">
-          <div className="sb-section-label">Management</div>
-          <button
-            className={`sb-nav-item${isActive("/admin/dashboard") ? " active" : ""}`}
-            onClick={() => go("/admin/dashboard")}
-          >
-            <LayoutDashboard size={16} /><span>Dashboard</span>
-          </button>
-          {/* Users dropdown — Active users (+ Pending approvals for administrators) */}
-          <button
-            className={`sb-nav-item${(isActive("/admin/users") || isActive("/admin/approvals")) ? " active" : ""}`}
-            onClick={() => toggleDropdown("users")}
-            style={{ justifyContent: "space-between" }}
-          >
-            <span style={{ display: "flex", alignItems: "center", gap: 10 }}>
-              <Users size={16} /><span>Users</span>
-            </span>
-            <ChevronDown size={14} style={{ color: "var(--text-muted)", transition: "transform 0.2s", transform: openDropdown === "users" ? "rotate(180deg)" : "none" }} />
-          </button>
-          {openDropdown === "users" && (
-            <div style={{ paddingLeft: 12, display: "flex", flexDirection: "column", gap: 1 }}>
-              <button
-                className={`sb-nav-item${isActive("/admin/users") ? " active" : ""}`}
-                style={{ fontSize: 12, paddingTop: 6, paddingBottom: 6, justifyContent: "space-between" }}
-                onClick={() => go("/admin/users")}
-              >
-                <span style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                  <Users size={13} /><span>Active Users</span>
-                </span>
-                {activeUsersCount != null && (
-                  <span style={{ fontSize: 10, fontWeight: 800, minWidth: 18, textAlign: "center", padding: "1px 6px", borderRadius: 999, background: "var(--border)", color: "#475569" }}>
-                    {activeUsersCount}
-                  </span>
-                )}
-              </button>
-              {user?.role === "administrator" && (
+  return (
+    <Wrapper>
+      <BrandHeader />
+      <nav className="sb-nav">
+        {sections.map((section, si) => (
+          <div key={si}>
+            {section.label && <div className="sb-section-label">{section.label}</div>}
+            {section.items.map((it) => {
+              const Icon = it.icon;
+              const active = itemActive(it);
+              const badge = it.badgeKey ? badges[it.badgeKey] : null;
+              return (
                 <button
-                  className={`sb-nav-item${isActive("/admin/approvals") ? " active" : ""}`}
-                  style={{ fontSize: 12, paddingTop: 6, paddingBottom: 6, justifyContent: "space-between" }}
-                  onClick={() => go("/admin/approvals")}
+                  key={it.id}
+                  className={`sb-nav-item${active ? " active" : ""}`}
+                  onClick={() => go(it.path)}
+                  aria-current={active ? "page" : undefined}
                 >
-                  <span style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                    <span style={{ fontSize: 13 }}>⏳</span><span>Pending Approvals</span>
-                  </span>
-                  {pendingCount != null && pendingCount > 0 && (
-                    <span style={{ fontSize: 10, fontWeight: 800, minWidth: 18, textAlign: "center", padding: "1px 6px", borderRadius: 999, background: "#fef3c7", color: "#b45309" }}>
-                      {pendingCount}
-                    </span>
+                  <Icon size={16} /><span>{it.label}</span>
+                  {badge != null && badge > 0 && (
+                    <span style={{ marginLeft: "auto", background: "var(--accent)", color: "#fff", fontSize: 10, fontWeight: 700, borderRadius: 999, padding: "1px 7px", lineHeight: 1.6 }}>{badge}</span>
                   )}
                 </button>
-              )}
-            </div>
-          )}
-          {user?.role === "administrator" && (
-            <button
-              className={`sb-nav-item${isActive("/admin/school-verification") ? " active" : ""}`}
-              onClick={() => go("/admin/school-verification")}
-            >
-              <ShieldCheck size={16} /><span>School Verification</span>
-            </button>
-          )}
-          {user?.role === "admin" && (
-            <button
-              className={`sb-nav-item${isActive("/school/verification") ? " active" : ""}`}
-              onClick={() => go("/school/verification")}
-            >
-              <ShieldCheck size={16} /><span>Verification</span>
-            </button>
-          )}
-          <button
-            className={`sb-nav-item${isActive("/admin/assessments") ? " active" : ""}`}
-            onClick={() => go("/admin/assessments")}
-          >
-            <ClipboardList size={16} /><span>Assessments</span>
-          </button>
-
-          <div className="sb-section-label">Platform</div>
-          <button
-            className={`sb-nav-item${isActive("/appointments") ? " active" : ""}`}
-            onClick={() => go("/appointments")}
-          >
-            <Calendar size={16} /><span>All Sessions</span>
-          </button>
-          <button
-            className={`sb-nav-item${isActive("/admin/knowledge") ? " active" : ""}`}
-            onClick={() => go("/admin/knowledge")}
-          >
-            <Database size={16} /><span>Knowledge Base</span>
-          </button>
-          <button
-            className={`sb-nav-item${isActive("/admin/reports") ? " active" : ""}`}
-            onClick={() => go("/admin/reports")}
-          >
-            <FileText size={16} /><span>Reports</span>
-            <span className="sb-soon-badge">Soon</span>
-          </button>
-          <button
-            className={`sb-nav-item${isActive("/admin/chats") ? " active" : ""}`}
-            onClick={() => go("/admin/chats")}
-          >
-            <MessageSquare size={16} /><span>All Chats</span>
-          </button>
-
-          <div className="sb-section-label">Analytics</div>
-          <button
-            className={`sb-nav-item${isActive("/admin/activity") ? " active" : ""}`}
-            onClick={() => go("/admin/activity")}
-          >
-            <Activity size={16} /><span>Activity Log</span>
-          </button>
-          <button
-            className={`sb-nav-item${isActive("/admin/analytics") ? " active" : ""}`}
-            onClick={() => go("/admin/analytics")}
-          >
-            <BarChart size={16} /><span>Analytics</span>
-            <span className="sb-soon-badge">Soon</span>
-          </button>
-
-          <div className="sb-section-label">System</div>
-          <button
-            className={`sb-nav-item${isActive("/admin/security") ? " active" : ""}`}
-            onClick={() => go("/admin/security")}
-          >
-            <ShieldCheck size={16} /><span>Security</span>
-            <span className="sb-soon-badge">Soon</span>
-          </button>
-          <button
-            className={`sb-nav-item${isActive("/school/billing") ? " active" : ""}`}
-            onClick={() => go("/school/billing")}
-          >
-            <CreditCard size={16} /><span>Billing</span>
-          </button>
-          <button
-            className={`sb-nav-item${isActive("/admin/settings") ? " active" : ""}`}
-            onClick={() => go("/admin/settings")}
-          >
-            <Settings size={16} /><span>Settings</span>
-          </button>
-        </nav>
-
-        <div className="sb-scroll"><div className="sb-spacer" /></div>
-
-        <Footer roleLabel="Admin" />
-      </Wrapper>
-    );
-  }
-
-  /* Fallback */
-  return null;
+              );
+            })}
+          </div>
+        ))}
+      </nav>
+      <Footer roleLabel={roleLabel(user?.role)} />
+    </Wrapper>
+  );
 }
