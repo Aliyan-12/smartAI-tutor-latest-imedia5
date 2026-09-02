@@ -3,6 +3,19 @@ import { Brain, ChevronDown, RefreshCw, Target } from "lucide-react";
 import { gamificationApi, type MasteryEngine, type MasteryBreakdown } from "../services/api";
 import { Card, CardBody, Badge, Button, Spinner } from "./ui";
 
+/** A pluggable data source so the same panel serves the student's own view and a
+ * parent/teacher's authorised view of a linked child. */
+export interface MasterySource {
+  overview: () => Promise<MasteryEngine>;
+  topic: (subject: string, topic: string) => Promise<MasteryBreakdown>;
+  backfill?: () => Promise<{ evidence_created: number }>;
+}
+const defaultSource: MasterySource = {
+  overview: () => gamificationApi.masteryEngine(),
+  topic: (s, t) => gamificationApi.masteryTopic(s, t),
+  backfill: () => gamificationApi.masteryBackfill(),
+};
+
 const STATE_META: Record<string, { label: string; tone: "neutral" | "brand" | "success" | "warning" | "danger" }> = {
   not_started: { label: "Not started", tone: "neutral" },
   emerging: { label: "Emerging", tone: "warning" },
@@ -20,14 +33,14 @@ function Bar({ value, tone }: { value: number; tone: string }) {
   );
 }
 
-function TopicRow({ subject, topic, state, performance, confidence, evidence_count }:
-  { subject: string; topic: string; state: string; performance: number; confidence: number; evidence_count: number }) {
+function TopicRow({ subject, topic, state, performance, confidence, source }:
+  { subject: string; topic: string; state: string; performance: number; confidence: number; source: MasterySource }) {
   const [open, setOpen] = useState(false);
   const [bd, setBd] = useState<MasteryBreakdown | null>(null);
   const meta = STATE_META[state] ?? STATE_META.not_started;
   const toggle = async () => {
     const next = !open; setOpen(next);
-    if (next && !bd) setBd(await gamificationApi.masteryTopic(subject, topic).catch(() => null));
+    if (next && !bd) setBd(await source.topic(subject, topic).catch(() => null));
   };
   return (
     <div className="border-b border-line last:border-0">
@@ -64,15 +77,17 @@ function TopicRow({ subject, topic, state, performance, confidence, evidence_cou
   );
 }
 
-export default function MasteryPanel() {
+export default function MasteryPanel({ source = defaultSource, title = "Mastery" }:
+  { source?: MasterySource; title?: string } = {}) {
   const [data, setData] = useState<MasteryEngine | null>(null);
   const [busy, setBusy] = useState(false);
-  const load = useCallback(() => gamificationApi.masteryEngine().then(setData).catch(() => setData(null)), []);
+  const load = useCallback(() => source.overview().then(setData).catch(() => setData(null)), [source]);
   useEffect(() => { load(); }, [load]);
 
   const backfill = async () => {
+    if (!source.backfill) return;
     setBusy(true);
-    try { await gamificationApi.masteryBackfill(); await load(); } finally { setBusy(false); }
+    try { await source.backfill(); await load(); } finally { setBusy(false); }
   };
 
   if (!data) return null;
@@ -87,11 +102,11 @@ export default function MasteryPanel() {
           <div className="flex items-center gap-2">
             <div className="w-9 h-9 rounded-lg bg-brand-light text-brand flex items-center justify-center"><Brain size={18} /></div>
             <div>
-              <h2 className="t-card-title">Mastery</h2>
+              <h2 className="t-card-title">{title}</h2>
               <div className="t-helper">Evidence-based · engine v{data.algorithm_version}</div>
             </div>
           </div>
-          {active.length === 0 && (
+          {active.length === 0 && source.backfill && (
             <Button size="sm" variant="secondary" loading={busy} leftIcon={<RefreshCw size={14} />} onClick={backfill}>Build from history</Button>
           )}
         </div>
@@ -122,7 +137,7 @@ export default function MasteryPanel() {
             )}
 
             <div className="max-h-[420px] overflow-y-auto pr-1">
-              {active.map((t) => <TopicRow key={t.subject + t.topic} {...t} />)}
+              {active.map((t) => <TopicRow key={t.subject + t.topic} {...t} source={source} />)}
             </div>
           </>
         )}
