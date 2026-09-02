@@ -118,11 +118,14 @@ async def booking_defaults(user: User = Depends(require_teacher), db: AsyncSessi
 
 
 @router.get("/policy")
-async def school_policy(user: User = Depends(require_teacher)):
-    """School-owned permissions, shown read-only. Made configurable by the admin in
-    feature 08; teachers can never change these themselves."""
+async def school_policy(user: User = Depends(require_teacher), db: AsyncSession = Depends(get_db)):
+    """School-owned permissions, shown read-only. Configured by the admin (feature 08);
+    teachers can never change these themselves."""
+    from app.services import platform_settings_service
+    can_manage = await platform_settings_service.value(db, "teachers_can_manage_assignments", user.school_id)
+    await db.commit()
     return {
-        "can_manage_assignments": True,
+        "can_manage_assignments": bool(can_manage),
         "report_visibility_locked": False,
         "billing_managed_by": "school" if user.school_id else "self",
     }
