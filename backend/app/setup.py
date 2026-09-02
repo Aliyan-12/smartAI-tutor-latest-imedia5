@@ -233,6 +233,12 @@ async def run_setup(fresh: bool = False, seed: bool = True):
             DROP TABLE notifications CASCADE;
           END IF;
         END $$;""",
+        # Indexes for the new high-volume queries (feature 15). IF NOT EXISTS keeps it idempotent.
+        "CREATE INDEX IF NOT EXISTS ix_mastery_evidence_student_subject_topic ON mastery_evidence(student_id, subject, topic)",
+        "CREATE INDEX IF NOT EXISTS ix_billing_ledger_wallet_created ON billing_ledger(wallet_id, created_at DESC)",
+        "CREATE INDEX IF NOT EXISTS ix_notifications_user_read ON notifications(user_id, read)",
+        "CREATE INDEX IF NOT EXISTS ix_access_audit_subject ON access_audit(subject_user_id, created_at DESC)",
+        "CREATE INDEX IF NOT EXISTS ix_topic_mastery_student_state ON topic_mastery(student_id, state)",
         "ALTER TABLE chats ADD COLUMN IF NOT EXISTS appointment_id INTEGER REFERENCES appointments(id)",
         "ALTER TABLE appointments ADD COLUMN IF NOT EXISTS paused_at TIMESTAMP WITH TIME ZONE",
         "ALTER TABLE appointments ADD COLUMN IF NOT EXISTS total_paused_seconds INTEGER DEFAULT 0",
