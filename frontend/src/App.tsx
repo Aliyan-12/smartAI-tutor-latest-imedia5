@@ -29,6 +29,7 @@ import LegalPage from "./pages/LegalPage";
 import PrivacyPage from "./pages/PrivacyPage";
 import SchoolVerificationPage from "./pages/SchoolVerificationPage";
 import AdminSchoolReviewPage from "./pages/AdminSchoolReviewPage";
+import AdminSettingsPage from "./pages/AdminSettingsPage";
 import { CookieConsent } from "./components/CookieConsent";
 import type { ReactNode } from "react";
 
@@ -243,6 +244,7 @@ export default function App() {
           <Route path="/privacy" element={<ProtectedRoute><PrivacyPage /></ProtectedRoute>} />
           <Route path="/school/verification" element={<ProtectedRoute allowedRoles={["admin"]}><SchoolVerificationPage /></ProtectedRoute>} />
           <Route path="/admin/school-verification" element={<ProtectedRoute allowedRoles={["administrator"]}><AdminSchoolReviewPage /></ProtectedRoute>} />
+          <Route path="/admin/settings" element={<ProtectedRoute allowedRoles={["admin", "administrator"]}><AdminSettingsPage /></ProtectedRoute>} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
         <CookieConsent />
