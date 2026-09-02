@@ -60,6 +60,15 @@ class Settings(BaseSettings):
 
     backend_cors_origins: str = "http://localhost:5173,http://localhost:3000"
 
+    # Billing / payments (feature 09/10). When stripe_secret_key is empty the backend
+    # uses a built-in MOCK provider so billing works end-to-end in dev without real keys.
+    stripe_secret_key: str = ""
+    stripe_publishable_key: str = ""
+    stripe_webhook_secret: str = ""
+    stripe_mode: str = "test"            # test | live
+    # Optional Stripe Price IDs per plan slug, JSON: {"individual_monthly":"price_...","school_monthly":"price_..."}
+    stripe_price_ids: str = ""
+
     embedding_model: str = "gemini-embedding-001"
     rag_chunk_size: int = 500
     rag_chunk_overlap: int = 50
