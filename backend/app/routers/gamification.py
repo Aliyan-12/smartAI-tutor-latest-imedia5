@@ -76,22 +76,12 @@ async def mastery_engine(
     db: AsyncSession = Depends(get_db),
 ):
     """Evidence-based mastery: per-topic state + confidence + provenance, plus recommended
-    next topics. Explainable (`based on N activities`) and versioned."""
+    next topics. Explainable (`based on N activities`) and versioned. Auto-seeds evidence
+    from history on first view so it is dynamic without a manual step."""
     from app.services import mastery_service
-    from app.services.mastery_algorithm import MASTERY_ALGORITHM_VERSION
-    topics = await mastery_service.mastery_overview(db, current_user.id)
-    recs = await mastery_service.recommend_next(db, current_user.id)
+    payload = await mastery_service.engine_payload(db, current_user.id)
     await db.commit()
-    return {
-        "algorithm_version": MASTERY_ALGORITHM_VERSION,
-        "topics": [{
-            "subject": t.subject, "key_stage": t.key_stage, "topic": t.topic,
-            "state": t.state, "performance": float(t.performance or 0),
-            "confidence": float(t.confidence or 0), "evidence_count": t.evidence_count,
-            "last_computed_at": t.last_computed_at,
-        } for t in topics],
-        "recommendations": recs,
-    }
+    return payload
 
 
 @router.get("/mastery-engine/topic")
