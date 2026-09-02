@@ -162,6 +162,23 @@ async def recommend_next(db: AsyncSession, student_id: int, limit: int = 5) -> L
     return [s for s in scored if s["state"] in ("needs_review", "emerging", "developing")][:limit]
 
 
+async def engine_payload(db: AsyncSession, student_id: int) -> Dict[str, Any]:
+    """The mastery-engine overview payload for a student — reused by the student's own view
+    and by authorised parent/teacher views."""
+    topics = await mastery_overview(db, student_id)
+    recs = await recommend_next(db, student_id)
+    return {
+        "algorithm_version": algo.MASTERY_ALGORITHM_VERSION,
+        "topics": [{
+            "subject": t.subject, "key_stage": t.key_stage, "topic": t.topic,
+            "state": t.state, "performance": float(t.performance or 0),
+            "confidence": float(t.confidence or 0), "evidence_count": t.evidence_count,
+            "last_computed_at": t.last_computed_at,
+        } for t in topics],
+        "recommendations": recs,
+    }
+
+
 async def backfill_student(db: AsyncSession, student: User) -> int:
     """Seed evidence from a student's legacy TopicMastery.score_history, then recompute.
     Idempotent — re-running won't duplicate (unique source id per history entry)."""
