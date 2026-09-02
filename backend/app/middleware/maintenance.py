@@ -14,7 +14,8 @@ from app.services import platform_settings_service as svc
 logger = logging.getLogger(__name__)
 
 # Always reachable so an admin can log in and turn maintenance back off.
-_ALLOW_PREFIXES = ("/api/auth", "/api/admin", "/api/health", "/health", "/docs", "/openapi", "/api/legal")
+_ALLOW_PREFIXES = ("/api/auth", "/api/admin", "/api/health", "/health", "/docs", "/openapi",
+                   "/api/legal", "/api/billing/webhook")
 _CACHE = {"on": False, "ts": 0.0}
 _TTL = 15.0
 
