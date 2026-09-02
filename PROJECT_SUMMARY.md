@@ -129,3 +129,33 @@ docker compose exec backend python -m app.seed    # default school + users + pol
 
 Local dev and env variables: see **`README.md`** and **`.env.example`**. Default test logins are in
 `README.md` / `CLAUDE.md`.
+
+---
+
+## Production feature set
+
+Built on top of the lesson/RAG/voice/puzzle core, in dependency order (one branch per area):
+
+| Area | What it adds |
+|------|--------------|
+| Design system + icons | Tailwind (preflight-off, token-bound), primitive component library, Lucide icons, typography + THIRD_PARTY_NOTICES |
+| Legal / privacy | Versioned legal documents, auditable consent, GDPR data-request workflow, cookie consent, compliance docs |
+| School verification | Approval state machine + audit trail, evidence upload, duplicate checks, verified-school gating |
+| Student preferences | Persisted preferences that drive the live tutor prompt; app-wide accessibility (text size, theme, reduced motion, contrast) |
+| Parent / teacher settings | Parent children + secure invite-code linking + billing; teacher classroom defaults consumed by booking |
+| Admin platform settings | Scoped, validated, audited config store; settings change real behaviour (maintenance, credits, policy) |
+| Billing (09/10) | Provider abstraction (Stripe + dev mock), immutable ledger, idempotent webhooks, parent subscriptions, school wallet/top-ups/invoices |
+| Mastery engine | Deterministic, versioned; performance vs confidence; evidence reliability hierarchy; recency decay; auto-backfill from history |
+| Reporting | Parent child-progress + teacher class-progress (heatmap, distribution), tenant/authorisation-scoped |
+| Notifications + audit | Central preference-aware, deduplicated notifications + in-app centre; sensitive-access audit |
+| Security + observability | Request IDs, structured logs, safe errors, readiness/health, metrics + reconciliation, sensitive-endpoint rate limits |
+| Navigation / IA | Central typed navigation registry; sidebar is a renderer; role-correct, no stale Soon/disabled |
+
+### Key invariants
+
+- **Backend is authoritative** for permissions, tenancy, child relationships, billing state, mastery
+  calculations and reporting aggregates. The frontend is never the security boundary.
+- **No double-crediting**: webhook event ids + ledger idempotency keys; the ledger is append-only.
+- **Mastery ≠ a single percentage**: separate performance / confidence / evidence, with explanations.
+- **Personalisation is bounded**: student preferences change teaching presentation, never curriculum
+  entitlement, safeguarding, assessment integrity, billing ownership or permissions.

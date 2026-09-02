@@ -196,3 +196,22 @@ contradict what's on screen. Subject + Key-Stage gates are HARD (a Maths lesson 
 | Biology | KS4 | Genetics and inheritance | `punnett_square` |
 
 Legend for your own notes: ✅ works · ⚠️ issue · ❌ broken · ⬜ not tested yet
+
+---
+
+## Platform services & APIs (production features)
+
+These are backend services/routers added by the production feature branches (not AI agent tools, but
+part of the product surface):
+
+- **Billing** — `services/billing/` (provider abstraction + immutable ledger + idempotent webhooks);
+  routers `billing`, `school_billing`. Card data never reaches the backend; dev uses a mock provider.
+- **Mastery engine** — `services/mastery_algorithm.py` (pure, deterministic, versioned) +
+  `services/mastery_service.py` (evidence store, recompute, breakdown, recommendations, auto-backfill).
+- **Settings** — `services/platform_settings_service.py` + `settings_registry.py` (scoped, validated,
+  audited); `parent_settings_service.py`, `teacher_settings_service.py`.
+- **Notifications** — `services/notification_service.py` (preference-aware, deduplicated) + in-app centre.
+- **Observability** — `observability/metrics.py`, `middleware/observability.py` (request IDs + structured
+  logs), `middleware/sensitive_rate_limit.py`, `routers/observability.py` (metrics + reconciliation).
+- **Navigation registry** — `frontend/src/lib/navigation.tsx` is the single source of truth for
+  role-specific sidebar navigation; the sidebar renders from it.
