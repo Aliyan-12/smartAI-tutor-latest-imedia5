@@ -1095,6 +1095,12 @@ export default function Sidebar({
             <span className="sb-soon-badge">Soon</span>
           </button>
           <button
+            className={`sb-nav-item${isActive("/school/billing") ? " active" : ""}`}
+            onClick={() => go("/school/billing")}
+          >
+            <CreditCard size={16} /><span>Billing</span>
+          </button>
+          <button
             className={`sb-nav-item${isActive("/admin/settings") ? " active" : ""}`}
             onClick={() => go("/admin/settings")}
           >

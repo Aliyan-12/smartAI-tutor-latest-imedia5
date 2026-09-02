@@ -863,6 +863,43 @@ export const billingApi = {
   },
 };
 
+export interface TopupRequest {
+  id: number; package_slug: string; credits: number; amount: number; status: string;
+  note: string; requested_by_id: number | null; created_at: string; decided_at: string | null;
+}
+export interface SchoolBillingSettings {
+  payment_model: string; currency: string; tax_rate_percent: number; invoice_prefix: string;
+  billing_contact_email: string | null; billing_address: string | null; school_name: string | null;
+}
+
+export const schoolBillingApi = {
+  async requests() { return handleResponse<{ requests: TopupRequest[] }>(await fetch(`${API_BASE}/billing/school/requests`, { headers: authHeaders() })); },
+  async createRequest(package_slug: string, note: string) {
+    return handleResponse<{ id: number; status: string }>(await fetch(`${API_BASE}/billing/school/requests`, { method: "POST", headers: authHeaders(), body: JSON.stringify({ package_slug, note }) }));
+  },
+  async approve(id: number) { return handleResponse(await fetch(`${API_BASE}/billing/school/requests/${id}/approve`, { method: "POST", headers: authHeaders() })); },
+  async decline(id: number) { return handleResponse(await fetch(`${API_BASE}/billing/school/requests/${id}/decline`, { method: "POST", headers: authHeaders() })); },
+  async manualCredit(amount: number, reason: string) {
+    return handleResponse<{ balance: number }>(await fetch(`${API_BASE}/billing/school/manual-credit`, { method: "POST", headers: authHeaders(), body: JSON.stringify({ amount, reason }) }));
+  },
+  async refund(amount: number, reason: string, reference = "") {
+    return handleResponse<{ balance: number }>(await fetch(`${API_BASE}/billing/school/refund`, { method: "POST", headers: authHeaders(), body: JSON.stringify({ amount, reason, reference }) }));
+  },
+  async settings() { return handleResponse<SchoolBillingSettings>(await fetch(`${API_BASE}/billing/school/settings`, { headers: authHeaders() })); },
+  async updateSettings(data: { billing_contact_email?: string; billing_address?: string }) {
+    return handleResponse(await fetch(`${API_BASE}/billing/school/settings`, { method: "PUT", headers: authHeaders(), body: JSON.stringify(data) }));
+  },
+  async downloadLedgerCsv() {
+    const res = await fetch(`${API_BASE}/billing/school/ledger.csv`, { headers: authHeaders() });
+    if (!res.ok) throw new Error("Export failed");
+    const blob = await res.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url; a.download = "school_wallet_ledger.csv"; a.click();
+    URL.revokeObjectURL(url);
+  },
+};
+
 export const lessonsApi = {
   async getAvailableFilters() {
     const res = await fetch(`${API_BASE}/lessons/available-filters`, { headers: authHeaders() });
