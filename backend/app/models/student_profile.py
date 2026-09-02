@@ -1,7 +1,7 @@
 from datetime import datetime, date, timezone
 from typing import Optional, List
 from sqlalchemy import (
-    Integer, String, Text, DateTime, Date, ForeignKey, UniqueConstraint, Index, Boolean
+    Integer, String, Text, DateTime, Date, ForeignKey, UniqueConstraint, Index, Boolean, Float
 )
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -73,6 +73,14 @@ class TopicMastery(Base):
     last_practiced_at: Mapped[Optional[datetime]] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
+    # Evidence-based mastery engine (feature 11). mastery_level is kept for back-compat;
+    # `state`/`performance`/`confidence` are the engine's authoritative, explainable output.
+    state: Mapped[str] = mapped_column(String(20), default="not_started", nullable=False)
+    performance: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
+    confidence: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
+    evidence_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    algorithm_version: Mapped[Optional[str]] = mapped_column(String(10), nullable=True)
+    last_computed_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
 
     student = relationship("User", foreign_keys=[student_id])
 
