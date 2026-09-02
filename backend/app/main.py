@@ -9,12 +9,13 @@ from starlette.middleware.sessions import SessionMiddleware
 
 from app.core.config import settings
 from app.middleware.rate_limit import RateLimitMiddleware
+from app.middleware.maintenance import MaintenanceMiddleware
 from app.routers import auth, chat, health, admin, teacher, subscription, documents
 from app.routers import parent, appointments, assessments, gamification, lessons, assignments
 from app.routers import settings as settings_router
 from app.routers import sessions, curriculum, school, puzzles
 from app.routers import legal, school_verification
-from app.routers import parent_settings, teacher_settings
+from app.routers import parent_settings, teacher_settings, admin_settings
 
 logging.basicConfig(
     level=logging.INFO,
@@ -90,6 +91,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 app.add_middleware(RateLimitMiddleware)
+app.add_middleware(MaintenanceMiddleware)
 # Required by Authlib's OAuth handshake to stash state/nonce between redirect
 # and callback. Falls back to the JWT secret when SESSION_SECRET isn't set.
 app.add_middleware(
@@ -133,3 +135,4 @@ app.include_router(legal.router)
 app.include_router(school_verification.router)
 app.include_router(parent_settings.router)
 app.include_router(teacher_settings.router)
+app.include_router(admin_settings.router)
