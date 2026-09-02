@@ -208,6 +208,22 @@ async def run_setup(fresh: bool = False, seed: bool = True):
             DROP TABLE platform_settings CASCADE;
           END IF;
         END $$;""",
+        # Mastery engine (feature 11): TopicMastery gains engine outputs; an earlier
+        # mastery_evidence schema is dropped so create_all rebuilds the current one.
+        "ALTER TABLE topic_mastery ADD COLUMN IF NOT EXISTS state VARCHAR(20) NOT NULL DEFAULT 'not_started'",
+        "ALTER TABLE topic_mastery ADD COLUMN IF NOT EXISTS performance DOUBLE PRECISION NOT NULL DEFAULT 0",
+        "ALTER TABLE topic_mastery ADD COLUMN IF NOT EXISTS confidence DOUBLE PRECISION NOT NULL DEFAULT 0",
+        "ALTER TABLE topic_mastery ADD COLUMN IF NOT EXISTS evidence_count INTEGER NOT NULL DEFAULT 0",
+        "ALTER TABLE topic_mastery ADD COLUMN IF NOT EXISTS algorithm_version VARCHAR(10)",
+        "ALTER TABLE topic_mastery ADD COLUMN IF NOT EXISTS last_computed_at TIMESTAMP WITH TIME ZONE",
+        """DO $$
+        BEGIN
+          IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name='mastery_evidence')
+             AND NOT EXISTS (SELECT 1 FROM information_schema.columns
+                             WHERE table_name='mastery_evidence' AND column_name='score') THEN
+            DROP TABLE mastery_evidence CASCADE;
+          END IF;
+        END $$;""",
         "ALTER TABLE chats ADD COLUMN IF NOT EXISTS appointment_id INTEGER REFERENCES appointments(id)",
         "ALTER TABLE appointments ADD COLUMN IF NOT EXISTS paused_at TIMESTAMP WITH TIME ZONE",
         "ALTER TABLE appointments ADD COLUMN IF NOT EXISTS total_paused_seconds INTEGER DEFAULT 0",

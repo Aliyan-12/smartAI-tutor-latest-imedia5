@@ -70,6 +70,56 @@ async def get_mastery(
     return [TopicMasteryResponse.model_validate(m) for m in mastery_list]
 
 
+@router.get("/mastery-engine")
+async def mastery_engine(
+    current_user: User = Depends(require_student),
+    db: AsyncSession = Depends(get_db),
+):
+    """Evidence-based mastery: per-topic state + confidence + provenance, plus recommended
+    next topics. Explainable (`based on N activities`) and versioned."""
+    from app.services import mastery_service
+    from app.services.mastery_algorithm import MASTERY_ALGORITHM_VERSION
+    topics = await mastery_service.mastery_overview(db, current_user.id)
+    recs = await mastery_service.recommend_next(db, current_user.id)
+    await db.commit()
+    return {
+        "algorithm_version": MASTERY_ALGORITHM_VERSION,
+        "topics": [{
+            "subject": t.subject, "key_stage": t.key_stage, "topic": t.topic,
+            "state": t.state, "performance": float(t.performance or 0),
+            "confidence": float(t.confidence or 0), "evidence_count": t.evidence_count,
+            "last_computed_at": t.last_computed_at,
+        } for t in topics],
+        "recommendations": recs,
+    }
+
+
+@router.get("/mastery-engine/topic")
+async def mastery_topic_breakdown(
+    subject: str,
+    topic: str,
+    current_user: User = Depends(require_student),
+    db: AsyncSession = Depends(get_db),
+):
+    """'Why this score?' — the evidence and weighting behind a topic's mastery."""
+    from app.services import mastery_service
+    result = await mastery_service.topic_breakdown(db, current_user.id, subject, topic)
+    await db.commit()
+    return result
+
+
+@router.post("/mastery-engine/backfill")
+async def mastery_backfill(
+    current_user: User = Depends(require_student),
+    db: AsyncSession = Depends(get_db),
+):
+    """Seed the evidence store from the student's legacy score history (idempotent)."""
+    from app.services import mastery_service
+    created = await mastery_service.backfill_student(db, current_user)
+    await db.commit()
+    return {"evidence_created": created}
+
+
 @router.get("/mastery/{student_id}", response_model=list[TopicMasteryResponse])
 async def get_mastery_for_student(
     student_id: int,
