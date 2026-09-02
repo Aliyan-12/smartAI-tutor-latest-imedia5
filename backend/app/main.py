@@ -15,7 +15,7 @@ from app.routers import parent, appointments, assessments, gamification, lessons
 from app.routers import settings as settings_router
 from app.routers import sessions, curriculum, school, puzzles
 from app.routers import legal, school_verification
-from app.routers import parent_settings, teacher_settings, admin_settings
+from app.routers import parent_settings, teacher_settings, admin_settings, billing
 
 logging.basicConfig(
     level=logging.INFO,
@@ -136,3 +136,4 @@ app.include_router(school_verification.router)
 app.include_router(parent_settings.router)
 app.include_router(teacher_settings.router)
 app.include_router(admin_settings.router)
+app.include_router(billing.router)
