@@ -32,6 +32,7 @@ import AdminSchoolReviewPage from "./pages/AdminSchoolReviewPage";
 import AdminSettingsPage from "./pages/AdminSettingsPage";
 import BillingPage from "./pages/BillingPage";
 import SchoolBillingPage from "./pages/SchoolBillingPage";
+import ParentProgressPage from "./pages/ParentProgressPage";
 import { CookieConsent } from "./components/CookieConsent";
 import type { ReactNode } from "react";
 
@@ -126,6 +127,7 @@ export default function App() {
           <Route path="/parent/students" element={<ProtectedRoute allowedRoles={["parent"]}><ParentDashboard /></ProtectedRoute>} />
           <Route path="/parent/appointments" element={<ProtectedRoute allowedRoles={["parent"]}><ParentDashboard /></ProtectedRoute>} />
           <Route path="/parent/reports" element={<ProtectedRoute allowedRoles={["parent"]}><ParentReportsPage /></ProtectedRoute>} />
+          <Route path="/parent/progress" element={<ProtectedRoute allowedRoles={["parent"]}><ParentProgressPage /></ProtectedRoute>} />
           <Route path="/parent/settings" element={<ProtectedRoute allowedRoles={["parent"]}><ParentSettingsPage /></ProtectedRoute>} />
           <Route path="/billing" element={<ProtectedRoute allowedRoles={["parent"]}><BillingPage /></ProtectedRoute>} />
           <Route path="/appointments" element={<ProtectedRoute allowedRoles={["admin", "teacher", "parent"]}><AppointmentsPage /></ProtectedRoute>} />

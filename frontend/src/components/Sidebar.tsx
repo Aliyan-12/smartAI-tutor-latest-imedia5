@@ -929,7 +929,6 @@ export default function Sidebar({
             onClick={() => go("/parent/progress")}
           >
             <BarChart2 size={16} /><span>Progress Tracker</span>
-            <span className="sb-soon-badge">Soon</span>
           </button>
 
           <div className="sb-section-label">Account</div>
