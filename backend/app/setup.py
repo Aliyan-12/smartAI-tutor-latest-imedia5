@@ -222,6 +222,15 @@ async def run_setup(fresh: bool = False, seed: bool = True):
             DROP TABLE mastery_evidence CASCADE;
           END IF;
         END $$;""",
+        # Notifications (feature 14): drop an incompatible legacy table so create_all rebuilds it.
+        """DO $$
+        BEGIN
+          IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name='notifications')
+             AND NOT EXISTS (SELECT 1 FROM information_schema.columns
+                             WHERE table_name='notifications' AND column_name='category') THEN
+            DROP TABLE notifications CASCADE;
+          END IF;
+        END $$;""",
         "ALTER TABLE chats ADD COLUMN IF NOT EXISTS appointment_id INTEGER REFERENCES appointments(id)",
         "ALTER TABLE appointments ADD COLUMN IF NOT EXISTS paused_at TIMESTAMP WITH TIME ZONE",
         "ALTER TABLE appointments ADD COLUMN IF NOT EXISTS total_paused_seconds INTEGER DEFAULT 0",
