@@ -181,18 +181,49 @@ def _ts(val) -> Optional[datetime]:
 
 
 async def handle_event(db: AsyncSession, event: Dict[str, Any], provider_name: str = "stripe") -> Dict[str, Any]:
+    from app.observability import metrics
+    metrics.incr("billing.webhook.received")
     event_id = event.get("id") or f"evt_{datetime.now(timezone.utc).timestamp()}"
     event_type = event.get("type", "")
     if not await _record_event(db, provider_name, event_id, event_type):
+        metrics.incr("billing.webhook.duplicate")
         return {"status": "duplicate", "event_id": event_id}
 
     obj = (event.get("data") or {}).get("object") or {}
     handler = _HANDLERS.get(event_type)
     if handler is None:
         logger.info("BILLING unhandled event type=%s", event_type)
+        metrics.incr("billing.webhook.ignored")
         return {"status": "ignored", "type": event_type}
-    await handler(db, obj)
+    try:
+        await handler(db, obj)
+    except Exception:
+        metrics.incr("billing.webhook.error")
+        raise
+    metrics.incr("billing.webhook.processed")
     return {"status": "processed", "type": event_type}
+
+
+async def _notify_billing(db: AsyncSession, cust, *, category: str, type: str, title: str,
+                          body: str, dedup_key: str) -> None:
+    """Notify the billing owner of a billing event. Best-effort; never breaks webhook processing.
+    Titles/bodies carry no sensitive child data."""
+    try:
+        from app.services import notification_service
+        from app.models.user import User as _User
+        from app.models.school import School as _School
+        target_id = None
+        if cust.owner_type == "user":
+            target_id = cust.owner_id
+        else:
+            school = await db.get(_School, cust.owner_id)
+            target_id = getattr(school, "superadmin_user_id", None)
+        if target_id:
+            await notification_service.notify(
+                db, user_id=target_id, category=category, type=type, title=title, body=body,
+                dedup_key=dedup_key, link="/billing")
+    except Exception:
+        logger.exception("billing notification failed (non-fatal)")
 
 
 async def _on_subscription_upsert(db: AsyncSession, obj: Dict[str, Any]):
@@ -258,6 +289,9 @@ async def _on_invoice_paid(db: AsyncSession, obj: Dict[str, Any]):
         await credit_wallet(db, wallet, credits, entry_type="subscription", source="invoice",
                             reference=invoice_id, idempotency_key=f"invoice:{invoice_id}",
                             reason=f"Subscription allocation for invoice {inv.number or invoice_id}")
+    await _notify_billing(db, cust, category="billing", type="payment_succeeded",
+                          title="Payment received", body="Your subscription payment was successful.",
+                          dedup_key=f"paid:{invoice_id}")
 
 
 async def _on_invoice_failed(db: AsyncSession, obj: Dict[str, Any]):
@@ -272,6 +306,9 @@ async def _on_invoice_failed(db: AsyncSession, obj: Dict[str, Any]):
         if sub:
             sub.status = "past_due"
             await db.flush()
+    await _notify_billing(db, cust, category="billing", type="payment_failed",
+                          title="Payment issue", body="A payment failed. Please update your payment method to keep your subscription active.",
+                          dedup_key=f"failed:{obj.get('id')}")
 
 
 async def _on_checkout_completed(db: AsyncSession, obj: Dict[str, Any]):

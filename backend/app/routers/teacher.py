@@ -223,9 +223,10 @@ async def student_mastery(
     db: AsyncSession = Depends(get_db),
 ):
     """Evidence-based mastery for a student the teacher is authorised to view."""
-    from app.services import teacher_progress_service, mastery_service
+    from app.services import teacher_progress_service, mastery_service, notification_service
     await teacher_progress_service.assert_can_view(db, teacher, student_id)
     payload = await mastery_service.engine_payload(db, student_id)
+    await notification_service.record_access(db, teacher, student_id, "student_mastery", "view")
     await db.commit()
     return payload
 
