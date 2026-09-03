@@ -8,6 +8,7 @@ import {
 } from "lucide-react";
 import { appointmentsApi } from "../services/api";
 import Sidebar from "../components/Sidebar";
+import { SkeletonList } from "../components/ui";
 import { useAuth } from "../context/AuthContext";
 import type { Appointment } from "../types";
 
@@ -402,11 +403,7 @@ export default function AppointmentsPage() {
             </div>
 
             {loading ? (
-              <div style={{ padding: "40px 0", textAlign: "center" }}>
-                <div className="typing-indicator" style={{ justifyContent: "center" }}>
-                  <span /><span /><span />
-                </div>
-              </div>
+              <div style={{ padding: 16 }}><SkeletonList rows={5} /></div>
             ) : displayAppointments.length === 0 ? (
               <div
                 style={{
