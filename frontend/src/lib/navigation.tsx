@@ -17,7 +17,7 @@
  */
 import type { LucideIcon } from "lucide-react";
 import {
-  LayoutDashboard, BookOpen, Calendar, BarChart2, BarChart, ClipboardList,
+  LayoutDashboard, BookOpen, Calendar, CalendarPlus, BarChart2, BarChart, ClipboardList,
   MessageCircle, Sparkles, Settings, Users, FileText, CreditCard, Bell,
   Database, ShieldCheck, ClipboardCheck,
 } from "lucide-react";
@@ -66,6 +66,7 @@ const PARENT: NavSection[] = [
     { id: "p-children", label: "My Children", path: "/parent/students", icon: Users },
   ] },
   { label: "Learning", items: [
+    { id: "p-book", label: "Book a session", path: "/appointments/new", icon: CalendarPlus },
     { id: "p-sessions", label: "Sessions", path: "/parent/appointments", icon: Calendar },
     { id: "p-progress", label: "Progress", path: "/parent/progress", icon: BarChart2 },
     { id: "p-reports", label: "Reports", path: "/parent/reports", icon: FileText },
@@ -84,11 +85,13 @@ const TEACHER: NavSection[] = [
     { id: "t-classprog", label: "Class Progress", path: "/teacher/progress", icon: BarChart },
   ] },
   { label: "Teaching", items: [
+    { id: "t-book", label: "Book a session", path: "/appointments/new", icon: CalendarPlus },
     { id: "t-sessions", label: "Sessions", path: "/appointments", icon: Calendar, activePrefix: true },
     { id: "t-kb", label: "Knowledge Base", path: "/teacher/knowledge", icon: Database },
     { id: "t-reports", label: "Reports", path: "/teacher/reports", icon: FileText },
   ] },
   { label: "Account", items: [
+    { id: "t-billing", label: "Billing", path: "/billing", icon: CreditCard },
     { id: "t-notif", label: "Notifications", path: "/notifications", icon: Bell },
     { id: "t-settings", label: "Settings", path: "/teacher/settings", icon: Settings },
   ] },
