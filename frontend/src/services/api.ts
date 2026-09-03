@@ -828,8 +828,14 @@ export const adminSettingsApi = {
 
 export interface BillingPlan { slug: string; name: string; audience: string; price: number; credits_per_period: number; interval: string; description: string }
 export interface TokenPackage { slug: string; name: string; audience: string; price: number; credits: number; description: string }
+export interface Offering {
+  id: number | null; kind: "plan" | "topup"; slug: string; name: string; audience: string;
+  price: number; credits: number; interval: string | null; description: string | null;
+  active: boolean; school_id: number | null;
+}
 export interface BillingSummary {
   audience: string; mock_mode: boolean; balance: number; currency: string;
+  payment_model?: string;
   payment_method: null | { brand: string | null; last4: string | null; exp_month: number | null; exp_year: number | null };
   subscription: null | { plan_slug: string; status: string; cancel_at_period_end: boolean; current_period_end: string | null; credits_per_period: number };
 }
@@ -848,6 +854,22 @@ export const billingApi = {
   },
   async devComplete(kind: "subscription" | "topup", slug: string) {
     return handleResponse<{ ok: boolean }>(await fetch(`${API_BASE}/billing/dev/complete`, { method: "POST", headers: authHeaders(), body: JSON.stringify({ kind, slug }) }));
+  },
+  // ── admin: manage the plan + top-up catalogue ──
+  async offerings() {
+    return handleResponse<{ plans: Offering[]; topups: Offering[]; is_platform_admin: boolean }>(await fetch(`${API_BASE}/billing/offerings`, { headers: authHeaders() }));
+  },
+  async createOffering(body: { kind: "plan" | "topup"; name: string; price: number; credits: number; audience?: string; interval?: string | null; description?: string }) {
+    return handleResponse<Offering>(await fetch(`${API_BASE}/billing/offerings`, { method: "POST", headers: authHeaders(), body: JSON.stringify(body) }));
+  },
+  async updateOffering(id: number, body: Partial<{ name: string; price: number; credits: number; description: string; interval: string | null; active: boolean }>) {
+    return handleResponse<Offering>(await fetch(`${API_BASE}/billing/offerings/${id}`, { method: "PATCH", headers: authHeaders(), body: JSON.stringify(body) }));
+  },
+  async deleteOffering(id: number) {
+    return handleResponse<{ ok: boolean }>(await fetch(`${API_BASE}/billing/offerings/${id}`, { method: "DELETE", headers: authHeaders() }));
+  },
+  async setPaymentModel(payment_model: string) {
+    return handleResponse<{ payment_model: string }>(await fetch(`${API_BASE}/billing/payment-model`, { method: "PATCH", headers: authHeaders(), body: JSON.stringify({ payment_model }) }));
   },
   async cancel(at_period_end = true) {
     return handleResponse(await fetch(`${API_BASE}/billing/subscription/cancel`, { method: "POST", headers: authHeaders(), body: JSON.stringify({ at_period_end }) }));

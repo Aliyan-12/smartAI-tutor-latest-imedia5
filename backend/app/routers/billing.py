@@ -17,11 +17,25 @@ from app.models.billing import (
     BillingCustomer, PaymentMethodRef, InvoiceRef, OWNER_USER, OWNER_SCHOOL,
 )
 from app.services.billing import service as billing
-from app.services.billing import plans as plan_catalog
+from app.services.billing import plans as plan_catalog  # noqa: F401 (kept for defaults)
+from app.services.billing import offerings
 from app.services.billing.provider import get_provider, is_mock
+from app.services import platform_settings_service
+from app.middleware.auth import require_admin
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/billing", tags=["billing"])
+
+
+async def _payment_model(db: AsyncSession, user: User) -> str:
+    """A school's chosen billing model ('subscription' | 'token_topup' | 'hybrid').
+    Individual parents always get the full choice."""
+    if user.role in (ROLE_ADMIN, ROLE_ADMINISTRATOR) and user.school_id:
+        try:
+            return (await platform_settings_service.value(db, "payment_model", user.school_id)) or "hybrid"
+        except Exception:
+            return "hybrid"
+    return "hybrid"
 
 
 def _owner_for(user: User) -> Tuple[str, int, str]:
@@ -55,15 +69,27 @@ class DevComplete(BaseModel):
 
 # ── catalogue ──────────────────────────────────────────────────────────────
 @router.get("/plans")
-async def list_plans(user: User = Depends(get_current_user)):
+async def list_plans(user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
     _, _, audience = _owner_for(user)
-    return {"plans": [p.__dict__ for p in plan_catalog.plans_for(audience)], "currency": "GBP"}
+    model = await _payment_model(db, user)
+    if model == "token_topup":          # top-ups only → no subscription plans
+        return {"plans": [], "currency": "GBP", "payment_model": model}
+    school_id = user.school_id if audience == "school" else None
+    plans = await offerings.list_offerings(db, "plan", audience, school_id)
+    for p in plans:                     # SubscribeTab reads credits_per_period
+        p["credits_per_period"] = p["credits"]
+    return {"plans": plans, "currency": "GBP", "payment_model": model}
 
 
 @router.get("/packages")
-async def list_packages(user: User = Depends(get_current_user)):
+async def list_packages(user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
     _, _, audience = _owner_for(user)
-    return {"packages": [p.__dict__ for p in plan_catalog.packages_for(audience)], "currency": "GBP"}
+    model = await _payment_model(db, user)
+    if model == "subscription":         # plans only → no top-ups
+        return {"packages": [], "currency": "GBP", "payment_model": model}
+    school_id = user.school_id if audience == "school" else None
+    packages = await offerings.list_offerings(db, "topup", audience, school_id)
+    return {"packages": packages, "currency": "GBP", "payment_model": model}
 
 
 # ── summary ─────────────────────────────────────────────────────────────────
@@ -88,6 +114,7 @@ async def billing_me(user: User = Depends(get_current_user), db: AsyncSession = 
         "mock_mode": is_mock(),
         "balance": float(wallet.balance),
         "currency": wallet.currency,
+        "payment_model": await _payment_model(db, user),
         "payment_method": pm,
         "subscription": None if sub is None else {
             "plan_slug": sub.plan_slug, "status": sub.status,
@@ -102,7 +129,7 @@ async def billing_me(user: User = Depends(get_current_user), db: AsyncSession = 
 @router.post("/subscribe")
 async def subscribe(payload: PlanSelect, user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
     owner_type, owner_id, audience = _owner_for(user)
-    plan = plan_catalog.get_plan(payload.plan_slug)
+    plan = await offerings.resolve_plan(db, payload.plan_slug)
     if plan is None or plan.audience != audience:
         raise HTTPException(400, "That plan is not available for your account")
     base = settings.frontend_base_url.rstrip("/")
@@ -119,7 +146,7 @@ async def subscribe(payload: PlanSelect, user: User = Depends(get_current_user),
 @router.post("/topup")
 async def topup(payload: PackageSelect, user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
     owner_type, owner_id, audience = _owner_for(user)
-    pkg = plan_catalog.get_package(payload.package_slug)
+    pkg = await offerings.resolve_package(db, payload.package_slug)
     if pkg is None or pkg.audience != audience:
         raise HTTPException(400, "That package is not available for your account")
     base = settings.frontend_base_url.rstrip("/")
@@ -232,3 +259,94 @@ async def webhook(request: Request, db: AsyncSession = Depends(get_db)):
     result = await billing.handle_event(db, dict(event), provider_name=get_provider().name)
     await db.commit()
     return result
+
+
+# ── admin: manage the plan + top-up catalogue ─────────────────────────────────
+class OfferingBody(BaseModel):
+    kind: str                       # "plan" | "topup"
+    name: str
+    price: float
+    credits: int
+    audience: str = "school"
+    interval: Optional[str] = "month"
+    description: str = ""
+
+
+class OfferingPatch(BaseModel):
+    name: Optional[str] = None
+    price: Optional[float] = None
+    credits: Optional[int] = None
+    description: Optional[str] = None
+    interval: Optional[str] = None
+    active: Optional[bool] = None
+
+
+class PaymentModelBody(BaseModel):
+    payment_model: str              # "subscription" | "token_topup" | "hybrid"
+
+
+@router.get("/offerings")
+async def admin_list_offerings(user: User = Depends(require_admin), db: AsyncSession = Depends(get_db)):
+    """Full catalogue (incl. inactive) an admin can manage: platform-wide + own school."""
+    school_id = user.school_id
+    # Materialise the code defaults on first management view so they can be edited.
+    if await offerings.seed_defaults(db):
+        await db.commit()
+    return {
+        "plans": await offerings.list_offerings(db, "plan", None, school_id, include_inactive=True),
+        "topups": await offerings.list_offerings(db, "topup", None, school_id, include_inactive=True),
+        "is_platform_admin": user.role == ROLE_ADMINISTRATOR,
+    }
+
+
+@router.post("/offerings")
+async def admin_create_offering(body: OfferingBody, user: User = Depends(require_admin), db: AsyncSession = Depends(get_db)):
+    if body.kind not in ("plan", "topup"):
+        raise HTTPException(400, "kind must be 'plan' or 'topup'")
+    is_platform = user.role == ROLE_ADMINISTRATOR
+    school_id = None if is_platform else user.school_id
+    o = await offerings.create_offering(
+        db, kind=body.kind, name=body.name, price=body.price, credits=body.credits,
+        audience=body.audience, interval=body.interval, description=body.description, school_id=school_id)
+    await db.commit()
+    return o
+
+
+@router.patch("/offerings/{offering_id}")
+async def admin_update_offering(offering_id: int, body: OfferingPatch,
+                                user: User = Depends(require_admin), db: AsyncSession = Depends(get_db)):
+    try:
+        o = await offerings.update_offering(
+            db, offering_id, school_id=user.school_id,
+            is_platform_admin=(user.role == ROLE_ADMINISTRATOR),
+            **body.model_dump(exclude_none=True))
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    await db.commit()
+    return o
+
+
+@router.delete("/offerings/{offering_id}")
+async def admin_delete_offering(offering_id: int, user: User = Depends(require_admin), db: AsyncSession = Depends(get_db)):
+    try:
+        await offerings.delete_offering(
+            db, offering_id, school_id=user.school_id,
+            is_platform_admin=(user.role == ROLE_ADMINISTRATOR))
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    await db.commit()
+    return {"ok": True}
+
+
+@router.patch("/payment-model")
+async def set_payment_model(body: PaymentModelBody, user: User = Depends(require_admin), db: AsyncSession = Depends(get_db)):
+    """A school admin chooses how their school pays."""
+    if body.payment_model not in ("subscription", "token_topup", "hybrid"):
+        raise HTTPException(400, "Invalid payment model")
+    if not user.school_id:
+        raise HTTPException(400, "Your account is not attached to a school")
+    await platform_settings_service.set_value(
+        db, user, "payment_model", body.payment_model,
+        reason="school billing model", school_id=user.school_id)
+    await db.commit()
+    return {"payment_model": body.payment_model}

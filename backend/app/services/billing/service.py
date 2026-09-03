@@ -16,6 +16,7 @@ from app.models.billing import (
     InvoiceRef, WebhookEvent, PaymentMethodRef,
 )
 from app.services.billing import plans as plan_catalog
+from app.services.billing import offerings
 from app.services.billing.provider import get_provider
 
 logger = logging.getLogger(__name__)
@@ -99,7 +100,7 @@ async def ledger_entries(db: AsyncSession, wallet: BillingWallet, limit: int = 1
 async def start_subscription_checkout(db: AsyncSession, owner_type: str, owner_id: int,
                                       plan_slug: str, email: Optional[str], name: Optional[str],
                                       success_url: str, cancel_url: str) -> Dict[str, Any]:
-    plan = plan_catalog.get_plan(plan_slug)
+    plan = await offerings.resolve_plan(db, plan_slug)
     if plan is None:
         raise ValueError("Unknown plan")
     cust = await get_or_create_customer(db, owner_type, owner_id, email, name)
@@ -111,7 +112,7 @@ async def start_subscription_checkout(db: AsyncSession, owner_type: str, owner_i
 
 async def start_topup_checkout(db: AsyncSession, owner_type: str, owner_id: int, package_slug: str,
                                email: Optional[str], success_url: str, cancel_url: str) -> Dict[str, Any]:
-    pkg = plan_catalog.get_package(package_slug)
+    pkg = await offerings.resolve_package(db, package_slug)
     if pkg is None:
         raise ValueError("Unknown package")
     cust = await get_or_create_customer(db, owner_type, owner_id, email)
@@ -204,7 +205,7 @@ async def _on_subscription_upsert(db: AsyncSession, obj: Dict[str, Any]):
         ProviderSubscription.provider_subscription_id == sub_id))
     sub = res.scalar_one_or_none()
     plan_slug = (obj.get("metadata") or {}).get("plan_slug", "") or (sub.plan_slug if sub else "")
-    plan = plan_catalog.get_plan(plan_slug)
+    plan = await offerings.resolve_plan(db, plan_slug)
     if sub is None:
         sub = ProviderSubscription(customer_id=cust.id, provider_subscription_id=sub_id, plan_slug=plan_slug,
                                    credits_per_period=plan.credits_per_period if plan else 0)
@@ -282,7 +283,7 @@ async def _on_checkout_completed(db: AsyncSession, obj: Dict[str, Any]):
     if cust is None:
         return
     package_slug = (obj.get("metadata") or {}).get("package_slug", "")
-    pkg = plan_catalog.get_package(package_slug)
+    pkg = await offerings.resolve_package(db, package_slug)
     if pkg is None:
         return
     wallet = await get_or_create_wallet(db, cust.owner_type, cust.owner_id)
@@ -322,7 +323,7 @@ def _now_ts() -> int:
 
 
 async def dev_complete_subscription(db: AsyncSession, owner_type: str, owner_id: int, plan_slug: str) -> Dict[str, Any]:
-    plan = plan_catalog.get_plan(plan_slug)
+    plan = await offerings.resolve_plan(db, plan_slug)
     if plan is None:
         raise ValueError("Unknown plan")
     cust = await get_or_create_customer(db, owner_type, owner_id)
@@ -350,7 +351,7 @@ async def dev_complete_subscription(db: AsyncSession, owner_type: str, owner_id:
 
 
 async def dev_complete_topup(db: AsyncSession, owner_type: str, owner_id: int, package_slug: str) -> Dict[str, Any]:
-    pkg = plan_catalog.get_package(package_slug)
+    pkg = await offerings.resolve_package(db, package_slug)
     if pkg is None:
         raise ValueError("Unknown package")
     cust = await get_or_create_customer(db, owner_type, owner_id)

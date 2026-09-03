@@ -6,7 +6,7 @@ import Sidebar from "../components/Sidebar";
 import {
   billingApi, schoolBillingApi,
   type BillingSummary, type BillingPlan, type TokenPackage, type InvoiceRow, type LedgerRow,
-  type TopupRequest, type SchoolBillingSettings,
+  type TopupRequest, type SchoolBillingSettings, type Offering,
 } from "../services/api";
 import {
   PageHeader, Card, CardBody, CardHeader, Button, Badge, Alert, Spinner, EmptyState,
@@ -17,6 +17,7 @@ const TABS = [
   { key: "wallet", label: "Wallet" },
   { key: "subscribe", label: "Buy & Subscribe" },
   { key: "topups", label: "Top-ups" },
+  { key: "manage", label: "Plans & top-ups" },
   { key: "invoices", label: "Invoices" },
   { key: "settings", label: "Settings" },
 ];
@@ -34,6 +35,12 @@ export default function SchoolBillingPage() {
   const refreshMe = useCallback(() => billingApi.me().then(setMe).catch(() => setMe(null)), []);
   useEffect(() => { refreshMe(); }, [refreshMe]);
 
+  // The school's payment model hides the tab it doesn't use.
+  const model = me?.payment_model ?? "hybrid";
+  const visibleTabs = TABS.filter((t) =>
+    (t.key !== "subscribe" || model !== "token_topup") &&
+    (t.key !== "topups" || model !== "subscription"));
+
   return (
     <div className="app-layout">
       <Sidebar />
@@ -41,10 +48,11 @@ export default function SchoolBillingPage() {
         <div className="dashboard-content" style={{ padding: "24px 28px", overflowY: "auto" }}>
           <PageHeader title="School billing" subtitle="Wallet, plans, top-ups and invoices for your school."
             actions={me?.mock_mode ? <Badge tone="warning">Test mode</Badge> : undefined} />
-          <div className="mb-5"><Tabs items={TABS} active={tab} onChange={setTab} /></div>
+          <div className="mb-5"><Tabs items={visibleTabs} active={tab} onChange={setTab} /></div>
           {tab === "wallet" && <WalletTab flash={flash} />}
           {tab === "subscribe" && <SubscribeTab me={me} refreshMe={refreshMe} flash={flash} />}
           {tab === "topups" && <TopupsTab flash={flash} onChange={refreshMe} />}
+          {tab === "manage" && <ManageTab flash={flash} refreshMe={refreshMe} model={model} />}
           {tab === "invoices" && <InvoicesTab />}
           {tab === "settings" && <SettingsTab flash={flash} />}
         </div>
@@ -85,6 +93,14 @@ function WalletTab({ flash }: { flash: (m: string) => void }) {
         <Card><CardBody>
           <div className="t-card-title mb-2">Adjust balance</div>
           <div className="flex flex-col gap-2">
+            <div className="flex flex-wrap gap-1.5">
+              {[50, 100, 250, 500, 1000].map((n) => (
+                <button key={n} type="button" onClick={() => setCredit({ ...credit, amount: String(n) })} aria-pressed={credit.amount === String(n)}
+                  className={`px-2.5 py-1 rounded-full border text-[12px] font-semibold transition-colors ${credit.amount === String(n) ? "border-brand bg-brand text-white" : "border-line bg-surface text-ink hover:border-brand"}`}>
+                  {n}
+                </button>
+              ))}
+            </div>
             <div className="flex gap-2">
               <Input type="number" placeholder="Amount" value={credit.amount} onChange={(e) => setCredit({ ...credit, amount: e.target.value })} />
             </div>
@@ -297,9 +313,9 @@ function SettingsTab({ flash }: { flash: (m: string) => void }) {
   return (
     <div className="flex flex-col gap-4 max-w-2xl">
       <Card>
-        <CardHeader title="Platform financial settings" subtitle="Set by the platform — read-only for schools." />
+        <CardHeader title="Platform financial settings" subtitle="Set by the platform — read-only for schools. (Your payment model is set under Plans & top-ups.)" />
         <CardBody className="pt-0 grid grid-cols-2 gap-3 text-[13px]">
-          {[["Payment model", s.payment_model], ["Currency", s.currency], ["Tax rate", `${s.tax_rate_percent}%`], ["Invoice prefix", s.invoice_prefix]].map(([k, v]) => (
+          {[["Currency", s.currency], ["Tax rate", `${s.tax_rate_percent}%`], ["Invoice prefix", s.invoice_prefix]].map(([k, v]) => (
             <div key={k as string}><div className="t-eyebrow">{k}</div><div className="text-ink font-medium">{v}</div></div>
           ))}
         </CardBody>
@@ -316,5 +332,88 @@ function SettingsTab({ flash }: { flash: (m: string) => void }) {
         </CardBody>
       </Card>
     </div>
+  );
+}
+
+/* ── Manage plans & top-ups + payment model ─────────────────────────────── */
+function ManageTab({ flash, refreshMe, model }: { flash: (m: string) => void; refreshMe: () => Promise<void>; model: string }) {
+  const [cat, setCat] = useState<{ plans: Offering[]; topups: Offering[]; is_platform_admin: boolean } | null>(null);
+  const [savingModel, setSavingModel] = useState(false);
+  const load = useCallback(() => billingApi.offerings().then(setCat).catch(() => setCat(null)), []);
+  useEffect(() => { load(); }, [load]);
+
+  const setModel = async (m: string) => {
+    setSavingModel(true);
+    try { await billingApi.setPaymentModel(m); await refreshMe(); flash("Payment model updated"); }
+    catch (e) { flash(e instanceof Error ? e.message : "Failed"); } finally { setSavingModel(false); }
+  };
+
+  if (!cat) return <Spinner />;
+  const MODELS: [string, string][] = [["hybrid", "Hybrid (both)"], ["subscription", "Plans only"], ["token_topup", "Top-ups only"]];
+  return (
+    <div className="flex flex-col gap-5 max-w-4xl">
+      <Card>
+        <CardHeader title="Payment model" subtitle="Choose how your school pays for credits." />
+        <CardBody className="pt-0 flex flex-wrap gap-2">
+          {MODELS.map(([k, label]) => (
+            <button key={k} type="button" disabled={savingModel} onClick={() => setModel(k)} aria-pressed={model === k}
+              className={`px-3.5 py-2 rounded-full border text-[13px] font-semibold transition-colors disabled:opacity-60 ${model === k ? "border-brand bg-brand text-white" : "border-line bg-surface text-ink hover:border-brand"}`}>
+              {label}
+            </button>
+          ))}
+        </CardBody>
+      </Card>
+
+      <OfferingManager kind="plan" title="Subscription plans" items={cat.plans} onChange={load} flash={flash} />
+      <OfferingManager kind="topup" title="Top-up packs" items={cat.topups} onChange={load} flash={flash} />
+    </div>
+  );
+}
+
+function OfferingManager({ kind, title, items, onChange, flash }: {
+  kind: "plan" | "topup"; title: string; items: Offering[]; onChange: () => Promise<void>; flash: (m: string) => void;
+}) {
+  const [draft, setDraft] = useState({ name: "", price: "", credits: "" });
+  const [busy, setBusy] = useState(false);
+  const create = async () => {
+    const price = parseFloat(draft.price), credits = parseInt(draft.credits, 10);
+    if (!draft.name.trim() || isNaN(price) || isNaN(credits)) { flash("Fill in a name, price and credits"); return; }
+    setBusy(true);
+    try {
+      await billingApi.createOffering({ kind, name: draft.name.trim(), price, credits, interval: kind === "plan" ? "month" : null });
+      setDraft({ name: "", price: "", credits: "" }); await onChange(); flash("Added");
+    } catch (e) { flash(e instanceof Error ? e.message : "Failed"); } finally { setBusy(false); }
+  };
+  const remove = async (o: Offering) => {
+    if (o.id == null) return;
+    if (!window.confirm(`Remove "${o.name}"?`)) return;
+    try { await billingApi.deleteOffering(o.id); await onChange(); flash("Removed"); }
+    catch (e) { flash(e instanceof Error ? e.message : "Failed"); }
+  };
+  return (
+    <Card>
+      <CardHeader title={title} subtitle="Platform offerings apply to every school; ones you add here are your school's own." />
+      <CardBody className="pt-0 flex flex-col gap-1.5">
+        {items.filter((o) => o.active).map((o) => (
+          <div key={o.slug} className="flex items-center justify-between gap-3 py-2 border-b border-line last:border-0">
+            <div className="min-w-0">
+              <div className="t-body font-semibold text-ink flex items-center gap-2">
+                {o.name}{o.school_id == null && <Badge tone="neutral">platform</Badge>}
+              </div>
+              <div className="t-helper">{money(o.price)}{kind === "plan" ? "/mo" : ""} · {o.credits.toLocaleString()} credits</div>
+            </div>
+            {o.id != null && o.school_id != null && (
+              <Button size="sm" variant="ghost" onClick={() => remove(o)}>Remove</Button>
+            )}
+          </div>
+        ))}
+        <div className="flex flex-wrap items-end gap-2 pt-3">
+          <FormField label="Name"><Input value={draft.name} onChange={(e) => setDraft({ ...draft, name: e.target.value })} placeholder={kind === "plan" ? "e.g. Department" : "e.g. Booster"} /></FormField>
+          <FormField label="Price (£)"><Input type="number" value={draft.price} onChange={(e) => setDraft({ ...draft, price: e.target.value })} /></FormField>
+          <FormField label="Credits"><Input type="number" value={draft.credits} onChange={(e) => setDraft({ ...draft, credits: e.target.value })} /></FormField>
+          <Button size="sm" loading={busy} leftIcon={<Plus size={14} />} onClick={create}>Add {kind === "plan" ? "plan" : "pack"}</Button>
+        </div>
+      </CardBody>
+    </Card>
   );
 }
