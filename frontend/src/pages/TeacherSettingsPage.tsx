@@ -130,9 +130,14 @@ function ClassTab({ flash, mode }: { flash: (m: string) => void; mode: string })
           <CardBody className="pt-0 flex flex-col gap-4">
             <div className="grid sm:grid-cols-2 gap-4">
               <FormField label="Default session length">
-                <Select value={c.default_session_length} onChange={(e) => setC({ ...c, default_session_length: parseInt(e.target.value, 10) })}>
-                  {[20, 40, 60, 90].map((m) => <option key={m} value={m}>{m} minutes</option>)}
-                </Select>
+                <div className="flex flex-wrap gap-2">
+                  {[20, 40, 60, 90].map((m) => (
+                    <button key={m} type="button" onClick={() => setC({ ...c, default_session_length: m })} aria-pressed={c.default_session_length === m}
+                      className={`px-3 py-1.5 rounded-full border text-[13px] font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/40 ${c.default_session_length === m ? "border-brand bg-brand text-white" : "border-line bg-surface text-ink hover:border-brand"}`}>
+                      {m} min
+                    </button>
+                  ))}
+                </div>
               </FormField>
               <FormField label="Default Key Stage">
                 <Select value={c.default_key_stage ?? ""} onChange={(e) => setC({ ...c, default_key_stage: e.target.value || null })}>
