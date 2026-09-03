@@ -38,6 +38,8 @@ class TeacherProfile(Base):
     default_subjects: Mapped[list] = mapped_column(JSONB, default=list, nullable=False)
     teaching_approach: Mapped[str] = mapped_column(String(30), default="balanced", nullable=False)
     default_objectives: Mapped[str] = mapped_column(Text, default="", nullable=False)
+    # Credits a newly added student starts with, chosen by the teacher (tap options in settings).
+    default_student_credits: Mapped[int] = mapped_column(Integer, default=100, nullable=False)
 
     # Availability / preferred windows — a light structure, e.g.
     # {"mon": ["16:00-18:00"], "sat": ["09:00-12:00"]}.

@@ -53,6 +53,11 @@ async def update_profile(db: AsyncSession, user: User, data: Dict[str, Any]) -> 
     for field in ("phone", "timezone", "language"):
         if field in data and data[field] is not None:
             setattr(profile, field, str(data[field]).strip()[:60])
+    if data.get("default_child_credits") is not None:
+        try:
+            profile.default_child_credits = max(0, min(100000, int(data["default_child_credits"])))
+        except (TypeError, ValueError):
+            pass
     await db.flush()
     return profile
 

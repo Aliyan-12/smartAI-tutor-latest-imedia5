@@ -678,6 +678,7 @@ export const settingsApi = {
 
 export interface ParentProfile {
   name: string; email: string; phone: string | null; timezone: string; language: string;
+  default_child_credits: number;
 }
 export interface ChildSummary {
   id: number; name: string; email: string; is_active: boolean;
@@ -696,7 +697,7 @@ export const parentSettingsApi = {
   async getProfile() {
     return handleResponse<ParentProfile>(await fetch(`${API_BASE}/parent/settings/profile`, { headers: authHeaders() }));
   },
-  async updateProfile(data: Partial<Pick<ParentProfile, "name" | "phone" | "timezone" | "language">>) {
+  async updateProfile(data: Partial<Pick<ParentProfile, "name" | "phone" | "timezone" | "language" | "default_child_credits">>) {
     return handleResponse<ParentProfile>(await fetch(`${API_BASE}/parent/settings/profile`, {
       method: "PUT", headers: authHeaders(), body: JSON.stringify(data),
     }));
@@ -751,6 +752,7 @@ export interface TeacherClassSettings {
   default_subjects: string[];
   teaching_approach: string;
   default_objectives: string;
+  default_student_credits: number;
   report_visibility: string;
   availability: Record<string, string[]>;
 }
@@ -895,7 +897,7 @@ export interface SchoolBillingSettings {
 }
 
 export const schoolBillingApi = {
-  async requests() { return handleResponse<{ requests: TopupRequest[] }>(await fetch(`${API_BASE}/billing/school/requests`, { headers: authHeaders() })); },
+  async requests() { return handleResponse<{ requests: TopupRequest[]; packages: Offering[] }>(await fetch(`${API_BASE}/billing/school/requests`, { headers: authHeaders() })); },
   async createRequest(package_slug: string, note: string) {
     return handleResponse<{ id: number; status: string }>(await fetch(`${API_BASE}/billing/school/requests`, { method: "POST", headers: authHeaders(), body: JSON.stringify({ package_slug, note }) }));
   },

@@ -110,6 +110,8 @@ async def run_setup(fresh: bool = False, seed: bool = True):
 
     # Column migrations (idempotent — safe to re-run)
     _migrations = [
+        "ALTER TABLE teacher_profiles ADD COLUMN IF NOT EXISTS default_student_credits INTEGER NOT NULL DEFAULT 100",
+        "ALTER TABLE parent_profiles ADD COLUMN IF NOT EXISTS default_child_credits INTEGER NOT NULL DEFAULT 100",
         # ================================================================
         # Auth overhaul — schools (multi-tenancy), email verification + OAuth
         # identities, Casbin policy store, and new users columns.

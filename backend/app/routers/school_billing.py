@@ -25,6 +25,7 @@ from app.models.billing import OWNER_SCHOOL
 from app.models.topup_request import SchoolTopupRequest
 from app.services.billing import service as billing
 from app.services.billing import plans as plan_catalog
+from app.services.billing import offerings
 from app.services.billing.provider import is_mock
 from app.services import platform_settings_service as settings_svc
 
@@ -80,17 +81,19 @@ async def list_requests(user: User = Depends(require_teacher), db: AsyncSession 
         q = q.where(SchoolTopupRequest.requested_by_id == user.id)
     q = q.order_by(desc(SchoolTopupRequest.created_at)).limit(100)
     rows = (await db.execute(q)).scalars().all()
+    # Requestable top-up packs so staff can pick one to request (tap options).
+    packages = await offerings.list_offerings(db, "topup", "school", school_id)
     return {"requests": [{
         "id": r.id, "package_slug": r.package_slug, "credits": float(r.credits), "amount": float(r.amount),
         "status": r.status, "note": r.note, "requested_by_id": r.requested_by_id,
         "created_at": r.created_at, "decided_at": r.decided_at,
-    } for r in rows]}
+    } for r in rows], "packages": packages}
 
 
 @router.post("/requests", status_code=status.HTTP_201_CREATED)
 async def create_request(payload: TopupRequestCreate, user: User = Depends(require_teacher), db: AsyncSession = Depends(get_db)):
     school_id = _require_school(user)
-    pkg = plan_catalog.get_package(payload.package_slug)
+    pkg = await offerings.resolve_package(db, payload.package_slug)
     if pkg is None or pkg.audience != "school":
         raise HTTPException(400, "Unknown token package")
     req = SchoolTopupRequest(school_id=school_id, requested_by_id=user.id, package_slug=pkg.slug,

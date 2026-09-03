@@ -31,6 +31,7 @@ class ParentProfileResponse(BaseModel):
     phone: Optional[str] = None
     timezone: str = "Europe/London"
     language: str = "en"
+    default_child_credits: int = 100
 
 
 class ParentProfileUpdate(BaseModel):
@@ -38,6 +39,7 @@ class ParentProfileUpdate(BaseModel):
     phone: Optional[str] = None
     timezone: Optional[str] = None
     language: Optional[str] = None
+    default_child_credits: Optional[int] = None
 
 
 class NotificationPrefs(BaseModel):
@@ -67,6 +69,7 @@ async def get_profile(parent: User = Depends(require_parent), db: AsyncSession =
     return ParentProfileResponse(
         name=parent.name, email=parent.email, phone=profile.phone,
         timezone=profile.timezone, language=profile.language,
+        default_child_credits=profile.default_child_credits,
     )
 
 
@@ -77,6 +80,7 @@ async def update_profile(payload: ParentProfileUpdate, parent: User = Depends(re
     return ParentProfileResponse(
         name=parent.name, email=parent.email, phone=profile.phone,
         timezone=profile.timezone, language=profile.language,
+        default_child_credits=profile.default_child_credits,
     )
 
 

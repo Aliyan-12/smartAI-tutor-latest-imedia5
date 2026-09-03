@@ -85,7 +85,7 @@ function ProfileTab({ flash }: { flash: (m: string) => void }) {
   const save = async () => {
     setSaving(true);
     try {
-      const updated = await parentSettingsApi.updateProfile({ name: p.name, phone: p.phone ?? "", timezone: p.timezone, language: p.language });
+      const updated = await parentSettingsApi.updateProfile({ name: p.name, phone: p.phone ?? "", timezone: p.timezone, language: p.language, default_child_credits: p.default_child_credits });
       setP(updated); flash("Profile saved");
     } finally { setSaving(false); }
   };
@@ -101,6 +101,16 @@ function ProfileTab({ flash }: { flash: (m: string) => void }) {
           <FormField label="Phone"><Input value={p.phone ?? ""} onChange={(e) => setP({ ...p, phone: e.target.value })} placeholder="Optional" /></FormField>
           <FormField label="Timezone"><Input value={p.timezone} onChange={(e) => setP({ ...p, timezone: e.target.value })} /></FormField>
         </div>
+        <FormField label="Default credits per child" hint="Applied when you add or link a child.">
+          <div className="flex flex-wrap gap-2">
+            {[50, 100, 200, 500, 1000].map((n) => (
+              <button key={n} type="button" onClick={() => setP({ ...p, default_child_credits: n })} aria-pressed={p.default_child_credits === n}
+                className={`px-3 py-1.5 rounded-full border text-[13px] font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/40 ${p.default_child_credits === n ? "border-brand bg-brand text-white" : "border-line bg-surface text-ink hover:border-brand"}`}>
+                {n}
+              </button>
+            ))}
+          </div>
+        </FormField>
         <div><Button onClick={save} loading={saving}>Save changes</Button></div>
       </CardBody>
     </Card>

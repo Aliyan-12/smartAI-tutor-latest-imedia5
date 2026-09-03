@@ -3,7 +3,8 @@ import { Lock, Check, ShieldCheck } from "lucide-react";
 import Sidebar from "../components/Sidebar";
 import { useAuth } from "../context/AuthContext";
 import {
-  teacherSettingsApi, legalApi, type TeacherClassSettings,
+  teacherSettingsApi, legalApi, schoolBillingApi, type TeacherClassSettings,
+  type Offering, type TopupRequest,
 } from "../services/api";
 import {
   PageHeader, Card, CardBody, CardHeader, Button, Badge, Alert, Spinner,
@@ -125,6 +126,7 @@ function ClassTab({ flash, mode }: { flash: (m: string) => void; mode: string })
   return (
     <div className="flex flex-col gap-4 max-w-2xl">
       {mode === "class" ? (
+        <>
         <Card>
           <CardHeader title="Session defaults" subtitle="Pre-filled when you book a new session." />
           <CardBody className="pt-0 flex flex-col gap-4">
@@ -161,9 +163,21 @@ function ClassTab({ flash, mode }: { flash: (m: string) => void; mode: string })
                 {REPORT_VIS.map((r) => <option key={r.key} value={r.key}>{r.label}</option>)}
               </Select>
             </FormField>
+            <FormField label="Default credits for a new student" hint="Applied when you add a student.">
+              <div className="flex flex-wrap gap-2">
+                {[50, 100, 200, 500, 1000].map((n) => (
+                  <button key={n} type="button" onClick={() => setC({ ...c, default_student_credits: n })} aria-pressed={c.default_student_credits === n}
+                    className={`px-3 py-1.5 rounded-full border text-[13px] font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/40 ${c.default_student_credits === n ? "border-brand bg-brand text-white" : "border-line bg-surface text-ink hover:border-brand"}`}>
+                    {n}
+                  </button>
+                ))}
+              </div>
+            </FormField>
             <div><Button onClick={save} loading={saving}>Save defaults</Button></div>
           </CardBody>
         </Card>
+        <RequestCreditsCard flash={flash} />
+        </>
       ) : (
         <Card>
           <CardHeader title="Teaching preferences" subtitle="How you like lessons run, and when you're available." />
@@ -293,5 +307,54 @@ function PrivacyTab({ flash }: { flash: (m: string) => void }) {
         </CardBody>
       </Card>
     </div>
+  );
+}
+
+/* ── Request a credit top-up (staff → school admin) ─────────────────────── */
+function RequestCreditsCard({ flash }: { flash: (m: string) => void }) {
+  const [packages, setPackages] = useState<Offering[]>([]);
+  const [requests, setRequests] = useState<TopupRequest[]>([]);
+  const [sel, setSel] = useState<string>("");
+  const [note, setNote] = useState("");
+  const [busy, setBusy] = useState(false);
+  const load = () => schoolBillingApi.requests()
+    .then((r) => { setPackages(r.packages || []); setRequests(r.requests || []); })
+    .catch(() => {});
+  useEffect(() => { load(); }, []);
+  const submit = async () => {
+    if (!sel) { flash("Pick a top-up pack"); return; }
+    setBusy(true);
+    try { await schoolBillingApi.createRequest(sel, note.trim()); setSel(""); setNote(""); load(); flash("Request sent to your school admin"); }
+    catch (e) { flash(e instanceof Error ? e.message : "Failed"); } finally { setBusy(false); }
+  };
+  const mine = requests.filter((r) => r.status === "pending");
+  return (
+    <Card>
+      <CardHeader title="Request a credit top-up" subtitle="Ask your school admin to add credits — they approve and pay." />
+      <CardBody className="pt-0 flex flex-col gap-3">
+        <div className="flex flex-wrap gap-2">
+          {packages.map((p) => (
+            <button key={p.slug} type="button" onClick={() => setSel(p.slug)} aria-pressed={sel === p.slug}
+              className={`px-3 py-1.5 rounded-full border text-[13px] font-semibold transition-colors ${sel === p.slug ? "border-brand bg-brand text-white" : "border-line bg-surface text-ink hover:border-brand"}`}>
+              {p.name} · {p.credits.toLocaleString()} cr
+            </button>
+          ))}
+          {packages.length === 0 && <span className="t-helper">No top-up packs available yet.</span>}
+        </div>
+        <Input placeholder="Note (optional) — why you need the credits" value={note} onChange={(e) => setNote(e.target.value)} />
+        <div><Button size="sm" loading={busy} onClick={submit}>Send request</Button></div>
+        {mine.length > 0 && (
+          <div className="pt-1">
+            <div className="t-eyebrow mb-1">Your pending requests</div>
+            {mine.map((r) => (
+              <div key={r.id} className="flex items-center justify-between py-1.5 border-b border-line last:border-0 text-[13px]">
+                <span className="text-ink">{r.package_slug} · {r.credits.toLocaleString()} cr</span>
+                <Badge tone="warning">{r.status}</Badge>
+              </div>
+            ))}
+          </div>
+        )}
+      </CardBody>
+    </Card>
   );
 }
