@@ -2,6 +2,7 @@ import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { Calendar, Clock, BookOpen, MessageCircle } from "lucide-react";
 import Sidebar from "../components/Sidebar";
+import { SkeletonList } from "../components/ui";
 import { assignmentsApi } from "../services/api";
 import type { MyAssignment } from "../types";
 
@@ -260,12 +261,7 @@ export default function AssignmentsPage() {
           </div>
 
           <div className="asgn-body">
-            {loading && (
-              <div className="asgn-empty">
-                <div style={{ width: 36, height: 36, border: "3px solid #e2e8f0", borderTopColor: "#3b82f6", borderRadius: "50%", animation: "spin 0.8s linear infinite" }} />
-                <p>Loading your assignments...</p>
-              </div>
-            )}
+            {loading && <div style={{ padding: 16 }}><SkeletonList rows={5} /></div>}
 
             {!loading && error && (
               <div className="asgn-empty">

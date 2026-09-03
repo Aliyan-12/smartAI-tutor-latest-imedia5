@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import Sidebar from "../components/Sidebar";
+import { SkeletonList } from "../components/ui";
 import { appointmentsApi } from "../services/api";
 import type { Appointment } from "../types";
 
@@ -310,13 +311,7 @@ export default function SessionsPage() {
             />
           </div>
 
-          {loading && (
-            <div style={{ padding: "60px 0", textAlign: "center" }}>
-              <div className="typing-indicator" style={{ justifyContent: "center" }}>
-                <span /><span /><span />
-              </div>
-            </div>
-          )}
+          {loading && <SkeletonList rows={5} />}
 
           {error && (
             <div style={{ padding: 14, background: "#fef2f2", border: "1px solid #fecaca", borderRadius: 8, color: "#dc2626", fontSize: 13, marginBottom: 16 }}>

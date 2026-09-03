@@ -3,6 +3,7 @@ import { useLocation } from "react-router-dom";
 import { Users, BookOpen, MessageSquare, Link, Eye, ChevronRight, ChevronLeft } from "lucide-react";
 import { parentApi } from "../services/api";
 import Sidebar from "../components/Sidebar";
+import { SkeletonStats, SkeletonCard } from "../components/ui";
 import StudentProgress from "../components/StudentProgress";
 import type { User, Assessment, ChatListItem, Chat } from "../types";
 
@@ -129,11 +130,7 @@ function StudentDetail({ student, onBack }: StudentDetailProps) {
       {error && <div className="dashboard-error">{error}</div>}
 
       {loading ? (
-        <div style={{ padding: "40px 0", textAlign: "center" }}>
-          <div className="typing-indicator" style={{ justifyContent: "center" }}>
-            <span /><span /><span />
-          </div>
-        </div>
+        <div style={{ padding: "24px 0" }}><SkeletonStats /><div style={{ height: 16 }} /><SkeletonCard lines={4} /></div>
       ) : activeTab === "progress" ? (
         <StudentProgress studentId={student.id} assessments={assessments} />
       ) : (

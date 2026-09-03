@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import Sidebar from "../components/Sidebar";
+import PageLoading from "../components/PageLoading";
 import MasteryPanel from "../components/MasteryPanel";
 import { gamificationApi, assessmentsApi, appointmentsApi } from "../services/api";
 import { useAuth } from "../context/AuthContext";
@@ -280,18 +281,7 @@ export default function ProgressPage() {
   ].filter(Boolean) as { icon: string; label: string }[];
 
   if (loading) {
-    return (
-      <div className="app-layout">
-        <Sidebar />
-        <div className="main-content">
-          <div style={{ padding: "60px 0", textAlign: "center" }}>
-            <div className="typing-indicator" style={{ justifyContent: "center" }}>
-              <span /><span /><span />
-            </div>
-          </div>
-        </div>
-      </div>
-    );
+    return <PageLoading />;
   }
 
   return (
