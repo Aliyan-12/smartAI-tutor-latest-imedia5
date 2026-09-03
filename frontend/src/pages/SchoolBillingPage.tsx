@@ -4,7 +4,7 @@ import {
 } from "lucide-react";
 import Sidebar from "../components/Sidebar";
 import {
-  billingApi, schoolBillingApi,
+  billingApi, schoolBillingApi, adminSettingsApi,
   type BillingSummary, type BillingPlan, type TokenPackage, type InvoiceRow, type LedgerRow,
   type TopupRequest, type SchoolBillingSettings, type Offering,
 } from "../services/api";
@@ -12,9 +12,11 @@ import {
   PageHeader, Card, CardBody, CardHeader, Button, Badge, Alert, Spinner, EmptyState,
   Input, FormField, Select, Tabs,
 } from "../components/ui";
+import { MemberFundingCard } from "./BillingPage";
 
 const TABS = [
   { key: "wallet", label: "Wallet" },
+  { key: "members", label: "Distribute credits" },
   { key: "subscribe", label: "Buy & Subscribe" },
   { key: "topups", label: "Top-ups" },
   { key: "manage", label: "Plans & top-ups" },
@@ -50,6 +52,12 @@ export default function SchoolBillingPage() {
             actions={me?.mock_mode ? <Badge tone="warning">Test mode</Badge> : undefined} />
           <div className="mb-5"><Tabs items={visibleTabs} active={tab} onChange={setTab} /></div>
           {tab === "wallet" && <WalletTab flash={flash} />}
+          {tab === "members" && (
+            <div className="max-w-4xl">
+              <p className="t-helper mb-3">Send credits from your school wallet to teachers, parents and students. Each transfer is deducted from the school wallet and recorded in the ledger.</p>
+              <MemberFundingCard flash={flash} onChange={refreshMe} />
+            </div>
+          )}
           {tab === "subscribe" && <SubscribeTab me={me} refreshMe={refreshMe} flash={flash} />}
           {tab === "topups" && <TopupsTab flash={flash} onChange={refreshMe} />}
           {tab === "manage" && <ManageTab flash={flash} refreshMe={refreshMe} model={model} />}
@@ -310,14 +318,30 @@ function SettingsTab({ flash }: { flash: (m: string) => void }) {
     try { await schoolBillingApi.updateSettings({ billing_contact_email: s.billing_contact_email ?? "", billing_address: s.billing_address ?? "" }); flash("Billing settings saved"); }
     finally { setSaving(false); }
   };
+  const saveFin = async (key: string, value: unknown) => {
+    try { await adminSettingsApi.update(key, value, "school financial setting"); flash("Saved"); }
+    catch (e) { flash(e instanceof Error ? e.message : "Couldn't save"); }
+  };
   return (
     <div className="flex flex-col gap-4 max-w-2xl">
       <Card>
-        <CardHeader title="Platform financial settings" subtitle="Set by the platform — read-only for schools. (Your payment model is set under Plans & top-ups.)" />
-        <CardBody className="pt-0 grid grid-cols-2 gap-3 text-[13px]">
-          {[["Currency", s.currency], ["Tax rate", `${s.tax_rate_percent}%`], ["Invoice prefix", s.invoice_prefix]].map(([k, v]) => (
-            <div key={k as string}><div className="t-eyebrow">{k}</div><div className="text-ink font-medium">{v}</div></div>
-          ))}
+        <CardHeader title="Financial settings" subtitle="Currency, tax and invoice prefix for your school. (Your payment model is set under Plans & top-ups.)" />
+        <CardBody className="pt-0 grid sm:grid-cols-3 gap-3">
+          <FormField label="Currency">
+            <Select value={s.currency} onChange={(e) => { setS({ ...s, currency: e.target.value }); saveFin("currency", e.target.value); }}>
+              {["GBP", "USD", "EUR", "AED"].map((c) => <option key={c} value={c}>{c}</option>)}
+            </Select>
+          </FormField>
+          <FormField label="Tax rate (%)">
+            <Input type="number" value={String(s.tax_rate_percent)}
+              onChange={(e) => setS({ ...s, tax_rate_percent: parseFloat(e.target.value || "0") })}
+              onBlur={(e) => saveFin("tax_rate_percent", parseFloat(e.target.value || "0"))} />
+          </FormField>
+          <FormField label="Invoice prefix">
+            <Input value={s.invoice_prefix}
+              onChange={(e) => setS({ ...s, invoice_prefix: e.target.value })}
+              onBlur={(e) => saveFin("invoice_prefix", e.target.value)} />
+          </FormField>
         </CardBody>
       </Card>
       <Card>

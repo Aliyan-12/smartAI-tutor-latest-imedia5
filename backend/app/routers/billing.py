@@ -2,6 +2,7 @@
 parent user) and school billing (owner = the school). Credits are granted only by
 provider webhooks; nothing here grants credits on a button press."""
 import logging
+from datetime import datetime, timezone
 from typing import Optional, Tuple
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
@@ -12,10 +13,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import settings
 from app.db.session import get_db
 from app.middleware.auth import get_current_user
-from app.models.user import User, ROLE_PARENT, ROLE_ADMIN, ROLE_ADMINISTRATOR
+from app.models.user import User, ROLE_PARENT, ROLE_ADMIN, ROLE_ADMINISTRATOR, ROLE_TEACHER, ROLE_STUDENT
 from app.models.billing import (
     BillingCustomer, PaymentMethodRef, InvoiceRef, OWNER_USER, OWNER_SCHOOL,
 )
+from app.models.credit_request import CreditRequest
 from app.services.billing import service as billing
 from app.services.billing import plans as plan_catalog  # noqa: F401 (kept for defaults)
 from app.services.billing import offerings
@@ -25,6 +27,10 @@ from app.middleware.auth import require_admin
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/billing", tags=["billing"])
+
+
+def _now():
+    return datetime.now(timezone.utc)
 
 
 async def _payment_model(db: AsyncSession, user: User) -> str:
@@ -39,15 +45,15 @@ async def _payment_model(db: AsyncSession, user: User) -> str:
 
 
 def _owner_for(user: User) -> Tuple[str, int, str]:
-    """(owner_type, owner_id, audience) for the caller. Parents own individual billing;
-    school admins own school billing. Students never own billing."""
-    if user.role == ROLE_PARENT:
-        return OWNER_USER, user.id, "individual"
+    """(owner_type, owner_id, audience) for the caller. Admins/administrator operate the SCHOOL
+    wallet (they have no personal wallet). Everyone else — parent, teacher, student — has their
+    own individual wallet."""
     if user.role in (ROLE_ADMIN, ROLE_ADMINISTRATOR):
         if not user.school_id:
             raise HTTPException(400, "Your account is not attached to a school")
         return OWNER_SCHOOL, user.school_id, "school"
-    raise HTTPException(status.HTTP_403_FORBIDDEN, "Your role cannot manage billing")
+    # parent, teacher, student
+    return OWNER_USER, user.id, "individual"
 
 
 class PlanSelect(BaseModel):
@@ -350,3 +356,148 @@ async def set_payment_model(body: PaymentModelBody, user: User = Depends(require
         reason="school billing model", school_id=user.school_id)
     await db.commit()
     return {"payment_model": body.payment_model}
+
+
+# ── wallet transfers: fund a member from the caller's wallet ──────────────────
+class TransferBody(BaseModel):
+    target_user_id: int
+    amount: float
+    reason: str = ""
+
+
+class CreditReqBody(BaseModel):
+    amount: float
+    note: str = ""
+
+
+async def _validate_fund_target(db: AsyncSession, caller: User, target_id: int) -> User:
+    """Return the target user if `caller` may fund them, else 403/404. Admins fund any member of
+    their school; parents fund their own child; teachers fund a student in their school."""
+    target = await db.get(User, target_id)
+    if target is None:
+        raise HTTPException(404, "Member not found")
+    if caller.role in (ROLE_ADMIN, ROLE_ADMINISTRATOR):
+        if not caller.school_id or target.school_id != caller.school_id:
+            raise HTTPException(403, "That member isn't in your school")
+    elif caller.role == ROLE_PARENT:
+        if not (target.role == ROLE_STUDENT and target.parent_id == caller.id):
+            raise HTTPException(403, "You can only fund your own child")
+    elif caller.role == ROLE_TEACHER:
+        if not (target.role == ROLE_STUDENT and target.school_id == caller.school_id):
+            raise HTTPException(403, "You can only fund a student in your school")
+    else:
+        raise HTTPException(403, "Your role cannot fund others")
+    return target
+
+
+async def _caller_source_wallet(db: AsyncSession, caller: User):
+    if caller.role in (ROLE_ADMIN, ROLE_ADMINISTRATOR):
+        if not caller.school_id:
+            raise HTTPException(400, "Your account is not attached to a school")
+        return await billing.get_or_create_wallet(db, OWNER_SCHOOL, caller.school_id)
+    return await billing.get_or_create_wallet(db, OWNER_USER, caller.id)
+
+
+@router.get("/members")
+async def fundable_members(user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+    """Members the caller can send credits to, with their current wallet balance."""
+    if user.role in (ROLE_ADMIN, ROLE_ADMINISTRATOR):
+        rows = (await db.execute(select(User).where(
+            User.school_id == user.school_id,
+            User.role.in_([ROLE_TEACHER, ROLE_PARENT, ROLE_STUDENT])))).scalars().all()
+    elif user.role == ROLE_PARENT:
+        rows = (await db.execute(select(User).where(User.parent_id == user.id, User.role == ROLE_STUDENT))).scalars().all()
+    elif user.role == ROLE_TEACHER:
+        rows = (await db.execute(select(User).where(User.school_id == user.school_id, User.role == ROLE_STUDENT))).scalars().all()
+    else:
+        rows = []
+    out = []
+    for u in rows:
+        w = await billing.get_or_create_wallet(db, OWNER_USER, u.id)
+        out.append({"id": u.id, "name": u.name, "role": u.role, "balance": float(w.balance)})
+    await db.commit()
+    return {"members": out}
+
+
+@router.post("/transfer")
+async def transfer(body: TransferBody, user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+    target = await _validate_fund_target(db, user, body.target_user_id)
+    src = await _caller_source_wallet(db, user)
+    dst = await billing.get_or_create_wallet(db, OWNER_USER, target.id)
+    try:
+        await billing.transfer_credits(db, src, dst, body.amount, body.reason or f"Credits to {target.name}", user.id)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    await db.commit()
+    return {"ok": True, "source_balance": float(src.balance), "target_balance": float(dst.balance)}
+
+
+# ── student credit requests (students receive-only; they ask to be funded) ────
+@router.post("/credit-requests", status_code=status.HTTP_201_CREATED)
+async def create_credit_request(body: CreditReqBody, user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+    if user.role != ROLE_STUDENT:
+        raise HTTPException(403, "Only students request top-ups")
+    if body.amount <= 0:
+        raise HTTPException(400, "Amount must be greater than zero")
+    req = CreditRequest(requester_id=user.id, school_id=user.school_id, amount=body.amount, note=body.note[:2000])
+    db.add(req)
+    await db.commit()
+    await db.refresh(req)
+    return {"id": req.id, "status": req.status}
+
+
+@router.get("/credit-requests")
+async def list_credit_requests(user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+    if user.role == ROLE_STUDENT:
+        q = select(CreditRequest).where(CreditRequest.requester_id == user.id).order_by(desc(CreditRequest.created_at)).limit(50)
+    elif user.role == ROLE_PARENT:
+        child_ids = (await db.execute(select(User.id).where(User.parent_id == user.id, User.role == ROLE_STUDENT))).scalars().all()
+        q = select(CreditRequest).where(CreditRequest.requester_id.in_(list(child_ids) or [-1]),
+                                        CreditRequest.status == "pending").order_by(desc(CreditRequest.created_at))
+    elif user.role in (ROLE_ADMIN, ROLE_ADMINISTRATOR, ROLE_TEACHER):
+        q = select(CreditRequest).where(CreditRequest.school_id == user.school_id,
+                                        CreditRequest.status == "pending").order_by(desc(CreditRequest.created_at))
+    else:
+        return {"requests": []}
+    rows = (await db.execute(q)).scalars().all()
+    ids = [r.requester_id for r in rows]
+    names = {}
+    if ids:
+        us = (await db.execute(select(User).where(User.id.in_(ids)))).scalars().all()
+        names = {u.id: u.name for u in us}
+    return {"requests": [{
+        "id": r.id, "requester_id": r.requester_id, "requester_name": names.get(r.requester_id, "Student"),
+        "amount": float(r.amount), "note": r.note, "status": r.status, "created_at": r.created_at,
+    } for r in rows]}
+
+
+@router.post("/credit-requests/{req_id}/fulfill")
+async def fulfill_credit_request(req_id: int, user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+    req = await db.get(CreditRequest, req_id)
+    if req is None or req.status != "pending":
+        raise HTTPException(404, "Request not found")
+    target = await _validate_fund_target(db, user, req.requester_id)
+    src = await _caller_source_wallet(db, user)
+    dst = await billing.get_or_create_wallet(db, OWNER_USER, target.id)
+    try:
+        await billing.transfer_credits(db, src, dst, float(req.amount), f"Fulfilled top-up request from {target.name}", user.id)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    req.status = "fulfilled"
+    req.fulfilled_by_id = user.id
+    req.decided_at = _now()
+    await db.commit()
+    return {"ok": True}
+
+
+@router.post("/credit-requests/{req_id}/decline")
+async def decline_credit_request(req_id: int, user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+    req = await db.get(CreditRequest, req_id)
+    if req is None or req.status != "pending":
+        raise HTTPException(404, "Request not found")
+    await _validate_fund_target(db, user, req.requester_id)
+    req.status = "declined"
+    req.fulfilled_by_id = user.id
+    req.decided_at = _now()
+    await db.commit()
+    return {"ok": True}

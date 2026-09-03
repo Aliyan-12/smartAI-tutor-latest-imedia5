@@ -1,11 +1,13 @@
 import { useCallback, useEffect, useState } from "react";
-import { Check, CreditCard, AlertTriangle, Sparkles, ExternalLink, RefreshCw } from "lucide-react";
+import { Check, CreditCard, AlertTriangle, Sparkles, ExternalLink, RefreshCw, Send } from "lucide-react";
 import Sidebar from "../components/Sidebar";
+import { useAuth } from "../context/AuthContext";
 import {
   billingApi, type BillingPlan, type BillingSummary, type InvoiceRow, type LedgerRow,
+  type WalletMember, type CreditRequestRow,
 } from "../services/api";
 import {
-  PageHeader, Card, CardBody, CardHeader, Button, Badge, Alert, Spinner, EmptyState,
+  PageHeader, Card, CardBody, CardHeader, Button, Badge, Alert, Spinner, EmptyState, Input,
 } from "../components/ui";
 
 function Toast({ msg }: { msg: string | null }) {
@@ -100,6 +102,8 @@ export default function BillingPage() {
             </CardBody></Card>
           </div>
 
+          <MemberFundingCard flash={flash} onChange={load} />
+
           {/* Plans */}
           <h2 className="t-section mb-3">{sub ? "Change plan" : "Choose a plan"}</h2>
           <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-4 mb-6">
@@ -192,5 +196,72 @@ export default function BillingPage() {
       </div>
       <Toast msg={toast} />
     </div>
+  );
+}
+
+/* ── Send credits to students/children + fulfil their requests ───────────── */
+export function MemberFundingCard({ flash, onChange }: { flash: (m: string) => void; onChange: () => Promise<void> }) {
+  const { user } = useAuth();
+  const [members, setMembers] = useState<WalletMember[]>([]);
+  const [requests, setRequests] = useState<CreditRequestRow[]>([]);
+  const [amt, setAmt] = useState<Record<number, string>>({});
+  const [busy, setBusy] = useState<number | null>(null);
+  const load = useCallback(async () => {
+    const [m, r] = await Promise.all([
+      billingApi.members().catch(() => ({ members: [] as WalletMember[] })),
+      billingApi.creditRequests().catch(() => ({ requests: [] as CreditRequestRow[] })),
+    ]);
+    setMembers(m.members);
+    setRequests(r.requests.filter((x) => x.status === "pending"));
+  }, []);
+  useEffect(() => { load(); }, [load]);
+
+  const send = async (id: number) => {
+    const n = parseFloat(amt[id] || "");
+    if (!n || n <= 0) { flash("Enter an amount"); return; }
+    setBusy(id);
+    try { await billingApi.transfer(id, n, "Credit top-up"); setAmt({ ...amt, [id]: "" }); await load(); await onChange(); flash("Credits sent"); }
+    catch (e) { flash(e instanceof Error ? e.message : "Failed"); } finally { setBusy(null); }
+  };
+  const fulfill = async (id: number) => {
+    try { await billingApi.fulfillCreditRequest(id); await load(); await onChange(); flash("Request fulfilled"); }
+    catch (e) { flash(e instanceof Error ? e.message : "Failed"); }
+  };
+  const decline = async (id: number) => { await billingApi.declineCreditRequest(id); await load(); flash("Request declined"); };
+
+  if (members.length === 0 && requests.length === 0) return null;
+  const who = user?.role === "parent" ? "your children" : user?.role === "teacher" ? "your students" : "your members";
+  return (
+    <Card className="mb-6">
+      <CardHeader title="Send credits" subtitle={`Top up ${who} from your wallet.`} />
+      <CardBody className="pt-0 flex flex-col gap-1.5">
+        {requests.length > 0 && (
+          <div className="mb-2">
+            <div className="t-eyebrow mb-1">Top-up requests</div>
+            {requests.map((r) => (
+              <div key={r.id} className="flex items-center justify-between gap-2 py-1.5 border-b border-line last:border-0 text-[13px]">
+                <span className="text-ink">{r.requester_name} asks for {r.amount.toLocaleString()} cr{r.note ? ` — "${r.note}"` : ""}</span>
+                <div className="flex gap-2">
+                  <Button size="sm" variant="success" onClick={() => fulfill(r.id)}>Fund</Button>
+                  <Button size="sm" variant="ghost" onClick={() => decline(r.id)}>Decline</Button>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+        {members.map((m) => (
+          <div key={m.id} className="flex items-center justify-between gap-2 py-1.5 border-b border-line last:border-0">
+            <div>
+              <div className="t-body font-semibold text-ink">{m.name} <span className="t-helper font-normal">· {m.role}</span></div>
+              <div className="t-helper">{m.balance.toLocaleString()} credits</div>
+            </div>
+            <div className="flex items-center gap-2">
+              <Input type="number" placeholder="Amount" value={amt[m.id] ?? ""} onChange={(e) => setAmt({ ...amt, [m.id]: e.target.value })} className="!h-9 w-28" />
+              <Button size="sm" loading={busy === m.id} leftIcon={<Send size={14} />} onClick={() => send(m.id)}>Send</Button>
+            </div>
+          </div>
+        ))}
+      </CardBody>
+    </Card>
   );
 }

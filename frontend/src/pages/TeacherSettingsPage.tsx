@@ -3,7 +3,7 @@ import { Lock, Check, ShieldCheck } from "lucide-react";
 import Sidebar from "../components/Sidebar";
 import { useAuth } from "../context/AuthContext";
 import {
-  teacherSettingsApi, legalApi, schoolBillingApi, type TeacherClassSettings,
+  teacherSettingsApi, legalApi, schoolBillingApi, curriculumApi, type TeacherClassSettings,
   type Offering, type TopupRequest,
 } from "../services/api";
 import {
@@ -109,7 +109,9 @@ function ProfileTab({ flash }: { flash: (m: string) => void }) {
 function ClassTab({ flash, mode }: { flash: (m: string) => void; mode: string }) {
   const [c, setC] = useState<TeacherClassSettings | null>(null);
   const [saving, setSaving] = useState(false);
+  const [hubSubjects, setHubSubjects] = useState<string[]>([]);
   useEffect(() => { teacherSettingsApi.getClassSettings().then(setC).catch(() => setC(null)); }, []);
+  useEffect(() => { curriculumApi.getSubjects().then((r) => setHubSubjects(r.subjects.map((s) => s.name))).catch(() => setHubSubjects([])); }, []);
   if (!c) return <Spinner />;
   const save = async () => {
     setSaving(true);
@@ -141,16 +143,10 @@ function ClassTab({ flash, mode }: { flash: (m: string) => void; mode: string })
                   ))}
                 </div>
               </FormField>
-              <FormField label="Default Key Stage">
-                <Select value={c.default_key_stage ?? ""} onChange={(e) => setC({ ...c, default_key_stage: e.target.value || null })}>
-                  <option value="">No default</option>
-                  {KEY_STAGES.map((k) => <option key={k} value={k}>{k}</option>)}
-                </Select>
-              </FormField>
             </div>
-            <FormField label="Default subjects" hint="Shown first in the booking form.">
+            <FormField label="Default subjects" hint="Shown first in the booking form. Sourced from the Resource Hub curriculum.">
               <div className="flex flex-wrap gap-2">
-                {SUBJECTS.map((s) => (
+                {(hubSubjects.length ? hubSubjects : SUBJECTS).map((s) => (
                   <button key={s} type="button" onClick={() => toggleSubject(s)} aria-pressed={c.default_subjects.includes(s)}
                     className={`px-3 py-1.5 rounded-full border text-[13px] font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/40 ${c.default_subjects.includes(s) ? "border-brand bg-brand text-white" : "border-line bg-surface text-ink hover:border-brand"}`}>
                     {s}

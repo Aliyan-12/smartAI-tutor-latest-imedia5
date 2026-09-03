@@ -835,6 +835,11 @@ export interface Offering {
   price: number; credits: number; interval: string | null; description: string | null;
   active: boolean; school_id: number | null;
 }
+export interface WalletMember { id: number; name: string; role: string; balance: number; }
+export interface CreditRequestRow {
+  id: number; requester_id: number; requester_name: string; amount: number;
+  note: string; status: string; created_at: string;
+}
 export interface BillingSummary {
   audience: string; mock_mode: boolean; balance: number; currency: string;
   payment_model?: string;
@@ -872,6 +877,25 @@ export const billingApi = {
   },
   async setPaymentModel(payment_model: string) {
     return handleResponse<{ payment_model: string }>(await fetch(`${API_BASE}/billing/payment-model`, { method: "PATCH", headers: authHeaders(), body: JSON.stringify({ payment_model }) }));
+  },
+  // ── wallet transfers + student credit requests ──
+  async members() {
+    return handleResponse<{ members: WalletMember[] }>(await fetch(`${API_BASE}/billing/members`, { headers: authHeaders() }));
+  },
+  async transfer(target_user_id: number, amount: number, reason = "") {
+    return handleResponse<{ ok: boolean; source_balance: number; target_balance: number }>(await fetch(`${API_BASE}/billing/transfer`, { method: "POST", headers: authHeaders(), body: JSON.stringify({ target_user_id, amount, reason }) }));
+  },
+  async creditRequests() {
+    return handleResponse<{ requests: CreditRequestRow[] }>(await fetch(`${API_BASE}/billing/credit-requests`, { headers: authHeaders() }));
+  },
+  async createCreditRequest(amount: number, note = "") {
+    return handleResponse<{ id: number; status: string }>(await fetch(`${API_BASE}/billing/credit-requests`, { method: "POST", headers: authHeaders(), body: JSON.stringify({ amount, note }) }));
+  },
+  async fulfillCreditRequest(id: number) {
+    return handleResponse<{ ok: boolean }>(await fetch(`${API_BASE}/billing/credit-requests/${id}/fulfill`, { method: "POST", headers: authHeaders() }));
+  },
+  async declineCreditRequest(id: number) {
+    return handleResponse<{ ok: boolean }>(await fetch(`${API_BASE}/billing/credit-requests/${id}/decline`, { method: "POST", headers: authHeaders() }));
   },
   async cancel(at_period_end = true) {
     return handleResponse(await fetch(`${API_BASE}/billing/subscription/cancel`, { method: "POST", headers: authHeaders(), body: JSON.stringify({ at_period_end }) }));

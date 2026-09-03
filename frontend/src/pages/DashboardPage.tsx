@@ -3,7 +3,7 @@ import { useNavigate } from "react-router-dom";
 import Sidebar from "../components/Sidebar";
 import WelcomeScreen from "../components/WelcomeScreen";
 import { useChat } from "../hooks/useChat";
-import { appointmentsApi } from "../services/api";
+import { appointmentsApi, billingApi } from "../services/api";
 import type { Appointment } from "../types";
 import LottiePlayer, { LOTTIE_URLS } from "../components/LottiePlayer";
 
@@ -102,9 +102,52 @@ export default function DashboardPage() {
           </div>
 
 
+          <StudentCredits />
+
           <WelcomeScreen onPromptClick={handlePromptClick} onStatsLoaded={setHeroStats} />
         </div>
       </div>
+    </div>
+  );
+}
+
+/* ── Student credits: balance + request a top-up (students never self-pay) ── */
+function StudentCredits() {
+  const [balance, setBalance] = useState<number | null>(null);
+  const [pending, setPending] = useState(0);
+  const [open, setOpen] = useState(false);
+  const [amount, setAmount] = useState("");
+  const [msg, setMsg] = useState<string | null>(null);
+  const load = () => {
+    billingApi.me().then((m) => setBalance(m.balance)).catch(() => setBalance(null));
+    billingApi.creditRequests().then((r) => setPending(r.requests.filter((x) => x.status === "pending").length)).catch(() => {});
+  };
+  useEffect(() => { load(); }, []);
+  const request = async () => {
+    const n = parseFloat(amount);
+    if (!n || n <= 0) { setMsg("Enter an amount"); return; }
+    try { await billingApi.createCreditRequest(n, ""); setAmount(""); setOpen(false); setMsg("Request sent to your parent / school"); load(); }
+    catch (e) { setMsg(e instanceof Error ? e.message : "Failed"); }
+    window.setTimeout(() => setMsg(null), 2600);
+  };
+  if (balance === null) return null;
+  return (
+    <div style={{ margin: "16px 0", padding: 16, background: "#fff", border: "1px solid #e2e8f0", borderRadius: 12, display: "flex", alignItems: "center", gap: 16, flexWrap: "wrap" }}>
+      <div>
+        <div style={{ fontSize: 11, fontWeight: 700, color: "#94a3b8", textTransform: "uppercase", letterSpacing: "0.4px" }}>Your credits</div>
+        <div style={{ fontSize: 24, fontWeight: 800, color: "#0f172a", lineHeight: 1.1 }}>{balance.toLocaleString()}</div>
+        {pending > 0 && <div style={{ fontSize: 12, color: "#ca8a04" }}>{pending} request{pending > 1 ? "s" : ""} pending</div>}
+      </div>
+      {!open ? (
+        <button onClick={() => setOpen(true)} style={{ marginLeft: "auto", padding: "8px 14px", background: "#1a73e8", color: "#fff", border: "none", borderRadius: 8, fontSize: 13, fontWeight: 700, cursor: "pointer" }}>Request top-up</button>
+      ) : (
+        <div style={{ marginLeft: "auto", display: "flex", gap: 8, alignItems: "center" }}>
+          <input type="number" value={amount} onChange={(e) => setAmount(e.target.value)} placeholder="Credits" style={{ width: 100, padding: "7px 10px", border: "1px solid #cbd5e1", borderRadius: 8, fontSize: 13 }} />
+          <button onClick={request} style={{ padding: "8px 12px", background: "#16a34a", color: "#fff", border: "none", borderRadius: 8, fontSize: 13, fontWeight: 700, cursor: "pointer" }}>Send</button>
+          <button onClick={() => setOpen(false)} style={{ padding: "8px 12px", background: "none", color: "#64748b", border: "none", fontSize: 13, cursor: "pointer" }}>Cancel</button>
+        </div>
+      )}
+      {msg && <div style={{ width: "100%", fontSize: 12.5, color: "#16a34a" }}>{msg}</div>}
     </div>
   );
 }

@@ -3,6 +3,7 @@ ledger, and webhook processing. Credits are allocated ONLY from authoritative pr
 events (invoice paid / top-up paid), never from a button click, and every allocation is
 idempotent by a stable key so a re-delivered webhook can't double-credit."""
 import logging
+import uuid
 from datetime import datetime, timezone
 from decimal import Decimal
 from typing import Any, Dict, List, Optional
@@ -48,6 +49,24 @@ async def get_or_create_wallet(db: AsyncSession, owner_type: str, owner_id: int,
         db.add(wallet)
         await db.flush()
     return wallet
+
+
+async def transfer_credits(db: AsyncSession, src: BillingWallet, dst: BillingWallet,
+                           amount: float, reason: str, actor_id: int) -> None:
+    """Move `amount` credits src -> dst, recording BOTH sides in the immutable ledger.
+    Raises ValueError if the source lacks the balance. Used for school->member funding and
+    parent/teacher->student funding."""
+    if amount <= 0:
+        raise ValueError("Amount must be greater than zero")
+    if float(src.balance) < amount:
+        raise ValueError("Not enough credits in the source wallet")
+    key = f"xfer:{src.id}->{dst.id}:{uuid.uuid4().hex}"
+    await credit_wallet(db, src, -amount, "transfer_out", source="internal_transfer",
+                        reference=f"wallet:{dst.id}", idempotency_key=f"{key}:out",
+                        reason=reason, actor_id=actor_id)
+    await credit_wallet(db, dst, amount, "transfer_in", source="internal_transfer",
+                        reference=f"wallet:{src.id}", idempotency_key=f"{key}:in",
+                        reason=reason, actor_id=actor_id)
 
 
 async def _customer_by_provider_id(db: AsyncSession, provider_customer_id: str) -> Optional[BillingCustomer]:
