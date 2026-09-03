@@ -15,6 +15,14 @@ function Toast({ msg }: { msg: string | null }) {
 }
 
 /** One editable setting row. Local draft; commits on Save (dangerous ones confirm first). */
+// Int settings that should be picked from fixed options (tap chips), not typed into a number box.
+const TAP_PRESETS: Record<string, number[]> = {
+  default_credits: [50, 100, 200, 500, 1000],
+  session_length: [20, 40, 60, 90],
+  default_session_length: [20, 40, 60, 90],
+  school_default_session_length: [20, 40, 60, 90],
+};
+
 function SettingRow({ s, onSaved, flash }: { s: SettingItem; onSaved: (v: unknown) => void; flash: (m: string) => void }) {
   const [val, setVal] = useState<unknown>(s.value);
   const [saving, setSaving] = useState(false);
@@ -69,6 +77,16 @@ function SettingRow({ s, onSaved, flash }: { s: SettingItem; onSaved: (v: unknow
     if (s.type === "text") return (
       <textarea value={String(val ?? "")} disabled={!s.editable} onChange={(e) => setVal(e.target.value)}
         className="w-full min-h-[70px] p-2.5 rounded-lg border border-line bg-surface text-[13px] text-ink outline-none focus-visible:ring-2 focus-visible:ring-brand/40 resize-y disabled:opacity-60" />
+    );
+    if (s.type === "int" && TAP_PRESETS[s.key]) return (
+      <div className="flex flex-wrap gap-2">
+        {TAP_PRESETS[s.key].map((n) => (
+          <button key={n} type="button" disabled={!s.editable} onClick={() => setVal(n)} aria-pressed={Number(val) === n}
+            className={`px-3 py-1.5 rounded-full border text-[13px] font-semibold transition-colors disabled:opacity-60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/40 ${Number(val) === n ? "border-brand bg-brand text-white" : "border-line bg-surface text-ink hover:border-brand"}`}>
+            {n}{s.key.includes("session") ? " min" : ""}
+          </button>
+        ))}
+      </div>
     );
     if (s.type === "int" || s.type === "float") return (
       <Input type="number" value={String(val ?? "")} disabled={!s.editable}
