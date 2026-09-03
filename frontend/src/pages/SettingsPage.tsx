@@ -5,7 +5,7 @@ import { settingsApi, curriculumApi } from "../services/api";
 import { useAuth } from "../context/AuthContext";
 import type { LearningPreferences } from "../types";
 
-type Tab = "profile" | "preferences" | "learning" | "notifications" | "account";
+type Tab = "profile" | "notifications" | "account";
 
 // Friendly labels for the hub's key stage codes (options themselves come from the Resource Hub).
 const KS_LABELS: Record<string, string> = {
@@ -185,10 +185,7 @@ export default function SettingsPage() {
   };
 
   const TABS: { id: Tab; icon: React.ReactNode; label: string }[] = [
-    { id: "profile",       icon: <User size={15} />,    label: "Profile" },
-    { id: "preferences",   icon: <Sliders size={15} />, label: "Preferences" },
-    { id: "learning",      icon: <BookOpen size={15} />,label: "Learning Preferences" },
-    { id: "notifications", icon: <Bell size={15} />,    label: "Notifications" },
+    { id: "profile",       icon: <User size={15} />,    label: "Profile" },    { id: "notifications", icon: <Bell size={15} />,    label: "Notifications" },
     { id: "account",       icon: <Shield size={15} />,  label: "Account" },
   ];
 
@@ -410,7 +407,7 @@ export default function SettingsPage() {
               <img src="/images/robotAI.png" alt="Settings robot" className="sett-hero-robot" draggable={false} />
               <div className="sett-hero-stat-row">
                 <div className="sett-hero-stat">
-                  <div className="sett-hero-stat-val">5</div>
+                  <div className="sett-hero-stat-val">3</div>
                   <div className="sett-hero-stat-lbl">Sections</div>
                 </div>
                 <div className="sett-hero-stat">
@@ -486,137 +483,6 @@ export default function SettingsPage() {
                   {saving ? "Saving..." : "Save Changes"}
                 </button>
               </div>
-            )}
-
-            {/* ── PREFERENCES ── */}
-            {activeTab === "preferences" && (
-              <div className="sett-card">
-                <p className="sett-card-title"><Sliders size={16} /> Preferences</p>
-                <div className="sett-row">
-                  <div>
-                    <div className="sett-row-label">Voice Responses</div>
-                    <div className="sett-row-sub">Hear your AI Tutor speak responses</div>
-                  </div>
-                  <label className="sett-toggle">
-                    <input type="checkbox" checked={voiceResponses} onChange={(e) => setVoiceResponses(e.target.checked)} />
-                    <span className="sett-toggle-slider" />
-                  </label>
-                </div>
-                <div className="sett-row">
-                  <div>
-                    <div className="sett-row-label">Text Size</div>
-                    <div className="sett-row-sub">Choose the text size that works best for you</div>
-                  </div>
-                  <div className="sett-text-size-row">
-                    {(["sm", "md", "lg"] as const).map((s, i) => (
-                      <button key={s} className={`sett-text-btn${textSize === s ? " selected" : ""}`} onClick={() => setTextSize(s)} style={{ fontSize: [12, 15, 19][i] }}>A</button>
-                    ))}
-                  </div>
-                </div>
-                <div className="sett-row">
-                  <div>
-                    <div className="sett-row-label">Dark Mode</div>
-                    <div className="sett-row-sub">Switch between light and dark theme</div>
-                  </div>
-                  <label className="sett-toggle">
-                    <input type="checkbox" checked={darkMode} onChange={(e) => setDarkMode(e.target.checked)} />
-                    <span className="sett-toggle-slider" />
-                  </label>
-                </div>
-              </div>
-            )}
-
-            {/* ── LEARNING PREFERENCES ── */}
-            {activeTab === "learning" && (
-              <>
-                <div className="sett-card">
-                  <p className="sett-card-title"><BookOpen size={16} /> Learning Preferences</p>
-                  <p style={{ fontSize: 13, color: "#64748b", margin: "0 0 14px" }}>Tell us about how you learn best. Your AI Tutor will use this to personalise your lessons.</p>
-
-                  <h4 style={{ fontSize: 13, fontWeight: 700, color: "#374151", margin: "0 0 10px" }}>1. Learning Style</h4>
-                  <p style={{ fontSize: 12, color: "#94a3b8", margin: "0 0 10px" }}>You can select more than one.</p>
-                  <div className="sett-style-grid">
-                    {LEARNING_STYLES.map((s) => (
-                      <div
-                        key={s.id}
-                        className={`sett-style-tile${learningStyles.includes(s.id) ? " selected" : ""}`}
-                        onClick={() => toggleStyle(s.id)}
-                      >
-                        <span style={{ fontSize: 20 }}>{s.icon}</span> {s.label}
-                      </div>
-                    ))}
-                  </div>
-
-                  <h4 style={{ fontSize: 13, fontWeight: 700, color: "#374151", margin: "16px 0 10px" }}>2. Teaching Pace</h4>
-                  <div className="sett-pace-row">
-                    {PACES.map((p) => (
-                      <button
-                        key={p.id}
-                        className={`sett-pace-btn${pace === p.id ? " selected" : ""}`}
-                        onClick={() => setPace(p.id)}
-                      >
-                        {p.icon} {p.label}
-                      </button>
-                    ))}
-                  </div>
-
-                  <h4 style={{ fontSize: 13, fontWeight: 700, color: "#374151", margin: "16px 0 10px" }}>3. How should your tutor teach?</h4>
-                  {TEACH_PREFS.map((tp) => (
-                    <label key={tp.id} className="sett-check-label">
-                      <input
-                        type="checkbox"
-                        checked={teachPrefs[tp.id] ?? false}
-                        onChange={(e) => setTeachPrefs({ ...teachPrefs, [tp.id]: e.target.checked })}
-                      />
-                      {tp.label}
-                    </label>
-                  ))}
-
-                  <h4 style={{ fontSize: 13, fontWeight: 700, color: "#374151", margin: "16px 0 10px" }}>4. Interests & Hobbies</h4>
-                  <div className="sett-tag-row">
-                    {interests.map((tag) => (
-                      <span key={tag} className="sett-tag">
-                        {tag}
-                        <button onClick={() => setInterests(interests.filter((i) => i !== tag))}>✕</button>
-                      </span>
-                    ))}
-                  </div>
-                  <div className="sett-tag-input">
-                    <input
-                      value={interestInput}
-                      onChange={(e) => setInterestInput(e.target.value)}
-                      onKeyDown={(e) => e.key === "Enter" && addInterest()}
-                      placeholder="e.g. Football, Space, Gaming..."
-                    />
-                    <button className="sett-tag-add" onClick={addInterest}>+ Add</button>
-                  </div>
-
-                  <h4 style={{ fontSize: 13, fontWeight: 700, color: "#374151", margin: "16px 0 10px" }}>5. Learning Goals (optional)</h4>
-                  <textarea
-                    className="sett-input"
-                    style={{ resize: "vertical", minHeight: 72 }}
-                    value={learningGoals}
-                    onChange={(e) => setLearningGoals(e.target.value)}
-                    placeholder="e.g. Improve my maths for school exams, be better at problem solving..."
-                  />
-
-                  {personalisedSummary().length > 0 && (
-                    <div className="sett-summary-box">
-                      <h4>Your Personalised Learning Summary</h4>
-                      <ul>
-                        {personalisedSummary().map((l, i) => <li key={i}>{l}</li>)}
-                      </ul>
-                    </div>
-                  )}
-
-                  <div style={{ marginTop: 20 }}>
-                    <button className="sett-save-btn" onClick={saveLearning} disabled={saving}>
-                      <Save size={14} style={{ marginRight: 6, verticalAlign: "middle" }} />
-                      {saving ? "Saving..." : "Save Changes"}
-                    </button>
-                  </div>
-                </div>
-              </>
             )}
 
             {/* ── NOTIFICATIONS ── */}

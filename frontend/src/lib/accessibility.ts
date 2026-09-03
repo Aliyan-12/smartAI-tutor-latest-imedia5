@@ -10,9 +10,11 @@
  */
 
 export type TextSize = "default" | "large" | "larger";
+export type Theme = "system" | "light" | "dark";
 
 export interface AccessibilityPrefs {
   text_size: TextSize;
+  theme: Theme;
   reduced_motion: boolean;
   high_contrast: boolean;
   captions: boolean;
@@ -20,6 +22,7 @@ export interface AccessibilityPrefs {
 
 export const DEFAULT_A11Y: AccessibilityPrefs = {
   text_size: "default",
+  theme: "system",
   reduced_motion: false,
   high_contrast: false,
   captions: false,
@@ -42,8 +45,10 @@ export function readStoredA11y(): AccessibilityPrefs {
 export function coerceA11y(raw: unknown): AccessibilityPrefs {
   const r = (raw ?? {}) as Record<string, unknown>;
   const size = r.text_size;
+  const theme = r.theme;
   return {
     text_size: size === "large" || size === "larger" ? size : "default",
+    theme: theme === "light" || theme === "dark" ? theme : "system",
     reduced_motion: r.reduced_motion === true,
     high_contrast: r.high_contrast === true,
     captions: r.captions === true,
@@ -55,6 +60,9 @@ export function applyAccessibility(a: AccessibilityPrefs): void {
   const el = document.documentElement;
   if (a.text_size === "default") el.removeAttribute("data-text-size");
   else el.setAttribute("data-text-size", a.text_size);
+  // Theme: the palette in index.css flips via the `.dark` class on <html>. "dark" adds it;
+  // "light"/"system" remove it (the app defaults to light).
+  el.classList.toggle("dark", a.theme === "dark");
   el.classList.toggle("reduce-motion", a.reduced_motion);
   el.classList.toggle("high-contrast", a.high_contrast);
   el.classList.toggle("captions-on", a.captions);

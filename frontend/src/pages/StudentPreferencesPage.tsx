@@ -430,6 +430,8 @@ export default function StudentPreferencesPage() {
                     ))}
                   </div>
                   <div className="flex flex-col gap-3">
+                    <ToggleRow label="Dark mode"
+                      checked={draft.accessibility.theme === "dark"} onChange={(v) => setA11y({ theme: v ? "dark" : "system" })} />
                     <ToggleRow label="Reduce motion & animations"
                       checked={draft.accessibility.reduced_motion} onChange={(v) => setA11y({ reduced_motion: v })} />
                     <ToggleRow label="Higher contrast colours"
