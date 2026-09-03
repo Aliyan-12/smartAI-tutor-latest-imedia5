@@ -6,6 +6,7 @@ import { useChat } from "../hooks/useChat";
 import { appointmentsApi, billingApi } from "../services/api";
 import type { Appointment } from "../types";
 import LottiePlayer, { LOTTIE_URLS } from "../components/LottiePlayer";
+import { Flame, Zap } from "lucide-react";
 
 
 interface HeroStats { streak: number; xp: number; level: number; xpPct: number; }
@@ -69,7 +70,7 @@ export default function DashboardPage() {
                     background: "#fff7ed", border: "1.5px solid #fed7aa",
                     borderRadius: 999, padding: "7px 14px",
                   }}>
-                    <span style={{ fontSize: 15 }}>🔥</span>
+                    <Flame size={15} color="#ea580c" fill="#ea580c" strokeWidth={2.2} />
                     <span style={{ fontSize: 13, fontWeight: 700, color: "#ea580c", whiteSpace: "nowrap" }}>{heroStats.streak} Day Streak</span>
                   </div>
 
@@ -79,7 +80,7 @@ export default function DashboardPage() {
                     background: "#fefce8", border: "1.5px solid #fde68a",
                     borderRadius: 999, padding: "7px 14px",
                   }}>
-                    <span style={{ fontSize: 15 }}>⭐</span>
+                    <Zap size={15} color="#ca8a04" fill="#ca8a04" strokeWidth={2.2} />
                     <span style={{ fontSize: 13, fontWeight: 700, color: "#ca8a04", whiteSpace: "nowrap" }}>{heroStats.xp.toLocaleString()} XP</span>
                   </div>
 
