@@ -244,6 +244,10 @@ On top of the core lesson/RAG/voice/puzzle platform, the following production ar
   limits. See `docs/security/SECURITY_AUDIT.md`.
 - **Navigation** — a central typed navigation registry (`frontend/src/lib/navigation.tsx`); the sidebar
   is a renderer over it, with role-correct destinations and no stale "Soon"/disabled items.
+- **Premium UI/UX** — content-shaped **skeleton loaders** on every data screen (a composite kit +
+  a full-page shell) replacing bare spinners, and **collapsible sidebar sections** whose open/closed
+  state persists (localStorage) and never closes when you select an item. Skeletons freeze under the
+  reduced-motion preference.
 
 ### Setup for the full stack
 
@@ -263,8 +267,8 @@ feat/ui-design-system-shell → feat/ui-icons-fonts-accessibility → feat/legal
 feat/school-verification-workflow → feat/student-learning-preferences → feat/parent-account-settings →
 feat/teacher-settings → feat/admin-platform-settings → feature/payments-token-billing →
 feat/progress-mastery-engine → feat/parent-progress-tracker → feat/teacher-progress-tracker →
-feat/reports-notifications-audit → feat/production-security-observability-qa →
-feat/navigation-information-architecture
+feat/reports-notifications-audit → feat/navigation-information-architecture →
+feat/premium-ui-ux-system → feat/production-security-observability-qa
 ```
 
 Open each PR against the **previous** branch to review exactly one feature's diff.

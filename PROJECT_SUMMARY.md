@@ -150,6 +150,7 @@ Built on top of the lesson/RAG/voice/puzzle core, in dependency order (one branc
 | Notifications + audit | Central preference-aware, deduplicated notifications + in-app centre; sensitive-access audit |
 | Security + observability | Request IDs, structured logs, safe errors, readiness/health, metrics + reconciliation, sensitive-endpoint rate limits |
 | Navigation / IA | Central typed navigation registry; sidebar is a renderer; role-correct, no stale Soon/disabled |
+| Premium UI/UX | Content-shaped skeleton loaders on every data screen (kit + full-page shell) instead of spinners; collapsible sidebar sections with persisted open state that never close on select; both honour reduced-motion |
 
 ### Key invariants
 
