@@ -1,8 +1,8 @@
 import { useEffect, useState } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
-import { LogOut, Menu, X } from "lucide-react";
+import { LogOut, Menu, X, Plus, MessageSquare } from "lucide-react";
 import { useAuth } from "../context/AuthContext";
-import { adminApi } from "../services/api";
+import { adminApi, chatApi } from "../services/api";
 import NotificationBell from "./NotificationBell";
 import { getNavForRole, roleLabel, type NavItem } from "../lib/navigation";
 import type { ChatListItem, Appointment } from "../types";
@@ -129,6 +129,20 @@ const SHARED_STYLES = `
     opacity: 0.45;
     cursor: default;
     pointer-events: none;
+  }
+
+  /* Student chat history sub-items under the "Chats" nav entry */
+  .sb-chat-sub {
+    padding-left: 34px;
+    font-size: 12.5px;
+    gap: 8px;
+  }
+  .sb-chat-new { font-weight: 700; color: var(--accent); }
+  .sb-chat-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .sb-chat-empty {
+    padding: 4px 12px 8px 34px;
+    font-size: 11.5px;
+    color: #94a3b8;
   }
 
   .sb-badge-count {
@@ -409,6 +423,16 @@ export default function Sidebar({
   const [mobileOpen, setMobileOpen] = useState(false);
   const [activeUsersCount, setActiveUsersCount] = useState<number | null>(null);
   const [pendingCount, setPendingCount] = useState<number | null>(null);
+  const [chats, setChats] = useState<ChatListItem[]>([]);
+
+  // Student chat history — powers the New Chat + list under the "Chats" nav item.
+  // Re-fetched on navigation so a chat the student just started appears without a refresh.
+  useEffect(() => {
+    if (user?.role !== "student") return;
+    chatApi.listChats()
+      .then((list) => setChats(Array.isArray(list) ? (list as ChatListItem[]) : []))
+      .catch(() => {});
+  }, [user?.role, location.pathname]);
 
   // Admin/administrator sidebar count badges (active users + pending approvals).
   // Re-fetched on navigation so they refresh after approve/reject + add/remove.
@@ -561,9 +585,8 @@ export default function Sidebar({
               const Icon = it.icon;
               const active = itemActive(it);
               const badge = it.badgeKey ? badges[it.badgeKey] : null;
-              return (
+              const navBtn = (
                 <button
-                  key={it.id}
                   className={`sb-nav-item${active ? " active" : ""}`}
                   onClick={() => go(it.path)}
                   aria-current={active ? "page" : undefined}
@@ -573,6 +596,26 @@ export default function Sidebar({
                     <span style={{ marginLeft: "auto", background: "var(--accent)", color: "#fff", fontSize: 10, fontWeight: 700, borderRadius: 999, padding: "1px 7px", lineHeight: 1.6 }}>{badge}</span>
                   )}
                 </button>
+              );
+              // Student "Chats": the destination link, a New Chat action, then the chat history.
+              if (it.id !== "s-chat") return <div key={it.id}>{navBtn}</div>;
+              return (
+                <div key={it.id}>
+                  {navBtn}
+                  <button className="sb-nav-item sb-chat-sub sb-chat-new" onClick={() => go("/chat")}>
+                    <Plus size={15} /><span>New Chat</span>
+                  </button>
+                  {chats.map((c) => {
+                    const chatActive = location.pathname === `/chat/${c.session_id}`;
+                    return (
+                      <button key={c.session_id} className={`sb-nav-item sb-chat-sub${chatActive ? " active" : ""}`}
+                        onClick={() => go(`/chat/${c.session_id}`)} title={c.title || "Chat"}>
+                        <MessageSquare size={14} /><span className="sb-chat-title">{c.title || "Untitled chat"}</span>
+                      </button>
+                    );
+                  })}
+                  {chats.length === 0 && <div className="sb-chat-empty">No chats yet — start one!</div>}
+                </div>
               );
             })}
           </div>

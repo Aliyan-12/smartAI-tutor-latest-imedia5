@@ -19,7 +19,7 @@ import type { LucideIcon } from "lucide-react";
 import {
   LayoutDashboard, BookOpen, Calendar, BarChart2, BarChart, ClipboardList,
   MessageCircle, Sparkles, Settings, Users, FileText, CreditCard, Bell,
-  Database, ShieldCheck, Activity, GraduationCap, ClipboardCheck,
+  Database, ShieldCheck, ClipboardCheck,
 } from "lucide-react";
 
 export type Role = "student" | "parent" | "teacher" | "admin" | "administrator";
@@ -106,10 +106,6 @@ const SCHOOL_ADMIN: NavSection[] = [
     { id: "a-kb", label: "Knowledge Base", path: "/admin/knowledge", icon: Database },
     { id: "a-sessions", label: "Sessions", path: "/appointments", icon: Calendar, activePrefix: true },
   ] },
-  { label: "Insights", items: [
-    { id: "a-reports", label: "Reports", path: "/teacher/reports", icon: FileText },
-    { id: "a-activity", label: "Activity", path: "/teacher/activity", icon: Activity },
-  ] },
   { label: "Administration", items: [
     { id: "a-billing", label: "Billing", path: "/school/billing", icon: CreditCard },
     { id: "a-settings", label: "Settings", path: "/admin/settings", icon: Settings },
@@ -125,13 +121,7 @@ const ADMINISTRATOR: NavSection[] = [
     { id: "pa-verif", label: "School Verification", path: "/admin/school-verification", icon: ShieldCheck },
   ] },
   { label: "Operations", items: [
-    { id: "pa-sessions", label: "Sessions", path: "/appointments", icon: Calendar, activePrefix: true },
     { id: "pa-kb", label: "Knowledge Base", path: "/admin/knowledge", icon: Database },
-    { id: "pa-assess", label: "Assessments", path: "/admin/assessments", icon: GraduationCap },
-    { id: "pa-reports", label: "Reports", path: "/teacher/reports", icon: FileText },
-  ] },
-  { label: "Insights", items: [
-    { id: "pa-activity", label: "Activity", path: "/teacher/activity", icon: Activity },
     { id: "pa-chats", label: "Chats", path: "/admin/chats", icon: MessageCircle },
   ] },
   { label: "Governance", items: [
