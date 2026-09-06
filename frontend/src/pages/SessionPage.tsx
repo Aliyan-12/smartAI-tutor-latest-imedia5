@@ -1605,6 +1605,7 @@ export default function SessionPage() {
           onWebSearchToggle={() => setWebSearchEnabled((v) => !v)}
           researchEnabled={researchEnabled}
           onResearchToggle={() => setResearchEnabled((v) => !v)}
+          mathKeyboard
         />
       </div>
     </>

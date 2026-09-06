@@ -1,5 +1,5 @@
 import { useState, useRef, useCallback, useEffect, type KeyboardEvent } from "react";
-import { Send, Mic, Square, PhoneOff, Plus, Paperclip, Globe, Search, X } from "lucide-react";
+import { Send, Mic, Square, PhoneOff, Plus, Paperclip, Globe, Search, X, Sigma } from "lucide-react";
 
 type VoiceStatus = "idle" | "connecting" | "listening" | "processing" | "speaking";
 
@@ -15,7 +15,12 @@ interface Props {
   onWebSearchToggle?: () => void;
   researchEnabled?: boolean;
   onResearchToggle?: () => void;
+  // Show a small maths keyboard (in-lesson chat) so students don't have to type notation.
+  mathKeyboard?: boolean;
 }
+
+// Compact, high-use symbol set — inserts readable Unicode the AI understands directly.
+const MATH_KEYS = ["²", "³", "⁻", "^", "√", "π", "×", "÷", "≤", "≥", "≠", "±", "°", "½", "¾", "⅓", "·", "∞", "≈", "→"];
 
 const STATUS_LABELS: Record<VoiceStatus, string> = {
   idle: "",
@@ -37,9 +42,11 @@ export default function ChatInput({
   onWebSearchToggle,
   researchEnabled,
   onResearchToggle,
+  mathKeyboard = false,
 }: Props) {
   const [input, setInput] = useState("");
   const [dropdownOpen, setDropdownOpen] = useState(false);
+  const [mathOpen, setMathOpen] = useState(false);
   const [attachedImage, setAttachedImage] = useState<{ data: string; mime: string; name: string } | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -91,6 +98,23 @@ export default function ChatInput({
       textareaRef.current.style.height = "auto";
     }
   }, [input, attachedImage, busy, onSend, webSearchEnabled, researchEnabled]);
+
+  // Insert a maths symbol at the caret (keeps the student's place in the text).
+  const insertSymbol = (sym: string) => {
+    const el = textareaRef.current;
+    if (!el) { setInput((v) => v + sym); return; }
+    const start = el.selectionStart ?? input.length;
+    const end = el.selectionEnd ?? input.length;
+    const next = input.slice(0, start) + sym + input.slice(end);
+    setInput(next);
+    requestAnimationFrame(() => {
+      el.focus();
+      const pos = start + sym.length;
+      el.setSelectionRange(pos, pos);
+      el.style.height = "auto";
+      el.style.height = Math.min(el.scrollHeight, 160) + "px";
+    });
+  };
 
   const handleKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === "Enter" && !e.shiftKey) {
@@ -179,6 +203,19 @@ export default function ChatInput({
           margin-left: auto;
           font-weight: 700;
         }
+        .math-bar {
+          display: flex; gap: 6px; overflow-x: auto; padding: 6px 2px 10px;
+          scrollbar-width: thin;
+        }
+        .math-key {
+          flex: 0 0 auto; min-width: 34px; height: 34px; padding: 0 8px;
+          border: 1px solid var(--border-color, #e2e8f0); border-radius: 8px;
+          background: var(--bg-primary, #fff); color: var(--text-primary, #0f172a);
+          font-size: 15px; font-weight: 700; cursor: pointer; font-family: inherit;
+          transition: background .15s, border-color .15s;
+        }
+        .math-key:hover { background: var(--bg-secondary, #eff6ff); border-color: #1a73e8; color: #1a73e8; }
+        .math-toggle.active { background: #eff6ff; border-color: #1a73e8; color: #1a73e8; }
       `}</style>
 
       {/* Attached image / file preview (100×100 thumbnail for images, chip for docs) */}
@@ -220,6 +257,17 @@ export default function ChatInput({
               </button>
             </div>
           )}
+        </div>
+      )}
+
+      {/* Maths keyboard (in-lesson): tap a symbol to insert it — no typing notation */}
+      {mathKeyboard && mathOpen && (
+        <div className="math-bar">
+          {MATH_KEYS.map((k) => (
+            <button key={k} type="button" className="math-key" onMouseDown={(e) => e.preventDefault()} onClick={() => insertSymbol(k)} title={`Insert ${k}`}>
+              {k}
+            </button>
+          ))}
         </div>
       )}
 
@@ -271,6 +319,17 @@ export default function ChatInput({
             </div>
           )}
         </div>
+
+        {mathKeyboard && (
+          <button
+            className={`input-btn plus-btn math-toggle${mathOpen ? " active" : ""}`}
+            onClick={() => setMathOpen((v) => !v)}
+            type="button"
+            title="Maths keyboard"
+          >
+            <Sigma size={18} />
+          </button>
+        )}
 
         <textarea
           ref={textareaRef}

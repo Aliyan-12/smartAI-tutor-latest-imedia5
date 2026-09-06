@@ -366,6 +366,7 @@ export default function ChatPage() {
             liveStatus={liveStatus}
             thinkingSteps={thinkingSteps}
             liveParts={liveParts}
+            plainMath
           />
         </div>
 

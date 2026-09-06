@@ -3,6 +3,7 @@ import ReactMarkdown from "react-markdown";
 import { Volume2, ChevronDown } from "lucide-react";
 import type { ChatMessage } from "../types";
 import type { LivePart } from "../hooks/useSessionChannel";
+import { normalizeMathText } from "../lib/mathText";
 
 const AI_LOGO = "/images/aitutor 4 schools-robo.png";
 
@@ -74,6 +75,9 @@ interface Props {
   // turn revealing as text, plus its status.
   liveText?: string | null;
   liveStatus?: "idle" | "connecting" | "waiting" | "speaking";
+  // Plain-text chat (/chat) sets this so raw LaTeX ($10^{-1}$) is rewritten to readable
+  // Unicode maths. The in-lesson chat leaves it off (its own KaTeX rendering stays untouched).
+  plainMath?: boolean;
 }
 
 export default function ChatWindow({
@@ -89,7 +93,10 @@ export default function ChatWindow({
   liveParts,
   liveText,
   liveStatus,
+  plainMath = false,
 }: Props) {
+  // Rewrite LaTeX → Unicode only in the plain text chat; a no-op everywhere else.
+  const mt = useCallback((s: string) => (plainMath ? normalizeMathText(s) : s), [plainMath]);
   const bottomRef = useRef<HTMLDivElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const userScrolledUpRef = useRef(false);
@@ -323,7 +330,7 @@ export default function ChatWindow({
             <div key={msg.id} className="message assistant chat-msg-animate">
               <AiAvatar />
               <div className="message-content ai-free-text">
-                <ReactMarkdown>{msg.content}</ReactMarkdown>
+                <ReactMarkdown>{mt(msg.content)}</ReactMarkdown>
                 <div className="message-actions">
                   <button onClick={() => onSpeak(msg.content)} title="Read aloud">
                     <Volume2 size={14} />
@@ -369,7 +376,7 @@ export default function ChatWindow({
         <div className="message assistant chat-msg-animate">
           <AiAvatar />
           <div className="message-content ai-free-text">
-            <ReactMarkdown>{revealedText || revealContent[0] || ""}</ReactMarkdown>
+            <ReactMarkdown>{mt(revealedText || revealContent[0] || "")}</ReactMarkdown>
             {(revealedText?.length ?? 0) < revealContent.length
               ? <span className="tts-reveal-ball" />
               : (
@@ -391,7 +398,7 @@ export default function ChatWindow({
           <AiAvatar />
           <div className="message-content ai-free-text streaming-bubble">
             <span className="stream-cursor">
-              <ReactMarkdown>{streamContent}</ReactMarkdown>
+              <ReactMarkdown>{mt(streamContent)}</ReactMarkdown>
             </span>
           </div>
         </div>
@@ -418,7 +425,7 @@ export default function ChatWindow({
                   />
                 ) : (
                   <div key={i} className="live-text-part">
-                    <ReactMarkdown>{p.text}</ReactMarkdown>
+                    <ReactMarkdown>{mt(p.text)}</ReactMarkdown>
                   </div>
                 )
               )}
