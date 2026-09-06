@@ -906,7 +906,11 @@ The student has uploaded the following material for this session. Reference it w
             "  3. Give ONE compelling reason why this topic matters (real-world hook)\n"
             "  4. Ask exactly ONE prior-knowledge question to gauge the student's starting point\n"
             "Keep the entire opening under 4 sentences. Do NOT start teaching content yet.\n"
-            "Do NOT say 'Great!' or 'Welcome!' — be direct and engaging immediately."
+            "Do NOT say 'Great!' or 'Welcome!' — be direct and engaging immediately.\n"
+            "The lesson has only just begun: NEVER refer to a specific worksheet/screen question "
+            "number in this opening (do NOT say 'let's look at question 2/3 on the screen'). When "
+            "you DO begin working through a worksheet or question sheet, always start at its "
+            "Question 1 and go in order — never open on question 2 or a later one."
         )
 
     # Fetch expert tutor style examples from model_training KB
