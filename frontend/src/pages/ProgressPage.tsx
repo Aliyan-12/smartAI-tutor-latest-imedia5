@@ -1,12 +1,11 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
+import { Flame, Zap, Clock, Target, ArrowRight } from "lucide-react";
 import Sidebar from "../components/Sidebar";
 import PageLoading from "../components/PageLoading";
-import MasteryPanel from "../components/MasteryPanel";
 import { gamificationApi, assessmentsApi, appointmentsApi } from "../services/api";
 import { useAuth } from "../context/AuthContext";
 import type { TopicMastery, StudentProfile, Assessment, Appointment } from "../types";
-import LottiePlayer, { LOTTIE_URLS } from "../components/LottiePlayer";
 
 const SUBJECT_PALETTE: Record<string, { color: string; bg: string; icon: string }> = {
   maths:              { color: "#f97316", bg: "#fff7ed", icon: "🧮" },
@@ -35,13 +34,6 @@ interface SubjectStats {
   needsFocus: boolean;
 }
 
-interface NextTopicRec {
-  topic: string;
-  subject: string;
-  key_stage: string;
-  preview: string;
-}
-
 function buildSubjectStats(mastery: TopicMastery[]): SubjectStats[] {
   const map: Record<string, { total: number; mastered: number }> = {};
   for (const m of mastery) {
@@ -62,6 +54,16 @@ function buildSubjectStats(mastery: TopicMastery[]): SubjectStats[] {
     .sort((a, b) => b.percent - a.percent);
 }
 
+// Count skills within a subject by band (matches the reference "strong · developing · need practice").
+function subjectSkillCounts(mastery: TopicMastery[], subject: string) {
+  const rows = mastery.filter((m) => m.subject === subject);
+  return {
+    strong: rows.filter((m) => m.mastery_level === "mastered").length,
+    developing: rows.filter((m) => m.mastery_level === "practicing" || m.mastery_level === "learning").length,
+    needPractice: rows.filter((m) => m.mastery_level === "not_started").length,
+  };
+}
+
 function formatStudyTime(minutes: number): string {
   const h = Math.floor(minutes / 60);
   const m = minutes % 60;
@@ -76,32 +78,14 @@ function getTopicAvgScore(m: TopicMastery): number | null {
   return Math.round(scores.reduce((a, b) => a + b, 0) / scores.length);
 }
 
-function getTopicTrend(m: TopicMastery): "up" | "down" | "stable" {
-  if (!m.score_history || m.score_history.length < 2) return "stable";
-  const last = m.score_history[m.score_history.length - 1].score;
-  const prev = m.score_history[m.score_history.length - 2].score;
-  if (last > prev + 5) return "up";
-  if (last < prev - 5) return "down";
-  return "stable";
-}
-
-const trendIcon = { up: "↑", down: "↓", stable: "→" };
-const trendColor = { up: "#16a34a", down: "#dc2626", stable: "#94a3b8" };
-
-function ProgressBar({ percent, color }: { percent: number; color: string }) {
-  return (
-    <div style={{ height: 8, background: "#e2e8f0", borderRadius: 999, overflow: "hidden", flex: 1, minWidth: 80 }}>
-      <div
-        style={{
-          height: "100%",
-          width: `${Math.min(percent, 100)}%`,
-          background: color,
-          borderRadius: 999,
-          transition: "width 0.4s ease",
-        }}
-      />
-    </div>
-  );
+// A mastery level → friendly band badge (Secure / Strong / Developing / Needs practice).
+function masteryBadge(level: string): { label: string; color: string; bg: string } {
+  switch (level) {
+    case "mastered":   return { label: "Secure", color: "#16a34a", bg: "#f0fdf4" };
+    case "practicing": return { label: "Strong", color: "#2563eb", bg: "#eff6ff" };
+    case "learning":   return { label: "Developing", color: "#d97706", bg: "#fffbeb" };
+    default:           return { label: "Needs practice", color: "#dc2626", bg: "#fef2f2" };
+  }
 }
 
 export default function ProgressPage() {
@@ -111,11 +95,8 @@ export default function ProgressPage() {
   const [mastery, setMastery] = useState<TopicMastery[]>([]);
   const [assessments, setAssessments] = useState<Assessment[]>([]);
   const [sessions, setSessions] = useState<Appointment[]>([]);
-  const [nextTopics, setNextTopics] = useState<NextTopicRec[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [showAllSubjects, setShowAllSubjects] = useState(false);
-  const [estimatorHours, setEstimatorHours] = useState(5);
 
   useEffect(() => {
     const load = async () => {
@@ -135,20 +116,9 @@ export default function ProgressPage() {
             const done = (d as Appointment[]).filter((a) => ["completed", "terminated"].includes(a.status));
             setSessions(done);
           }).catch(() => {}),
-          (async () => {
-            const primarySubject = masteryData.length > 0
-              ? buildSubjectStats(masteryData)[0]?.subject
-              : undefined;
-            try {
-              const result = await (gamificationApi as any).getNextTopics(primarySubject);
-              if (result?.recommendations) setNextTopics(result.recommendations);
-            } catch {
-              // non-fatal
-            }
-          })(),
         ]);
-      } catch (e: any) {
-        setError(e.message);
+      } catch (e) {
+        setError(e instanceof Error ? e.message : "Failed to load progress");
       } finally {
         setLoading(false);
       }
@@ -157,7 +127,6 @@ export default function ProgressPage() {
   }, [user]);
 
   const subjectStats = buildSubjectStats(mastery);
-  const visibleSubjects = showAllSubjects ? subjectStats : subjectStats.slice(0, 5);
 
   const strengths = mastery
     .filter((m) => m.mastery_level === "mastered" || m.mastery_level === "practicing")
@@ -170,10 +139,8 @@ export default function ProgressPage() {
     .slice(0, 4);
 
   const completedAssessments = assessments.filter((a) => a.status === "completed");
-
-  const totalStudyMinutes = sessions.reduce((sum, s) => sum + (s.duration_minutes ?? 0), 0);
-  const sessionsDone = sessions.length;
   const totalTopics = mastery.length;
+  const masteredCount = mastery.filter((m) => m.mastery_level === "mastered").length;
 
   const totalQuestionsCorrect = completedAssessments.reduce((sum, a) => sum + (a.correct_answers ?? 0), 0);
   const totalQuestionsAttempted = completedAssessments.reduce((sum, a) => sum + (a.total_questions ?? 0), 0);
@@ -182,16 +149,17 @@ export default function ProgressPage() {
       ? Math.round((totalQuestionsCorrect / totalQuestionsAttempted) * 100)
       : null;
 
-  // Compute this Monday (start of current calendar week)
+  // Start of the current calendar week (Monday 00:00).
   const thisMonday = (() => {
     const d = new Date();
     d.setHours(0, 0, 0, 0);
-    const day = d.getDay(); // 0=Sun
+    const day = d.getDay();
     d.setDate(d.getDate() + (day === 0 ? -6 : 1 - day));
     return d;
   })();
+  const weekStartMs = thisMonday.getTime();
 
-  // Weekly chart scores: 4 calendar weeks (Mon-Sun), index 0 = 3 weeks ago, index 3 = this week
+  // Weekly chart scores: 4 calendar weeks, index 3 = this week.
   const weeklyScores: (number | null)[] = [3, 2, 1, 0].map((w) => {
     const start = new Date(thisMonday);
     start.setDate(start.getDate() - w * 7);
@@ -205,140 +173,52 @@ export default function ProgressPage() {
     return Math.round(weekAsm.reduce((s, a) => s + (a.score_percent ?? 0), 0) / weekAsm.length);
   });
 
-  // Human-readable labels for the 4 past weeks + 1 predicted next week
-  const weekLabels: string[] = (() => {
-    const fmt = (d: Date) =>
-      d.toLocaleDateString("en-GB", { day: "numeric", month: "short" });
-    const labels = [3, 2, 1, 0].map((w) => {
-      const d = new Date(thisMonday);
-      d.setDate(d.getDate() - w * 7);
-      return w === 0 ? "This wk" : fmt(d);
-    });
-    const nextMon = new Date(thisMonday);
-    nextMon.setDate(nextMon.getDate() + 7);
-    labels.push(fmt(nextMon));
-    return labels;
-  })();
+  const weekLabels: string[] = ["W1", "W2", "W3", "This week"];
 
-  // Predicted next week score via linear extrapolation
   const nonZeroWeeks = weeklyScores
-    .map((s, i) => ({ week: i, score: s }))
-    .filter((x): x is { week: number; score: number } => x.score !== null && x.score > 0);
+    .map((s) => s)
+    .filter((s): s is number => s !== null && s > 0);
+  const improvementDelta =
+    nonZeroWeeks.length >= 2 ? nonZeroWeeks[nonZeroWeeks.length - 1] - nonZeroWeeks[0] : 0;
 
-  let predictedNextWeek: number | null = null;
-  if (nonZeroWeeks.length >= 2) {
-    const last = nonZeroWeeks[nonZeroWeeks.length - 1].score;
-    const prev = nonZeroWeeks[nonZeroWeeks.length - 2].score;
-    predictedNextWeek = Math.max(5, Math.min(100, Math.round(last + (last - prev))));
-  } else if (nonZeroWeeks.length === 1) {
-    predictedNextWeek = nonZeroWeeks[0].score;
-  }
+  // This-week engagement figures.
+  const WEEKLY_GOAL = 5;
+  const sessionsThisWeekList = sessions.filter((s) => {
+    const raw = s.session_started_at ?? s.scheduled_at ?? null;
+    return raw ? new Date(raw).getTime() >= weekStartMs : false;
+  });
+  const sessionsThisWeek = sessionsThisWeekList.length;
+  const studyMinutesThisWeek = sessionsThisWeekList.reduce((sum, s) => sum + (s.duration_minutes ?? 0), 0);
+  const sessionsToGoal = Math.max(0, WEEKLY_GOAL - sessionsThisWeek);
+  const weeklyGoalPct = Math.min(100, Math.round((sessionsThisWeek / WEEKLY_GOAL) * 100));
 
-  // Learning velocity: mastered topics / weeks active
-  const masteredCount = mastery.filter((m) => m.mastery_level === "mastered").length;
-  const activeTopics = mastery.filter((m) => m.last_practiced_at !== null);
-  let learningVelocity = 0;
-  if (activeTopics.length > 0 && masteredCount > 0) {
-    const dates = activeTopics.map((m) => new Date(m.last_practiced_at!).getTime());
-    const oldest = Math.min(...dates);
-    const weeksActive = Math.max(1, (Date.now() - oldest) / (7 * 24 * 3600 * 1000));
-    learningVelocity = Math.round((masteredCount / weeksActive) * 10) / 10;
-  }
+  const firstName = user?.name?.split(" ")[0] ?? "there";
+  const weakest = subjectStats.find((s) => s.needsFocus) ?? subjectStats[subjectStats.length - 1];
+  const weakestSubject = weakest?.subject ?? "your weaker topics";
+  const primarySubject = subjectStats[0];
 
-  const topicsRemaining = mastery.filter((m) => m.mastery_level !== "mastered").length;
-  const completionWeeks = learningVelocity > 0 ? Math.ceil(topicsRemaining / learningVelocity) : null;
+  // The single skill we nudge the student to practise next.
+  const recFocus = focusAreas[0] ?? null;
+  const recAvg = recFocus ? getTopicAvgScore(recFocus) : null;
 
-  const masteryTrend: "improving" | "declining" | "stable" = (() => {
-    if (nonZeroWeeks.length < 2) return "stable";
-    const diff = nonZeroWeeks[nonZeroWeeks.length - 1].score - nonZeroWeeks[nonZeroWeeks.length - 2].score;
-    return diff > 5 ? "improving" : diff < -5 ? "declining" : "stable";
-  })();
-
-  const weakestSubject = subjectStats.find((s) => s.needsFocus)?.subject ?? "your weaker topics";
-
-  // Progress estimator: estimate level gain from extra study hours
-  const currentLevel = profile?.xp_level ?? 1;
-  const currentXp = profile?.xp_total ?? 0;
-  const xpPerHour = 45; // approx XP per hour of study
-  const projectedXp = currentXp + estimatorHours * xpPerHour;
-  const projectedLevel = Math.floor(projectedXp / 100) + 1;
-  const levelsGained = Math.max(0, projectedLevel - currentLevel);
-  const avgScoreOverall = mastery.length > 0
-    ? Math.round(
-        mastery.reduce((sum, m) => {
-          const hist = m.score_history ?? [];
-          const avg = hist.length > 0 ? hist.reduce((a, s) => a + s.score, 0) / hist.length : 0;
-          return sum + avg;
-        }, 0) / mastery.length
-      )
-    : 0;
-
-  const achievements = [
-    profile && profile.current_streak >= 5 ? { icon: "🔥", label: `${profile.current_streak}-day streak` } : null,
-    profile && profile.xp_total >= 100 ? { icon: "⭐", label: `${profile.xp_total} XP` } : null,
-    totalTopics >= 5 ? { icon: "📚", label: "Topic Explorer" } : null,
-    completedAssessments.length >= 3 ? { icon: "⚡", label: `${completedAssessments.length} Quizzes Done` } : null,
-  ].filter(Boolean) as { icon: string; label: string }[];
-
-  if (loading) {
-    return <PageLoading />;
-  }
+  if (loading) return <PageLoading />;
 
   return (
     <div className="app-layout">
       <Sidebar />
       <div className="main-content">
         <div className="dashboard-content">
-          <div style={{
-            background: "linear-gradient(135deg, #10b981 0%, #3b82f6 100%)",
-            borderRadius: 16,
-            padding: "20px 24px",
-            marginBottom: 20,
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "space-between",
-            position: "relative",
-            overflow: "hidden",
-          }}>
-            <div style={{ position: "absolute", top: -20, right: 80, width: 100, height: 100, borderRadius: "50%", background: "rgba(255,255,255,0.08)", pointerEvents: "none" }} />
-            <div style={{ position: "absolute", bottom: -30, right: 25, width: 130, height: 130, borderRadius: "50%", background: "rgba(255,255,255,0.05)", pointerEvents: "none" }} />
-            <div>
-              <h1 style={{ fontSize: 22, fontWeight: 800, color: "#fff", margin: 0 }}>📊 My Progress</h1>
-              <p className="pg-hero-sub" style={{ fontSize: 14, color: "rgba(255,255,255,0.85)", margin: "4px 0 0" }}>
-                See how you're improving and where to focus more.
-              </p>
-              <style>{`@media (max-width: 640px) { .pg-hero-sub { display: none !important; } }`}</style>
-            </div>
-            {profile && (
-              <div style={{
-                background: "rgba(255,255,255,0.18)",
-                borderRadius: 12,
-                padding: "10px 16px",
-                textAlign: "center",
-                zIndex: 1,
-              }}>
-                <div style={{ fontSize: 22, fontWeight: 800, color: "#fff" }}>Level {profile.xp_level}</div>
-                <div style={{ fontSize: 11, color: "rgba(255,255,255,0.85)", fontWeight: 600 }}>⭐ {profile.xp_total.toLocaleString()} XP</div>
-              </div>
-            )}
-            <img
-              src="/images/robotAI.png"
-              alt="AI tutor robot"
-              draggable={false}
-              style={{
-                width: 110,
-                height: "auto",
-                position: "absolute",
-                right: 20,
-                bottom: 0,
-                pointerEvents: "none",
-                objectFit: "contain",
-                zIndex: 0,
-              }}
-            />
-          </div>
-
-          <MasteryPanel />
+          <style>{`
+            .pg-grid-2 { display: grid; grid-template-columns: 3fr 2fr; gap: 16px; margin-bottom: 16px; }
+            .pg-grid-eq { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 16px; }
+            .pg-card { background: #fff; border: 1px solid #e2e8f0; border-radius: 14px; padding: 20px 22px; box-shadow: 0 2px 10px rgba(0,0,0,0.05); }
+            .pg-card-title { font-size: 14px; font-weight: 800; color: #0f172a; margin: 0 0 14px; display: flex; align-items: center; gap: 7px; }
+            .pg-hero-stat { display: flex; align-items: center; gap: 7px; color: #fff; font-size: 13px; font-weight: 700; }
+            @media (max-width: 900px) {
+              .pg-grid-2, .pg-grid-eq { grid-template-columns: 1fr; }
+              .pg-hero-art { display: none !important; }
+            }
+          `}</style>
 
           {error && (
             <div style={{ padding: 14, background: "#fef2f2", border: "1px solid #fecaca", borderRadius: 8, color: "#dc2626", fontSize: 13, marginBottom: 16 }}>
@@ -346,485 +226,260 @@ export default function ProgressPage() {
             </div>
           )}
 
-          {/* Stats Row */}
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))", gap: 12, marginBottom: 20 }}>
-            {[
-              { icon: "📚", value: formatStudyTime(totalStudyMinutes), label: "Total Study Time", color: "#3b82f6", bg: "#eff6ff" },
-              { icon: "✅", value: String(sessionsDone), label: "Sessions Done", color: "#10b981", bg: "#ecfdf5" },
-              { icon: "🎯", value: accuracyPercent !== null ? `${accuracyPercent}%` : "—", label: "Quiz Accuracy", color: "#f97316", bg: "#fff7ed" },
-              { icon: "🗂️", value: String(totalTopics), label: "Topics Covered", color: "#a855f7", bg: "#faf5ff" },
-            ].map((s) => (
-              <div key={s.label} style={{
-                background: "#fff",
-                border: `1px solid ${s.color}22`,
-                borderRadius: 12,
-                padding: "16px 18px",
-                boxShadow: "0 2px 6px rgba(0,0,0,0.05)",
-                borderTop: `3px solid ${s.color}`,
-                position: "relative",
-                overflow: "hidden",
-              }}>
-                <div style={{
-                  position: "absolute", top: 0, right: 0, width: 60, height: 60,
-                  borderRadius: "0 12px 0 60px",
-                  background: s.bg,
-                  display: "flex", alignItems: "flex-start", justifyContent: "flex-end",
-                  padding: "6px 8px",
-                  fontSize: 20,
-                }}>{s.icon}</div>
-                <div style={{ fontSize: 24, fontWeight: 800, color: s.color, marginBottom: 2 }}>{s.value}</div>
-                <div style={{ fontSize: 12, color: "#64748b", fontWeight: 600 }}>{s.label}</div>
-              </div>
-            ))}
-          </div>
-
-          {/* Forecast Metrics Row */}
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))", gap: 12, marginBottom: 20 }}>
-            {[
-              {
-                icon: "⚡",
-                value: learningVelocity > 0 ? `${learningVelocity}/wk` : "—",
-                label: "Learning Velocity",
-                sub: "topics mastered per week",
-                color: "#3b82f6",
-              },
-              {
-                icon: masteryTrend === "improving" ? "📈" : masteryTrend === "declining" ? "📉" : "➡️",
-                value: masteryTrend === "improving" ? "Improving" : masteryTrend === "declining" ? "Declining" : "Stable",
-                label: "Quiz Score Trend",
-                sub: "based on last 4 weeks",
-                color: masteryTrend === "improving" ? "#16a34a" : masteryTrend === "declining" ? "#dc2626" : "#64748b",
-              },
-              {
-                icon: "🎯",
-                value: predictedNextWeek !== null ? `~${predictedNextWeek}%` : "—",
-                label: "Predicted Next Week",
-                sub: "projected quiz accuracy",
-                color: "#8b5cf6",
-              },
-              {
-                icon: "🏁",
-                value: completionWeeks !== null ? `~${completionWeeks}w` : "—",
-                label: "Est. Completion",
-                sub: `${topicsRemaining} topics remaining`,
-                color: "#f59e0b",
-              },
-            ].map((s) => (
-              <div key={s.label} style={{ background: "#fff", border: "1px solid #e2e8f0", borderRadius: 10, padding: "14px 16px", boxShadow: "0 1px 3px rgba(0,0,0,0.04)" }}>
-                <div style={{ fontSize: 18, marginBottom: 4 }}>{s.icon}</div>
-                <div style={{ fontSize: 20, fontWeight: 800, color: s.color, marginBottom: 2 }}>{s.value}</div>
-                <div style={{ fontSize: 12, fontWeight: 600, color: "#0f172a" }}>{s.label}</div>
-                <div style={{ fontSize: 11, color: "#94a3b8", marginTop: 2 }}>{s.sub}</div>
-              </div>
-            ))}
-          </div>
-
-          {/* ── Goal Estimator ─────────────────────────────────────────────── */}
+          {/* ── Hero: weekly-goal focused ── */}
           <div style={{
-            background: "var(--bg-secondary)",
-            border: "1px solid var(--border-color)",
-            borderRadius: 14,
-            padding: "20px 22px",
-            marginBottom: 20,
-            animation: "lp-slide-up 0.5s ease both",
+            background: "linear-gradient(120deg, #10b981 0%, #3b82f6 100%)",
+            borderRadius: 18, padding: "26px 30px", marginBottom: 16,
+            position: "relative", overflow: "hidden",
           }}>
-            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 14 }}>
-              <div>
-                <h3 style={{ fontSize: 15, fontWeight: 800, color: "var(--text-primary)", margin: 0 }}>
-                  🎯 Goal Estimator
-                </h3>
-                <p style={{ fontSize: 12, color: "var(--text-muted)", margin: "3px 0 0" }}>
-                  Drag to see how extra study hours unlock new levels
-                </p>
-              </div>
-              <LottiePlayer
-                src={avgScoreOverall >= 70 ? LOTTIE_URLS.trophy : LOTTIE_URLS.brain}
-                fallback={avgScoreOverall >= 70 ? "🏆" : "🧠"}
-                style={{ width: 60, height: 60 }}
-              />
-            </div>
-
-            {/* Slider */}
-            <div style={{ marginBottom: 16 }}>
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
-                <span style={{ fontSize: 13, fontWeight: 600, color: "var(--text-secondary)" }}>
-                  Extra study time
-                </span>
-                <span style={{
-                  fontSize: 15, fontWeight: 800, color: "#1a73e8",
-                  background: "rgba(26,115,232,0.1)", padding: "2px 10px", borderRadius: 99,
-                }}>
-                  {estimatorHours}h / week
-                </span>
-              </div>
-              <input
-                type="range"
-                min={1} max={20} step={1}
-                value={estimatorHours}
-                onChange={(e) => setEstimatorHours(Number(e.target.value))}
-                style={{
-                  width: "100%", height: 6, accentColor: "#1a73e8",
-                  cursor: "grab", borderRadius: 99,
-                }}
-              />
-              <div style={{ display: "flex", justifyContent: "space-between", fontSize: 10, color: "var(--text-muted)", marginTop: 4 }}>
-                <span>1h</span><span>5h</span><span>10h</span><span>15h</span><span>20h</span>
-              </div>
-            </div>
-
-            {/* Projection result */}
-            <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-              <div style={{
-                flex: 1, minWidth: 110, padding: "12px 14px",
-                background: "rgba(26,115,232,0.06)", border: "1px solid rgba(26,115,232,0.15)",
-                borderRadius: 10, textAlign: "center",
-                animation: "lp-bounce-in 0.3s ease both",
-              }} key={estimatorHours}>
-                <div style={{ fontSize: 24, fontWeight: 800, color: "#1a73e8" }}>
-                  +{levelsGained}
-                </div>
-                <div style={{ fontSize: 11, color: "var(--text-muted)", fontWeight: 600 }}>Levels Gained</div>
-              </div>
-              <div style={{
-                flex: 1, minWidth: 110, padding: "12px 14px",
-                background: "rgba(16,185,129,0.06)", border: "1px solid rgba(16,185,129,0.15)",
-                borderRadius: 10, textAlign: "center",
-              }}>
-                <div style={{ fontSize: 24, fontWeight: 800, color: "#10b981" }}>
-                  {projectedXp}
-                </div>
-                <div style={{ fontSize: 11, color: "var(--text-muted)", fontWeight: 600 }}>Projected XP</div>
-              </div>
-              <div style={{
-                flex: 1, minWidth: 110, padding: "12px 14px",
-                background: "rgba(99,102,241,0.06)", border: "1px solid rgba(99,102,241,0.15)",
-                borderRadius: 10, textAlign: "center",
-              }}>
-                <div style={{ fontSize: 24, fontWeight: 800, color: "#6366f1" }}>
-                  Lv {projectedLevel}
-                </div>
-                <div style={{ fontSize: 11, color: "var(--text-muted)", fontWeight: 600 }}>Target Level</div>
-              </div>
-            </div>
-
-            {levelsGained > 0 && (
-              <div style={{
-                marginTop: 12, padding: "8px 12px",
-                background: "rgba(16,185,129,0.07)", borderRadius: 8,
-                fontSize: 12, fontWeight: 600, color: "#10b981",
-                display: "flex", alignItems: "center", gap: 6,
-                animation: "lp-slide-up 0.3s ease both",
-              }}>
-                <span style={{ animation: "lp-spin-slow 2s linear infinite", display: "inline-block" }}>⭐</span>
-                {estimatorHours}h of study per week will take you to Level {projectedLevel}!
-                {levelsGained >= 3 && " You're on fire! 🔥"}
+            <img src="/images/robotAI.png" alt="" draggable={false} className="pg-hero-art"
+              style={{ position: "absolute", right: 24, bottom: -6, height: 150, width: "auto", objectFit: "contain", pointerEvents: "none", zIndex: 0 }} />
+            {sessionsToGoal > 0 && (
+              <div className="pg-hero-art" style={{ position: "absolute", right: 190, top: 26, background: "#fff", color: "#0f172a", fontSize: 12, fontWeight: 700, padding: "7px 12px", borderRadius: 12, borderBottomRightRadius: 3, boxShadow: "0 4px 14px rgba(0,0,0,0.18)", zIndex: 1, maxWidth: 150, lineHeight: 1.35 }}>
+                {sessionsToGoal} more session{sessionsToGoal > 1 ? "s" : ""} to hit your goal! 🎯
               </div>
             )}
+            <div style={{ position: "relative", zIndex: 1, maxWidth: 620 }}>
+              <div style={{ fontSize: 11, fontWeight: 800, letterSpacing: "0.6px", color: "rgba(255,255,255,0.9)", textTransform: "uppercase", marginBottom: 8 }}>📊 My Progress</div>
+              <h1 style={{ fontSize: 26, fontWeight: 800, color: "#fff", margin: "0 0 4px", letterSpacing: "-0.01em" }}>
+                You're making great progress, {firstName}!
+              </h1>
+              <p style={{ fontSize: 14, color: "rgba(255,255,255,0.9)", margin: "0 0 16px" }}>
+                Keep learning to reach your weekly goal.
+              </p>
+
+              {/* Weekly goal progress */}
+              <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 14, maxWidth: 460 }}>
+                <div style={{ flex: 1, height: 10, background: "rgba(255,255,255,0.3)", borderRadius: 999, overflow: "hidden" }}>
+                  <div style={{ height: "100%", width: `${Math.max(weeklyGoalPct, 3)}%`, background: "#fff", borderRadius: 999, transition: "width 0.5s ease" }} />
+                </div>
+                <span style={{ fontSize: 13, fontWeight: 800, color: "#fff", whiteSpace: "nowrap" }}>{sessionsThisWeek} / {WEEKLY_GOAL} sessions</span>
+              </div>
+
+              <div style={{ display: "flex", alignItems: "center", gap: 20, flexWrap: "wrap" }}>
+                <span className="pg-hero-stat"><Flame size={16} fill="#fff" strokeWidth={2} /> {profile?.current_streak ?? 0} day streak</span>
+                <span className="pg-hero-stat"><Zap size={16} fill="#fff" strokeWidth={2} /> {(profile?.xp_total ?? 0).toLocaleString()} XP</span>
+                <span className="pg-hero-stat"><Clock size={16} strokeWidth={2} /> {formatStudyTime(studyMinutesThisWeek)} studied this week</span>
+                <button onClick={() => navigate("/lesson/setup")} style={{ background: "#fff", color: "#1e40af", border: "none", borderRadius: 10, padding: "10px 18px", fontSize: 13, fontWeight: 800, cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 7 }}>
+                  Continue Learning <ArrowRight size={15} />
+                </button>
+              </div>
+            </div>
           </div>
 
-          {/* Subject progress + Strengths/Focus */}
-          <div style={{ display: "flex", gap: 14, flexWrap: "wrap", marginBottom: 16 }}>
-            {/* Progress by Subject */}
-            <div style={{ flex: "3 1 300px", background: "#fff", border: "1px solid #e2e8f0", borderRadius: 12, padding: "18px 20px", boxShadow: "0 2px 8px rgba(0,0,0,0.05)" }}>
-              <h3 style={{ fontSize: 14, fontWeight: 800, color: "#0f172a", marginBottom: 16, display: "flex", alignItems: "center", gap: 6 }}>
-                <span style={{ fontSize: 18 }}>📊</span> Progress by Subject
-              </h3>
-              {subjectStats.length === 0 ? (
-                <p style={{ fontSize: 13, color: "#94a3b8" }}>No subject data yet. Start a few AI sessions to track your progress.</p>
-              ) : (
+          {/* ── Recommended for You + This Week ── */}
+          <div className="pg-grid-2">
+            <div className="pg-card" style={{ borderLeft: "4px solid #7c3aed" }}>
+              <p className="pg-card-title"><Target size={16} color="#7c3aed" /> Recommended for You</p>
+              {recFocus ? (
                 <>
-                  {visibleSubjects.map((s) => {
-                    const pal = getSubjectPalette(s.subject);
-                    return (
-                    <div key={s.subject} style={{ marginBottom: 14 }}>
-                      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 7 }}>
-                        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                          <div style={{
-                            width: 30, height: 30, borderRadius: 8,
-                            background: pal.bg, border: `1.5px solid ${pal.color}33`,
-                            display: "flex", alignItems: "center", justifyContent: "center",
-                            fontSize: 16, flexShrink: 0,
-                          }}>{pal.icon}</div>
-                          <span style={{ fontSize: 13, fontWeight: 700, color: "#0f172a" }}>{s.subject}</span>
-                          {s.needsFocus && (
-                            <span style={{ fontSize: 10, fontWeight: 700, color: "#f59e0b", background: "#fef3c7", padding: "2px 7px", borderRadius: 999 }}>
-                              Needs Focus
-                            </span>
-                          )}
-                          {s.percent >= 80 && (
-                            <LottiePlayer
-                              src={LOTTIE_URLS.stars}
-                              fallback="⭐"
-                              loop={false}
-                              style={{ width: 28, height: 28, flexShrink: 0 }}
-                            />
-                          )}
-                        </div>
-                        <span style={{ fontSize: 12, fontWeight: 700, color: pal.color, background: pal.bg, padding: "2px 8px", borderRadius: 999 }}>
-                          {s.mastered}/{s.total} · {s.percent}%
-                        </span>
-                      </div>
-                      <ProgressBar
-                        percent={s.percent}
-                        color={pal.color}
-                      />
+                  <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 8, flexWrap: "wrap" }}>
+                    <span style={{ fontSize: 18, fontWeight: 800, color: "#0f172a" }}>{recFocus.topic}</span>
+                    <span style={{ fontSize: 11, fontWeight: 700, color: "#d97706", background: "#fffbeb", padding: "2px 10px", borderRadius: 999 }}>Developing</span>
+                  </div>
+                  <p style={{ fontSize: 13, color: "#64748b", margin: "0 0 14px", lineHeight: 1.5 }}>
+                    A little more practice with <strong>{recFocus.topic}</strong> ({recFocus.subject}) will help you become secure.
+                  </p>
+                  <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 16 }}>
+                    <div style={{ flex: 1, height: 8, background: "#e2e8f0", borderRadius: 999, overflow: "hidden" }}>
+                      <div style={{ height: "100%", width: `${recAvg ?? 40}%`, background: "linear-gradient(90deg,#7c3aed,#a855f7)", borderRadius: 999 }} />
                     </div>
-                    );
-                  })}
-                  {subjectStats.length > 5 && (
-                    <button
-                      onClick={() => setShowAllSubjects((v) => !v)}
-                      style={{ background: "none", border: "none", color: "#3b82f6", fontSize: 13, fontWeight: 600, cursor: "pointer", padding: 0, marginTop: 4, fontFamily: "inherit" }}
-                    >
-                      {showAllSubjects ? "Show less" : `View all ${subjectStats.length} subjects`}
-                    </button>
-                  )}
+                    <span style={{ fontSize: 13, fontWeight: 800, color: "#7c3aed" }}>{recAvg ?? 40}%</span>
+                  </div>
+                  <button
+                    onClick={() => navigate("/lesson/setup", { state: { subject: recFocus.subject, topic: recFocus.topic, goal: "revision" } })}
+                    style={{ background: "linear-gradient(135deg,#7c3aed,#6d28d9)", color: "#fff", border: "none", borderRadius: 10, padding: "11px 20px", fontSize: 13.5, fontWeight: 800, cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 7 }}
+                  >
+                    Practise This Skill <ArrowRight size={15} />
+                  </button>
                 </>
+              ) : (
+                <p style={{ fontSize: 13, color: "#94a3b8", margin: 0 }}>
+                  Complete a few sessions and we'll recommend the best skill to practise next.
+                </p>
               )}
             </div>
 
-            {/* Strengths & Focus Areas */}
-            <div style={{ flex: "2 1 220px", background: "#fff", border: "1px solid #e2e8f0", borderRadius: 10, padding: "18px 20px", boxShadow: "0 1px 3px rgba(0,0,0,0.04)" }}>
-              <div style={{ marginBottom: 18 }}>
-                <h3 style={{ fontSize: 13, fontWeight: 700, color: "#16a34a", marginBottom: 10 }}>✅ Your Strengths</h3>
-                {strengths.length === 0 ? (
-                  <p style={{ fontSize: 12, color: "#94a3b8" }}>Complete more sessions to identify your strengths.</p>
-                ) : (
-                  <ul style={{ margin: 0, padding: 0, listStyle: "none" }}>
-                    {strengths.map((m) => {
-                      const avg = getTopicAvgScore(m);
-                      const trend = getTopicTrend(m);
-                      return (
-                        <li key={m.id} style={{ marginBottom: 8, display: "flex", alignItems: "flex-start", gap: 6 }}>
-                          <span style={{ color: "#22c55e", marginTop: 2 }}>•</span>
-                          <div style={{ flex: 1 }}>
-                            <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
-                              <span style={{ fontSize: 13, color: "#0f172a", fontWeight: 500 }}>{m.topic}</span>
-                              <span style={{ fontSize: 10, color: "#94a3b8" }}>({m.subject})</span>
-                              {avg !== null && (
-                                <span style={{ fontSize: 11, fontWeight: 700, color: "#16a34a", background: "#f0fdf4", padding: "1px 6px", borderRadius: 999 }}>
-                                  {avg}%
-                                </span>
-                              )}
-                              <span style={{ fontSize: 12, color: trendColor[trend], fontWeight: 700 }}>{trendIcon[trend]}</span>
-                            </div>
-                            <div style={{ fontSize: 11, color: "#94a3b8" }}>{m.attempts} attempt{m.attempts !== 1 ? "s" : ""}</div>
-                          </div>
-                        </li>
-                      );
-                    })}
-                  </ul>
-                )}
-              </div>
-              <div>
-                <h3 style={{ fontSize: 13, fontWeight: 700, color: "#dc2626", marginBottom: 10 }}>🎯 Focus Areas</h3>
-                {focusAreas.length === 0 ? (
-                  <p style={{ fontSize: 12, color: "#94a3b8" }}>Great job! No urgent focus areas right now.</p>
-                ) : (
-                  <ul style={{ margin: 0, padding: 0, listStyle: "none" }}>
-                    {focusAreas.map((m) => {
-                      const avg = getTopicAvgScore(m);
-                      const trend = getTopicTrend(m);
-                      return (
-                        <li key={m.id} style={{ marginBottom: 8, display: "flex", alignItems: "flex-start", gap: 6 }}>
-                          <span style={{ color: "#ef4444", marginTop: 2 }}>•</span>
-                          <div style={{ flex: 1 }}>
-                            <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
-                              <span style={{ fontSize: 13, color: "#0f172a", fontWeight: 500 }}>{m.topic}</span>
-                              <span style={{ fontSize: 10, color: "#94a3b8" }}>({m.subject})</span>
-                              {avg !== null && (
-                                <span style={{ fontSize: 11, fontWeight: 700, color: "#dc2626", background: "#fef2f2", padding: "1px 6px", borderRadius: 999 }}>
-                                  {avg}%
-                                </span>
-                              )}
-                              {m.attempts > 0 && (
-                                <span style={{ fontSize: 12, color: trendColor[trend], fontWeight: 700 }}>{trendIcon[trend]}</span>
-                              )}
-                            </div>
-                            <div style={{ fontSize: 11, color: "#94a3b8" }}>
-                              {m.attempts === 0 ? "Not attempted yet" : `${m.attempts} attempt${m.attempts !== 1 ? "s" : ""}`}
-                            </div>
-                          </div>
-                        </li>
-                      );
-                    })}
-                  </ul>
-                )}
-              </div>
+            <div className="pg-card">
+              <p className="pg-card-title">🗓️ This Week</p>
+              {[
+                { icon: "📊", val: `${sessionsThisWeek}`, sub: `of ${WEEKLY_GOAL} weekly goal`, label: "Sessions completed", color: "#3b82f6" },
+                { icon: "⏱️", val: formatStudyTime(studyMinutesThisWeek), sub: "", label: "Total study time", color: "#8b5cf6" },
+                { icon: "🎯", val: accuracyPercent !== null ? `${accuracyPercent}%` : "—", sub: "", label: "Quiz accuracy", color: "#f97316" },
+                { icon: "🔥", val: `${profile?.current_streak ?? 0} day`, sub: "Keep it up!", label: "Current streak", color: "#ef4444" },
+              ].map((s) => (
+                <div key={s.label} style={{ display: "flex", alignItems: "center", gap: 12, padding: "9px 0", borderBottom: "1px solid #f1f5f9" }}>
+                  <span style={{ fontSize: 18 }}>{s.icon}</span>
+                  <div style={{ flex: 1 }}>
+                    <div style={{ fontSize: 15, fontWeight: 800, color: "#0f172a", lineHeight: 1.1 }}>{s.val} <span style={{ fontSize: 11, fontWeight: 600, color: "#94a3b8" }}>{s.sub}</span></div>
+                    <div style={{ fontSize: 12, color: "#64748b" }}>{s.label}</div>
+                  </div>
+                </div>
+              ))}
             </div>
           </div>
 
-          {/* Improvement Chart */}
-          <div style={{ background: "#fff", border: "1px solid #e2e8f0", borderRadius: 10, padding: "18px 20px", marginBottom: 16, boxShadow: "0 1px 3px rgba(0,0,0,0.04)" }}>
-            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 16 }}>
-              <h3 style={{ fontSize: 14, fontWeight: 700, color: "#0f172a", margin: 0 }}>Improvement Over Time</h3>
-              <div style={{ display: "flex", gap: 14, fontSize: 11, color: "#64748b" }}>
-                <span style={{ display: "flex", alignItems: "center", gap: 4 }}>
-                  <span style={{ width: 10, height: 10, background: "#bfdbfe", borderRadius: 2, display: "inline-block" }} /> Past weeks
-                </span>
-                <span style={{ display: "flex", alignItems: "center", gap: 4 }}>
-                  <span style={{ width: 10, height: 10, background: "#3b82f6", borderRadius: 2, display: "inline-block" }} /> This week
-                </span>
-                <span style={{ display: "flex", alignItems: "center", gap: 4 }}>
-                  <span style={{ width: 10, height: 10, background: "#a855f7", borderRadius: 2, display: "inline-block", opacity: 0.7 }} /> Predicted
-                </span>
-              </div>
+          {/* ── Strengths + Focus Areas ── */}
+          <div className="pg-grid-eq">
+            <div className="pg-card">
+              <p className="pg-card-title">⭐ Your Strengths</p>
+              {strengths.length === 0 ? (
+                <p style={{ fontSize: 13, color: "#94a3b8", margin: 0 }}>Complete more sessions to reveal your strengths.</p>
+              ) : (
+                strengths.map((m) => {
+                  const b = masteryBadge(m.mastery_level);
+                  return (
+                    <div key={m.id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "9px 0", borderBottom: "1px solid #f1f5f9" }}>
+                      <span style={{ width: 9, height: 9, borderRadius: "50%", background: "#22c55e", flexShrink: 0 }} />
+                      <span style={{ flex: 1, fontSize: 13.5, color: "#0f172a", fontWeight: 500 }}>{m.topic} <span style={{ fontSize: 11, color: "#94a3b8" }}>· {m.subject}</span></span>
+                      <span style={{ fontSize: 11, fontWeight: 700, color: b.color, background: b.bg, padding: "2px 10px", borderRadius: 999 }}>{b.label}</span>
+                    </div>
+                  );
+                })
+              )}
             </div>
 
-            {/* Chart area with gridlines */}
-            <div style={{ position: "relative", paddingTop: 4 }}>
-              {/* Horizontal gridlines */}
-              {[0, 25, 50, 75, 100].map((pct) => (
-                <div
-                  key={pct}
-                  style={{
-                    position: "absolute",
-                    left: 0,
-                    right: 0,
-                    bottom: `${36 + (pct / 100) * 100}px`,
-                    borderTop: pct === 0 ? "2px solid #cbd5e1" : "1px dashed #e2e8f0",
-                    zIndex: 0,
-                  }}
-                >
-                  <span style={{ position: "absolute", left: -28, fontSize: 10, color: "#cbd5e1", transform: "translateY(-50%)" }}>
-                    {pct}%
-                  </span>
-                </div>
-              ))}
+            <div className="pg-card">
+              <p className="pg-card-title">🎯 Focus Areas</p>
+              {focusAreas.length === 0 ? (
+                <p style={{ fontSize: 13, color: "#94a3b8", margin: 0 }}>Great job — no urgent focus areas right now!</p>
+              ) : (
+                focusAreas.map((m) => {
+                  const b = masteryBadge(m.mastery_level);
+                  return (
+                    <div key={m.id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "9px 0", borderBottom: "1px solid #f1f5f9" }}>
+                      <span style={{ width: 9, height: 9, borderRadius: "50%", background: b.color, flexShrink: 0 }} />
+                      <span style={{ flex: 1, fontSize: 13.5, color: "#0f172a", fontWeight: 500 }}>{m.topic} <span style={{ fontSize: 11, color: "#94a3b8" }}>· {m.subject}</span></span>
+                      <span style={{ fontSize: 11, fontWeight: 700, color: b.color, background: b.bg, padding: "2px 10px", borderRadius: 999 }}>{b.label}</span>
+                    </div>
+                  );
+                })
+              )}
+            </div>
+          </div>
 
-              <div style={{ display: "flex", alignItems: "flex-end", gap: 12, height: 140, paddingLeft: 30, paddingBottom: 36, position: "relative", zIndex: 1 }}>
+          {/* ── Your Subjects + Your Improvement ── */}
+          <div className="pg-grid-eq">
+            <div className="pg-card">
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 14 }}>
+                <p className="pg-card-title" style={{ margin: 0 }}>📘 Your Subjects</p>
+                <button onClick={() => navigate("/lesson/setup")} style={{ fontSize: 12, fontWeight: 700, color: "#1a73e8", background: "none", border: "none", cursor: "pointer", fontFamily: "inherit" }}>View all subjects →</button>
+              </div>
+              {subjectStats.length === 0 ? (
+                <p style={{ fontSize: 13, color: "#94a3b8", margin: 0 }}>No subject data yet. Start a few sessions to track progress.</p>
+              ) : (
+                subjectStats.slice(0, 4).map((s) => {
+                  const pal = getSubjectPalette(s.subject);
+                  const c = subjectSkillCounts(mastery, s.subject);
+                  return (
+                    <div key={s.subject} style={{ padding: "10px 0", borderBottom: "1px solid #f1f5f9" }}>
+                      <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 7 }}>
+                        <div style={{ width: 34, height: 34, borderRadius: 9, background: pal.bg, border: `1.5px solid ${pal.color}33`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 17, flexShrink: 0 }}>{pal.icon}</div>
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
+                            <span style={{ fontSize: 14, fontWeight: 800, color: "#0f172a" }}>{s.subject}</span>
+                            <span style={{ fontSize: 13, fontWeight: 800, color: pal.color }}>{s.percent}%</span>
+                          </div>
+                          <div style={{ height: 7, background: "#e2e8f0", borderRadius: 999, overflow: "hidden", marginTop: 5 }}>
+                            <div style={{ height: "100%", width: `${s.percent}%`, background: pal.color, borderRadius: 999 }} />
+                          </div>
+                        </div>
+                      </div>
+                      <div style={{ fontSize: 11.5, color: "#94a3b8", paddingLeft: 44 }}>
+                        {c.strong} strong · {c.developing} developing · {c.needPractice} need practice
+                      </div>
+                    </div>
+                  );
+                })
+              )}
+            </div>
+
+            <div className="pg-card">
+              <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", marginBottom: 6 }}>
+                <p className="pg-card-title" style={{ margin: 0 }}>📈 Your Improvement</p>
+                <span style={{ fontSize: 11, color: "#94a3b8" }}>Quiz accuracy</span>
+              </div>
+              <div style={{ display: "flex", alignItems: "baseline", gap: 10, marginBottom: 4 }}>
+                <span style={{ fontSize: 30, fontWeight: 800, color: "#0f172a", lineHeight: 1 }}>{accuracyPercent !== null ? `${accuracyPercent}%` : "—"}</span>
+                {improvementDelta !== 0 && (
+                  <span style={{ fontSize: 13, fontWeight: 800, color: improvementDelta > 0 ? "#16a34a" : "#dc2626" }}>
+                    {improvementDelta > 0 ? "↑ +" : "↓ "}{Math.abs(improvementDelta)}% <span style={{ color: "#94a3b8", fontWeight: 600 }}>this month</span>
+                  </span>
+                )}
+              </div>
+
+              {/* Bar chart — kept simple and fully inside the card */}
+              <div style={{ display: "flex", alignItems: "flex-end", gap: 12, height: 120, marginTop: 12, paddingBottom: 22, position: "relative" }}>
                 {weeklyScores.map((score, i) => {
                   const isNull = score === null;
                   const pct = isNull ? 0 : score;
-                  const barH = pct > 0 ? Math.max(6, (pct / 100) * 100) : 4;
-                  const barColor = pct > 0 ? (i === 3 ? "#3b82f6" : "#bfdbfe") : "#e2e8f0";
+                  const barH = pct > 0 ? Math.max(6, (pct / 100) * 92) : 4;
+                  const isThis = i === 3;
                   return (
-                    <div key={i} style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", height: "100%", justifyContent: "flex-end", gap: 4 }}>
-                      {pct > 0 && (
-                        <span style={{ fontSize: 12, fontWeight: 700, color: i === 3 ? "#3b82f6" : "#64748b" }}>{pct}%</span>
-                      )}
-                      {pct === 0 && !isNull && (
-                        <span style={{ fontSize: 11, color: "#cbd5e1" }}>0%</span>
-                      )}
-                      {isNull && (
-                        <span style={{ fontSize: 11, color: "#cbd5e1" }}>—</span>
-                      )}
-                      <div
-                        style={{
-                          width: "100%",
-                          maxWidth: 52,
-                          height: `${barH}px`,
-                          background: barColor,
-                          borderRadius: "4px 4px 0 0",
-                          transition: "height 0.4s ease",
-                        }}
-                      />
-                      <span style={{ position: "absolute", bottom: 0, fontSize: 11, color: i === 3 ? "#3b82f6" : "#94a3b8", fontWeight: i === 3 ? 700 : 400 }}>{weekLabels[i]}</span>
+                    <div key={i} style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", height: "100%", justifyContent: "flex-end", gap: 4, position: "relative" }}>
+                      <span style={{ fontSize: 11, fontWeight: 700, color: isNull ? "#cbd5e1" : isThis ? "#3b82f6" : "#64748b" }}>{isNull ? "—" : `${pct}%`}</span>
+                      <div style={{ width: "100%", maxWidth: 46, height: `${barH}px`, background: isNull ? "#e2e8f0" : isThis ? "#3b82f6" : "#bfdbfe", borderRadius: "5px 5px 0 0", transition: "height 0.4s ease" }} />
+                      <span style={{ position: "absolute", bottom: 0, fontSize: 10.5, color: isThis ? "#3b82f6" : "#94a3b8", fontWeight: isThis ? 700 : 500 }}>{weekLabels[i]}</span>
                     </div>
                   );
                 })}
-
-                {/* Predicted next week bar */}
-                {predictedNextWeek !== null && (
-                  <div style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", height: "100%", justifyContent: "flex-end", gap: 4 }}>
-                    <span style={{ fontSize: 12, fontWeight: 700, color: "#a855f7" }}>~{predictedNextWeek}%</span>
-                    <div
-                      style={{
-                        width: "100%",
-                        maxWidth: 52,
-                        height: `${Math.max(6, (predictedNextWeek / 100) * 100)}px`,
-                        background: "repeating-linear-gradient(45deg, #e9d5ff, #e9d5ff 4px, #a855f7 4px, #a855f7 8px)",
-                        borderRadius: "4px 4px 0 0",
-                        opacity: 0.85,
-                      }}
-                    />
-                    <span style={{ position: "absolute", bottom: 0, fontSize: 11, color: "#a855f7", fontWeight: 600 }}>{weekLabels[4]} ✦</span>
-                  </div>
-                )}
               </div>
+              <p style={{ fontSize: 11.5, color: "#94a3b8", margin: "6px 0 0", lineHeight: 1.4 }}>
+                Average quiz accuracy per calendar week (Mon–Sun).
+              </p>
             </div>
-            <p style={{ fontSize: 12, color: "#94a3b8", marginTop: 4 }}>
-              Average quiz accuracy per calendar week (Mon–Sun). Next week bar is AI-predicted based on your trend.
-            </p>
           </div>
 
-          {/* What's Next (RAG recommendations) */}
-          {nextTopics.length > 0 && (
-            <div style={{ background: "#fff", border: "1px solid #e2e8f0", borderRadius: 10, padding: "18px 20px", marginBottom: 16, boxShadow: "0 1px 3px rgba(0,0,0,0.04)" }}>
-              <h3 style={{ fontSize: 14, fontWeight: 700, color: "#0f172a", marginBottom: 4 }}>🔭 What to Study Next</h3>
-              <p style={{ fontSize: 12, color: "#64748b", margin: "0 0 14px" }}>
-                Recommended based on your progress — topics that naturally follow what you've mastered.
-              </p>
-              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: 10 }}>
-                {nextTopics.map((rec, i) => (
-                  <div
-                    key={i}
-                    style={{
-                      background: "#f8fafc",
-                      border: "1px solid #e2e8f0",
-                      borderLeft: "3px solid #3b82f6",
-                      borderRadius: 8,
-                      padding: "12px 14px",
-                    }}
-                  >
-                    <div style={{ fontSize: 13, fontWeight: 600, color: "#0f172a", marginBottom: 4 }}>{rec.topic}</div>
-                    <div style={{ display: "flex", gap: 6, marginBottom: 6, flexWrap: "wrap" }}>
-                      <span style={{ fontSize: 10, background: "#dbeafe", color: "#1d4ed8", padding: "2px 7px", borderRadius: 999, fontWeight: 600 }}>{rec.subject}</span>
-                      <span style={{ fontSize: 10, background: "#f0f9ff", color: "#0369a1", padding: "2px 7px", borderRadius: 999 }}>{rec.key_stage}</span>
-                    </div>
-                    <p style={{ fontSize: 11, color: "#64748b", margin: 0, lineHeight: 1.5 }}>{rec.preview}</p>
-                  </div>
-                ))}
-              </div>
-              <button
-                onClick={() => navigate("/chat")}
-                style={{
-                  marginTop: 12,
-                  fontSize: 13,
-                  fontWeight: 600,
-                  color: "#3b82f6",
-                  background: "none",
-                  border: "1px solid #bfdbfe",
-                  borderRadius: 7,
-                  padding: "6px 16px",
-                  cursor: "pointer",
-                  fontFamily: "inherit",
-                }}
-              >
-                Start learning these topics →
-              </button>
+          {/* ── Your Goal ── */}
+          <div className="pg-card" style={{ marginBottom: 16 }}>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 14, flexWrap: "wrap", gap: 8 }}>
+              <p className="pg-card-title" style={{ margin: 0 }}>🚩 Your Goal</p>
+              <button onClick={() => navigate("/lesson/setup")} style={{ fontSize: 12, fontWeight: 700, color: "#1a73e8", background: "none", border: "none", cursor: "pointer", fontFamily: "inherit" }}>Edit goal →</button>
             </div>
-          )}
-
-          {/* Recent Achievements */}
-          {achievements.length > 0 && (
-            <div style={{ background: "#fff", border: "1px solid #e2e8f0", borderRadius: 10, padding: "16px 20px", marginBottom: 16, boxShadow: "0 1px 3px rgba(0,0,0,0.04)" }}>
-              <h3 style={{ fontSize: 14, fontWeight: 700, color: "#0f172a", marginBottom: 12 }}>Recent Achievements</h3>
-              <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-                {achievements.map((ach) => (
-                  <div
-                    key={ach.label}
-                    style={{ padding: "7px 14px", background: "#fffbeb", border: "1px solid #fde68a", borderRadius: 999, fontSize: 13, fontWeight: 600, color: "#92400e", display: "flex", alignItems: "center", gap: 6 }}
-                  >
-                    <span>{ach.icon}</span>
-                    <span>{ach.label}</span>
+            <div style={{ display: "flex", alignItems: "center", gap: 18, flexWrap: "wrap" }}>
+              <div style={{ flex: "2 1 260px" }}>
+                <div style={{ fontSize: 17, fontWeight: 800, color: "#0f172a", marginBottom: 12 }}>
+                  Become confident in {primarySubject ? primarySubject.subject : weakestSubject}
+                </div>
+                <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+                  <div style={{ textAlign: "center" }}>
+                    <div style={{ fontSize: 10, color: "#94a3b8", fontWeight: 700, textTransform: "uppercase", marginBottom: 3 }}>Current</div>
+                    <span style={{ fontSize: 12, fontWeight: 700, color: "#d97706", background: "#fffbeb", padding: "4px 12px", borderRadius: 999 }}>Developing</span>
                   </div>
-                ))}
+                  <ArrowRight size={18} color="#94a3b8" />
+                  <div style={{ textAlign: "center" }}>
+                    <div style={{ fontSize: 10, color: "#94a3b8", fontWeight: 700, textTransform: "uppercase", marginBottom: 3 }}>Target</div>
+                    <span style={{ fontSize: 12, fontWeight: 700, color: "#16a34a", background: "#f0fdf4", padding: "4px 12px", borderRadius: 999 }}>Secure</span>
+                  </div>
+                </div>
+              </div>
+              <div style={{ flex: "3 1 300px" }}>
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 6 }}>
+                  <span style={{ fontSize: 13, fontWeight: 700, color: "#0f172a" }}>{masteredCount} of {totalTopics || 0} skills secure</span>
+                </div>
+                <div style={{ height: 9, background: "#e2e8f0", borderRadius: 999, overflow: "hidden", marginBottom: 12 }}>
+                  <div style={{ height: "100%", width: `${totalTopics > 0 ? Math.round((masteredCount / totalTopics) * 100) : 0}%`, background: "linear-gradient(90deg,#10b981,#3b82f6)", borderRadius: 999 }} />
+                </div>
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                  <span style={{ fontSize: 12.5, color: "#64748b" }}>🗓️ {WEEKLY_GOAL} sessions per week</span>
+                  <span style={{ fontSize: 12.5, fontWeight: 700, color: "#0f172a" }}>{sessionsThisWeek}/{WEEKLY_GOAL}</span>
+                </div>
               </div>
             </div>
-          )}
+          </div>
 
-          {/* AI Tutor Tip */}
-          <div style={{ padding: "14px 18px", background: "#f0fdf4", border: "1px solid #bbf7d0", borderRadius: 10, display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
-            <span style={{ fontSize: 18 }}>🤖</span>
-            <p style={{ flex: 1, fontSize: 13, color: "#166534", margin: 0, fontStyle: "italic" }}>
-              AI Tutor Tip: Focus on <strong>{weakestSubject}</strong> this week — a little practice each day will make a big difference!
-            </p>
+          {/* ── Bottom CTA ── */}
+          <div style={{ background: "linear-gradient(120deg,#eef2ff,#f0fdf4)", border: "1px solid #e2e8f0", borderRadius: 14, padding: "18px 22px", display: "flex", alignItems: "center", gap: 16, flexWrap: "wrap" }}>
+            <img src="/images/robot-happy.png" alt="" draggable={false} style={{ height: 56, width: "auto", objectFit: "contain", flexShrink: 0 }} />
+            <div style={{ flex: 1, minWidth: 200 }}>
+              <div style={{ fontSize: 16, fontWeight: 800, color: "#0f172a" }}>Ready to improve your next skill?</div>
+              <div style={{ fontSize: 13, color: "#64748b" }}>Let's keep the momentum going with a personalised practice session.</div>
+            </div>
             <button
-              onClick={() => navigate("/chat")}
-              style={{ fontSize: 13, fontWeight: 600, color: "#16a34a", background: "white", border: "1px solid #bbf7d0", borderRadius: 7, padding: "5px 14px", cursor: "pointer", fontFamily: "inherit", whiteSpace: "nowrap" }}
+              onClick={() => recFocus ? navigate("/lesson/setup", { state: { subject: recFocus.subject, topic: recFocus.topic, goal: "revision" } }) : navigate("/lesson/setup")}
+              style={{ background: "linear-gradient(135deg,#1a73e8,#4f46e5)", color: "#fff", border: "none", borderRadius: 10, padding: "12px 22px", fontSize: 13.5, fontWeight: 800, cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 8, whiteSpace: "nowrap" }}
             >
-              Practice Now
+              Start Recommended Practice <ArrowRight size={16} />
             </button>
           </div>
         </div>
