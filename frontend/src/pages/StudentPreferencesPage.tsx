@@ -477,7 +477,9 @@ export default function StudentPreferencesPage() {
                       <span>All changes saved</span>
                     )}
                   </div>
-                  <Button onClick={save} disabled={!dirty || saving} loading={saving}>
+                  <Button onClick={save} disabled={!dirty || saving} loading={saving}
+                    size="lg" leftIcon={<Check size={17} />}
+                    className="px-8 text-[15px] shadow-md">
                     Save changes
                   </Button>
                 </div>
