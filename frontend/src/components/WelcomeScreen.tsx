@@ -258,6 +258,54 @@ export default function WelcomeScreen({ onPromptClick, onStatsLoaded }: Props) {
 
   const hasSessions = activeSessions.length > 0 || upcomingSessions.length > 0;
 
+  // Single, prominent "Recommended for You" pick — assignment > weak spot > subject.
+  const ksLabel = profile.key_stage || continue_learning?.key_stage || "";
+  interface TopRec {
+    badge: string; badgeColor: string; badgeBg: string; title: string; sub: string;
+    difficulty: string; minutes: string; buildsOn: string; color: string;
+    img?: string; icon?: string; onStart: () => void;
+  }
+  let topRec: TopRec;
+  if (pendingAssignments.length > 0) {
+    const a = pendingAssignments[0];
+    topRec = {
+      badge: "Teacher Assigned", badgeColor: "#1a73e8", badgeBg: "#eff6ff",
+      title: `${a.homework.subject} — ${a.homework.title}`,
+      sub: "Complete this assignment set by your teacher.",
+      difficulty: ksLabel || "Your level",
+      minutes: a.homework.estimated_minutes ? `${a.homework.estimated_minutes} min` : "40 min",
+      buildsOn: "Teacher's plan", color: "#1a73e8", img: "/images/robot-happy.png",
+      onStart: () => navigate("/lesson/setup", { state: { subject: a.homework.subject, topic: a.homework.topic, goal: "homework" } }),
+    };
+  } else if (daily_plan.weak_spots.length > 0) {
+    const w = daily_plan.weak_spots[0];
+    topRec = {
+      badge: "Recommended Learning", badgeColor: "#7c3aed", badgeBg: "#f5f3ff",
+      title: `Improve in ${w.subject} — ${w.topic}`,
+      sub: "Based on your recent performance, we recommend practising this topic.",
+      difficulty: ksLabel || "Your level", minutes: "40 minutes", buildsOn: "Your recent work",
+      color: "#7c3aed", img: "/images/robot-happy.png",
+      onStart: () => navigate("/lesson/setup", { state: { subject: w.subject, topic: w.topic, goal: "revision" } }),
+    };
+  } else if (hubSubjects.length > 0) {
+    const c = getSubjectCard(hubSubjects[0], 0);
+    topRec = {
+      badge: "Recommended Subject", badgeColor: c.color, badgeBg: `${c.color}14`,
+      title: c.name, sub: c.desc, difficulty: ksLabel || "Your level",
+      minutes: "40 minutes", buildsOn: "Your level", color: c.color, icon: c.icon,
+      onStart: () => navigate("/lesson/setup", { state: { subject: c.name } }),
+    };
+  } else {
+    topRec = {
+      badge: "Keep Learning", badgeColor: "#1a73e8", badgeBg: "#eff6ff",
+      title: "Explore a new topic today",
+      sub: "Pick any subject and continue learning at your own pace.",
+      difficulty: ksLabel || "Your level", minutes: "40 minutes", buildsOn: "Your pace",
+      color: "#1a73e8", img: "/images/robot-happy.png",
+      onStart: () => navigate("/lesson/setup"),
+    };
+  }
+
   return (
     <>
       <style>{`
@@ -681,6 +729,57 @@ export default function WelcomeScreen({ onPromptClick, onStatsLoaded }: Props) {
         }
 
         .ws-rec-start-btn:hover { opacity: 0.88; }
+
+        /* ── Section 2 (redesigned): prominent full-width Recommended card ── */
+        .ws-rec2-head {
+          display: flex; align-items: center; justify-content: space-between; margin: 0 0 12px;
+        }
+        .ws-rec2-title {
+          font-size: 16px; font-weight: 800; color: #0f172a; margin: 0;
+          display: flex; align-items: center; gap: 6px;
+        }
+        .ws-rec2-more {
+          font-size: 12.5px; font-weight: 700; color: #1a73e8;
+          background: none; border: none; cursor: pointer; font-family: inherit;
+        }
+        .ws-rec2-more:hover { text-decoration: underline; }
+        .ws-rec2-card {
+          background: #fff; border: 1px solid #e2e8f0; border-radius: 16px;
+          padding: 18px 22px; margin-bottom: 20px;
+          display: flex; align-items: center; gap: 18px;
+          box-shadow: 0 2px 12px rgba(0,0,0,0.05);
+        }
+        .ws-rec2-bubble {
+          width: 56px; height: 56px; border-radius: 14px; flex-shrink: 0;
+          display: flex; align-items: center; justify-content: center; overflow: hidden;
+        }
+        .ws-rec2-main { flex: 1; min-width: 0; }
+        .ws-rec2-badge {
+          font-size: 10px; font-weight: 800; letter-spacing: 0.5px; text-transform: uppercase;
+          padding: 3px 9px; border-radius: 6px; display: inline-block; margin-bottom: 6px;
+        }
+        .ws-rec2-name { font-size: 17px; font-weight: 800; color: #0f172a; margin: 0 0 3px; }
+        .ws-rec2-sub { font-size: 12.5px; color: #64748b; margin: 0; }
+        .ws-rec2-stats { display: flex; align-items: center; gap: 24px; flex-shrink: 0; }
+        .ws-rec2-stat { display: flex; align-items: center; gap: 8px; }
+        .ws-rec2-stat-ico { font-size: 17px; flex-shrink: 0; }
+        .ws-rec2-stat-val { font-size: 13px; font-weight: 800; color: #0f172a; line-height: 1.1; }
+        .ws-rec2-stat-lbl { font-size: 11px; color: #94a3b8; }
+        .ws-rec2-start {
+          padding: 12px 22px; border-radius: 10px; font-size: 13.5px; font-weight: 800;
+          border: none; cursor: pointer; font-family: inherit; color: #fff; white-space: nowrap;
+          transition: opacity 0.18s; flex-shrink: 0;
+        }
+        .ws-rec2-start:hover { opacity: 0.9; }
+        @media (max-width: 960px) {
+          .ws-rec2-card { flex-wrap: wrap; }
+          .ws-rec2-stats { width: 100%; gap: 18px; order: 3; }
+          .ws-rec2-start { order: 4; }
+        }
+        @media (max-width: 560px) {
+          .ws-rec2-stats { display: none; }
+          .ws-rec2-start { width: 100%; }
+        }
 
         .ws-promo-card {
           background: linear-gradient(135deg, #1e3a5f 0%, #1a73e8 100%);
@@ -1201,163 +1300,43 @@ export default function WelcomeScreen({ onPromptClick, onStatsLoaded }: Props) {
           </div>
         )}
 
-        {/* ── Section 2: Recommended for You ── */}
-        <div className="ws-rec-row">
-          {/* Left column */}
-          <div>
-            <h3 className="ws-rec-left-header" style={{ display: "flex", alignItems: "center", gap: 6 }}>
-              <span style={{ color: "#1a73e8" }}>✦</span> Recommended for You
-            </h3>
-
-            {pendingAssignments.length > 0 && (
-              <div className="ws-rec-card">
-                <div className="ws-rec-icon-bubble">📋</div>
-                <div className="ws-rec-body">
-                  <span className="ws-rec-label" style={{ color: "#1a73e8", background: "#eff6ff" }}>
-                    Teacher Assigned
-                  </span>
-                  <p className="ws-rec-title">
-                    Homework: {pendingAssignments[0].homework.subject} — {pendingAssignments[0].homework.title}
-                  </p>
-                  <p className="ws-rec-desc">
-                    Complete this assignment set by your teacher
-                  </p>
-                </div>
-                <div className="ws-rec-right">
-                  {pendingAssignments[0].homework.estimated_minutes && (
-                    <span className="ws-rec-mins">{pendingAssignments[0].homework.estimated_minutes} mins</span>
-                  )}
-                  <button
-                    className="ws-rec-start-btn"
-                    style={{ background: "#1a73e8" }}
-                    onClick={() =>
-                      navigate("/lesson/setup", {
-                        state: {
-                          subject: pendingAssignments[0].homework.subject,
-                          topic: pendingAssignments[0].homework.topic,
-                          goal: "homework",
-                        },
-                      })
-                    }
-                  >
-                    Start Session
-                  </button>
-                </div>
-              </div>
-            )}
-
-            {daily_plan.weak_spots.length > 0 && (
-              <div className="ws-rec-card">
-                <div className="ws-rec-icon-bubble">
-                  <img src="/images/robot-happy.png" style={{ width: 40, height: 40, objectFit: "contain" }} alt="Start Learning" />
-                </div>
-                <div className="ws-rec-body">
-                  <span className="ws-rec-label" style={{ color: "#7c3aed", background: "#f5f3ff" }}>
-                    Recommended Learning
-                  </span>
-                  <p className="ws-rec-title">
-                    Improve in {daily_plan.weak_spots[0].subject} — {daily_plan.weak_spots[0].topic}
-                  </p>
-                  <p className="ws-rec-desc">
-                    Based on your recent performance, we recommend practising this topic.
-                  </p>
-                </div>
-                <div className="ws-rec-right">
-                  <span className="ws-rec-mins">40 Minutes</span>
-                  <button
-                    className="ws-rec-start-btn"
-                    style={{ background: "#7c3aed" }}
-                    onClick={() =>
-                      navigate("/lesson/setup", {
-                        state: {
-                          subject: daily_plan.weak_spots[0].subject,
-                          topic: daily_plan.weak_spots[0].topic,
-                          goal: "revision",
-                        },
-                      })
-                    }
-                  >
-                    Start Session
-                  </button>
-                </div>
-              </div>
-            )}
-
-            {pendingAssignments.length === 0 && daily_plan.weak_spots.length === 0 && (
-              hubSubjects.length > 0 ? (
-                hubSubjects.slice(0, 3).map((name, i) => {
-                  const c = getSubjectCard(name, i);
-                  return (
-                    <div key={name} className="ws-rec-card" style={{ borderLeft: `3px solid ${c.color}`, paddingLeft: 14 }}>
-                      <div style={{
-                        width: 52, height: 52, borderRadius: 12,
-                        background: c.bg, border: `1px solid ${c.color}40`,
-                        display: "flex", alignItems: "center", justifyContent: "center",
-                        flexShrink: 0, fontSize: 26,
-                      }}>
-                        {c.icon}
-                      </div>
-                      <div className="ws-rec-body">
-                        <span className="ws-rec-label" style={{ color: c.color, background: `${c.color}14` }}>
-                          Recommended Subject
-                        </span>
-                        <p className="ws-rec-title">{c.name}</p>
-                        <p className="ws-rec-desc">{c.desc}</p>
-                      </div>
-                      <div className="ws-rec-right">
-                        <button
-                          className="ws-rec-start-btn"
-                          style={{ background: c.color }}
-                          onClick={() => navigate("/lesson/setup", { state: { subject: c.name } })}
-                        >
-                          Start Session
-                        </button>
-                      </div>
-                    </div>
-                  );
-                })
-              ) : (
-                <div className="ws-rec-card" style={{ borderLeft: "3px solid #1a73e8", paddingLeft: 14 }}>
-                  <div style={{
-                    width: 52, height: 52, borderRadius: 12,
-                    background: "#eff6ff", border: "1px solid #bfdbfe",
-                    display: "flex", alignItems: "center", justifyContent: "center",
-                    flexShrink: 0, overflow: "hidden",
-                  }}>
-                    <img src="/images/robot-happy.png" alt="AI Tutor" draggable={false}
-                      style={{ width: 40, height: 40, objectFit: "contain" }} />
-                  </div>
-                  <div className="ws-rec-body">
-                    <span className="ws-rec-label" style={{ color: "#1a73e8", background: "#eff6ff", display: "flex", alignItems: "center", gap: 4 }}>
-                      <span style={{ color: "#1a73e8" }}>✦</span> Keep Learning
-                    </span>
-                    <p className="ws-rec-title">Explore a new topic today</p>
-                    <p className="ws-rec-desc">Pick any subject and continue learning at your own pace.</p>
-                  </div>
-                  <div className="ws-rec-right">
-                    <button
-                      className="ws-rec-start-btn"
-                      style={{ background: "#1a73e8" }}
-                      onClick={() => navigate("/lesson/setup")}
-                    >
-                      Start Session
-                    </button>
-                  </div>
-                </div>
-              )
-            )}
+        {/* ── Section 2: Recommended for You — one prominent, full-width card ── */}
+        <div className="ws-rec2-head">
+          <h3 className="ws-rec2-title"><span style={{ color: "#1a73e8" }}>✦</span> Recommended for You</h3>
+          <button className="ws-rec2-more" onClick={() => navigate("/progress")}>See more recommendations →</button>
+        </div>
+        <div className="ws-rec2-card" style={{ borderLeft: `4px solid ${topRec.color}` }}>
+          <div className="ws-rec2-bubble" style={{ background: topRec.badgeBg, border: `1px solid ${topRec.color}33` }}>
+            {topRec.img
+              ? <img src={topRec.img} alt="" draggable={false} style={{ width: 44, height: 44, objectFit: "contain" }} />
+              : <span style={{ fontSize: 28 }}>{topRec.icon}</span>}
           </div>
-
-          {/* Right column — promo banner image */}
-          <div style={{ borderRadius: 16, overflow: "hidden", height: "100%", minHeight: 180 }}>
-            <img
-              src="/images/banner.jpeg"
-              alt="Smart Tuition"
-              draggable={false}
-              className="ws-promo-banner"
-              style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }}
-            />
+          <div className="ws-rec2-main">
+            <span className="ws-rec2-badge" style={{ color: topRec.badgeColor, background: topRec.badgeBg }}>{topRec.badge}</span>
+            <p className="ws-rec2-name">{topRec.title}</p>
+            <p className="ws-rec2-sub">{topRec.sub}</p>
           </div>
+          <div className="ws-rec2-stats">
+            <div className="ws-rec2-stat">
+              <span className="ws-rec2-stat-ico">📊</span>
+              <div><div className="ws-rec2-stat-val">{topRec.difficulty}</div><div className="ws-rec2-stat-lbl">Difficulty</div></div>
+            </div>
+            <div className="ws-rec2-stat">
+              <span className="ws-rec2-stat-ico">⏱️</span>
+              <div><div className="ws-rec2-stat-val">{topRec.minutes}</div><div className="ws-rec2-stat-lbl">Estimated time</div></div>
+            </div>
+            <div className="ws-rec2-stat">
+              <span className="ws-rec2-stat-ico">🎯</span>
+              <div><div className="ws-rec2-stat-val">{topRec.buildsOn}</div><div className="ws-rec2-stat-lbl">Builds on</div></div>
+            </div>
+          </div>
+          <button
+            className="ws-rec2-start"
+            style={{ background: `linear-gradient(135deg, ${topRec.color}, ${topRec.color}cc)` }}
+            onClick={topRec.onStart}
+          >
+            Start Session →
+          </button>
         </div>
 
         {/* ── Section 3: Pick a Subject & Tutor ── */}
@@ -1428,14 +1407,14 @@ export default function WelcomeScreen({ onPromptClick, onStatsLoaded }: Props) {
             24/7 AI Support
           </span>
 
-          {/* Col 1 — 30% — robot background */}
+          {/* Col 1 — 30% — robot background (vertically centred so the bar feels balanced) */}
           <div style={{
             flex: 3,
             backgroundImage: "url('/images/robot-help.png')",
-            backgroundSize: "contain",
-            backgroundPosition: "center bottom",
+            backgroundSize: "auto 90%",
+            backgroundPosition: "center",
             backgroundRepeat: "no-repeat",
-            minHeight: 130,
+            minHeight: 132,
           }} />
 
           {/* Col 2 — 30% — heading + subtitle + scrolling chips */}
