@@ -60,6 +60,17 @@ async def get_profile(
     return StudentProfileResponse.model_validate(profile)
 
 
+@router.get("/leaderboard")
+async def get_leaderboard(
+    limit: int = Query(50, ge=5, le=100),
+    current_user: User = Depends(require_student),
+    db: AsyncSession = Depends(get_db),
+):
+    """XP leaderboard ranked within the student's year group (inside their school),
+    with the student's own rank highlighted."""
+    return await platform_service.get_leaderboard(db, current_user.id, limit=limit)
+
+
 @router.get("/mastery", response_model=list[TopicMasteryResponse])
 async def get_mastery(
     current_user: User = Depends(require_student),

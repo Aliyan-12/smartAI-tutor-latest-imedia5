@@ -19,7 +19,7 @@ import type { LucideIcon } from "lucide-react";
 import {
   LayoutDashboard, BookOpen, Calendar, CalendarPlus, BarChart2, BarChart, ClipboardList,
   MessageCircle, Sparkles, Settings, Users, FileText, CreditCard, Bell,
-  Database, ShieldCheck, ClipboardCheck,
+  Database, ShieldCheck, ClipboardCheck, Trophy,
 } from "lucide-react";
 
 export type Role = "student" | "parent" | "teacher" | "admin" | "administrator";
@@ -49,6 +49,7 @@ const STUDENT: NavSection[] = [
     { id: "s-lesson", label: "Start a Lesson", path: "/lesson/setup", icon: BookOpen },
     { id: "s-sessions", label: "My Sessions", path: "/sessions", icon: Calendar, activePrefix: true },
     { id: "s-progress", label: "My Progress", path: "/progress", icon: BarChart2 },
+    { id: "s-leaderboard", label: "Leaderboard", path: "/leaderboard", icon: Trophy },
     { id: "s-assign", label: "Assignments", path: "/assignments", icon: ClipboardList },
   ] },
   { label: "Chat", items: [

@@ -588,6 +588,24 @@ export const assessmentsApi = {
   },
 };
 
+export interface LeaderboardEntry {
+  rank: number;
+  student_id: number;
+  name: string;
+  xp_total: number;
+  level: number;
+  streak: number;
+  is_me: boolean;
+}
+export interface LeaderboardData {
+  scope: string;
+  year_group: string | null;
+  total_students: number;
+  my_rank: number | null;
+  me: LeaderboardEntry | null;
+  entries: LeaderboardEntry[];
+}
+
 export const gamificationApi = {
   async getDashboard() {
     const res = await fetch(`${API_BASE}/gamification/dashboard`, { headers: authHeaders() });
@@ -596,6 +614,10 @@ export const gamificationApi = {
   async getProfile() {
     const res = await fetch(`${API_BASE}/gamification/profile`, { headers: authHeaders() });
     return handleResponse(res);
+  },
+  async getLeaderboard(limit = 50) {
+    const res = await fetch(`${API_BASE}/gamification/leaderboard?limit=${limit}`, { headers: authHeaders() });
+    return handleResponse<LeaderboardData>(res);
   },
   async getMastery() {
     const res = await fetch(`${API_BASE}/gamification/mastery`, { headers: authHeaders() });

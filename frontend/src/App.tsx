@@ -12,6 +12,7 @@ import BookSessionPage from "./pages/BookSessionPage";
 import SessionPage from "./pages/SessionPage";
 import SessionsPage from "./pages/SessionsPage";
 import ProgressPage from "./pages/ProgressPage";
+import LeaderboardPage from "./pages/LeaderboardPage";
 import AssignmentsPage from "./pages/AssignmentsPage";
 import SettingsPage from "./pages/SettingsPage";
 import StudentPreferencesPage from "./pages/StudentPreferencesPage";
@@ -190,6 +191,14 @@ export default function App() {
             element={
               <ProtectedRoute allowedRoles={["student"]}>
                 <ProgressPage />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/leaderboard"
+            element={
+              <ProtectedRoute allowedRoles={["student"]}>
+                <LeaderboardPage />
               </ProtectedRoute>
             }
           />
