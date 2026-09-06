@@ -110,24 +110,46 @@ export default function AssignmentsPage() {
         .asgn-subtitle { font-size: 14px; color: #64748b; margin: 0; }
         .asgn-hero {
           margin: 24px 24px 0;
-          background: linear-gradient(135deg, #f59e0b 0%, #f97316 100%);
-          border-radius: 16px;
-          padding: 20px 24px;
+          background: linear-gradient(120deg, #fb923c 0%, #f97316 55%, #ea580c 100%);
+          border-radius: 18px;
+          padding: 26px 28px;
+          min-height: 128px;
           display: flex;
           align-items: center;
           justify-content: space-between;
           position: relative;
           overflow: hidden;
+          box-shadow: 0 10px 30px rgba(234,88,12,0.22);
         }
         .asgn-hero-deco1 {
-          position: absolute; top: -20px; right: 80px;
-          width: 90px; height: 90px; border-radius: 50%;
-          background: rgba(255,255,255,0.08); pointer-events: none;
+          position: absolute; top: -30px; right: 260px;
+          width: 120px; height: 120px; border-radius: 50%;
+          background: rgba(255,255,255,0.10); pointer-events: none;
         }
         .asgn-hero-deco2 {
-          position: absolute; bottom: -25px; right: 20px;
-          width: 110px; height: 110px; border-radius: 50%;
-          background: rgba(255,255,255,0.06); pointer-events: none;
+          position: absolute; bottom: -40px; right: 120px;
+          width: 150px; height: 150px; border-radius: 50%;
+          background: rgba(255,255,255,0.07); pointer-events: none;
+        }
+        .asgn-hero-badge {
+          display: inline-flex; align-items: center; gap: 6px;
+          padding: 4px 12px; margin-bottom: 12px;
+          background: rgba(255,255,255,0.22); border: 1px solid rgba(255,255,255,0.35);
+          border-radius: 999px; font-size: 11px; font-weight: 800;
+          letter-spacing: 0.7px; color: #fff; text-transform: uppercase;
+        }
+        .asgn-hero-note {
+          position: absolute; pointer-events: none; z-index: 0;
+          font-family: "Segoe Print", "Bradley Hand", "Comic Sans MS", cursive;
+          color: rgba(255,255,255,0.96); line-height: 1.2;
+        }
+        .asgn-hero-robot {
+          position: absolute; right: 178px; bottom: -6px; height: 118px; width: auto;
+          object-fit: contain; pointer-events: none; z-index: 0;
+          filter: drop-shadow(0 8px 14px rgba(0,0,0,0.18));
+        }
+        @media (max-width: 1023px) {
+          .asgn-hero-note, .asgn-hero-robot { display: none; }
         }
         .asgn-cal-btn {
           display: flex; align-items: center; gap: 6px; padding: 8px 16px;
@@ -215,36 +237,40 @@ export default function AssignmentsPage() {
           <div className="asgn-header">
             <div className="asgn-hero">
               <div className="asgn-hero-deco1" /><div className="asgn-hero-deco2" />
+
+              {/* Handwritten accents (approximate the reference illustration with existing assets) */}
+              <span className="asgn-hero-note" style={{ top: 26, left: 360, fontSize: 16, transform: "rotate(-6deg)" }}>
+                Keep learning,<br />keep growing! ↳
+              </span>
+              <span className="asgn-hero-note" style={{ top: 20, right: 170, fontSize: 13, textAlign: "right", opacity: 0.9 }}>
+                Big goals start<br />with small steps
+              </span>
+              <span className="asgn-hero-note" style={{ bottom: 20, right: 148, fontSize: 20 }}>✦</span>
+              <span className="asgn-hero-note" style={{ top: 30, right: 132, fontSize: 15 }}>★</span>
+
+              <img
+                src="/images/classroom-robot.png"
+                alt=""
+                draggable={false}
+                className="asgn-hero-robot"
+              />
+
               <div style={{ zIndex: 1 }}>
-                <h1 style={{ fontSize: 22, fontWeight: 800, color: "#fff", margin: "0 0 4px" }}>📝 Assignments</h1>
-                <p style={{ fontSize: 13, color: "rgba(255,255,255,0.85)", margin: 0 }}>
+                <span className="asgn-hero-badge">✦ Learning</span>
+                <h1 style={{ fontSize: 27, fontWeight: 800, color: "#fff", margin: "0 0 5px", letterSpacing: "-0.01em" }}>Assignments</h1>
+                <p style={{ fontSize: 13.5, color: "rgba(255,255,255,0.9)", margin: 0 }}>
                   Your homework and learning tasks from your teachers.
                 </p>
               </div>
               <div style={{ display: "flex", alignItems: "center", gap: 10, zIndex: 1 }}>
                 <button
                   className="asgn-cal-btn"
-                  style={{ background: "rgba(255,255,255,0.95)", borderColor: "transparent" }}
+                  style={{ background: "rgba(255,255,255,0.97)", borderColor: "transparent", padding: "10px 18px", fontWeight: 700 }}
                   onClick={() => { setCalendarToast(true); setTimeout(() => setCalendarToast(false), 2500); }}
                 >
-                  <Calendar size={15} /> Calendar
+                  <Calendar size={16} /> Calendar
                 </button>
               </div>
-              <img
-                src="/images/classroom-robot.png"
-                alt="Classroom robot"
-                draggable={false}
-                style={{
-                  width: 110,
-                  height: "auto",
-                  position: "absolute",
-                  right: 20,
-                  bottom: 0,
-                  pointerEvents: "none",
-                  objectFit: "contain",
-                  zIndex: 0,
-                }}
-              />
             </div>
           </div>
 
