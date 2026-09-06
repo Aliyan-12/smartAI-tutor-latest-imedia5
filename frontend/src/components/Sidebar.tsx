@@ -7,6 +7,16 @@ import NotificationBell from "./NotificationBell";
 import { getNavForRole, roleLabel, type NavItem } from "../lib/navigation";
 import type { ChatListItem, Appointment } from "../types";
 
+// Chat titles arrive prefixed with a raw "[session:NN]" tag (and sometimes a duplicated
+// lesson name). Strip the noise so the sidebar list reads as clean conversation titles.
+function cleanChatTitle(raw?: string): string {
+  const t = (raw || "")
+    .replace(/^\s*\[session:\s*\d+\]\s*/i, "")
+    .replace(/\s+/g, " ")
+    .trim();
+  return t || "New conversation";
+}
+
 // Props are accepted for backwards-compatibility with existing callers (e.g. ChatPage still
 // passes chat props). The sidebar no longer renders an inline chat list — "Chats" is a single
 // destination in the registry — so these are intentionally unused here.
@@ -143,6 +153,32 @@ const SHARED_STYLES = `
     padding: 4px 12px 8px 34px;
     font-size: 11.5px;
     color: #94a3b8;
+  }
+  /* Collapsible "Recent" sub-header for the chat history list */
+  .sb-chat-subhead {
+    width: calc(100% - 22px);
+    margin-left: 22px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 6px;
+    padding: 7px 12px 4px;
+    background: none;
+    border: none;
+    cursor: pointer;
+    font-family: inherit;
+    font-size: 10px;
+    font-weight: 700;
+    color: #94a3b8;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    transition: color 0.15s;
+  }
+  .sb-chat-subhead:hover { color: #64748b; }
+  .sb-chat-subhead:focus-visible {
+    outline: none;
+    box-shadow: 0 0 0 2px var(--accent-muted);
+    border-radius: 6px;
   }
 
   .sb-badge-count {
@@ -484,6 +520,8 @@ export default function Sidebar({
   // closes its section (the reported "dropdown closes on select" bug), and the choice is
   // persisted so it survives route changes and reloads.
   const COLLAPSE_KEY = "smartai:sidebar:collapsed";
+  // Special collapse key for the student chat-history sub-dropdown (kept in the same set).
+  const CHATS_KEY = "__chats__";
   const [collapsed, setCollapsed] = useState<Set<string>>(() => {
     try {
       const raw = localStorage.getItem(COLLAPSE_KEY);
@@ -672,24 +710,46 @@ export default function Sidebar({
                     )}
                   </button>
                 );
-                // Student "Chats": the destination link, a New Chat action, then the chat history.
+                // Student "Chats": the destination link, a New Chat action, then a
+                // COLLAPSIBLE "Recent" sub-dropdown holding the chat history (cleaned labels).
                 if (it.id !== "s-chat") return <div key={it.id}>{navBtn}</div>;
+                const chatsCollapsed = collapsed.has(CHATS_KEY);
                 return (
                   <div key={it.id}>
                     {navBtn}
                     <button className="sb-nav-item sb-chat-sub sb-chat-new" onClick={() => go("/chat")}>
                       <Plus size={15} /><span>New Chat</span>
                     </button>
-                    {chats.map((c) => {
-                      const chatActive = location.pathname === `/chat/${c.session_id}`;
-                      return (
-                        <button key={c.session_id} className={`sb-nav-item sb-chat-sub${chatActive ? " active" : ""}`}
-                          onClick={() => go(`/chat/${c.session_id}`)} title={c.title || "Chat"}>
-                          <MessageSquare size={14} /><span className="sb-chat-title">{c.title || "Untitled chat"}</span>
+                    {chats.length > 0 ? (
+                      <>
+                        <button
+                          type="button"
+                          className="sb-chat-subhead"
+                          onClick={() => toggleSection(CHATS_KEY)}
+                          aria-expanded={!chatsCollapsed}
+                          aria-controls="sb-chats-list"
+                        >
+                          <span>Recent</span>
+                          <ChevronDown size={12} className={`sb-chevron${chatsCollapsed ? " collapsed" : ""}`} />
                         </button>
-                      );
-                    })}
-                    {chats.length === 0 && <div className="sb-chat-empty">No chats yet — start one!</div>}
+                        <div id="sb-chats-list" className={`sb-section-items${chatsCollapsed ? " collapsed" : ""}`} role="group" aria-label="Recent chats">
+                          <div className="sb-section-inner">
+                            {chats.slice(0, 10).map((c) => {
+                              const chatActive = location.pathname === `/chat/${c.session_id}`;
+                              const title = cleanChatTitle(c.title);
+                              return (
+                                <button key={c.session_id} className={`sb-nav-item sb-chat-sub${chatActive ? " active" : ""}`}
+                                  onClick={() => go(`/chat/${c.session_id}`)} title={title}>
+                                  <MessageSquare size={14} /><span className="sb-chat-title">{title}</span>
+                                </button>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      </>
+                    ) : (
+                      <div className="sb-chat-empty">No chats yet — start one!</div>
+                    )}
                   </div>
                 );
               })}
