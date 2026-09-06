@@ -42,57 +42,35 @@ export default function DashboardPage() {
           {/* White hero header */}
           <div style={{
             display: "flex", alignItems: "center", justifyContent: "space-between",
-            padding: "20px 28px 18px",
-            background: "#fff",
-            borderBottom: "1px solid #e2e8f0",
-            position: "relative",
+            padding: "22px 28px", gap: 16, flexWrap: "wrap",
+            background: "linear-gradient(120deg, #1a73e8 0%, #4f46e5 100%)",
+            color: "#fff", position: "relative", overflow: "hidden",
           }}>
             <style>{`
               @media (max-width: 640px) {
                 .db-hero-sub { display: none !important; }
                 .db-hero-stats { gap: 6px !important; flex-wrap: wrap; }
               }
+              .db-chip { display: flex; align-items: center; gap: 6px; background: rgba(255,255,255,0.16); border: 1px solid rgba(255,255,255,0.28); border-radius: 999px; padding: 6px 13px; }
+              .db-chip span { font-size: 13px; font-weight: 700; color: #fff; white-space: nowrap; }
             `}</style>
-            <div>
-              <h2 style={{ fontSize: 20, fontWeight: 800, color: "#0f172a", margin: 0 }}>
+            <div style={{ zIndex: 1 }}>
+              <h2 style={{ fontSize: 22, fontWeight: 800, color: "#fff", margin: 0, letterSpacing: "-0.01em" }}>
                 Good {new Date().getHours() < 12 ? "morning" : new Date().getHours() < 17 ? "afternoon" : "evening"}! 👋
               </h2>
-              <p className="db-hero-sub" style={{ fontSize: 13, color: "#64748b", margin: "4px 0 0" }}>
+              <p className="db-hero-sub" style={{ fontSize: 13.5, color: "rgba(255,255,255,0.85)", margin: "4px 0 0" }}>
                 Ready to learn something amazing today?
               </p>
             </div>
             <div className="db-hero-stats" style={{ display: "flex", alignItems: "center", gap: 8, zIndex: 1 }}>
               {heroStats ? (
                 <>
-                  {/* Streak pill */}
-                  <div style={{
-                    display: "flex", alignItems: "center", gap: 6,
-                    background: "#fff7ed", border: "1.5px solid #fed7aa",
-                    borderRadius: 999, padding: "7px 14px",
-                  }}>
-                    <Flame size={15} color="#ea580c" fill="#ea580c" strokeWidth={2.2} />
-                    <span style={{ fontSize: 13, fontWeight: 700, color: "#ea580c", whiteSpace: "nowrap" }}>{heroStats.streak} Day Streak</span>
-                  </div>
-
-                  {/* XP pill */}
-                  <div style={{
-                    display: "flex", alignItems: "center", gap: 6,
-                    background: "#fefce8", border: "1.5px solid #fde68a",
-                    borderRadius: 999, padding: "7px 14px",
-                  }}>
-                    <Zap size={15} color="#ca8a04" fill="#ca8a04" strokeWidth={2.2} />
-                    <span style={{ fontSize: 13, fontWeight: 700, color: "#ca8a04", whiteSpace: "nowrap" }}>{heroStats.xp.toLocaleString()} XP</span>
-                  </div>
-
-                  {/* Level pill with inline progress bar */}
-                  <div style={{
-                    display: "flex", alignItems: "center", gap: 8,
-                    background: "#eff6ff", border: "1.5px solid #bfdbfe",
-                    borderRadius: 999, padding: "7px 14px",
-                  }}>
-                    <span style={{ fontSize: 13, fontWeight: 700, color: "#1d4ed8", whiteSpace: "nowrap" }}>Level {heroStats.level}</span>
-                    <div style={{ width: 60, height: 5, background: "#dbeafe", borderRadius: 999, overflow: "hidden" }}>
-                      <div style={{ height: "100%", background: "#1a73e8", borderRadius: 999, width: `${heroStats.xpPct}%`, transition: "width 0.6s ease" }} />
+                  <div className="db-chip"><Flame size={15} color="#fff" fill="#fff" strokeWidth={2.2} /><span>{heroStats.streak} Day Streak</span></div>
+                  <div className="db-chip"><Zap size={15} color="#fff" fill="#fff" strokeWidth={2.2} /><span>{heroStats.xp.toLocaleString()} XP</span></div>
+                  <div className="db-chip" style={{ gap: 8 }}>
+                    <span>Level {heroStats.level}</span>
+                    <div style={{ width: 56, height: 5, background: "rgba(255,255,255,0.25)", borderRadius: 999, overflow: "hidden" }}>
+                      <div style={{ height: "100%", background: "#fff", borderRadius: 999, width: `${heroStats.xpPct}%`, transition: "width 0.6s ease" }} />
                     </div>
                   </div>
                 </>
@@ -133,11 +111,11 @@ function StudentCredits() {
   };
   if (balance === null) return null;
   return (
-    <div style={{ margin: "16px 0", padding: 16, background: "#fff", border: "1px solid #e2e8f0", borderRadius: 12, display: "flex", alignItems: "center", gap: 16, flexWrap: "wrap" }}>
-      <div>
-        <div style={{ fontSize: 11, fontWeight: 700, color: "#94a3b8", textTransform: "uppercase", letterSpacing: "0.4px" }}>Your credits</div>
-        <div style={{ fontSize: 24, fontWeight: 800, color: "#0f172a", lineHeight: 1.1 }}>{balance.toLocaleString()}</div>
-        {pending > 0 && <div style={{ fontSize: 12, color: "#ca8a04" }}>{pending} request{pending > 1 ? "s" : ""} pending</div>}
+    <div style={{ margin: "12px 28px 0", padding: "8px 14px", background: "#fff", border: "1px solid #e2e8f0", borderRadius: 10, display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+      <div style={{ display: "flex", alignItems: "baseline", gap: 6 }}>
+        <span style={{ fontSize: 11, fontWeight: 700, color: "#94a3b8", textTransform: "uppercase", letterSpacing: "0.4px" }}>Credits</span>
+        <span style={{ fontSize: 17, fontWeight: 800, color: "#0f172a" }}>{balance.toLocaleString()}</span>
+        {pending > 0 && <span style={{ fontSize: 11.5, color: "#ca8a04" }}>· {pending} pending</span>}
       </div>
       {!open ? (
         <button onClick={() => setOpen(true)} style={{ marginLeft: "auto", padding: "8px 14px", background: "#1a73e8", color: "#fff", border: "none", borderRadius: 8, fontSize: 13, fontWeight: 700, cursor: "pointer" }}>Request top-up</button>
