@@ -299,11 +299,12 @@ export default function SessionsPage() {
               alt="Classroom robot"
               draggable={false}
               style={{
-                width: 110,
-                height: "auto",
+                height: 78,
+                width: "auto",
                 position: "absolute",
-                right: 20,
-                bottom: 0,
+                right: 24,
+                top: "50%",
+                transform: "translateY(-50%)",
                 pointerEvents: "none",
                 objectFit: "contain",
                 zIndex: 1,
