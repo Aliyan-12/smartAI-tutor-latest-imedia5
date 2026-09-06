@@ -91,11 +91,20 @@ export default function DashboardPage() {
 }
 
 /* ── Student credits: balance + request a top-up (students never self-pay) ── */
+// Preset top-up tiers — students pick a bundle instead of typing a raw number.
+const CREDIT_TIERS = [
+  { credits: 10, price: "£1.99" },
+  { credits: 25, price: "£4.99" },
+  { credits: 50, price: "£8.99" },
+  { credits: 100, price: "£16.99" },
+  { credits: 250, price: "£39.99" },
+];
+
 function StudentCredits() {
   const [balance, setBalance] = useState<number | null>(null);
   const [pending, setPending] = useState(0);
   const [open, setOpen] = useState(false);
-  const [amount, setAmount] = useState("");
+  const [tier, setTier] = useState<number>(CREDIT_TIERS[0].credits);
   const [msg, setMsg] = useState<string | null>(null);
   const load = () => {
     billingApi.me().then((m) => setBalance(m.balance)).catch(() => setBalance(null));
@@ -103,9 +112,9 @@ function StudentCredits() {
   };
   useEffect(() => { load(); }, []);
   const request = async () => {
-    const n = parseFloat(amount);
-    if (!n || n <= 0) { setMsg("Enter an amount"); return; }
-    try { await billingApi.createCreditRequest(n, ""); setAmount(""); setOpen(false); setMsg("Request sent to your parent / school"); load(); }
+    const n = Number(tier);
+    if (!n || n <= 0) { setMsg("Choose a bundle"); return; }
+    try { await billingApi.createCreditRequest(n, ""); setTier(CREDIT_TIERS[0].credits); setOpen(false); setMsg("Request sent to your parent / school"); load(); }
     catch (e) { setMsg(e instanceof Error ? e.message : "Failed"); }
     window.setTimeout(() => setMsg(null), 2600);
   };
@@ -121,8 +130,17 @@ function StudentCredits() {
         <button onClick={() => setOpen(true)} style={{ marginLeft: "auto", padding: "8px 14px", background: "#1a73e8", color: "#fff", border: "none", borderRadius: 8, fontSize: 13, fontWeight: 700, cursor: "pointer" }}>Request top-up</button>
       ) : (
         <div style={{ marginLeft: "auto", display: "flex", gap: 8, alignItems: "center" }}>
-          <input type="number" value={amount} onChange={(e) => setAmount(e.target.value)} placeholder="Credits" style={{ width: 100, padding: "7px 10px", border: "1px solid #cbd5e1", borderRadius: 8, fontSize: 13 }} />
-          <button onClick={request} style={{ padding: "8px 12px", background: "#16a34a", color: "#fff", border: "none", borderRadius: 8, fontSize: 13, fontWeight: 700, cursor: "pointer" }}>Send</button>
+          <select
+            value={tier}
+            onChange={(e) => setTier(Number(e.target.value))}
+            aria-label="Choose a credit bundle"
+            style={{ padding: "8px 12px", border: "1px solid #cbd5e1", borderRadius: 8, fontSize: 13, fontWeight: 600, color: "#0f172a", background: "#fff", cursor: "pointer", minWidth: 168 }}
+          >
+            {CREDIT_TIERS.map((t) => (
+              <option key={t.credits} value={t.credits}>{t.credits} credits — {t.price}</option>
+            ))}
+          </select>
+          <button onClick={request} style={{ padding: "8px 14px", background: "#16a34a", color: "#fff", border: "none", borderRadius: 8, fontSize: 13, fontWeight: 700, cursor: "pointer" }}>Send</button>
           <button onClick={() => setOpen(false)} style={{ padding: "8px 12px", background: "none", color: "#64748b", border: "none", fontSize: 13, cursor: "pointer" }}>Cancel</button>
         </div>
       )}
