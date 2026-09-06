@@ -2,7 +2,7 @@ import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { User, Bell, Shield, Save, LogOut, Eye, EyeOff } from "lucide-react";
 import Sidebar from "../components/Sidebar";
-import { settingsApi, curriculumApi } from "../services/api";
+import { settingsApi, curriculumApi, gamificationApi } from "../services/api";
 import { useAuth } from "../context/AuthContext";
 import type { LearningPreferences } from "../types";
 
@@ -46,6 +46,8 @@ export default function SettingsPage() {
   const [name, setName] = useState(user?.name ?? "");
   const [yearGroup, setYearGroup] = useState("");
   const [keyStage, setKeyStage] = useState("");
+  // Real gamification stats for the hero banner (no fabricated numbers).
+  const [hero, setHero] = useState<{ xp: number; level: number; streak: number } | null>(null);
   // Key stages + year groups sourced from the Resource Hub (not hardcoded).
   const [hubKeyStages, setHubKeyStages] = useState<string[]>([]);
   const [hubYears, setHubYears] = useState<string[]>([]);
@@ -103,6 +105,16 @@ export default function SettingsPage() {
   useEffect(() => {
     curriculumApi.getKeyStages()
       .then((d) => setHubKeyStages(d.keystages ?? []))
+      .catch(() => {});
+  }, []);
+
+  // Real XP / level / streak for the hero stat cards.
+  useEffect(() => {
+    gamificationApi.getDashboard()
+      .then((d) => {
+        const p = (d as { profile?: { xp_total?: number; xp_level?: number; current_streak?: number } })?.profile;
+        if (p) setHero({ xp: p.xp_total ?? 0, level: p.xp_level ?? 1, streak: p.current_streak ?? 0 });
+      })
       .catch(() => {});
   }, []);
 
@@ -207,6 +219,7 @@ export default function SettingsPage() {
           .sett-hero h1 { font-size: 20px; }
           .sett-hero-robot { height: 70px; }
           .sett-hero-right { display: none; }
+          .sett-hero-note { display: none; }
         }
 
         /* Hero banner */
@@ -262,8 +275,40 @@ export default function SettingsPage() {
           background: rgba(255,255,255,0.1); border: 1px solid rgba(255,255,255,0.15);
           border-radius: 10px; padding: 6px 12px; text-align: center; backdrop-filter: blur(6px);
         }
-        .sett-hero-stat-val { font-size: 14px; font-weight: 800; color: #fff; line-height: 1; }
+        .sett-hero-stat-val { font-size: 15px; font-weight: 800; color: #fff; line-height: 1; }
         .sett-hero-stat-lbl { font-size: 10px; color: rgba(199,210,254,0.75); margin-top: 2px; font-weight: 600; }
+        .sett-hero-note {
+          position: absolute; z-index: 1; pointer-events: none;
+          font-family: "Segoe Print", "Bradley Hand", "Comic Sans MS", cursive;
+          color: rgba(224,231,255,0.96); line-height: 1.2;
+        }
+        .sett-hero-bubble {
+          background: #fff; color: #1e1b4b; font-size: 12px; font-weight: 700;
+          padding: 6px 12px; border-radius: 12px; border-bottom-right-radius: 3px;
+          box-shadow: 0 4px 14px rgba(0,0,0,0.22); white-space: nowrap;
+        }
+        .sett-hero-name { display: flex; align-items: center; gap: 10px; margin-top: 12px; }
+        .sett-hero-name-av {
+          width: 40px; height: 40px; border-radius: 50%;
+          background: linear-gradient(135deg, #a5b4fc, #7c3aed);
+          display: flex; align-items: center; justify-content: center;
+          font-size: 17px; font-weight: 800; color: #fff;
+          border: 2px solid rgba(255,255,255,0.3); flex-shrink: 0;
+        }
+        /* Two-column profile card (avatar left, fields right) — fills the blank space */
+        .sett-profile-grid {
+          display: grid; grid-template-columns: 168px 1fr; gap: 26px; align-items: start;
+          margin-bottom: 6px;
+        }
+        .sett-profile-avatar-col { display: flex; flex-direction: column; align-items: center; gap: 10px; }
+        .sett-avatar-btn {
+          font-size: 12px; font-weight: 600; color: #4338ca; background: #eef2ff;
+          border: 1px solid #c7d2fe; border-radius: 8px; padding: 7px 14px; cursor: pointer;
+          display: inline-flex; align-items: center; gap: 6px; transition: background .15s;
+        }
+        .sett-avatar-btn:hover { background: #e0e7ff; }
+        .sett-field-label { font-size: 13px; font-weight: 600; color: #374151; display: block; margin-bottom: 4px; }
+        @media (max-width: 640px) { .sett-profile-grid { grid-template-columns: 1fr; gap: 16px; } }
 
         .sett-tabs { display: flex; gap: 2px; padding: 16px 24px 0; border-bottom: 2px solid #e2e8f0; overflow-x: auto; flex-shrink: 0; }
         .sett-tab {
@@ -398,24 +443,42 @@ export default function SettingsPage() {
         <div className="sett-main">
           {/* Hero Banner */}
           <div className="sett-hero">
+            <span className="sett-hero-note" style={{ top: 26, left: "40%", fontSize: 18, transform: "rotate(-5deg)" }}>
+              Small steps lead to<br />big progress
+            </span>
             <div className="sett-hero-left">
               <div className="sett-hero-badge">⚙️ Settings</div>
               <h1>Your Account</h1>
               <p>Personalise your learning experience</p>
-              <div className="sett-hero-avatar">
-                {(name || user?.name || "?").charAt(0).toUpperCase()}
+              <div className="sett-hero-name">
+                <div className="sett-hero-name-av">{(name || user?.name || "?").charAt(0).toUpperCase()}</div>
+                <div>
+                  <div style={{ fontSize: 14, fontWeight: 800, color: "#fff", lineHeight: 1.1 }}>{name || user?.name || "Your name"}</div>
+                  {(yearGroup || keyStage) && (
+                    <div style={{ fontSize: 11.5, color: "rgba(199,210,254,0.85)", marginTop: 2 }}>
+                      {[yearGroup, keyStage].filter(Boolean).join(" · ")}
+                    </div>
+                  )}
+                </div>
               </div>
             </div>
             <div className="sett-hero-right">
-              <img src="/images/robotAI.png" alt="Settings robot" className="sett-hero-robot" draggable={false} />
+              <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                <div className="sett-hero-bubble">You're doing great! 🚀</div>
+                <img src="/images/robotAI.png" alt="Settings robot" className="sett-hero-robot" draggable={false} />
+              </div>
               <div className="sett-hero-stat-row">
                 <div className="sett-hero-stat">
-                  <div className="sett-hero-stat-val">3</div>
-                  <div className="sett-hero-stat-lbl">Sections</div>
+                  <div className="sett-hero-stat-val">{hero ? hero.streak : "—"}</div>
+                  <div className="sett-hero-stat-lbl">Streak</div>
                 </div>
                 <div className="sett-hero-stat">
-                  <div className="sett-hero-stat-val">{user?.name ? "✓" : "!"}</div>
-                  <div className="sett-hero-stat-lbl">Profile</div>
+                  <div className="sett-hero-stat-val">{hero ? hero.xp.toLocaleString() : "—"}</div>
+                  <div className="sett-hero-stat-lbl">XP</div>
+                </div>
+                <div className="sett-hero-stat">
+                  <div className="sett-hero-stat-val">{hero ? hero.level : "—"}</div>
+                  <div className="sett-hero-stat-lbl">Level</div>
                 </div>
               </div>
             </div>
@@ -438,45 +501,61 @@ export default function SettingsPage() {
             {activeTab === "profile" && (
               <div className="sett-card">
                 <p className="sett-card-title"><User size={16} /> Profile</p>
-                <div className="sett-avatar">{(name || user?.name || "?").charAt(0).toUpperCase()}</div>
-                <label style={{ fontSize: 13, fontWeight: 600, color: "#374151", display: "block", marginBottom: 4 }}>Full Name</label>
-                <input className="sett-input" value={name} onChange={(e) => setName(e.target.value)} placeholder="Your full name" />
-                <label style={{ fontSize: 13, fontWeight: 600, color: "#374151", display: "block", marginBottom: 4 }}>
-                  Key Stage
-                </label>
-                <select
-                  className="sett-select"
-                  value={keyStage}
-                  onChange={(e) => handleKeyStageChange(e.target.value)}
-                  style={{ width: "100%", marginBottom: 16 }}
-                >
-                  <option value="">Select key stage</option>
-                  {hubKeyStages.map((ks) => (
-                    <option key={ks} value={ks}>{KS_LABELS[ks] ?? ks}</option>
-                  ))}
-                </select>
-                <label style={{ fontSize: 13, fontWeight: 600, color: "#374151", display: "block", marginBottom: 4 }}>
-                  Year Group
-                </label>
-                <select
-                  className="sett-select"
-                  value={yearGroup}
-                  onChange={(e) => setYearGroup(e.target.value)}
-                  style={{ width: "100%", marginBottom: 4 }}
-                >
-                  <option value="">Select year group</option>
-                  {/* Always include the saved value so it shows even before the year list loads. */}
-                  {yearGroup && !hubYears.includes(yearGroup) && (
-                    <option value={yearGroup}>{yearGroup}</option>
-                  )}
-                  {hubYears.map((y) => (
-                    <option key={y} value={y}>{y}</option>
-                  ))}
-                </select>
-                <p style={{ fontSize: 12, color: "#64748b", marginTop: 4, marginBottom: 20 }}>
-                  Working ahead? You can change your key stage and year group here to challenge
-                  yourself — this only affects your lessons, not your school records.
-                </p>
+                <div className="sett-profile-grid">
+                  {/* Left column — avatar + change action */}
+                  <div className="sett-profile-avatar-col">
+                    <div className="sett-avatar" style={{ marginBottom: 0 }}>{(name || user?.name || "?").charAt(0).toUpperCase()}</div>
+                    <button
+                      type="button"
+                      className="sett-avatar-btn"
+                      onClick={() => showToast("Custom avatars are coming soon!")}
+                    >
+                      📷 Change Avatar
+                    </button>
+                  </div>
+
+                  {/* Right column — fields (fills the horizontal space) */}
+                  <div>
+                    <label className="sett-field-label">Full Name</label>
+                    <input className="sett-input" value={name} onChange={(e) => setName(e.target.value)} placeholder="Your full name" />
+                    <label className="sett-field-label">Key Stage</label>
+                    <select
+                      className="sett-select"
+                      value={keyStage}
+                      onChange={(e) => handleKeyStageChange(e.target.value)}
+                      style={{ width: "100%", marginBottom: 16 }}
+                    >
+                      <option value="">Select key stage</option>
+                      {hubKeyStages.map((ks) => (
+                        <option key={ks} value={ks}>{KS_LABELS[ks] ?? ks}</option>
+                      ))}
+                    </select>
+                    <label className="sett-field-label">Year Group</label>
+                    <select
+                      className="sett-select"
+                      value={yearGroup}
+                      onChange={(e) => setYearGroup(e.target.value)}
+                      style={{ width: "100%", marginBottom: 0 }}
+                    >
+                      <option value="">Select year group</option>
+                      {/* Always include the saved value so it shows even before the year list loads. */}
+                      {yearGroup && !hubYears.includes(yearGroup) && (
+                        <option value={yearGroup}>{yearGroup}</option>
+                      )}
+                      {hubYears.map((y) => (
+                        <option key={y} value={y}>{y}</option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+
+                <div style={{ background: "#eef2ff", border: "1px solid #c7d2fe", borderRadius: 10, padding: "10px 14px", margin: "16px 0 18px", display: "flex", gap: 8, alignItems: "flex-start" }}>
+                  <span style={{ fontSize: 14 }}>ℹ️</span>
+                  <p style={{ fontSize: 12.5, color: "#4338ca", margin: 0, lineHeight: 1.5 }}>
+                    Working ahead? You can change your key stage and year group here to challenge
+                    yourself — this only affects your lessons, not your school records.
+                  </p>
+                </div>
                 <button className="sett-save-btn" onClick={saveProfile} disabled={saving}>
                   <Save size={14} style={{ marginRight: 6, verticalAlign: "middle" }} />
                   {saving ? "Saving..." : "Save Changes"}
