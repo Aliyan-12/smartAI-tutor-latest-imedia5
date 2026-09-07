@@ -1907,13 +1907,8 @@ def _build_quiz_ctx(topic: str, score: float, strong: list, weak: list) -> str:
 
 
 def _appt_id_from_chat(chat) -> Optional[int]:
-    """Resolve the appointment id a session chat belongs to (column or [session:N] title)."""
-    appt_id = getattr(chat, "appointment_id", None)
-    if not appt_id and getattr(chat, "title", None):
-        m = _re.match(r"\[session:(\d+)\]", chat.title)
-        if m:
-            appt_id = int(m.group(1))
-    return appt_id
+    """Resolve the appointment id a session chat belongs to — from its FK column only."""
+    return getattr(chat, "appointment_id", None)
 
 
 async def _resolve_appt_id(db: AsyncSession, chat_id: int) -> Optional[int]:

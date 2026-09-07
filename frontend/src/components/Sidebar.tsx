@@ -7,13 +7,10 @@ import NotificationBell from "./NotificationBell";
 import { getNavForRole, roleLabel, type NavItem } from "../lib/navigation";
 import type { ChatListItem, Appointment } from "../types";
 
-// Chat titles arrive prefixed with a raw "[session:NN]" tag (and sometimes a duplicated
-// lesson name). Strip the noise so the sidebar list reads as clean conversation titles.
+// Sidebar only lists simple chats (session chats are excluded server-side by their
+// appointment_id FK), so the title is already a clean conversation name — just tidy whitespace.
 function cleanChatTitle(raw?: string): string {
-  const t = (raw || "")
-    .replace(/^\s*\[session:\s*\d+\]\s*/i, "")
-    .replace(/\s+/g, " ")
-    .trim();
+  const t = (raw || "").replace(/\s+/g, " ").trim();
   return t || "New conversation";
 }
 

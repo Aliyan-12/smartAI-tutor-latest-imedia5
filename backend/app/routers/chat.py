@@ -32,16 +32,11 @@ async def list_chats(
     _ensure_student(current_user)
     chats = await chat_service.get_user_chats(db, current_user.id)
     # Only SIMPLE chats belong in the sidebar "Chats" list. Lesson/session chats are
-    # identified by their appointment_id FK (they're reached from My Sessions, not here);
-    # the "[session:<id>]" title prefix is a fallback for any legacy chat created before
-    # the FK was populated.
-    def _is_session_chat(c) -> bool:
-        return getattr(c, "appointment_id", None) is not None or (c.title or "").startswith("[session:")
-
+    # identified by their appointment_id FK (they're reached from My Sessions, not here).
     return [
         ChatListItem(id=c.id, session_id=c.session_id, title=c.title, created_at=c.created_at)
         for c in chats
-        if not _is_session_chat(c)
+        if getattr(c, "appointment_id", None) is None
     ]
 
 
@@ -91,16 +86,14 @@ async def get_or_create_session_chat(
     from app.models.chat import Chat as ChatModel
     from sqlalchemy import select as sa_select
 
-    # The session chat title is a stable key used to find the right chat later
-    session_title_key = f"[session:{appointment_id}]"
-
-    # Look up by stable title key + user — no migration dependency
+    # A session chat is identified SOLELY by its appointment_id FK (never a title string),
+    # so the chat's title stays a clean, human-readable lesson name.
     result = await db.execute(
         sa_select(ChatModel)
         .options(selectinload(ChatModel.messages))
         .where(
             ChatModel.user_id == current_user.id,
-            ChatModel.title.like(f"{session_title_key}%"),
+            ChatModel.appointment_id == appointment_id,
         )
         .order_by(ChatModel.id.desc())
         .limit(1)
@@ -121,15 +114,9 @@ async def get_or_create_session_chat(
         if appt.student_id != current_user.id:
             raise HTTPException(status_code=403, detail="This appointment does not belong to you")
 
-        display_title = appt.title or f"{appt.subject} Session"
-        full_title = f"{session_title_key} {display_title}"
-        chat = await chat_service.create_chat(db, current_user.id, title=full_title)
-
-        # Also try to set appointment_id FK if the column exists (non-fatal)
-        try:
-            chat.appointment_id = appointment_id
-        except Exception:
-            pass
+        title = appt.title or f"{appt.subject} Session"
+        chat = await chat_service.create_chat(db, current_user.id, title=title)
+        chat.appointment_id = appointment_id
 
         await db.commit()
         await db.refresh(chat)
