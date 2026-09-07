@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
 import { gamificationApi, appointmentsApi, assignmentsApi, chatApi, curriculumApi, settingsApi } from "../services/api";
 import type { DashboardData, Appointment, MyAssignment } from "../types";
+import { SkeletonCard, SkeletonStats, SkeletonList } from "./ui";
 
 interface SessionSummary {
   messageCount: number;
@@ -215,10 +216,19 @@ export default function WelcomeScreen({ onPromptClick, onStatsLoaded }: Props) {
   const firstName = user?.name?.split(" ")[0] ?? "there";
 
   if (loading) {
+    // Shaped skeleton (never a bare "Loading…" line) — mirrors the dashboard's own layout.
     return (
-      <div className="ws-root ws-loading">
-        <div className="ws-spinner" />
-        <p>Loading your dashboard…</p>
+      <div className="ws-root">
+        <SkeletonCard lines={2} />
+        <div style={{ height: 16 }} />
+        <div className="ws-rec-row" style={{ display: "grid", gridTemplateColumns: "3fr 2fr", gap: 16 }}>
+          <SkeletonCard lines={4} />
+          <SkeletonCard lines={4} />
+        </div>
+        <div style={{ height: 16 }} />
+        <SkeletonStats count={3} />
+        <div style={{ height: 16 }} />
+        <SkeletonList rows={3} />
       </div>
     );
   }
