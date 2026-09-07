@@ -204,9 +204,7 @@ export default function ProgressPage() {
   if (loading) return <PageLoading />;
 
   return (
-    <div className="app-layout">
-      <Sidebar />
-      <div className="main-content">
+    <div className="main-content">
         <div className="dashboard-content">
           <style>{`
             .pg-grid-2 { display: grid; grid-template-columns: 3fr 2fr; gap: 16px; margin-bottom: 16px; }
@@ -531,6 +529,5 @@ export default function ProgressPage() {
           </div>
         </div>
       </div>
-    </div>
   );
 }

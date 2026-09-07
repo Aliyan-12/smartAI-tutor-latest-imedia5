@@ -199,19 +199,7 @@ export default function ChatPage() {
   const subjectTheme = themeSource.trim() ? detectSubjectTheme(themeSource) : null;
 
   return (
-    <div className="app-layout">
-      <Sidebar
-        chatList={chatList}
-        activeSessionId={sessionId ?? null}
-        credits={credits}
-        appointments={studentAppointments}
-        onNewChat={handleNewChat}
-        onSelectChat={handleSelectChat}
-        onDeleteChat={handleDeleteChat}
-        onLoadChats={loadChats}
-      />
-
-      <div className="main-content" style={{
+    <div className="main-content" style={{
         background: subjectTheme ? subjectTheme.bg : undefined,
         transition: "background 0.4s ease",
       }}>
@@ -394,6 +382,5 @@ export default function ChatPage() {
           onResearchToggle={() => setResearchEnabled((v) => !v)}
         />
       </div>
-    </div>
   );
 }

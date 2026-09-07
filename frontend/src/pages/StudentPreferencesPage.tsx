@@ -297,9 +297,7 @@ export default function StudentPreferencesPage() {
   };
 
   return (
-    <div className="app-layout">
-      <Sidebar />
-      <div className="main-content">
+    <div className="main-content">
         <div className="dashboard-content" style={{ padding: "24px 28px", overflowY: "auto" }}>
           <PageHeader
             title="Learning preferences"
@@ -488,6 +486,5 @@ export default function StudentPreferencesPage() {
           )}
         </div>
       </div>
-    </div>
   );
 }

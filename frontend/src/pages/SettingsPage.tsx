@@ -448,9 +448,7 @@ export default function SettingsPage() {
         }
       `}</style>
 
-      <div className="sett-page">
-        <Sidebar />
-        <div className="sett-main">
+      <div className="sett-main">
           {/* Hero Banner */}
           <div className="sett-hero">
             <span className="sett-hero-note" style={{ top: 26, left: "40%", fontSize: 18, transform: "rotate(-5deg)" }}>
@@ -687,7 +685,6 @@ export default function SettingsPage() {
             )}
           </div>
         </div>
-      </div>
 
       {toast && <div className="sett-toast">{toast}</div>}
     </>

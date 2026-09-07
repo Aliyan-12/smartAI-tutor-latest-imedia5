@@ -28,16 +28,7 @@ export default function DashboardPage() {
   };
 
   return (
-    <div className="app-layout">
-      <Sidebar
-        chatList={chatList}
-        credits={credits}
-        appointments={appointments}
-        onLoadChats={loadChats}
-        onSelectChat={(id) => navigate(`/chat/${id}`)}
-        onNewChat={() => navigate("/chat")}
-      />
-      <div className="main-content">
+    <div className="main-content">
         <div style={{ flex: 1, overflowY: "auto" }}>
           {/* White hero header */}
           <div style={{
@@ -85,7 +76,6 @@ export default function DashboardPage() {
 
           <WelcomeScreen onPromptClick={handlePromptClick} onStatsLoaded={setHeroStats} />
         </div>
-      </div>
     </div>
   );
 }

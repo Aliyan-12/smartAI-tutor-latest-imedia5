@@ -271,9 +271,7 @@ export default function SessionsPage() {
   const visible = filtered.slice(0, showCount);
 
   return (
-    <div className="app-layout">
-      <Sidebar />
-      <div className="main-content">
+    <div className="main-content">
         <div className="dashboard-content">
           <div style={{
             background: "linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%)",
@@ -584,6 +582,5 @@ export default function SessionsPage() {
           )}
         </div>
       </div>
-    </div>
   );
 }

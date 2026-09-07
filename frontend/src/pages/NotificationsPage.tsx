@@ -37,9 +37,7 @@ export default function NotificationsPage() {
   };
 
   return (
-    <div className="app-layout">
-      <Sidebar />
-      <div className="main-content">
+    <div className="main-content">
         <div className="dashboard-content" style={{ padding: "24px 28px", overflowY: "auto" }}>
           <PageHeader
             title="Notifications"
@@ -80,6 +78,5 @@ export default function NotificationsPage() {
           )}
         </div>
       </div>
-    </div>
   );
 }

@@ -634,10 +634,7 @@ export default function LessonSetupPage() {
   const goalLabel = goalOptions.find((g) => g.id === goal)?.label ?? "";
 
   return (
-    <div style={{ display: "flex", height: "100vh", overflow: "hidden", background: "#f8fafc" }}>
-      <Sidebar />
-
-      <main style={{ flex: 1, minWidth: 0, overflowY: "auto", height: "100%", display: "flex", flexDirection: "column" }}>
+      <main style={{ flex: 1, minWidth: 0, overflowY: "auto", height: "100%", display: "flex", flexDirection: "column", background: "#f8fafc" }}>
         <style>{`
           @media (max-width: 768px) {
             .lsp-two-col { flex-direction: column !important; padding: 12px 12px 100px !important; gap: 12px !important; }
@@ -1605,7 +1602,6 @@ export default function LessonSetupPage() {
         </div>
 
       </main>
-    </div>
   );
 }
 

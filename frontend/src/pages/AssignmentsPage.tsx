@@ -231,9 +231,7 @@ export default function AssignmentsPage() {
         @keyframes fadeIn { from { opacity: 0; transform: translateX(-50%) translateY(8px); } to { opacity: 1; transform: translateX(-50%) translateY(0); } }
       `}</style>
 
-      <div className="asgn-page">
-        <Sidebar />
-        <div className="asgn-main">
+      <div className="asgn-main">
           <div className="asgn-header">
             <div className="asgn-hero">
               <div className="asgn-hero-deco1" /><div className="asgn-hero-deco2" />
@@ -390,7 +388,6 @@ export default function AssignmentsPage() {
             That's all for now! Great job staying on top of your learning 🎉
           </p>
         </div>
-      </div>
 
       {calendarToast && (
         <div className="asgn-toast">📅 Calendar view coming soon!</div>

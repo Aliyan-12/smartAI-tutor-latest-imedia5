@@ -37,6 +37,7 @@ import SchoolBillingPage from "./pages/SchoolBillingPage";
 import ParentProgressPage from "./pages/ParentProgressPage";
 import TeacherProgressPage from "./pages/TeacherProgressPage";
 import { CookieConsent } from "./components/CookieConsent";
+import AppShell from "./components/AppShell";
 import type { ReactNode } from "react";
 
 const Loading = () => (
@@ -107,14 +108,20 @@ export default function App() {
     <BrowserRouter>
       <AuthProvider>
         <Routes>
-          <Route
-            path="/"
-            element={
-              <ProtectedRoute>
-                <RoleRouter />
-              </ProtectedRoute>
-            }
-          />
+          {/* ── Standalone routes (no persistent sidebar): auth, onboarding, legal, full-screen session ── */}
+          <Route path="/" element={<ProtectedRoute><RoleRouter /></ProtectedRoute>} />
+          <Route path="/dashboard" element={<Navigate to="/student/dashboard" replace />} />
+          <Route path="/login" element={<PublicRoute><LoginPage /></PublicRoute>} />
+          <Route path="/register" element={<PublicRoute><RegisterPage /></PublicRoute>} />
+          <Route path="/verify-email" element={<VerifyEmailPage />} />
+          <Route path="/oauth/callback" element={<OAuthCallbackPage />} />
+          <Route path="/onboarding" element={<RequireAuth><OnboardingPage /></RequireAuth>} />
+          <Route path="/legal" element={<LegalPage />} />
+          <Route path="/legal/:docKey" element={<LegalPage />} />
+          <Route path="/session/:appointmentId" element={<ProtectedRoute allowedRoles={["student"]}><SessionPage /></ProtectedRoute>} />
+          <Route path="/session/:appointmentId/report" element={<ProtectedRoute allowedRoles={["student"]}><SessionReportPage /></ProtectedRoute>} />
+
+          {/* Parent / teacher / admin pages (each still renders its own Sidebar for now). */}
           <Route path="/admin/dashboard" element={<ProtectedRoute allowedRoles={["admin", "administrator"]}><AdminDashboard /></ProtectedRoute>} />
           <Route path="/admin/users" element={<ProtectedRoute allowedRoles={["admin", "administrator"]}><AdminDashboard /></ProtectedRoute>} />
           <Route path="/admin/approvals" element={<ProtectedRoute allowedRoles={["administrator"]}><AdminDashboard /></ProtectedRoute>} />
@@ -137,133 +144,27 @@ export default function App() {
           <Route path="/appointments" element={<ProtectedRoute allowedRoles={["admin", "teacher", "parent"]}><AppointmentsPage /></ProtectedRoute>} />
           <Route path="/appointments/new" element={<ProtectedRoute allowedRoles={["teacher", "parent"]}><BookSessionPage /></ProtectedRoute>} />
           <Route path="/admin/assessments" element={<ProtectedRoute allowedRoles={["admin", "administrator"]}><AdminDashboard /></ProtectedRoute>} />
-          <Route path="/dashboard" element={<Navigate to="/student/dashboard" replace />} />
-          <Route
-            path="/student/dashboard"
-            element={
-              <ProtectedRoute allowedRoles={["student"]}>
-                <DashboardPage />
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/chat"
-            element={
-              <ProtectedRoute allowedRoles={["student"]}>
-                <ChatPage />
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/chat/:sessionId"
-            element={
-              <ProtectedRoute allowedRoles={["student"]}>
-                <ChatPage />
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/session/:appointmentId"
-            element={
-              <ProtectedRoute allowedRoles={["student"]}>
-                <SessionPage />
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/session/:appointmentId/report"
-            element={
-              <ProtectedRoute allowedRoles={["student"]}>
-                <SessionReportPage />
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/sessions"
-            element={
-              <ProtectedRoute allowedRoles={["student"]}>
-                <SessionsPage />
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/progress"
-            element={
-              <ProtectedRoute allowedRoles={["student"]}>
-                <ProgressPage />
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/leaderboard"
-            element={
-              <ProtectedRoute allowedRoles={["student"]}>
-                <LeaderboardPage />
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/assignments"
-            element={
-              <ProtectedRoute allowedRoles={["student"]}>
-                <AssignmentsPage />
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/settings"
-            element={
-              <ProtectedRoute allowedRoles={["student"]}>
-                <SettingsPage />
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/preferences"
-            element={
-              <ProtectedRoute allowedRoles={["student"]}>
-                <StudentPreferencesPage />
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/lesson/setup"
-            element={
-              <ProtectedRoute allowedRoles={["student"]}>
-                <LessonSetupPage />
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/login"
-            element={
-              <PublicRoute>
-                <LoginPage />
-              </PublicRoute>
-            }
-          />
-          <Route
-            path="/register"
-            element={
-              <PublicRoute>
-                <RegisterPage />
-              </PublicRoute>
-            }
-          />
-          {/* Email verification + OAuth callback are reachable without a session. */}
-          <Route path="/verify-email" element={<VerifyEmailPage />} />
-          <Route path="/oauth/callback" element={<OAuthCallbackPage />} />
-          {/* Onboarding requires auth but not completed-onboarding (avoids a loop). */}
-          <Route path="/onboarding" element={<RequireAuth><OnboardingPage /></RequireAuth>} />
-          {/* Public legal surface — readable without a session. */}
-          <Route path="/legal" element={<LegalPage />} />
-          <Route path="/legal/:docKey" element={<LegalPage />} />
-          <Route path="/privacy" element={<ProtectedRoute><PrivacyPage /></ProtectedRoute>} />
-          <Route path="/notifications" element={<ProtectedRoute><NotificationsPage /></ProtectedRoute>} />
           <Route path="/school/verification" element={<ProtectedRoute allowedRoles={["admin"]}><SchoolVerificationPage /></ProtectedRoute>} />
           <Route path="/admin/school-verification" element={<ProtectedRoute allowedRoles={["administrator"]}><AdminSchoolReviewPage /></ProtectedRoute>} />
           <Route path="/admin/settings" element={<ProtectedRoute allowedRoles={["admin", "administrator"]}><AdminSettingsPage /></ProtectedRoute>} />
           <Route path="/school/billing" element={<ProtectedRoute allowedRoles={["admin", "administrator"]}><SchoolBillingPage /></ProtectedRoute>} />
+
+          {/* ── Student pages: Sidebar mounted ONCE in AppShell → it never reloads on navigation ── */}
+          <Route element={<AppShell />}>
+            <Route path="/student/dashboard" element={<ProtectedRoute allowedRoles={["student"]}><DashboardPage /></ProtectedRoute>} />
+            <Route path="/chat" element={<ProtectedRoute allowedRoles={["student"]}><ChatPage /></ProtectedRoute>} />
+            <Route path="/chat/:sessionId" element={<ProtectedRoute allowedRoles={["student"]}><ChatPage /></ProtectedRoute>} />
+            <Route path="/sessions" element={<ProtectedRoute allowedRoles={["student"]}><SessionsPage /></ProtectedRoute>} />
+            <Route path="/progress" element={<ProtectedRoute allowedRoles={["student"]}><ProgressPage /></ProtectedRoute>} />
+            <Route path="/leaderboard" element={<ProtectedRoute allowedRoles={["student"]}><LeaderboardPage /></ProtectedRoute>} />
+            <Route path="/assignments" element={<ProtectedRoute allowedRoles={["student"]}><AssignmentsPage /></ProtectedRoute>} />
+            <Route path="/settings" element={<ProtectedRoute allowedRoles={["student"]}><SettingsPage /></ProtectedRoute>} />
+            <Route path="/preferences" element={<ProtectedRoute allowedRoles={["student"]}><StudentPreferencesPage /></ProtectedRoute>} />
+            <Route path="/lesson/setup" element={<ProtectedRoute allowedRoles={["student"]}><LessonSetupPage /></ProtectedRoute>} />
+            <Route path="/privacy" element={<ProtectedRoute><PrivacyPage /></ProtectedRoute>} />
+            <Route path="/notifications" element={<ProtectedRoute><NotificationsPage /></ProtectedRoute>} />
+          </Route>
+
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
         <CookieConsent />

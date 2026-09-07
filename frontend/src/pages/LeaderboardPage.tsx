@@ -70,9 +70,7 @@ export default function LeaderboardPage() {
   const meVisible = data?.entries.some((e) => e.is_me);
 
   return (
-    <div className="app-layout">
-      <Sidebar />
-      <div className="main-content">
+    <div className="main-content">
         <div className="dashboard-content">
           {/* Hero */}
           <div style={{ background: "linear-gradient(120deg,#f59e0b 0%,#f97316 60%,#ea580c 100%)", borderRadius: 18, padding: "26px 30px", marginBottom: 20, position: "relative", overflow: "hidden", color: "#fff" }}>
@@ -129,6 +127,5 @@ export default function LeaderboardPage() {
           </p>
         </div>
       </div>
-    </div>
   );
 }

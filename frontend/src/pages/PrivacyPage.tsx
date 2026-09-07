@@ -45,9 +45,7 @@ export default function PrivacyPage() {
   };
 
   return (
-    <div className="app-layout">
-      <Sidebar />
-      <div className="main-content">
+    <div className="main-content">
         <div className="dashboard-content" style={{ padding: "24px 28px", overflowY: "auto" }}>
           <PageHeader
             title="Privacy & Data"
@@ -132,6 +130,5 @@ export default function PrivacyPage() {
           </Card>
         </div>
       </div>
-    </div>
   );
 }
