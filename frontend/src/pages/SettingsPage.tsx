@@ -2,7 +2,7 @@ import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { User, Bell, Shield, Save, LogOut, Eye, EyeOff } from "lucide-react";
 import Sidebar from "../components/Sidebar";
-import { settingsApi, curriculumApi, gamificationApi } from "../services/api";
+import { settingsApi, curriculumApi, gamificationApi, appointmentsApi } from "../services/api";
 import { useAuth } from "../context/AuthContext";
 import type { LearningPreferences } from "../types";
 
@@ -48,6 +48,7 @@ export default function SettingsPage() {
   const [keyStage, setKeyStage] = useState("");
   // Real gamification stats for the hero banner (no fabricated numbers).
   const [hero, setHero] = useState<{ xp: number; level: number; streak: number } | null>(null);
+  const [sessionsDone, setSessionsDone] = useState<number | null>(null);
   // Key stages + year groups sourced from the Resource Hub (not hardcoded).
   const [hubKeyStages, setHubKeyStages] = useState<string[]>([]);
   const [hubYears, setHubYears] = useState<string[]>([]);
@@ -108,13 +109,16 @@ export default function SettingsPage() {
       .catch(() => {});
   }, []);
 
-  // Real XP / level / streak for the hero stat cards.
+  // Real XP / level / streak + completed-session count for the hero stat cards.
   useEffect(() => {
     gamificationApi.getDashboard()
       .then((d) => {
         const p = (d as { profile?: { xp_total?: number; xp_level?: number; current_streak?: number } })?.profile;
         if (p) setHero({ xp: p.xp_total ?? 0, level: p.xp_level ?? 1, streak: p.current_streak ?? 0 });
       })
+      .catch(() => {});
+    appointmentsApi.list()
+      .then((d) => setSessionsDone((d as { status: string }[]).filter((a) => ["completed", "terminated"].includes(a.status)).length))
       .catch(() => {});
   }, []);
 
@@ -419,6 +423,12 @@ export default function SettingsPage() {
         }
         .sett-save-btn:hover { opacity: 0.88; }
         .sett-save-btn:disabled { opacity: 0.5; cursor: default; }
+        .sett-outline-btn {
+          padding: 8px 16px; background: #fff; color: #1a73e8; border: 1.5px solid #bfdbfe;
+          border-radius: 8px; font-size: 13px; font-weight: 700; cursor: pointer; white-space: nowrap;
+          transition: background .15s, border-color .15s;
+        }
+        .sett-outline-btn:hover { background: #eff6ff; border-color: #1a73e8; }
         .sett-danger-btn {
           padding: 10px 20px; background: #fef2f2; color: #dc2626; border: 1.5px solid #fecaca;
           border-radius: 8px; font-size: 14px; font-weight: 700; cursor: pointer; transition: .15s;
@@ -469,36 +479,29 @@ export default function SettingsPage() {
               </div>
               <div className="sett-hero-stat-row">
                 <div className="sett-hero-stat">
-                  <div className="sett-hero-stat-val">{hero ? hero.streak : "—"}</div>
-                  <div className="sett-hero-stat-lbl">Streak</div>
+                  <div style={{ fontSize: 14, marginBottom: 3 }}>🔥</div>
+                  <div className="sett-hero-stat-val">{sessionsDone ?? "—"}</div>
+                  <div className="sett-hero-stat-lbl">Sessions</div>
                 </div>
                 <div className="sett-hero-stat">
+                  <div style={{ fontSize: 14, marginBottom: 3 }}>⭐</div>
                   <div className="sett-hero-stat-val">{hero ? hero.xp.toLocaleString() : "—"}</div>
                   <div className="sett-hero-stat-lbl">XP</div>
                 </div>
-                <div className="sett-hero-stat">
-                  <div className="sett-hero-stat-val">{hero ? hero.level : "—"}</div>
-                  <div className="sett-hero-stat-lbl">Level</div>
+                <div className="sett-hero-stat" style={{ minWidth: 74 }}>
+                  <div style={{ fontSize: 14, marginBottom: 3 }}>📊</div>
+                  <div className="sett-hero-stat-val">Level {hero ? hero.level : "—"}</div>
+                  <div style={{ height: 5, background: "rgba(255,255,255,0.25)", borderRadius: 999, overflow: "hidden", marginTop: 5 }}>
+                    <div style={{ height: "100%", width: `${Math.min(100, Math.max(12, ((hero?.xp ?? 0) % 500) / 5))}%`, background: "#fff", borderRadius: 999 }} />
+                  </div>
                 </div>
               </div>
             </div>
           </div>
 
-          <div className="sett-tabs">
-            {TABS.map((t) => (
-              <button
-                key={t.id}
-                className={`sett-tab${activeTab === t.id ? " active" : ""}`}
-                onClick={() => setActiveTab(t.id)}
-              >
-                {t.icon} {t.label}
-              </button>
-            ))}
-          </div>
-
           <div className="sett-body">
             {/* ── PROFILE ── */}
-            {activeTab === "profile" && (
+            {(
               <div className="sett-card">
                 <p className="sett-card-title"><User size={16} /> Profile</p>
                 <div className="sett-profile-grid">
@@ -564,19 +567,23 @@ export default function SettingsPage() {
             )}
 
             {/* ── NOTIFICATIONS ── */}
-            {activeTab === "notifications" && (
+            {(
               <div className="sett-card">
                 <p className="sett-card-title"><Bell size={16} /> Notifications</p>
+                <p style={{ fontSize: 12.5, color: "#64748b", margin: "-8px 0 10px" }}>Choose what you'd like to be notified about.</p>
                 {[
-                  { id: "assignment_reminders", label: "Assignment Reminders", sub: "Get reminded about upcoming assignments" },
-                  { id: "session_reminders",    label: "Session Reminders",    sub: "Remind me to keep up with my learning" },
-                  { id: "messages",             label: "Messages",             sub: "New messages from teachers" },
-                  { id: "weekly_progress",      label: "Weekly Progress",      sub: "Receive a weekly progress summary" },
+                  { id: "session_reminders",    icon: "📊", label: "Learning reminders",  sub: "Reminders to keep you on track with your goals." },
+                  { id: "weekly_progress",      icon: "⭐", label: "Achievements",        sub: "Get notified when you earn XP, level up or hit a streak." },
+                  { id: "messages",             icon: "✉️", label: "Tips and updates",     sub: "Receive helpful tips, new features and important updates." },
+                  { id: "assignment_reminders", icon: "📌", label: "Assignment reminders", sub: "Get reminded about upcoming assignments." },
                 ].map((n) => (
                   <div key={n.id} className="sett-row">
-                    <div>
-                      <div className="sett-row-label">{n.label}</div>
-                      <div className="sett-row-sub">{n.sub}</div>
+                    <div style={{ display: "flex", alignItems: "flex-start", gap: 12 }}>
+                      <span style={{ fontSize: 18, marginTop: 1 }}>{n.icon}</span>
+                      <div>
+                        <div className="sett-row-label">{n.label}</div>
+                        <div className="sett-row-sub">{n.sub}</div>
+                      </div>
                     </div>
                     <label className="sett-toggle">
                       <input
@@ -597,18 +604,34 @@ export default function SettingsPage() {
               </div>
             )}
 
-            {/* ── ACCOUNT ── */}
-            {activeTab === "account" && (
+            {/* ── ACCOUNT DETAILS ── */}
+            {(
               <>
                 <div className="sett-card">
-                  <p className="sett-card-title"><Shield size={16} /> Account</p>
+                  <p className="sett-card-title"><Shield size={16} /> Account Details</p>
+                  <p style={{ fontSize: 12.5, color: "#64748b", margin: "-8px 0 6px" }}>Manage your account information and keep it secure.</p>
                   <div className="sett-row">
-                    <div>
-                      <div className="sett-row-label">Change Password</div>
-                      <div className="sett-row-sub">Update your account password</div>
+                    <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+                      <span style={{ fontSize: 18 }}>✉️</span>
+                      <div>
+                        <div className="sett-row-label">Email address</div>
+                        <div className="sett-row-sub">{user?.email ?? "—"}</div>
+                      </div>
                     </div>
-                    <button className="sett-save-btn" style={{ marginTop: 0 }} onClick={() => setShowPwForm((v) => !v)}>
-                      {showPwForm ? "Cancel" : "Change"}
+                    <button className="sett-outline-btn" onClick={() => showToast("To change your email, please contact your school or support.")}>
+                      Change Email
+                    </button>
+                  </div>
+                  <div className="sett-row">
+                    <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+                      <span style={{ fontSize: 18 }}>🔒</span>
+                      <div>
+                        <div className="sett-row-label">Password</div>
+                        <div className="sett-row-sub">••••••••••••</div>
+                      </div>
+                    </div>
+                    <button className="sett-outline-btn" onClick={() => setShowPwForm((v) => !v)}>
+                      {showPwForm ? "Cancel" : "Change Password"}
                     </button>
                   </div>
 
