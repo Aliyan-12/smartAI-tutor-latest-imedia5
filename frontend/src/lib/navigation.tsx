@@ -52,7 +52,9 @@ const STUDENT: NavSection[] = [
     { id: "s-leaderboard", label: "Leaderboard", path: "/leaderboard", icon: Trophy },
     { id: "s-assign", label: "Assignments", path: "/assignments", icon: ClipboardList },
   ] },
-  { label: "Chat", items: [
+  // "Chats" is its OWN collapsible dropdown (New Chat + recent chats inside) — rendered
+  // specially in Sidebar, so this section is unlabelled (no separate "CHAT" header).
+  { items: [
     { id: "s-chat", label: "Chats", path: "/chat", icon: MessageCircle, activePrefix: true },
   ] },
   { label: "Account", items: [

@@ -67,6 +67,8 @@ export default function ChatPage() {
     // Backend forces text→no-TTS and voice→TTS by message type; `true` lets the
     // voice-mode audio segments actually play on the client.
     ttsEnabled: true,
+    // Stream replies at full speed — no reading-cadence metering in the simple chat.
+    instantText: true,
     onReady: (sid) => {
       connectedSidRef.current = sid;
       if (!sessionIdParamRef.current) {

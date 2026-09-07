@@ -149,6 +149,23 @@ const SHARED_STYLES = `
   }
   .sb-chat-new { font-weight: 700; color: var(--accent); }
   .sb-chat-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+  /* Chat row = clickable title + a delete affordance revealed on hover */
+  .sb-chat-row { position: relative; display: flex; align-items: center; }
+  .sb-chat-main { flex: 1; min-width: 0; padding-right: 28px; }
+  .sb-chat-row.active .sb-chat-main {
+    background: var(--sidebar-active); color: var(--accent); font-weight: 700;
+  }
+  .sb-chat-del {
+    position: absolute; right: 8px; top: 50%; transform: translateY(-50%);
+    display: flex; align-items: center; justify-content: center;
+    width: 20px; height: 20px; border: none; background: none; border-radius: 5px;
+    color: #94a3b8; cursor: pointer; opacity: 0;
+    transition: opacity 0.15s, background 0.15s, color 0.15s;
+  }
+  .sb-chat-row:hover .sb-chat-del,
+  .sb-chat-del:focus-visible { opacity: 1; }
+  .sb-chat-del:hover { background: rgba(239,68,68,0.12); color: #ef4444; }
   .sb-chat-empty {
     padding: 4px 12px 8px 34px;
     font-size: 11.5px;
@@ -530,6 +547,14 @@ export default function Sidebar({
       return new Set<string>();
     }
   });
+  // Delete a simple chat from the sidebar list (optimistic + navigate away if it's open).
+  const deleteChat = async (sessionId: string) => {
+    setChats((prev) => prev.filter((c) => c.session_id !== sessionId));
+    if (location.pathname === `/chat/${sessionId}`) navigate("/chat");
+    try { await chatApi.deleteChat(sessionId); } catch { /* already removed locally */ }
+    onDeleteChat?.(sessionId);
+  };
+
   const toggleSection = (label: string) => {
     setCollapsed((prev) => {
       const next = new Set(prev);
@@ -710,46 +735,45 @@ export default function Sidebar({
                     )}
                   </button>
                 );
-                // Student "Chats": the destination link, a New Chat action, then a
-                // COLLAPSIBLE "Recent" sub-dropdown holding the chat history (cleaned labels).
+                // Student "Chats" is its OWN collapsible dropdown: the heading toggles it
+                // open/closed, and New Chat + all recent chats live inside as its options.
                 if (it.id !== "s-chat") return <div key={it.id}>{navBtn}</div>;
                 const chatsCollapsed = collapsed.has(CHATS_KEY);
                 return (
                   <div key={it.id}>
-                    {navBtn}
-                    <button className="sb-nav-item sb-chat-sub sb-chat-new" onClick={() => go("/chat")}>
-                      <Plus size={15} /><span>New Chat</span>
+                    <button
+                      type="button"
+                      className={`sb-nav-item sb-chats-head${active ? " active" : ""}`}
+                      onClick={() => toggleSection(CHATS_KEY)}
+                      aria-expanded={!chatsCollapsed}
+                      aria-controls="sb-chats-list"
+                    >
+                      <Icon size={16} /><span>{it.label}</span>
+                      <ChevronDown size={14} className={`sb-chevron${chatsCollapsed ? " collapsed" : ""}`} style={{ marginLeft: "auto" }} />
                     </button>
-                    {chats.length > 0 ? (
-                      <>
-                        <button
-                          type="button"
-                          className="sb-chat-subhead"
-                          onClick={() => toggleSection(CHATS_KEY)}
-                          aria-expanded={!chatsCollapsed}
-                          aria-controls="sb-chats-list"
-                        >
-                          <span>Recent</span>
-                          <ChevronDown size={12} className={`sb-chevron${chatsCollapsed ? " collapsed" : ""}`} />
+                    <div id="sb-chats-list" className={`sb-section-items${chatsCollapsed ? " collapsed" : ""}`} role="group" aria-label="Chats">
+                      <div className="sb-section-inner">
+                        <button className="sb-nav-item sb-chat-sub sb-chat-new" onClick={() => go("/chat")}>
+                          <Plus size={15} /><span>New Chat</span>
                         </button>
-                        <div id="sb-chats-list" className={`sb-section-items${chatsCollapsed ? " collapsed" : ""}`} role="group" aria-label="Recent chats">
-                          <div className="sb-section-inner">
-                            {chats.slice(0, 10).map((c) => {
-                              const chatActive = location.pathname === `/chat/${c.session_id}`;
-                              const title = cleanChatTitle(c.title);
-                              return (
-                                <button key={c.session_id} className={`sb-nav-item sb-chat-sub${chatActive ? " active" : ""}`}
-                                  onClick={() => go(`/chat/${c.session_id}`)} title={title}>
-                                  <MessageSquare size={14} /><span className="sb-chat-title">{title}</span>
-                                </button>
-                              );
-                            })}
-                          </div>
-                        </div>
-                      </>
-                    ) : (
-                      <div className="sb-chat-empty">No chats yet — start one!</div>
-                    )}
+                        {chats.slice(0, 12).map((c) => {
+                          const chatActive = location.pathname === `/chat/${c.session_id}`;
+                          const title = cleanChatTitle(c.title);
+                          return (
+                            <div key={c.session_id} className={`sb-chat-row${chatActive ? " active" : ""}`}>
+                              <button className="sb-nav-item sb-chat-sub sb-chat-main"
+                                onClick={() => go(`/chat/${c.session_id}`)} title={title}>
+                                <MessageSquare size={14} /><span className="sb-chat-title">{title}</span>
+                              </button>
+                              <button className="sb-chat-del" onClick={(e) => { e.stopPropagation(); deleteChat(c.session_id); }} title="Delete chat" aria-label="Delete chat">
+                                <X size={13} />
+                              </button>
+                            </div>
+                          );
+                        })}
+                        {chats.length === 0 && <div className="sb-chat-empty">No chats yet — start one!</div>}
+                      </div>
+                    </div>
                   </div>
                 );
               })}

@@ -31,9 +31,17 @@ async def list_chats(
 ):
     _ensure_student(current_user)
     chats = await chat_service.get_user_chats(db, current_user.id)
+    # Only SIMPLE chats belong in the sidebar "Chats" list. Lesson/session chats are
+    # identified by their appointment_id FK (they're reached from My Sessions, not here);
+    # the "[session:<id>]" title prefix is a fallback for any legacy chat created before
+    # the FK was populated.
+    def _is_session_chat(c) -> bool:
+        return getattr(c, "appointment_id", None) is not None or (c.title or "").startswith("[session:")
+
     return [
         ChatListItem(id=c.id, session_id=c.session_id, title=c.title, created_at=c.created_at)
         for c in chats
+        if not _is_session_chat(c)
     ]
 
 
