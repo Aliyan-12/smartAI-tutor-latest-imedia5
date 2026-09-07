@@ -62,4 +62,6 @@ export interface InteractivePuzzleProps {
   payload: PuzzlePayload;
   onSubmit: (answer: unknown) => void;
   disabled?: boolean;
+  /** The lesson's Key Stage (KS1…KS5) — drives the age-appropriate question theme. */
+  keyStage?: string;
 }

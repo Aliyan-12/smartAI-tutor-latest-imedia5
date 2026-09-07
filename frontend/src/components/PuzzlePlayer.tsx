@@ -30,7 +30,7 @@ import BalanceEquation from "./puzzles/manipulatives/BalanceEquation";
 import PhScale from "./puzzles/manipulatives/PhScale";
 import ForceArrows from "./puzzles/manipulatives/ForceArrows";
 import PunnettSquare from "./puzzles/manipulatives/PunnettSquare";
-import PuzzleBackground, { bgTheme } from "./puzzles/backgrounds";
+import { getQuizTheme } from "../lib/quizTheme";
 
 /**
  * Renders a puzzle and reports the student's structured answer via onSubmit.
@@ -57,8 +57,8 @@ const MANIPULATIVE_RENDERS = new Set([
 ]);
 
 export default function PuzzlePlayer({
-  payload, onSubmit, locked = false,
-}: { payload: PuzzlePayload; onSubmit: (answer: unknown) => void; locked?: boolean }) {
+  payload, onSubmit, locked = false, keyStage,
+}: { payload: PuzzlePayload; onSubmit: (answer: unknown) => void; locked?: boolean; keyStage?: string }) {
   const [submitted, setSubmitted] = useState(false);
 
   const handleSubmit = (answer: unknown) => {
@@ -67,27 +67,26 @@ export default function PuzzlePlayer({
     onSubmit(answer);
   };
 
-  // Display-only teaching visuals — nothing to submit, so no puzzle backdrop and no
-  // "checking your answer" note. (Name kept: everywhere it already meant "display-only".)
+  // The maths question (MCQ / typed answer) gets a purpose-built centred question-card layout.
+  const isThemedQuestion = payload.render === "math";
+
+  // Display-only teaching visuals — nothing to submit, so no "checking your answer" note.
   const isExplanatory = payload.render === "explanatory_image"
     || payload.render === "svg_diagram" || payload.render === "mermaid"
     || payload.render === "animation";
   const isManipulative = MANIPULATIVE_RENDERS.has(payload.render);
-  // A plain interactive puzzle (math / graph): short content that should sit CENTRED in the
-  // panel, so the backdrop fills evenly top-and-bottom instead of leaving white space below.
+  // A plain interactive puzzle (math / graph): short content that should sit CENTRED in the panel.
   const isInteractive = !isManipulative && !isExplanatory;
 
-  // The server picks a backdrop per puzzle. Explanatory images (often a science photo/diagram)
-  // stay on plain white so nothing competes with the picture; everything else gets its backdrop.
-  const bgVariant = isExplanatory ? "plain" : ((payload.params.background as string) || "plain");
-  const dark = bgTheme(bgVariant) === "dark";
-  const promptColour = dark ? "rgba(255,255,255,0.92)" : "#334155";
-  // The whole panel takes the puzzle's base colour, so even if the backdrop SVG doesn't reach the
-  // very bottom the area is never bare white under a dark puzzle (the reported white strip).
-  const baseBg = dark ? "#061521" : "#fff";
+  // EVERY puzzle shares ONE age-appropriate theme (KS1–2 bright/playful, KS3 → GCSE focused/cosmic)
+  // and fills the WHOLE panel — so the practice area looks consistent for a given Key Stage.
+  const t = getQuizTheme(keyStage);
+  const dark = !t.isJunior;
+  const promptColour = t.qText;
+  const panelBg = t.wrap;
 
   const body = () => {
-    const p = { payload, onSubmit: handleSubmit, disabled: submitted };
+    const p = { payload, onSubmit: handleSubmit, disabled: submitted, keyStage };
     switch (payload.render) {
       case "explanatory_image":
         return <ExplanatoryImage payload={payload} />;
@@ -159,7 +158,8 @@ export default function PuzzlePlayer({
   };
 
   return (
-    <div style={{ position: "relative", display: "flex", flexDirection: "column", height: "100%", flex: 1, minHeight: 0, background: baseBg }}>
+    <div style={{ position: "relative", display: "flex", flexDirection: "column", height: "100%", flex: 1, minHeight: 0, background: panelBg }}>
+      <PuzzleDecor junior={t.isJunior} />
       {/* Loading veil: the puzzle is on screen but blurred + non-interactive until the tutor has
           FINISHED SPEAKING this turn (TTS completion). Being on top, it also swallows clicks so
           the student can't answer before it clears. Only shown when Read Aloud is on. */}
@@ -192,9 +192,14 @@ export default function PuzzlePlayer({
         <span style={{ fontSize: 13, fontWeight: 600, color: "#0f172a" }}>{payload.title}</span>
       </div>
 
-      {/* A manipulative owns the whole body: it sizes itself, and centring + 20px of padding is
+      {isThemedQuestion ? (
+        <div style={{ position: "relative", flex: 1, minHeight: 0, display: "flex", flexDirection: "column" }}>
+          <MathPuzzle payload={payload} keyStage={keyStage} onSubmit={handleSubmit} disabled={submitted} />
+        </div>
+      ) : (
+      /* A manipulative owns the whole body: it sizes itself, and centring + 20px of padding is
           exactly what used to shrink every puzzle down to a postage stamp in the middle.
-          `position: relative` so the backdrop can sit behind the content. */}
+          `position: relative` so the backdrop can sit behind the content. */
       <div
         style={{
           position: "relative",
@@ -211,12 +216,10 @@ export default function PuzzlePlayer({
           alignItems: isManipulative ? "stretch" : "center",
           justifyContent: isInteractive ? "center" : "flex-start",
           gap: isManipulative ? 0 : 14,
-          background: baseBg,
+          background: "transparent",
         }}
       >
-        <PuzzleBackground variant={bgVariant} />
-
-        {/* Everything real sits ABOVE the backdrop. */}
+        {/* Everything real sits ABOVE the shared themed panel + decorations. */}
         <p style={{
           position: "relative", zIndex: 1,
           fontSize: isManipulative ? 17 : 14, color: promptColour, textAlign: "center",
@@ -247,6 +250,41 @@ export default function PuzzlePlayer({
           </div>
         )}
       </div>
+      )}
     </div>
+  );
+}
+
+/** Shared age-appropriate decorations behind EVERY puzzle (hidden on narrow panels). */
+function PuzzleDecor({ junior }: { junior: boolean }) {
+  return (
+    <>
+      <style>{`@media (max-width: 900px){ .pz-deco{ display:none !important; } }`}</style>
+      {junior ? (
+        <>
+          <div className="pz-deco" style={{ position: "absolute", top: 58, left: 16, background: "#fde68a", color: "#78350f", fontFamily: '"Segoe Print","Comic Sans MS",cursive', fontWeight: 800, fontSize: 14, padding: "10px 12px", borderRadius: 6, transform: "rotate(-6deg)", boxShadow: "0 4px 10px rgba(0,0,0,0.12)", lineHeight: 1.2, zIndex: 0 }}>
+            YOU<br />GOT THIS! 🙂
+          </div>
+          <div className="pz-deco" style={{ position: "absolute", top: 62, right: 20, fontFamily: '"Segoe Print","Comic Sans MS",cursive', color: "#2563eb", fontSize: 15, fontWeight: 700, textAlign: "right", lineHeight: 1.2, zIndex: 0 }}>
+            Small steps<br />Big progress ⭐
+          </div>
+          <div className="pz-deco" style={{ position: "absolute", bottom: 18, left: 18, display: "flex", flexDirection: "column", gap: 4, zIndex: 0 }}>
+            {["Explore", "Practice", "Improve", "Succeed"].map((s) => (
+              <span key={s} style={{ background: "#b45309", color: "#fff7ed", fontSize: 11, fontWeight: 800, padding: "3px 10px", borderRadius: 4, boxShadow: "0 2px 4px rgba(0,0,0,0.15)" }}>{s}</span>
+            ))}
+          </div>
+        </>
+      ) : (
+        <>
+          <div aria-hidden style={{ position: "absolute", inset: 0, opacity: 0.5, pointerEvents: "none", zIndex: 0, backgroundImage: "radial-gradient(circle at 85% 20%, rgba(99,102,241,0.26), transparent 42%), radial-gradient(circle at 8% 82%, rgba(56,189,248,0.2), transparent 46%)" }} />
+          <div className="pz-deco" style={{ position: "absolute", top: "40%", left: 22, color: "rgba(255,255,255,0.32)", fontSize: 13, fontWeight: 800, letterSpacing: "1px", lineHeight: 1.5, zIndex: 0 }}>
+            SMALL<br />STEPS<br />BIG<br />PROGRESS
+          </div>
+          <div className="pz-deco" style={{ position: "absolute", top: "34%", right: 22, color: "rgba(255,255,255,0.28)", fontSize: 14, textAlign: "right", lineHeight: 1.7, zIndex: 0 }}>
+            Powers<br />Indices<br />Standard Form
+          </div>
+        </>
+      )}
+    </>
   );
 }

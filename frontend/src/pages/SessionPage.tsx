@@ -536,7 +536,8 @@ export default function SessionPage() {
   useEffect(() => {
     const handler = (e: SessionBusEvent) => {
       const triggersReply =
-        e.type === "lesson_end_request" || e.type === "student_idle" || e.type === "latex_error";
+        e.type === "lesson_end_request" || e.type === "student_idle" ||
+        e.type === "latex_error" || e.type === "user_message";
       sendEventRef.current(e.type, e.data, triggersReply);
     };
     sessionBus.on("session", handler);
@@ -1210,6 +1211,7 @@ export default function SessionPage() {
                 key={currentPuzzle.instance_id || `${currentPuzzle.puzzle_type}:${currentPuzzle.prompt}`}
                 payload={currentPuzzle}
                 locked={interactionLocked}
+                keyStage={sessionKeyStage}
                 onSubmit={(answer) =>
                   channel.sendPuzzleResult(currentPuzzle.puzzle_type, currentPuzzle.prompt, answer)
                 }

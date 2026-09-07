@@ -1,40 +1,37 @@
 import { useEffect, useRef, useState } from "react";
-import { motion, AnimatePresence } from "framer-motion";
-import { BlockMath } from "react-katex";
 import katex from "katex";
 import "katex/dist/katex.min.css";
 import type { InteractivePuzzleProps } from "./types";
 import { emitSessionEvent } from "../../lib/sessionBus";
+import { getQuizTheme, QUIZ_OPT_COLORS } from "../../lib/quizTheme";
+import { normalizeMathText } from "../../lib/mathText";
 
 /**
- * A maths problem — shown as crisp LaTeX, or a generated image for loose visual concepts.
+ * A maths question — the student TAPS one of the A/B/C/D answer cards (or types an answer).
  *
- * The equation now sits on a bold card that pops in, and — when the server supplies options —
- * the student TAPS one of four colourful answer bubbles instead of typing into a bare box.
- * That's the friendlier path for younger children (the ask), and it's marked exactly the same
- * way. If there are no options, it falls back to a nicely styled text input for older students.
- *
- * This puzzle rides a DARK background (mesh / bubbles), so everything here is light-on-dark.
+ * It fills the whole Practice panel with an age-appropriate theme (KS1–KS2 bright & playful,
+ * KS3 → GCSE focused/cosmic) so it reads like a proper quiz card, not a bare form. Correctness
+ * is decided server-side, so this only collects the answer.
  */
+const LETTERS = ["A", "B", "C", "D", "E", "F"];
 
-const BUBBLE_COLOURS = ["#2563eb", "#16a34a", "#f97316", "#a855f7", "#ec4899", "#0891b2"];
-
-export default function MathPuzzle({ payload, onSubmit, disabled }: InteractivePuzzleProps) {
+export default function MathPuzzle({ payload, onSubmit, disabled, keyStage }: InteractivePuzzleProps) {
   const mode = (payload.params.mode as string) || "latex";
-  const latex = (payload.params.latex as string) || "";
   const image = (payload.params.image as string) || "";
+  const latex = (payload.params.latex as string) || "";
   const options = (payload.params.options as string[]) || [];
-
-  const [val, setVal] = useState("");
-  const [picked, setPicked] = useState<string | null>(null);
-
   const hasChoices = options.length > 0;
 
-  // VALIDATE → FIX → RETRY. No client-side repair: if KaTeX can't parse the LaTeX, bounce a
-  // `latex_error` back so the AI re-emits a corrected puzzle. Reported once per distinct latex;
-  // the BlockMath below keeps a readable degraded form on screen meanwhile, so the student is
-  // never stuck on a broken formula while the fix is in flight.
-  const reportedRef = useRef<string>("");
+  const [val, setVal] = useState("");
+  const [pickedIdx, setPickedIdx] = useState<number | null>(null);
+  const [hintOpen, setHintOpen] = useState(false);
+
+  const t = getQuizTheme(keyStage);
+  const isJunior = t.isJunior;
+
+  // VALIDATE → the server repairs broken LaTeX; if KaTeX still can't parse it, bounce a
+  // `latex_error` so the AI re-emits a corrected question (reported once per distinct latex).
+  const reportedRef = useRef("");
   useEffect(() => {
     if (!latex || mode === "image") return;
     try {
@@ -43,166 +40,101 @@ export default function MathPuzzle({ payload, onSubmit, disabled }: InteractiveP
       if (reportedRef.current !== latex) {
         reportedRef.current = latex;
         emitSessionEvent("latex_error", {
-          latex,
-          error: String((e as Error)?.message || e || "KaTeX parse error"),
+          latex, error: String((e as Error)?.message || e || "KaTeX parse error"),
           prompt: payload.prompt || "",
         });
       }
     }
   }, [latex, mode, payload.prompt]);
 
+  // The question reads as clean text (Unicode maths, never raw "$10^{-1}$").
+  const questionText = normalizeMathText(payload.prompt || latex || "");
+
+  const submitChoice = () => { if (pickedIdx !== null && !disabled) onSubmit(options[pickedIdx]); };
+  const submitTyped = () => { if (val.trim() && !disabled) onSubmit(val.trim()); };
+  const skip = () => { if (!disabled) emitSessionEvent("user_message", { text: "Can we skip this question and move on, please?" }); };
+
   return (
-    <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 22, width: "100%", padding: "6px 12px 0" }}>
-      {/* The problem card */}
-      <motion.div
-        initial={{ scale: 0.9, opacity: 0, y: 8 }}
-        animate={{ scale: 1, opacity: 1, y: 0 }}
-        transition={{ type: "spring", stiffness: 300, damping: 22 }}
-        // Full width so the card can use the panel; without this the flex item shrink-wraps
-        // and forces the formula to wrap even with a wide panel available.
-        style={{ width: "100%", display: "flex", justifyContent: "center" }}
-      >
-        {mode === "image" && image ? (
-          <img
-            src={image}
-            alt="maths problem"
-            // Was capped at 300x210 — a maths diagram the student must READ (side lengths,
-            // angle marks) rendered as a thumbnail. The Learn panel is ~70% of the screen.
-            style={{ width: "100%", maxWidth: 620, maxHeight: "min(46vh, 420px)", objectFit: "contain", borderRadius: 16, background: "#fff", padding: 10 }}
-          />
-        ) : latex ? (
-          <>
-            {/* ONE LINE. KaTeX's display wrapper is a block that wraps at spaces, so a formula
-                like "A = πr², r = 6 cm" broke into four stacked lines inside a narrow card and
-                read as four separate facts. nowrap keeps it as the single statement it is; the
-                card stretches to the panel instead of shrink-wrapping the text. */}
-            <style>{`
-              .pz-math-line .katex-display { margin: 0 !important; }
-              .pz-math-line .katex-display > .katex { white-space: nowrap !important; }
-              .pz-math-line .katex { white-space: nowrap !important; }
-            `}</style>
-            <div
-              className="pz-math-line"
-              style={{
-                // The equation IS the question — scale it with the panel, but keep it on one
-                // line: the ceiling is lower than before because a wrapped formula is worse
-                // than a slightly smaller one.
-                fontSize: "clamp(24px, 3.4vw, 42px)", padding: "24px 34px", borderRadius: 18,
-                color: "#0f172a",
-                background: "rgba(255,255,255,0.96)",
-                boxShadow: "0 10px 30px rgba(0,0,0,0.35)",
-                border: "1px solid rgba(255,255,255,0.6)",
-                width: "100%", maxWidth: 900,
-                overflowX: "auto", textAlign: "center",
-              }}
-            >
-              {/* LAST LINE OF DEFENCE. The server repairs the common breakages, but if KaTeX
-                  still can't parse something it renders a red error string at the student —
-                  worse than plain text. Degrade to the readable form instead: strip the TeX
-                  scaffolding and show the maths as words/symbols, so the question is always
-                  answerable even when the typesetting fails. */}
-              <BlockMath
-                math={latex}
-                renderError={() => (
-                  <span style={{ fontFamily: "inherit" }}>
-                    {latex
-                      .replace(/\\[,;!:]/g, " ")
-                      .replace(/\\(?:left|right|displaystyle)\b/g, "")
-                      .replace(/\\frac\s*\{([^{}]*)\}\s*\{([^{}]*)\}/g, "$1/$2")
-                      .replace(/\\text\s*\{([^{}]*)\}/g, "$1")
-                      .replace(/\\times/g, "×").replace(/\\div/g, "÷")
-                      .replace(/\\pi/g, "π").replace(/\\theta/g, "θ")
-                      .replace(/\\geq/g, "≥").replace(/\\leq/g, "≤").replace(/\\neq/g, "≠")
-                      .replace(/\\approx/g, "≈").replace(/\\pm/g, "±")
-                      .replace(/\\rightarrow/g, "→").replace(/\\%/g, "%")
-                      .replace(/\^2/g, "²").replace(/\^3/g, "³")
-                      .replace(/\\[a-zA-Z]+/g, "")
-                      .replace(/[{}]/g, "")
-                      .replace(/\s{2,}/g, " ")
-                      .trim()}
-                  </span>
-                )}
-              />
-            </div>
-          </>
-        ) : null}
-      </motion.div>
+    <div style={{ position: "relative", zIndex: 1, flex: 1, minHeight: 0, width: "100%", overflow: "auto", background: "transparent" }}>
+      {/* Content sits on the shared themed panel + decorations provided by PuzzlePlayer. */}
+      <div style={{ position: "relative", zIndex: 1, minHeight: "100%", boxSizing: "border-box", display: "flex", flexDirection: "column", justifyContent: "center", gap: 18, padding: "22px clamp(16px, 6vw, 90px)" }}>
+        {/* Question box */}
+        <div style={{ background: t.qBox, border: t.qBoxBorder, borderRadius: 16, padding: "26px 24px", textAlign: "center", boxShadow: isJunior ? "0 4px 14px rgba(0,0,0,0.06)" : "none" }}>
+          {mode === "image" && image ? (
+            <img src={image} alt="maths problem" style={{ width: "100%", maxWidth: 560, maxHeight: "min(38vh, 360px)", objectFit: "contain", borderRadius: 12, background: "#fff", padding: 8 }} />
+          ) : (
+            <span style={{ fontSize: "clamp(20px, 2.6vw, 30px)", fontWeight: 700, color: t.qText, lineHeight: 1.35 }}>{questionText}</span>
+          )}
+        </div>
 
-      {hasChoices ? (
-        <>
-          <div style={{
-            display: "grid", gridTemplateColumns: "1fr 1fr",
-            gap: 14, width: "100%", maxWidth: 460,
-          }}>
-            <AnimatePresence>
-              {options.map((opt, i) => {
-                const chosen = picked === opt;
-                const colour = BUBBLE_COLOURS[i % BUBBLE_COLOURS.length];
-                return (
-                  <motion.button
-                    key={opt}
-                    initial={{ scale: 0, opacity: 0 }}
-                    animate={{ scale: 1, opacity: 1 }}
-                    transition={{ type: "spring", stiffness: 420, damping: 22, delay: i * 0.06 }}
-                    whileTap={{ scale: 0.94 }}
-                    onClick={() => !disabled && setPicked(opt)}
-                    disabled={disabled}
-                    style={{
-                      minHeight: 66, borderRadius: 16, cursor: disabled ? "default" : "pointer",
-                      fontFamily: "inherit", fontSize: 22, fontWeight: 800,
-                      color: chosen ? "#fff" : colour,
-                      background: chosen ? colour : "rgba(255,255,255,0.96)",
-                      border: `3px solid ${colour}`,
-                      boxShadow: chosen ? `0 6px 18px ${colour}88` : "0 4px 0 rgba(0,0,0,0.18)",
-                      transition: "background .15s, color .15s, box-shadow .15s",
-                    }}
-                  >
-                    {opt}
-                  </motion.button>
-                );
-              })}
-            </AnimatePresence>
+        {/* Options (A/B/C/D) or a typed answer */}
+        {hasChoices ? (
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14, maxWidth: 760, width: "100%", margin: "0 auto" }}>
+            {options.map((opt, i) => {
+              const oc = QUIZ_OPT_COLORS[i % QUIZ_OPT_COLORS.length];
+              const picked = pickedIdx === i;
+              return (
+                <button
+                  key={`${opt}-${i}`}
+                  disabled={disabled}
+                  onClick={() => !disabled && setPickedIdx(i)}
+                  style={{
+                    display: "flex", alignItems: "center", gap: 14, padding: "15px 18px",
+                    border: `2px solid ${picked ? oc : t.cardBorder}`,
+                    background: picked ? (isJunior ? `${oc}14` : "rgba(255,255,255,0.12)") : t.cardBg,
+                    borderRadius: 14, cursor: disabled ? "default" : "pointer", textAlign: "left",
+                    color: t.qText, fontFamily: "inherit", transition: "border-color .15s, background .15s",
+                    boxShadow: picked ? `0 4px 14px ${oc}55` : "none",
+                  }}
+                >
+                  <span style={{ width: 36, height: 36, borderRadius: "50%", background: oc, color: "#fff", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 15, fontWeight: 800, flexShrink: 0 }}>{LETTERS[i] ?? i + 1}</span>
+                  <span style={{ flex: 1, fontSize: 20, fontWeight: 700 }}>{opt}</span>
+                </button>
+              );
+            })}
           </div>
-
-          <CheckButton onClick={() => picked && onSubmit(picked)} disabled={disabled || !picked} />
-        </>
-      ) : (
-        <>
+        ) : (
           <input
-            style={{
-              width: 240, padding: "14px 16px", borderRadius: 14, fontSize: 22, fontWeight: 800,
-              textAlign: "center", fontFamily: "inherit", color: "#0f172a",
-              background: "rgba(255,255,255,0.96)", border: "3px solid rgba(255,255,255,0.7)",
-              outlineColor: "#2563eb",
-            }}
             value={val}
             onChange={(e) => setVal(e.target.value)}
-            onKeyDown={(e) => { if (e.key === "Enter" && val.trim()) onSubmit(val.trim()); }}
-            placeholder="Your answer"
+            onKeyDown={(e) => { if (e.key === "Enter") submitTyped(); }}
+            placeholder="Type your answer"
             autoFocus
             disabled={disabled}
+            style={{ alignSelf: "center", width: "min(320px, 90%)", padding: "14px 16px", borderRadius: 14, fontSize: 20, fontWeight: 700, textAlign: "center", fontFamily: "inherit", color: t.qText, background: t.qBox, border: `2px solid ${t.cardBorder}`, outlineColor: t.accent }}
           />
-          <CheckButton onClick={() => onSubmit(val.trim())} disabled={disabled || !val.trim()} />
-        </>
-      )}
-    </div>
-  );
-}
+        )}
 
-function CheckButton({ onClick, disabled }: { onClick: () => void; disabled?: boolean }) {
-  return (
-    <button
-      onClick={onClick}
-      disabled={disabled}
-      style={{
-        minHeight: 54, padding: "0 44px", fontSize: 19, fontWeight: 800, fontFamily: "inherit",
-        color: "#fff", border: "none", borderRadius: 14,
-        background: disabled ? "rgba(148,163,184,0.6)" : "#16a34a",
-        cursor: disabled ? "not-allowed" : "pointer",
-        boxShadow: disabled ? "none" : "0 4px 0 #15803d",
-      }}
-    >
-      Check
-    </button>
+        {/* Check Answer */}
+        <button
+          onClick={hasChoices ? submitChoice : submitTyped}
+          disabled={disabled || (hasChoices ? pickedIdx === null : !val.trim())}
+          style={{
+            alignSelf: "center", minWidth: "min(380px, 90%)", padding: "14px 26px", borderRadius: 12,
+            fontSize: 15.5, fontWeight: 800, fontFamily: "inherit", color: "#fff", border: "none",
+            background: (disabled || (hasChoices ? pickedIdx === null : !val.trim())) ? "rgba(148,163,184,0.6)" : `linear-gradient(135deg, ${t.accent}, #1d4ed8)`,
+            cursor: (disabled || (hasChoices ? pickedIdx === null : !val.trim())) ? "not-allowed" : "pointer",
+            display: "inline-flex", alignItems: "center", justifyContent: "center", gap: 8,
+          }}
+        >
+          {disabled ? "Checking…" : "Check Answer →"}
+        </button>
+
+        {/* Hint tip */}
+        {hintOpen && (
+          <div style={{ alignSelf: "center", maxWidth: 560, padding: "10px 14px", borderRadius: 12, background: isJunior ? "#fffbeb" : "rgba(250,204,21,0.12)", border: "1px solid rgba(234,179,8,0.35)", fontSize: 12.5, color: t.qText, lineHeight: 1.5, textAlign: "center" }}>
+            💡 Tip: rule out the options you know are wrong first, then pick the best one. Take your time!
+          </div>
+        )}
+
+        {/* Need a hint? / Skip question */}
+        {!disabled && (
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", maxWidth: 760, width: "100%", margin: "0 auto" }}>
+            <button onClick={() => setHintOpen((v) => !v)} style={{ background: "none", border: "none", cursor: "pointer", fontFamily: "inherit", fontSize: 12.5, fontWeight: 700, color: t.accent, display: "inline-flex", alignItems: "center", gap: 5 }}>💡 Need a hint?</button>
+            <button onClick={skip} style={{ background: "none", border: "none", cursor: "pointer", fontFamily: "inherit", fontSize: 12.5, fontWeight: 700, color: t.qText, opacity: 0.7, display: "inline-flex", alignItems: "center", gap: 5 }}>Skip question →</button>
+          </div>
+        )}
+      </div>
+    </div>
   );
 }
