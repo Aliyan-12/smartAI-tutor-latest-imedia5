@@ -11,8 +11,14 @@ import {
   PageHeader, Card, CardBody, CardHeader, Button, Badge, Alert, Spinner, EmptyState, Select,
 } from "../components/ui";
 
-// Preset credit amounts for wallet→member transfers (same tiers as the student top-up dropdown).
-const SEND_AMOUNTS = [10, 25, 50, 100, 250];
+// Preset credit tiers for wallet→member transfers — same options/format as the student top-up.
+const SEND_TIERS = [
+  { credits: 10, price: "£1.99" },
+  { credits: 25, price: "£4.99" },
+  { credits: 50, price: "£8.99" },
+  { credits: 100, price: "£16.99" },
+  { credits: 250, price: "£39.99" },
+];
 
 function Toast({ msg }: { msg: string | null }) {
   if (!msg) return null;
@@ -260,10 +266,10 @@ export function MemberFundingCard({ flash, onChange }: { flash: (m: string) => v
               <div className="t-helper">{m.balance.toLocaleString()} credits</div>
             </div>
             <div className="flex items-center gap-2">
-              <Select aria-label={`Credits to send to ${m.name}`} value={amt[m.id] ?? ""} onChange={(e) => setAmt({ ...amt, [m.id]: e.target.value })} className="!h-9 w-36">
+              <Select aria-label={`Credits to send to ${m.name}`} value={amt[m.id] ?? ""} onChange={(e) => setAmt({ ...amt, [m.id]: e.target.value })} className="!h-9 w-48">
                 <option value="">Amount…</option>
-                {SEND_AMOUNTS.map((n) => (
-                  <option key={n} value={n}>{n} credits</option>
+                {SEND_TIERS.map((t) => (
+                  <option key={t.credits} value={t.credits}>{t.credits} credits — {t.price}</option>
                 ))}
               </Select>
               <Button size="sm" loading={busy === m.id} leftIcon={<Send size={14} />} onClick={() => send(m.id)}>Send</Button>
