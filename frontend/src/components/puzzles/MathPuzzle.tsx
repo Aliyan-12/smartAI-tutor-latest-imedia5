@@ -4,7 +4,7 @@ import "katex/dist/katex.min.css";
 import type { InteractivePuzzleProps } from "./types";
 import { emitSessionEvent } from "../../lib/sessionBus";
 import { getQuizTheme, QUIZ_OPT_COLORS } from "../../lib/quizTheme";
-import { normalizeMathText } from "../../lib/mathText";
+import { MathText, KaTeX } from "../../lib/mathRender";
 
 /**
  * A maths question — the student TAPS one of the A/B/C/D answer cards (or types an answer).
@@ -47,8 +47,8 @@ export default function MathPuzzle({ payload, onSubmit, disabled, keyStage }: In
     }
   }, [latex, mode, payload.prompt]);
 
-  // The question reads as clean text (Unicode maths, never raw "$10^{-1}$").
-  const questionText = normalizeMathText(payload.prompt || latex || "");
+  // Show the equation from `latex` too, UNLESS the prompt already contains it (avoids double).
+  const showLatex = !!latex && mode !== "image" && !(payload.prompt || "").includes(latex);
 
   const submitChoice = () => { if (pickedIdx !== null && !disabled) onSubmit(options[pickedIdx]); };
   const submitTyped = () => { if (val.trim() && !disabled) onSubmit(val.trim()); };
@@ -63,7 +63,16 @@ export default function MathPuzzle({ payload, onSubmit, disabled, keyStage }: In
           {mode === "image" && image ? (
             <img src={image} alt="maths problem" style={{ width: "100%", maxWidth: 560, maxHeight: "min(38vh, 360px)", objectFit: "contain", borderRadius: 12, background: "#fff", padding: 8 }} />
           ) : (
-            <span style={{ fontSize: "clamp(20px, 2.6vw, 30px)", fontWeight: 700, color: t.qText, lineHeight: 1.35 }}>{questionText}</span>
+            <div style={{ color: t.qText }}>
+              <span style={{ fontSize: "clamp(20px, 2.6vw, 30px)", fontWeight: 700, lineHeight: 1.4 }}>
+                <MathText text={payload.prompt || ""} />
+              </span>
+              {showLatex && (
+                <div style={{ marginTop: 14, fontSize: "clamp(22px, 3.2vw, 36px)", fontWeight: 700 }}>
+                  <KaTeX tex={latex} block />
+                </div>
+              )}
+            </div>
           )}
         </div>
 
@@ -88,7 +97,7 @@ export default function MathPuzzle({ payload, onSubmit, disabled, keyStage }: In
                   }}
                 >
                   <span style={{ width: 36, height: 36, borderRadius: "50%", background: oc, color: "#fff", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 15, fontWeight: 800, flexShrink: 0 }}>{LETTERS[i] ?? i + 1}</span>
-                  <span style={{ flex: 1, fontSize: 20, fontWeight: 700 }}>{opt}</span>
+                  <span style={{ flex: 1, fontSize: 20, fontWeight: 700 }}><MathText text={opt} /></span>
                 </button>
               );
             })}

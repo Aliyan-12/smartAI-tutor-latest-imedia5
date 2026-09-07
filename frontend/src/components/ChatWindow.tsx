@@ -300,7 +300,7 @@ export default function ChatWindow({
                 fontSize: 12, fontWeight: 600, color: "#6d28d9",
                 textAlign: "center", maxWidth: "85%", lineHeight: 1.5,
               }}>
-                {msg.content}
+                {mt(msg.content)}
               </div>
             </div>
           );
@@ -317,7 +317,7 @@ export default function ChatWindow({
                 fontStyle: "italic", textAlign: "center",
                 maxWidth: "80%", lineHeight: 1.5,
               }}>
-                {msg.content}
+                {mt(msg.content)}
               </div>
             </div>
           );

@@ -13,6 +13,7 @@ import LearnIdle from "../components/LearnIdle";
 import Celebration from "../components/puzzles/Celebration";
 import type { PuzzlePayload } from "../components/puzzles/types";
 import { sessionBus, type SessionBusEvent } from "../lib/sessionBus";
+import { MathText } from "../lib/mathRender";
 import AssessmentMode from "../components/AssessmentMode";
 import PostSessionScreen from "../components/PostSessionScreen";
 import { useSessionChannel } from "../hooks/useSessionChannel";
@@ -1223,9 +1224,9 @@ export default function SessionPage() {
         )}
 
         {!isPaused && learnTab === "test" && (
-          <div style={{ padding: "16px", position: "relative" }}>
+          <div style={{ flex: 1, minHeight: 0, position: "relative", display: "flex", flexDirection: "column", overflow: "auto" }}>
             {testResult ? (
-              <div>
+              <div style={{ padding: "16px" }}>
                 {/* Header */}
                 <div style={{ textAlign: "center", marginBottom: 14 }}>
                   <span style={{ fontSize: 40 }}>🏅</span>
@@ -1296,11 +1297,11 @@ export default function SessionPage() {
                 </div>
               </div>
             ) : testAssessment ? (
-              <div style={{ borderRadius: 16, padding: "18px", background: quizTheme.wrap, position: "relative", overflow: "hidden" }}>
+              <div style={{ flex: 1, minHeight: 0, padding: "20px clamp(16px,4vw,48px)", background: quizTheme.wrap, position: "relative", overflow: "auto", display: "flex", flexDirection: "column" }}>
                 {!isJuniorQuiz && (
                   <div aria-hidden style={{ position: "absolute", inset: 0, opacity: 0.5, pointerEvents: "none", backgroundImage: "radial-gradient(circle at 85% 15%, rgba(99,102,241,0.28), transparent 42%), radial-gradient(circle at 8% 85%, rgba(56,189,248,0.2), transparent 46%)" }} />
                 )}
-                <div style={{ position: "relative", zIndex: 1 }}>
+                <div style={{ position: "relative", zIndex: 1, flex: 1, display: "flex", flexDirection: "column", justifyContent: "center", gap: 4 }}>
                   {/* Have-a-go chip */}
                   <div style={{ marginBottom: 12 }}>
                     <span style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 10.5, fontWeight: 800, letterSpacing: "0.5px", textTransform: "uppercase", color: quizTheme.chipColor, background: quizTheme.chipBg, padding: "4px 11px", borderRadius: 999 }}>
@@ -1324,7 +1325,7 @@ export default function SessionPage() {
                   {/* Question box */}
                   <div style={{ background: quizTheme.qBox, border: isJuniorQuiz ? "1px solid #e2e8f0" : "1px solid rgba(255,255,255,0.1)", borderRadius: 14, padding: "20px 18px", textAlign: "center", marginBottom: 14, boxShadow: isJuniorQuiz ? "0 2px 8px rgba(0,0,0,0.05)" : "none" }}>
                     <p style={{ fontSize: 17, fontWeight: 700, color: quizTheme.qText, lineHeight: 1.5, margin: 0 }}>
-                      {testAssessment.questions[testCurrentQ].question_text}
+                      <MathText text={testAssessment.questions[testCurrentQ].question_text} />
                     </p>
                   </div>
 
@@ -1351,7 +1352,7 @@ export default function SessionPage() {
                           <span style={{ width: 30, height: 30, borderRadius: "50%", background: oc, color: "#fff", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 13, fontWeight: 800, flexShrink: 0 }}>
                             {["A", "B", "C", "D"][idx]}
                           </span>
-                          <span style={{ flex: 1 }}>{opt}</span>
+                          <span style={{ flex: 1 }}><MathText text={opt} /></span>
                         </button>
                       );
                     })}
@@ -1513,6 +1514,7 @@ export default function SessionPage() {
               liveStatus={liveStatus}
               thinkingSteps={thinkingSteps}
               liveParts={liveParts}
+              plainMath
             />
             {toolResults.map((tr) => {
               if (tr.tool === "set_homework") {
@@ -1804,7 +1806,7 @@ export default function SessionPage() {
           // screen while the Learn panel (slides, puzzles, the actual lesson) got 35%.
           <ResizablePanels
             panels={[
-              { id: "learn", label: "Learn", content: <div style={{ ...styles.learnPanel, width: "100%", borderRight: "none" }}>{learnPanelInner}</div> },
+              { id: "learn", label: "Learn", content: <div style={{ ...styles.learnPanel, width: "100%", flex: 1, borderRight: "none" }}>{learnPanelInner}</div> },
               { id: "chat",  label: "Chat",  content: <div style={{ ...styles.chatPanel,  flex: 1 }}>{chatPanelInner}</div> },
             ]}
             initialWidths={[70, 30]}
