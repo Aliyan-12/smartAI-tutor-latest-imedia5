@@ -8,8 +8,11 @@ import {
   type WalletMember, type CreditRequestRow,
 } from "../services/api";
 import {
-  PageHeader, Card, CardBody, CardHeader, Button, Badge, Alert, Spinner, EmptyState, Input,
+  PageHeader, Card, CardBody, CardHeader, Button, Badge, Alert, Spinner, EmptyState, Select,
 } from "../components/ui";
+
+// Preset credit amounts for wallet→member transfers (same tiers as the student top-up dropdown).
+const SEND_AMOUNTS = [10, 25, 50, 100, 250];
 
 function Toast({ msg }: { msg: string | null }) {
   if (!msg) return null;
@@ -257,7 +260,12 @@ export function MemberFundingCard({ flash, onChange }: { flash: (m: string) => v
               <div className="t-helper">{m.balance.toLocaleString()} credits</div>
             </div>
             <div className="flex items-center gap-2">
-              <Input type="number" placeholder="Amount" value={amt[m.id] ?? ""} onChange={(e) => setAmt({ ...amt, [m.id]: e.target.value })} className="!h-9 w-28" />
+              <Select aria-label={`Credits to send to ${m.name}`} value={amt[m.id] ?? ""} onChange={(e) => setAmt({ ...amt, [m.id]: e.target.value })} className="!h-9 w-36">
+                <option value="">Amount…</option>
+                {SEND_AMOUNTS.map((n) => (
+                  <option key={n} value={n}>{n} credits</option>
+                ))}
+              </Select>
               <Button size="sm" loading={busy === m.id} leftIcon={<Send size={14} />} onClick={() => send(m.id)}>Send</Button>
             </div>
           </div>
