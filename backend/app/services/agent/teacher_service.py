@@ -1424,14 +1424,8 @@ def manim_available_kinds(key_stage: Optional[str] = None, subject: Optional[str
 
 # ═══════════════════════════════════════════════════════════════════════════
 # TEACHING-VISUAL BUILDERS (merged from puzzle_service.py — mermaid / svg / animation
-# payload builders + backgrounds; these RETURN payload dicts, no puzzle state)
+# payload builders; these RETURN payload dicts, no puzzle state)
 # ═══════════════════════════════════════════════════════════════════════════
-_LIGHT_BACKGROUNDS = ["aurora", "blueprint", "paper"]
-_DARK_BACKGROUNDS = ["mesh", "bubbles"]
-
-
-def pick_background(dark: bool = False) -> str:
-    return random.choice(_DARK_BACKGROUNDS if dark else _LIGHT_BACKGROUNDS)
 
 
 # ── Builders ─────────────────────────────────────────────────────────────────────

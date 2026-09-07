@@ -2524,14 +2524,10 @@ async def generate_math_diagram(concept: str, params: Dict[str, Any]) -> Optiona
 # ═══════════════════════════════════════════════════════════════════════════
 # PUZZLE BUILDERS + MATH/LATEX + EVALUATION + PUZZLE STATE + VISUAL-FAMILY ROTATION
 # (merged from puzzle_service.py practice half. _clampi/_load_plan are identical to the
-# manipulative copies above — harmless redefinition. pick_background is duplicated below.)
+# manipulative copies above — harmless redefinition.)
 # ═══════════════════════════════════════════════════════════════════════════
-_LIGHT_BACKGROUNDS = ["aurora", "blueprint", "paper"]
-_DARK_BACKGROUNDS = ["mesh", "bubbles"]
-
-
-def pick_background(dark: bool = False) -> str:
-    return random.choice(_DARK_BACKGROUNDS if dark else _LIGHT_BACKGROUNDS)
+# Puzzle backdrops are no longer per-puzzle: the Practice + Quiz tabs use one shared,
+# Key-Stage-driven theme in the frontend, so builders emit no "background" param.
 
 
 # ── Builders ─────────────────────────────────────────────────────────────────────
@@ -2755,7 +2751,6 @@ def build_math(question: str, answer: str, *, mode: str = "latex",
         "params": {
             "mode": mode, "latex": latex or "", "image": image_url or "",
             "options": opts,                       # non-empty → the client shows tappable bubbles
-            "background": pick_background(dark=True),
         },
         "solution": ans,
         # "choice" is only a hint to the UI (bubbles vs typing); marking is the same either way.
@@ -2769,7 +2764,7 @@ def build_graph(question: str, answer: str, image_url: str) -> Dict[str, Any]:
         "puzzle_type": "graph",
         "title": "Read the graph",
         "prompt": question or "Answer from the graph.",
-        "params": {"image": image_url, "background": pick_background(dark=False)},
+        "params": {"image": image_url},
         "solution": str(answer),
         "answer_type": "text",
     }
@@ -2790,8 +2785,7 @@ def build_manipulative(kind: str, clean_params: Dict[str, Any], solution: Any,
         "puzzle_type": "manipulative",
         "title": title or "Have a go",
         "prompt": prompt or "",
-        "params": {"kind": kind, "background": pick_background(dark=False),
-                   **(clean_params or {})},
+        "params": {"kind": kind, **(clean_params or {})},
         "solution": solution,
         "answer_type": "manipulative",
     }
