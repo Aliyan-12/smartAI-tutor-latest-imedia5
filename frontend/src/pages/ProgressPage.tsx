@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
-import { Flame, Zap, Clock, Target, ArrowRight } from "lucide-react";
+import { Target, ArrowRight, BarChart2 } from "lucide-react";
 import Sidebar from "../components/Sidebar";
 import PageLoading from "../components/PageLoading";
 import { gamificationApi, assessmentsApi, appointmentsApi } from "../services/api";
@@ -226,43 +226,63 @@ export default function ProgressPage() {
             </div>
           )}
 
-          {/* ── Hero: weekly-goal focused ── */}
+          {/* ── Banner: "My Progress" mountain-path (ref image #14) ── */}
           <div style={{
-            background: "linear-gradient(120deg, #10b981 0%, #3b82f6 100%)",
-            borderRadius: 18, padding: "26px 30px", marginBottom: 16,
+            background: "linear-gradient(110deg, #10b981 0%, #22c55e 30%, #3b82f6 100%)",
+            borderRadius: 18, padding: "24px 28px", marginBottom: 16, minHeight: 150,
             position: "relative", overflow: "hidden",
+            display: "flex", alignItems: "center", justifyContent: "space-between", gap: 20,
           }}>
-            <img src="/images/robotAI.png" alt="" draggable={false} className="pg-hero-art"
-              style={{ position: "absolute", right: 24, bottom: -6, height: 150, width: "auto", objectFit: "contain", pointerEvents: "none", zIndex: 0 }} />
-            {sessionsToGoal > 0 && (
-              <div className="pg-hero-art" style={{ position: "absolute", right: 190, top: 26, background: "#fff", color: "#0f172a", fontSize: 12, fontWeight: 700, padding: "7px 12px", borderRadius: 12, borderBottomRightRadius: 3, boxShadow: "0 4px 14px rgba(0,0,0,0.18)", zIndex: 1, maxWidth: 150, lineHeight: 1.35 }}>
-                {sessionsToGoal} more session{sessionsToGoal > 1 ? "s" : ""} to hit your goal! 🎯
+            {/* soft cloud blobs */}
+            <div aria-hidden style={{ position: "absolute", inset: 0, opacity: 0.5, pointerEvents: "none",
+              backgroundImage: "radial-gradient(circle at 60% 120%, rgba(255,255,255,0.18), transparent 45%), radial-gradient(circle at 90% -10%, rgba(255,255,255,0.15), transparent 40%)" }} />
+
+            {/* Left — title + subtitle */}
+            <div style={{ position: "relative", zIndex: 2, maxWidth: 360, flexShrink: 0 }}>
+              <div style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", width: 34, height: 34, borderRadius: 9, background: "rgba(255,255,255,0.2)", marginBottom: 10 }}>
+                <BarChart2 size={18} color="#fff" />
               </div>
-            )}
-            <div style={{ position: "relative", zIndex: 1, maxWidth: 620 }}>
-              <div style={{ fontSize: 11, fontWeight: 800, letterSpacing: "0.6px", color: "rgba(255,255,255,0.9)", textTransform: "uppercase", marginBottom: 8 }}>📊 My Progress</div>
-              <h1 style={{ fontSize: 26, fontWeight: 800, color: "#fff", margin: "0 0 4px", letterSpacing: "-0.01em" }}>
-                You're making great progress, {firstName}!
+              <h1 style={{ fontSize: 30, fontWeight: 800, color: "#fff", margin: 0, letterSpacing: "-0.02em", lineHeight: 1.05 }}>
+                My <span style={{ borderBottom: "4px solid rgba(255,255,255,0.55)", paddingBottom: 1 }}>Progress</span>
               </h1>
-              <p style={{ fontSize: 14, color: "rgba(255,255,255,0.9)", margin: "0 0 16px" }}>
-                Keep learning to reach your weekly goal.
+              <p style={{ fontSize: 14, color: "rgba(255,255,255,0.92)", margin: "8px 0 0" }}>
+                See how you're improving and where to focus more.
               </p>
+            </div>
 
-              {/* Weekly goal progress */}
-              <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 14, maxWidth: 460 }}>
-                <div style={{ flex: 1, height: 10, background: "rgba(255,255,255,0.3)", borderRadius: 999, overflow: "hidden" }}>
-                  <div style={{ height: "100%", width: `${Math.max(weeklyGoalPct, 3)}%`, background: "#fff", borderRadius: 999, transition: "width 0.5s ease" }} />
+            {/* Middle — ascending milestone path + cheering robot (decorative) */}
+            <div className="pg-hero-art" style={{ position: "relative", flex: 1, height: 120, minWidth: 320 }}>
+              {[
+                { label: "Keep going!", left: "2%", bottom: 4, bg: "#fff", color: "#0f766e" },
+                { label: "You're improving!", left: "26%", bottom: 34, bg: "#22d3ee", color: "#083344" },
+                { label: "Great progress!", left: "52%", bottom: 66, bg: "#bbf7d0", color: "#065f46" },
+              ].map((m) => (
+                <div key={m.label} style={{ position: "absolute", left: m.left, bottom: m.bottom, zIndex: 2 }}>
+                  <span style={{ background: m.bg, color: m.color, fontSize: 11.5, fontWeight: 800, padding: "4px 10px", borderRadius: 999, boxShadow: "0 3px 8px rgba(0,0,0,0.15)", whiteSpace: "nowrap" }}>{m.label}</span>
+                  <div style={{ width: 12, height: 12, borderRadius: "50%", background: "#fff", border: "3px solid #38bdf8", margin: "5px auto 0" }} />
                 </div>
-                <span style={{ fontSize: 13, fontWeight: 800, color: "#fff", whiteSpace: "nowrap" }}>{sessionsThisWeek} / {WEEKLY_GOAL} sessions</span>
-              </div>
+              ))}
+              <span style={{ position: "absolute", left: "70%", bottom: 92, fontSize: 22, zIndex: 2 }}>🚩</span>
+              <img src="/images/robotAI.png" alt="" draggable={false}
+                style={{ position: "absolute", right: 6, bottom: -8, height: 128, width: "auto", objectFit: "contain", zIndex: 1, filter: "drop-shadow(0 8px 14px rgba(0,0,0,0.18))" }} />
+              <span style={{ position: "absolute", right: 4, top: 2, fontFamily: '"Segoe Print","Bradley Hand","Comic Sans MS",cursive', fontSize: 14, color: "rgba(255,255,255,0.96)", textAlign: "right", lineHeight: 1.2, zIndex: 2 }}>
+                Progress builds<br />brighter futures!
+              </span>
+            </div>
 
-              <div style={{ display: "flex", alignItems: "center", gap: 20, flexWrap: "wrap" }}>
-                <span className="pg-hero-stat"><Flame size={16} fill="#fff" strokeWidth={2} /> {profile?.current_streak ?? 0} day streak</span>
-                <span className="pg-hero-stat"><Zap size={16} fill="#fff" strokeWidth={2} /> {(profile?.xp_total ?? 0).toLocaleString()} XP</span>
-                <span className="pg-hero-stat"><Clock size={16} strokeWidth={2} /> {formatStudyTime(studyMinutesThisWeek)} studied this week</span>
-                <button onClick={() => navigate("/lesson/setup")} style={{ background: "#fff", color: "#1e40af", border: "none", borderRadius: 10, padding: "10px 18px", fontSize: 13, fontWeight: 800, cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 7 }}>
-                  Continue Learning <ArrowRight size={15} />
-                </button>
+            {/* Right — Level / XP badge */}
+            <div className="pg-hero-art" style={{ position: "relative", zIndex: 2, flexShrink: 0, background: "rgba(255,255,255,0.16)", border: "1px solid rgba(255,255,255,0.28)", borderRadius: 14, padding: "12px 16px", minWidth: 150, backdropFilter: "blur(4px)" }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
+                <div style={{ width: 30, height: 30, borderRadius: 8, background: "rgba(255,255,255,0.22)", display: "flex", alignItems: "center", justifyContent: "center" }}>
+                  <BarChart2 size={16} color="#fff" />
+                </div>
+                <div>
+                  <div style={{ fontSize: 15, fontWeight: 800, color: "#fff", lineHeight: 1 }}>Level {profile?.xp_level ?? 1}</div>
+                  <div style={{ fontSize: 11, color: "rgba(255,255,255,0.85)", marginTop: 2 }}>{(profile?.xp_total ?? 0).toLocaleString()} XP</div>
+                </div>
+              </div>
+              <div style={{ height: 7, background: "rgba(255,255,255,0.25)", borderRadius: 999, overflow: "hidden" }}>
+                <div style={{ height: "100%", width: `${Math.min(100, Math.max(10, ((profile?.xp_total ?? 0) % 500) / 5))}%`, background: "#fff", borderRadius: 999 }} />
               </div>
             </div>
           </div>
@@ -272,27 +292,45 @@ export default function ProgressPage() {
             <div className="pg-card" style={{ borderLeft: "4px solid #7c3aed" }}>
               <p className="pg-card-title"><Target size={16} color="#7c3aed" /> Recommended for You</p>
               {recFocus ? (
-                <>
-                  <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 8, flexWrap: "wrap" }}>
-                    <span style={{ fontSize: 18, fontWeight: 800, color: "#0f172a" }}>{recFocus.topic}</span>
-                    <span style={{ fontSize: 11, fontWeight: 700, color: "#d97706", background: "#fffbeb", padding: "2px 10px", borderRadius: 999 }}>Developing</span>
-                  </div>
-                  <p style={{ fontSize: 13, color: "#64748b", margin: "0 0 14px", lineHeight: 1.5 }}>
-                    A little more practice with <strong>{recFocus.topic}</strong> ({recFocus.subject}) will help you become secure.
-                  </p>
-                  <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 16 }}>
-                    <div style={{ flex: 1, height: 8, background: "#e2e8f0", borderRadius: 999, overflow: "hidden" }}>
-                      <div style={{ height: "100%", width: `${recAvg ?? 40}%`, background: "linear-gradient(90deg,#7c3aed,#a855f7)", borderRadius: 999 }} />
+                <div style={{ display: "flex", gap: 16, alignItems: "stretch" }}>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 8, flexWrap: "wrap" }}>
+                      <span style={{ fontSize: 18, fontWeight: 800, color: "#0f172a" }}>{recFocus.topic}</span>
+                      <span style={{ fontSize: 11, fontWeight: 700, color: "#d97706", background: "#fffbeb", padding: "2px 10px", borderRadius: 999 }}>Developing</span>
                     </div>
-                    <span style={{ fontSize: 13, fontWeight: 800, color: "#7c3aed" }}>{recAvg ?? 40}%</span>
+                    <p style={{ fontSize: 13, color: "#64748b", margin: "0 0 12px", lineHeight: 1.5 }}>
+                      A little more practice with <strong>{recFocus.topic}</strong> ({recFocus.subject}) will help you become secure.
+                    </p>
+                    <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 16 }}>
+                      <div style={{ flex: 1, height: 8, background: "#e2e8f0", borderRadius: 999, overflow: "hidden" }}>
+                        <div style={{ height: "100%", width: `${recAvg ?? 40}%`, background: "linear-gradient(90deg,#7c3aed,#a855f7)", borderRadius: 999 }} />
+                      </div>
+                      <span style={{ fontSize: 13, fontWeight: 800, color: "#7c3aed" }}>{recAvg ?? 40}%</span>
+                    </div>
+                    <div style={{ display: "flex", gap: 16, margin: "0 0 16px", flexWrap: "wrap" }}>
+                      <span style={{ fontSize: 12, color: "#64748b", display: "inline-flex", alignItems: "center", gap: 5 }}>⏱️ 10 min practice</span>
+                      <span style={{ fontSize: 12, color: "#64748b", display: "inline-flex", alignItems: "center", gap: 5 }}>📄 Similar questions</span>
+                    </div>
+                    <div style={{ display: "flex", alignItems: "center", gap: 14, flexWrap: "wrap" }}>
+                      <button
+                        onClick={() => navigate("/lesson/setup", { state: { subject: recFocus.subject, topic: recFocus.topic, goal: "revision" } })}
+                        style={{ background: "linear-gradient(135deg,#7c3aed,#6d28d9)", color: "#fff", border: "none", borderRadius: 10, padding: "11px 20px", fontSize: 13.5, fontWeight: 800, cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 7 }}
+                      >
+                        Practise This Skill <ArrowRight size={15} />
+                      </button>
+                      <span title="We suggest this because it's your least-secure recent topic — practising it lifts your overall mastery." style={{ fontSize: 12.5, fontWeight: 700, color: "#1a73e8", cursor: "help" }}>
+                        Why am I seeing this?
+                      </span>
+                    </div>
                   </div>
-                  <button
-                    onClick={() => navigate("/lesson/setup", { state: { subject: recFocus.subject, topic: recFocus.topic, goal: "revision" } })}
-                    style={{ background: "linear-gradient(135deg,#7c3aed,#6d28d9)", color: "#fff", border: "none", borderRadius: 10, padding: "11px 20px", fontSize: 13.5, fontWeight: 800, cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 7 }}
-                  >
-                    Practise This Skill <ArrowRight size={15} />
-                  </button>
-                </>
+                  {/* Flashcard visual */}
+                  <div className="pg-hero-art" style={{ width: 120, flexShrink: 0, position: "relative", display: "flex", alignItems: "center", justifyContent: "center" }}>
+                    <div style={{ position: "absolute", inset: "16px 4px", background: "#eef2ff", borderRadius: 12, transform: "rotate(-7deg)" }} />
+                    <div style={{ position: "relative", width: 104, height: 118, background: "#f5f3ff", border: "1px solid #ddd6fe", borderRadius: 12, display: "flex", alignItems: "center", justifyContent: "center", textAlign: "center", padding: 10, boxShadow: "0 6px 16px rgba(124,58,237,0.15)" }}>
+                      <span style={{ fontSize: 14, fontWeight: 800, color: "#6d28d9", lineHeight: 1.25 }}>{recFocus.topic}</span>
+                    </div>
+                  </div>
+                </div>
               ) : (
                 <p style={{ fontSize: 13, color: "#94a3b8", margin: 0 }}>
                   Complete a few sessions and we'll recommend the best skill to practise next.
@@ -424,9 +462,18 @@ export default function ProgressPage() {
                   );
                 })}
               </div>
-              <p style={{ fontSize: 11.5, color: "#94a3b8", margin: "6px 0 0", lineHeight: 1.4 }}>
-                Average quiz accuracy per calendar week (Mon–Sun).
-              </p>
+              {improvementDelta > 0 ? (
+                <div style={{ display: "flex", alignItems: "center", gap: 8, background: "#f0fdf4", border: "1px solid #bbf7d0", borderRadius: 10, padding: "8px 12px", marginTop: 8 }}>
+                  <span style={{ fontSize: 15 }}>📈</span>
+                  <span style={{ fontSize: 12, fontWeight: 600, color: "#166534", lineHeight: 1.4 }}>
+                    Great progress — your accuracy is up {improvementDelta}% over the last few weeks!
+                  </span>
+                </div>
+              ) : (
+                <p style={{ fontSize: 11.5, color: "#94a3b8", margin: "8px 0 0", lineHeight: 1.4 }}>
+                  Average quiz accuracy per calendar week (Mon–Sun).
+                </p>
+              )}
             </div>
           </div>
 
