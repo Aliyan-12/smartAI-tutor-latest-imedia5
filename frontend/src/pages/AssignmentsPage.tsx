@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
-import { Calendar, Clock, BookOpen, MessageCircle } from "lucide-react";
+import { Calendar, Clock, BookOpen, MessageCircle, ArrowRight } from "lucide-react";
 import Sidebar from "../components/Sidebar";
 import { SkeletonList } from "../components/ui";
 import { assignmentsApi } from "../services/api";
@@ -239,14 +239,16 @@ export default function AssignmentsPage() {
               <div className="asgn-hero-deco1" /><div className="asgn-hero-deco2" />
 
               {/* Handwritten accents (approximate the reference illustration with existing assets) */}
-              <span className="asgn-hero-note" style={{ top: 26, left: 360, fontSize: 16, transform: "rotate(-6deg)" }}>
-                Keep learning,<br />keep growing! ↳
+              <span className="asgn-hero-note" style={{ top: 24, left: 350, fontSize: 16, transform: "rotate(-6deg)" }}>
+                Keep learning,<br />keep growing! ⤳
               </span>
-              <span className="asgn-hero-note" style={{ top: 20, right: 170, fontSize: 13, textAlign: "right", opacity: 0.9 }}>
+              <span className="asgn-hero-note" style={{ top: 18, right: 160, fontSize: 13, textAlign: "right", opacity: 0.9, borderBottom: "2px solid rgba(255,255,255,0.5)", paddingBottom: 2 }}>
                 Big goals start<br />with small steps
               </span>
-              <span className="asgn-hero-note" style={{ bottom: 20, right: 148, fontSize: 20 }}>✦</span>
-              <span className="asgn-hero-note" style={{ top: 30, right: 132, fontSize: 15 }}>★</span>
+              <span className="asgn-hero-note" style={{ top: 62, right: 210, fontSize: 22 }}>📅</span>
+              <span className="asgn-hero-note" style={{ bottom: 22, right: 150, fontSize: 20, color: "#fde68a" }}>★</span>
+              <span className="asgn-hero-note" style={{ top: 34, right: 128, fontSize: 15, color: "#fde68a" }}>★</span>
+              <span className="asgn-hero-note" style={{ bottom: 46, right: 250, fontSize: 12, color: "#fde68a" }}>✦</span>
 
               <img
                 src="/images/classroom-robot.png"
@@ -256,7 +258,7 @@ export default function AssignmentsPage() {
               />
 
               <div style={{ zIndex: 1 }}>
-                <span className="asgn-hero-badge">✦ Learning</span>
+                <span className="asgn-hero-badge">◆ Learning</span>
                 <h1 style={{ fontSize: 27, fontWeight: 800, color: "#fff", margin: "0 0 5px", letterSpacing: "-0.01em" }}>Assignments</h1>
                 <p style={{ fontSize: 13.5, color: "rgba(255,255,255,0.9)", margin: 0 }}>
                   Your homework and learning tasks from your teachers.
@@ -268,7 +270,7 @@ export default function AssignmentsPage() {
                   style={{ background: "rgba(255,255,255,0.97)", borderColor: "transparent", padding: "10px 18px", fontWeight: 700 }}
                   onClick={() => { setCalendarToast(true); setTimeout(() => setCalendarToast(false), 2500); }}
                 >
-                  <Calendar size={16} /> Calendar
+                  <Calendar size={16} /> Calendar <ArrowRight size={15} />
                 </button>
               </div>
             </div>
