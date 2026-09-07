@@ -107,6 +107,14 @@ async def billing_me(user: User = Depends(get_current_user), db: AsyncSession = 
         BillingCustomer.owner_type == owner_type, BillingCustomer.owner_id == owner_id))
     cust = cust_res.scalar_one_or_none()
     sub = await billing.active_subscription(db, cust.id) if cust else None
+    # Reflect the SCHOOL's active subscription for every non-student member (parent/teacher)
+    # who has no personal subscription — so an active plan shows everywhere except for students.
+    if sub is None and user.role != "student" and getattr(user, "school_id", None):
+        sc_res = await db.execute(select(BillingCustomer).where(
+            BillingCustomer.owner_type == OWNER_SCHOOL, BillingCustomer.owner_id == user.school_id))
+        sc = sc_res.scalar_one_or_none()
+        if sc:
+            sub = await billing.active_subscription(db, sc.id)
     pm = None
     if cust and cust.default_payment_method_id:
         r = await db.execute(select(PaymentMethodRef).where(
