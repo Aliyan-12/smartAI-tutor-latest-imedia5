@@ -4,6 +4,7 @@ import { useAuth } from "../context/AuthContext";
 import { appointmentsApi, gamificationApi } from "../services/api";
 import type { SessionReport, SessionPhase } from "../types";
 import LottiePlayer, { LOTTIE_URLS } from "./LottiePlayer";
+import { Check, Pause, Minus } from "lucide-react";
 
 interface Props {
   appointmentId: number;
@@ -204,57 +205,53 @@ export default function PostSessionScreen({
         {report?.phases && report.phases.length > 0 && (
           <div style={{ ...styles.section, paddingBottom: 16 }}>
             <p style={styles.sectionHeading}>📋 Lesson Breakdown</p>
-            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-              {report.phases.map((phase: SessionPhase, i: number) => {
+            <div style={{ display: "flex", flexDirection: "column" }}>
+              {report.phases.map((phase: SessionPhase, i: number, arr: SessionPhase[]) => {
+                const isLast = i === arr.length - 1;
                 const statusColor =
                   phase.status === "completed" ? "#10b981" :
-                  phase.status === "partial" ? "#f59e0b" : "#94a3b8";
-                const statusDot = phase.status === "completed" ? "✓" : phase.status === "partial" ? "~" : "–";
+                  phase.status === "partial" ? "#f59e0b" : "#cbd5e1";
+                const Icon = phase.status === "completed" ? Check : phase.status === "partial" ? Pause : Minus;
                 return (
-                  <div key={i} style={{
-                    background: "var(--bg-primary)",
-                    border: "1px solid var(--border-color)",
-                    borderRadius: 8,
-                    padding: "10px 14px",
-                    display: "flex",
-                    gap: 12,
-                    alignItems: "flex-start",
-                  }}>
-                    <div style={{
-                      width: 22, height: 22, borderRadius: "50%",
-                      background: statusColor + "22",
-                      border: `1.5px solid ${statusColor}`,
-                      display: "flex", alignItems: "center", justifyContent: "center",
-                      fontSize: 11, fontWeight: 700, color: statusColor,
-                      flexShrink: 0, marginTop: 1,
-                    }}>
-                      {statusDot}
+                  <div key={i} style={{ display: "flex", gap: 14, alignItems: "stretch" }}>
+                    {/* Timeline rail: solid circle + connecting line */}
+                    <div style={{ display: "flex", flexDirection: "column", alignItems: "center", flexShrink: 0 }}>
+                      <div style={{
+                        width: 30, height: 30, borderRadius: "50%", background: statusColor,
+                        display: "flex", alignItems: "center", justifyContent: "center",
+                        flexShrink: 0, boxShadow: `0 2px 6px ${statusColor}66`,
+                      }}>
+                        <Icon size={15} color="#fff" strokeWidth={3} />
+                      </div>
+                      {!isLast && <div style={{ width: 2, flex: 1, minHeight: 16, background: "var(--border-color)", margin: "3px 0" }} />}
                     </div>
-                    <div style={{ flex: 1 }}>
+                    {/* Content */}
+                    <div style={{ flex: 1, paddingBottom: isLast ? 4 : 16, borderBottom: isLast ? "none" : "1px solid var(--border-color)", marginBottom: isLast ? 0 : 12 }}>
                       <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-                        <span style={{ fontSize: 13, fontWeight: 700, color: "var(--text-primary)" }}>
+                        <span style={{ fontSize: 13.5, fontWeight: 700, color: "var(--text-primary)" }}>
                           {phase.phase_title}
                         </span>
                         {phase.planned_minutes && (
-                          <span style={{ fontSize: 11, color: "var(--text-muted)", fontWeight: 500 }}>
+                          <span style={{ fontSize: 11.5, color: "var(--text-muted)", fontWeight: 500 }}>
                             {phase.planned_minutes} min
                           </span>
                         )}
                         <span style={{
                           fontSize: 10, fontWeight: 800, textTransform: "uppercase",
-                          color: statusColor, background: statusColor + "1a",
+                          color: phase.status === "not_started" ? "#64748b" : statusColor,
+                          background: (phase.status === "not_started" ? "#94a3b8" : statusColor) + "1a",
                           padding: "2px 9px", borderRadius: 999, letterSpacing: "0.4px",
                         }}>
-                          {phase.status}
+                          {phase.status.replace("_", " ")}
                         </span>
                       </div>
                       {phase.what_was_covered && (
-                        <p style={{ fontSize: 12, color: "var(--text-secondary)", margin: "4px 0 2px", lineHeight: 1.4 }}>
+                        <p style={{ fontSize: 12, color: "var(--text-secondary)", margin: "5px 0 2px", lineHeight: 1.45 }}>
                           {phase.what_was_covered}
                         </p>
                       )}
                       {phase.student_engagement && (
-                        <p style={{ fontSize: 11, color: "var(--text-muted)", margin: 0, fontStyle: "italic" }}>
+                        <p style={{ fontSize: 11.5, color: "var(--text-muted)", margin: 0, fontStyle: "italic" }}>
                           {phase.student_engagement}
                         </p>
                       )}
@@ -271,8 +268,19 @@ export default function PostSessionScreen({
           gap: 16, padding: "18px 28px",
           background: "linear-gradient(135deg, rgba(26,115,232,0.08) 0%, rgba(99,102,241,0.08) 100%)",
           borderBottom: "1px solid var(--border-color)",
-          flexWrap: "wrap",
+          flexWrap: "wrap", position: "relative", overflow: "hidden",
         }}>
+          {/* Confetti accents */}
+          {([
+            { pos: { top: 14, left: "12%" }, c: "#f59e0b", r: "-25deg" },
+            { pos: { top: 26, left: "30%" }, c: "#3b82f6", r: "40deg" },
+            { pos: { bottom: 16, left: "22%" }, c: "#10b981", r: "15deg" },
+            { pos: { top: 16, right: "14%" }, c: "#8b5cf6", r: "30deg" },
+            { pos: { bottom: 18, right: "28%" }, c: "#ef4444", r: "-20deg" },
+            { pos: { top: 30, right: "34%" }, c: "#06b6d4", r: "-45deg" },
+          ] as const).map((d, i) => (
+            <span key={i} aria-hidden style={{ position: "absolute", ...d.pos, width: 8, height: 3, borderRadius: 2, background: d.c, transform: `rotate(${d.r})`, opacity: 0.85, pointerEvents: "none" }} />
+          ))}
           {/* XP Earned */}
           <div style={{ textAlign: "center", minWidth: 100 }}>
             <div style={{
