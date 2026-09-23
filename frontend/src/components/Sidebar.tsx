@@ -1009,6 +1009,22 @@ export default function Sidebar({
               )}
             </div>
           )}
+          {user?.role === "administrator" && (
+            <button
+              className={`sb-nav-item${isActive("/admin/school-verification") ? " active" : ""}`}
+              onClick={() => go("/admin/school-verification")}
+            >
+              <ShieldCheck size={16} /><span>School Verification</span>
+            </button>
+          )}
+          {user?.role === "admin" && (
+            <button
+              className={`sb-nav-item${isActive("/school/verification") ? " active" : ""}`}
+              onClick={() => go("/school/verification")}
+            >
+              <ShieldCheck size={16} /><span>Verification</span>
+            </button>
+          )}
           <button
             className={`sb-nav-item${isActive("/admin/assessments") ? " active" : ""}`}
             onClick={() => go("/admin/assessments")}

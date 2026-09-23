@@ -125,7 +125,10 @@ async def login(payload: UserLogin, db: AsyncSession = Depends(get_db)):
     if not user.is_verified:
         # Frontend detects this code to offer "resend verification".
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="email_unverified")
-    if user.approval_status == APPROVAL_PENDING:
+    # A pending SCHOOL ADMIN may sign in, but only reaches the verification workflow — their
+    # school's protected features stay gated on verification_status (see require_verified_school).
+    # Other pending roles remain blocked; rejected accounts are always blocked.
+    if user.approval_status == APPROVAL_PENDING and user.role != ROLE_ADMIN:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="account_pending_approval")
     if user.approval_status == APPROVAL_REJECTED:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="account_rejected")

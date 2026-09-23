@@ -30,6 +30,22 @@ async def _require_school(current_user: User) -> int:
     return current_user.school_id
 
 
+async def _require_verified_school(db: AsyncSession, current_user: User):
+    """Gate protected school-management features until the school is verified (feature 04).
+    Administrators (cross-platform) are exempt; the default school is always verified."""
+    from app.models.user import ROLE_ADMINISTRATOR
+    if current_user.role == ROLE_ADMINISTRATOR:
+        return
+    from app.models.school import School
+    from app.services.school_verification_service import is_verified
+    school = await db.get(School, current_user.school_id) if current_user.school_id else None
+    if school is None or not is_verified(school):
+        raise HTTPException(
+            status_code=403,
+            detail={"code": "school_not_verified", "message": "Your school must be verified before you can manage members."},
+        )
+
+
 @router.get("/me", response_model=SchoolStats)
 async def my_school(
     current_user: User = Depends(require_admin),
@@ -96,6 +112,7 @@ async def add_user(
     db: AsyncSession = Depends(get_db),
 ):
     school_id = await _require_school(current_user)
+    await _require_verified_school(db, current_user)   # gate: no member management until verified
     if await get_user_by_email(db, payload.email):
         raise HTTPException(status_code=409, detail="An account with this email already exists")
     # School-managed accounts are pre-verified (the school vouches for them) but
