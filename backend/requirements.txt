@@ -46,3 +46,6 @@ casbin-async-sqlalchemy-adapter>=1.4.0
 # it does NOT affect LaTeX in the app: equation puzzles render LaTeX with KaTeX in the browser
 # (katex / react-katex); the AI authors valid LaTeX itself (validate → fix → retry, no server repair).
 manim>=0.18.1
+
+# Billing (feature 09/10) — optional at runtime; the mock provider is used when unset.
+stripe==11.1.0

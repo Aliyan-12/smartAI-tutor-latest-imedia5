@@ -49,6 +49,11 @@ async def update_class_settings(db: AsyncSession, user_id: int, data: Dict[str, 
         profile.teaching_approach = data["teaching_approach"]
     if "default_objectives" in data and data["default_objectives"] is not None:
         profile.default_objectives = str(data["default_objectives"])[:2000]
+    if "default_student_credits" in data and data["default_student_credits"] is not None:
+        try:
+            profile.default_student_credits = max(0, min(100000, int(data["default_student_credits"])))
+        except (TypeError, ValueError):
+            pass
     if data.get("report_visibility") in REPORT_VISIBILITY:
         profile.report_visibility = data["report_visibility"]
     if isinstance(data.get("availability"), dict):

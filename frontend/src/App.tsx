@@ -30,6 +30,8 @@ import PrivacyPage from "./pages/PrivacyPage";
 import SchoolVerificationPage from "./pages/SchoolVerificationPage";
 import AdminSchoolReviewPage from "./pages/AdminSchoolReviewPage";
 import AdminSettingsPage from "./pages/AdminSettingsPage";
+import BillingPage from "./pages/BillingPage";
+import SchoolBillingPage from "./pages/SchoolBillingPage";
 import { CookieConsent } from "./components/CookieConsent";
 import type { ReactNode } from "react";
 
@@ -125,6 +127,7 @@ export default function App() {
           <Route path="/parent/appointments" element={<ProtectedRoute allowedRoles={["parent"]}><ParentDashboard /></ProtectedRoute>} />
           <Route path="/parent/reports" element={<ProtectedRoute allowedRoles={["parent"]}><ParentReportsPage /></ProtectedRoute>} />
           <Route path="/parent/settings" element={<ProtectedRoute allowedRoles={["parent"]}><ParentSettingsPage /></ProtectedRoute>} />
+          <Route path="/billing" element={<ProtectedRoute allowedRoles={["parent", "teacher"]}><BillingPage /></ProtectedRoute>} />
           <Route path="/appointments" element={<ProtectedRoute allowedRoles={["admin", "teacher", "parent"]}><AppointmentsPage /></ProtectedRoute>} />
           <Route path="/appointments/new" element={<ProtectedRoute allowedRoles={["teacher", "parent"]}><BookSessionPage /></ProtectedRoute>} />
           <Route path="/admin/assessments" element={<ProtectedRoute allowedRoles={["admin", "administrator"]}><AdminDashboard /></ProtectedRoute>} />
@@ -245,6 +248,7 @@ export default function App() {
           <Route path="/school/verification" element={<ProtectedRoute allowedRoles={["admin"]}><SchoolVerificationPage /></ProtectedRoute>} />
           <Route path="/admin/school-verification" element={<ProtectedRoute allowedRoles={["administrator"]}><AdminSchoolReviewPage /></ProtectedRoute>} />
           <Route path="/admin/settings" element={<ProtectedRoute allowedRoles={["admin", "administrator"]}><AdminSettingsPage /></ProtectedRoute>} />
+          <Route path="/school/billing" element={<ProtectedRoute allowedRoles={["admin", "administrator"]}><SchoolBillingPage /></ProtectedRoute>} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
         <CookieConsent />

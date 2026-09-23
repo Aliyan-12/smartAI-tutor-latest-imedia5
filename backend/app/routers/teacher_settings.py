@@ -30,6 +30,7 @@ class ClassSettingsUpdate(BaseModel):
     default_subjects: Optional[List[str]] = None
     teaching_approach: Optional[str] = None
     default_objectives: Optional[str] = None
+    default_student_credits: Optional[int] = None
     report_visibility: Optional[str] = None
     availability: Optional[Dict[str, List[str]]] = None
 
@@ -56,6 +57,7 @@ def _class_dto(p) -> Dict[str, Any]:
         "default_subjects": p.default_subjects or [],
         "teaching_approach": p.teaching_approach,
         "default_objectives": p.default_objectives or "",
+        "default_student_credits": p.default_student_credits,
         "report_visibility": p.report_visibility,
         "availability": p.availability or {},
     }

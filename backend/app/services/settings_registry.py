@@ -49,10 +49,11 @@ REGISTRY: List[Setting] = [
     Setting("billing_enabled", "billing", "Billing enabled", "bool", False, dangerous=True,
             help="Turns paid plans and top-ups on across the platform."),
     Setting("payment_model", "billing", "Payment model", "enum", "hybrid",
-            options=["subscription", "token_topup", "hybrid"]),
-    Setting("currency", "billing", "Currency", "enum", "GBP", options=["GBP", "USD", "EUR", "AED"]),
-    Setting("tax_rate_percent", "billing", "Tax rate (%)", "float", 0.0, min=0, max=100),
-    Setting("invoice_prefix", "billing", "Invoice prefix", "string", "SMART"),
+            options=["subscription", "token_topup", "hybrid"], scope_type="school",
+            help="How this school pays: subscription plans, token top-ups, or both (hybrid)."),
+    Setting("currency", "billing", "Currency", "enum", "GBP", options=["GBP", "USD", "EUR", "AED"], scope_type="school"),
+    Setting("tax_rate_percent", "billing", "Tax rate (%)", "float", 0.0, min=0, max=100, scope_type="school"),
+    Setting("invoice_prefix", "billing", "Invoice prefix", "string", "SMART", scope_type="school"),
     Setting("invoice_numbering", "billing", "Invoice numbering", "enum", "sequential",
             options=["sequential", "per_school"]),
     Setting("billing_grace_period_days", "billing", "Grace period (days)", "int", 7, min=0, max=90),
@@ -85,6 +86,8 @@ REGISTRY: List[Setting] = [
             "bool", True, scope_type="school"),
     Setting("school_default_session_length", "school_policy", "Default session length (min)",
             "int", 40, scope_type="school", min=20, max=90),
+    Setting("teachers_can_view_billing", "school_policy", "Teachers can view billing balance",
+            "bool", False, scope_type="school"),
 ]
 
 SECTIONS = [

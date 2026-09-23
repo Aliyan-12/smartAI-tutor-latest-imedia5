@@ -678,6 +678,7 @@ export const settingsApi = {
 
 export interface ParentProfile {
   name: string; email: string; phone: string | null; timezone: string; language: string;
+  default_child_credits: number;
 }
 export interface ChildSummary {
   id: number; name: string; email: string; is_active: boolean;
@@ -696,7 +697,7 @@ export const parentSettingsApi = {
   async getProfile() {
     return handleResponse<ParentProfile>(await fetch(`${API_BASE}/parent/settings/profile`, { headers: authHeaders() }));
   },
-  async updateProfile(data: Partial<Pick<ParentProfile, "name" | "phone" | "timezone" | "language">>) {
+  async updateProfile(data: Partial<Pick<ParentProfile, "name" | "phone" | "timezone" | "language" | "default_child_credits">>) {
     return handleResponse<ParentProfile>(await fetch(`${API_BASE}/parent/settings/profile`, {
       method: "PUT", headers: authHeaders(), body: JSON.stringify(data),
     }));
@@ -751,6 +752,7 @@ export interface TeacherClassSettings {
   default_subjects: string[];
   teaching_approach: string;
   default_objectives: string;
+  default_student_credits: number;
   report_visibility: string;
   availability: Record<string, string[]>;
 }
@@ -823,6 +825,126 @@ export const adminSettingsApi = {
   },
   async auditLog() {
     return handleResponse<{ changes: SettingChangeRow[] }>(await fetch(`${API_BASE}/admin/settings/audit/log`, { headers: authHeaders() }));
+  },
+};
+
+export interface BillingPlan { slug: string; name: string; audience: string; price: number; credits_per_period: number; interval: string; description: string }
+export interface TokenPackage { slug: string; name: string; audience: string; price: number; credits: number; description: string }
+export interface Offering {
+  id: number | null; kind: "plan" | "topup"; slug: string; name: string; audience: string;
+  price: number; credits: number; interval: string | null; description: string | null;
+  active: boolean; school_id: number | null;
+}
+export interface WalletMember { id: number; name: string; role: string; balance: number; }
+export interface CreditRequestRow {
+  id: number; requester_id: number; requester_name: string; amount: number;
+  note: string; status: string; created_at: string;
+}
+export interface BillingSummary {
+  audience: string; mock_mode: boolean; balance: number; currency: string;
+  payment_model?: string;
+  payment_method: null | { brand: string | null; last4: string | null; exp_month: number | null; exp_year: number | null };
+  subscription: null | { plan_slug: string; status: string; cancel_at_period_end: boolean; current_period_end: string | null; credits_per_period: number };
+}
+export interface InvoiceRow { number: string | null; status: string; amount_total: number; tax: number; currency: string; hosted_invoice_url: string | null; pdf_url: string | null; paid_at: string | null; created_at: string }
+export interface LedgerRow { delta: number; balance_after: number; entry_type: string; source: string | null; reference: string | null; reason: string; created_at: string }
+
+export const billingApi = {
+  async plans() { return handleResponse<{ plans: BillingPlan[]; currency: string }>(await fetch(`${API_BASE}/billing/plans`, { headers: authHeaders() })); },
+  async packages() { return handleResponse<{ packages: TokenPackage[]; currency: string }>(await fetch(`${API_BASE}/billing/packages`, { headers: authHeaders() })); },
+  async me() { return handleResponse<BillingSummary>(await fetch(`${API_BASE}/billing/me`, { headers: authHeaders() })); },
+  async subscribe(plan_slug: string) {
+    return handleResponse<{ mock: boolean; url: string | null }>(await fetch(`${API_BASE}/billing/subscribe`, { method: "POST", headers: authHeaders(), body: JSON.stringify({ plan_slug }) }));
+  },
+  async topup(package_slug: string) {
+    return handleResponse<{ mock: boolean; url: string | null }>(await fetch(`${API_BASE}/billing/topup`, { method: "POST", headers: authHeaders(), body: JSON.stringify({ package_slug }) }));
+  },
+  async devComplete(kind: "subscription" | "topup", slug: string) {
+    return handleResponse<{ ok: boolean }>(await fetch(`${API_BASE}/billing/dev/complete`, { method: "POST", headers: authHeaders(), body: JSON.stringify({ kind, slug }) }));
+  },
+  // ── admin: manage the plan + top-up catalogue ──
+  async offerings() {
+    return handleResponse<{ plans: Offering[]; topups: Offering[]; is_platform_admin: boolean }>(await fetch(`${API_BASE}/billing/offerings`, { headers: authHeaders() }));
+  },
+  async createOffering(body: { kind: "plan" | "topup"; name: string; price: number; credits: number; audience?: string; interval?: string | null; description?: string }) {
+    return handleResponse<Offering>(await fetch(`${API_BASE}/billing/offerings`, { method: "POST", headers: authHeaders(), body: JSON.stringify(body) }));
+  },
+  async updateOffering(id: number, body: Partial<{ name: string; price: number; credits: number; description: string; interval: string | null; active: boolean }>) {
+    return handleResponse<Offering>(await fetch(`${API_BASE}/billing/offerings/${id}`, { method: "PATCH", headers: authHeaders(), body: JSON.stringify(body) }));
+  },
+  async deleteOffering(id: number) {
+    return handleResponse<{ ok: boolean }>(await fetch(`${API_BASE}/billing/offerings/${id}`, { method: "DELETE", headers: authHeaders() }));
+  },
+  async setPaymentModel(payment_model: string) {
+    return handleResponse<{ payment_model: string }>(await fetch(`${API_BASE}/billing/payment-model`, { method: "PATCH", headers: authHeaders(), body: JSON.stringify({ payment_model }) }));
+  },
+  // ── wallet transfers + student credit requests ──
+  async members() {
+    return handleResponse<{ members: WalletMember[] }>(await fetch(`${API_BASE}/billing/members`, { headers: authHeaders() }));
+  },
+  async transfer(target_user_id: number, amount: number, reason = "") {
+    return handleResponse<{ ok: boolean; source_balance: number; target_balance: number }>(await fetch(`${API_BASE}/billing/transfer`, { method: "POST", headers: authHeaders(), body: JSON.stringify({ target_user_id, amount, reason }) }));
+  },
+  async creditRequests() {
+    return handleResponse<{ requests: CreditRequestRow[] }>(await fetch(`${API_BASE}/billing/credit-requests`, { headers: authHeaders() }));
+  },
+  async createCreditRequest(amount: number, note = "") {
+    return handleResponse<{ id: number; status: string }>(await fetch(`${API_BASE}/billing/credit-requests`, { method: "POST", headers: authHeaders(), body: JSON.stringify({ amount, note }) }));
+  },
+  async fulfillCreditRequest(id: number) {
+    return handleResponse<{ ok: boolean }>(await fetch(`${API_BASE}/billing/credit-requests/${id}/fulfill`, { method: "POST", headers: authHeaders() }));
+  },
+  async declineCreditRequest(id: number) {
+    return handleResponse<{ ok: boolean }>(await fetch(`${API_BASE}/billing/credit-requests/${id}/decline`, { method: "POST", headers: authHeaders() }));
+  },
+  async cancel(at_period_end = true) {
+    return handleResponse(await fetch(`${API_BASE}/billing/subscription/cancel`, { method: "POST", headers: authHeaders(), body: JSON.stringify({ at_period_end }) }));
+  },
+  async reactivate() {
+    return handleResponse(await fetch(`${API_BASE}/billing/subscription/reactivate`, { method: "POST", headers: authHeaders() }));
+  },
+  async portal() { return handleResponse<{ url: string | null; mock: boolean }>(await fetch(`${API_BASE}/billing/portal`, { method: "POST", headers: authHeaders() })); },
+  async invoices() { return handleResponse<{ invoices: InvoiceRow[] }>(await fetch(`${API_BASE}/billing/invoices`, { headers: authHeaders() })); },
+  async ledger(entry_type?: string) {
+    const q = entry_type ? `?entry_type=${entry_type}` : "";
+    return handleResponse<{ balance: number; entries: LedgerRow[] }>(await fetch(`${API_BASE}/billing/ledger${q}`, { headers: authHeaders() }));
+  },
+};
+
+export interface TopupRequest {
+  id: number; package_slug: string; credits: number; amount: number; status: string;
+  note: string; requested_by_id: number | null; created_at: string; decided_at: string | null;
+}
+export interface SchoolBillingSettings {
+  payment_model: string; currency: string; tax_rate_percent: number; invoice_prefix: string;
+  billing_contact_email: string | null; billing_address: string | null; school_name: string | null;
+}
+
+export const schoolBillingApi = {
+  async requests() { return handleResponse<{ requests: TopupRequest[]; packages: Offering[] }>(await fetch(`${API_BASE}/billing/school/requests`, { headers: authHeaders() })); },
+  async createRequest(package_slug: string, note: string) {
+    return handleResponse<{ id: number; status: string }>(await fetch(`${API_BASE}/billing/school/requests`, { method: "POST", headers: authHeaders(), body: JSON.stringify({ package_slug, note }) }));
+  },
+  async approve(id: number) { return handleResponse(await fetch(`${API_BASE}/billing/school/requests/${id}/approve`, { method: "POST", headers: authHeaders() })); },
+  async decline(id: number) { return handleResponse(await fetch(`${API_BASE}/billing/school/requests/${id}/decline`, { method: "POST", headers: authHeaders() })); },
+  async manualCredit(amount: number, reason: string) {
+    return handleResponse<{ balance: number }>(await fetch(`${API_BASE}/billing/school/manual-credit`, { method: "POST", headers: authHeaders(), body: JSON.stringify({ amount, reason }) }));
+  },
+  async refund(amount: number, reason: string, reference = "") {
+    return handleResponse<{ balance: number }>(await fetch(`${API_BASE}/billing/school/refund`, { method: "POST", headers: authHeaders(), body: JSON.stringify({ amount, reason, reference }) }));
+  },
+  async settings() { return handleResponse<SchoolBillingSettings>(await fetch(`${API_BASE}/billing/school/settings`, { headers: authHeaders() })); },
+  async updateSettings(data: { billing_contact_email?: string; billing_address?: string }) {
+    return handleResponse(await fetch(`${API_BASE}/billing/school/settings`, { method: "PUT", headers: authHeaders(), body: JSON.stringify(data) }));
+  },
+  async downloadLedgerCsv() {
+    const res = await fetch(`${API_BASE}/billing/school/ledger.csv`, { headers: authHeaders() });
+    if (!res.ok) throw new Error("Export failed");
+    const blob = await res.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url; a.download = "school_wallet_ledger.csv"; a.click();
+    URL.revokeObjectURL(url);
   },
 };
 

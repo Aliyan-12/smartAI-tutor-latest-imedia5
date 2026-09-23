@@ -29,6 +29,8 @@ class ParentProfile(Base):
     timezone: Mapped[str] = mapped_column(String(60), default="Europe/London", nullable=False)
     language: Mapped[str] = mapped_column(String(10), default="en", nullable=False)
     notification_prefs: Mapped[dict] = mapped_column(JSONB, default=dict, nullable=False)
+    # Credits a newly linked child starts with, chosen by the parent (tap options in settings).
+    default_child_credits: Mapped[int] = mapped_column(Integer, default=100, nullable=False)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False
     )
