@@ -1089,8 +1089,8 @@ export default function Sidebar({
             <span className="sb-soon-badge">Soon</span>
           </button>
           <button
-            className={`sb-nav-item${isActive("/settings") ? " active" : ""}`}
-            onClick={() => go("/settings")}
+            className={`sb-nav-item${isActive("/admin/settings") ? " active" : ""}`}
+            onClick={() => go("/admin/settings")}
           >
             <Settings size={16} /><span>Settings</span>
           </button>

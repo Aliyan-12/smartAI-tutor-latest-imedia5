@@ -801,6 +801,31 @@ export const teacherSettingsApi = {
   },
 };
 
+export interface SettingItem {
+  key: string; label: string; type: string; scope_type: string; help: string;
+  options: string[] | null; dangerous: boolean; sensitive: boolean;
+  min: number | null; max: number | null; editable: boolean; value: unknown;
+}
+export interface SettingSection { key: string; label: string; settings: SettingItem[] }
+export interface SettingChangeRow {
+  key: string; label: string; scope: string; old_value: unknown; new_value: unknown;
+  reason: string; actor_id: number | null; created_at: string;
+}
+
+export const adminSettingsApi = {
+  async getSchema() {
+    return handleResponse<{ sections: SettingSection[] }>(await fetch(`${API_BASE}/admin/settings`, { headers: authHeaders() }));
+  },
+  async update(key: string, value: unknown, reason?: string, school_id?: number) {
+    return handleResponse<{ key: string; value: unknown }>(await fetch(`${API_BASE}/admin/settings/${key}`, {
+      method: "PUT", headers: authHeaders(), body: JSON.stringify({ value, reason, school_id }),
+    }));
+  },
+  async auditLog() {
+    return handleResponse<{ changes: SettingChangeRow[] }>(await fetch(`${API_BASE}/admin/settings/audit/log`, { headers: authHeaders() }));
+  },
+};
+
 export const lessonsApi = {
   async getAvailableFilters() {
     const res = await fetch(`${API_BASE}/lessons/available-filters`, { headers: authHeaders() });

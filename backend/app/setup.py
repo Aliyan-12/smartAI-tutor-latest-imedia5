@@ -195,6 +195,17 @@ async def run_setup(fresh: bool = False, seed: bool = True):
         "ALTER TABLE invite_codes ADD COLUMN IF NOT EXISTS used_at TIMESTAMP WITH TIME ZONE",
         "ALTER TABLE invite_codes ADD COLUMN IF NOT EXISTS expires_at TIMESTAMP WITH TIME ZONE",
         "ALTER TABLE invite_codes ADD COLUMN IF NOT EXISTS created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()",
+        # Admin settings (feature 08): an earlier build shipped a different platform_settings
+        # schema. Drop it only when it lacks the new `scope` column so create_all rebuilds it.
+        """DO $$
+        BEGIN
+          IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name='platform_settings')
+             AND NOT EXISTS (SELECT 1 FROM information_schema.columns
+                             WHERE table_name='platform_settings' AND column_name='scope') THEN
+            DROP TABLE IF EXISTS setting_changes CASCADE;
+            DROP TABLE platform_settings CASCADE;
+          END IF;
+        END $$;""",
         "ALTER TABLE chats ADD COLUMN IF NOT EXISTS appointment_id INTEGER REFERENCES appointments(id)",
         "ALTER TABLE appointments ADD COLUMN IF NOT EXISTS paused_at TIMESTAMP WITH TIME ZONE",
         "ALTER TABLE appointments ADD COLUMN IF NOT EXISTS total_paused_seconds INTEGER DEFAULT 0",

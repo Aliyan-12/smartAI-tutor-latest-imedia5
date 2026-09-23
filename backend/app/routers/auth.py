@@ -60,9 +60,17 @@ async def register(payload: RegisterRequest, db: AsyncSession = Depends(get_db))
     else:
         default_school = await school_service.get_or_create_default_school(db)
         role = payload.role if payload.role in (ROLE_STUDENT, ROLE_PARENT) else ROLE_STUDENT
+        # Starting credits are configurable by the administrator (feature 08).
+        from app.services import platform_settings_service
+        starting_credits = 0
+        if role == ROLE_STUDENT:
+            try:
+                starting_credits = int(await platform_settings_service.value(db, "default_credits"))
+            except Exception:
+                starting_credits = DEFAULT_CREDITS
         user = await create_user(
             db, name=payload.name, email=payload.email, password=payload.password,
-            role=role, credits=DEFAULT_CREDITS if role == ROLE_STUDENT else 0,
+            role=role, credits=starting_credits,
             school_id=default_school.id, account_type=ACCOUNT_INDIVIDUAL, auth_provider="password",
         )
 
