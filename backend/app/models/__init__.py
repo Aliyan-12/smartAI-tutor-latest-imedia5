@@ -16,6 +16,7 @@ from app.models.topup_request import SchoolTopupRequest
 from app.models.billing_offering import BillingOffering
 from app.models.credit_request import CreditRequest
 from app.models.mastery import MasteryEvidence
+from app.models.notification import Notification, AccessAudit
 from app.models.assessment import Assessment, AssessmentQuestion
 from app.models.appointment import Appointment
 from app.models.student_profile import StudentProfile, TopicMastery
@@ -42,6 +43,7 @@ __all__ = [
     "BillingOffering", "CreditRequest",
     "BillingOffering",
     "MasteryEvidence",
+    "MasteryEvidence", "Notification", "AccessAudit",
     "Assessment", "AssessmentQuestion",
     "Appointment",
     "StudentProfile", "TopicMastery",

@@ -130,8 +130,9 @@ async def child_mastery(
 ):
     """Authorised evidence-based mastery for a linked child."""
     await _assert_is_child(db, parent.id, student_id)
-    from app.services import mastery_service
+    from app.services import mastery_service, notification_service
     payload = await mastery_service.engine_payload(db, student_id)
+    await notification_service.record_access(db, parent, student_id, "child_mastery", "view")
     await db.commit()
     return payload
 

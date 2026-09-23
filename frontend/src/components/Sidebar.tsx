@@ -10,6 +10,7 @@ import {
 } from "lucide-react";
 import { useAuth } from "../context/AuthContext";
 import { chatApi, adminApi } from "../services/api";
+import NotificationBell from "./NotificationBell";
 import type { ChatListItem, Appointment } from "../types";
 
 interface Props {
@@ -509,6 +510,7 @@ export default function Sidebar({
           <div className="sb-brand-name" style={{ fontSize: 17, fontWeight: 900 }}>AI Tutor <span style={{ color: "#f97316" }}>4</span> Schools</div>
           <div style={{ fontSize: 11.5, color: "#94a3b8", marginTop: 2 }}>AI-Powered Education</div>
         </div>
+        <NotificationBell />
         <button className="sb-close-btn" onClick={close} aria-label="Close menu">
           <X size={18} />
         </button>
