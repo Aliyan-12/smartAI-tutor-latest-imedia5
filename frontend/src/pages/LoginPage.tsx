@@ -1,5 +1,6 @@
 import { useState, useRef, useEffect, type FormEvent, type ReactNode } from "react";
 import { Link } from "react-router-dom";
+import { Check, Headphones } from "lucide-react";
 import { useAuth } from "../context/AuthContext";
 import { authApi } from "../services/api";
 
@@ -598,7 +599,7 @@ export default function LoginPage() {
                       style={{paddingLeft:38}}
                     />
                     {email && email.includes("@") && (
-                      <span style={{position:"absolute",right:12,top:"50%",transform:"translateY(-50%)",color:"#10b981",fontSize:15}}>✓</span>
+                      <Check size={16} style={{position:"absolute",right:12,top:"50%",transform:"translateY(-50%)",color:"#10b981"}} aria-hidden />
                     )}
                   </div>
                 </div>
@@ -647,7 +648,7 @@ export default function LoginPage() {
               </p>
 
               <div style={{display:"flex",alignItems:"center",gap:12,background:"#f8fafc",border:"1px solid #e2e8f0",borderRadius:10,padding:"12px 14px",margin:"14px 0"}}>
-                <span style={{fontSize:22,flexShrink:0}}>🎧</span>
+                <Headphones size={22} style={{flexShrink:0,color:"#1a73e8"}} aria-hidden />
                 <div style={{fontSize:12,lineHeight:1.5,color:"#475569"}}>
                   <strong style={{color:"#1e293b",fontSize:13,display:"block",marginBottom:2}}>Need help?</strong>
                   Contact your school administrator to get access.
