@@ -11,3 +11,6 @@ export type { TabItem } from "./Tabs";
 export { PageHeader } from "./PageHeader";
 export { Icon } from "./Icon";
 export { Emoji } from "./Emoji";
+export {
+  SkeletonText, SkeletonCard, SkeletonStats, SkeletonTable, SkeletonList, SkeletonPage,
+} from "./Skeletons";

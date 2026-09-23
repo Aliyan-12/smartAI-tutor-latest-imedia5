@@ -160,8 +160,8 @@ export function Alert({ tone = "info", title, className, children }: { tone?: Al
 }
 
 /* ─────────────────────────────  Skeleton / Spinner  ───────────────────────────── */
-export function Skeleton({ className }: { className?: string }) {
-  return <div className={cn("animate-pulse rounded-md bg-surface-muted", className)} />;
+export function Skeleton({ className, ...rest }: HTMLAttributes<HTMLDivElement>) {
+  return <div aria-hidden="true" className={cn("animate-pulse rounded-md bg-surface-muted", className)} {...rest} />;
 }
 export function Spinner({ className }: { className?: string }) {
   return <Loader2 className={cn("h-5 w-5 animate-spin text-ink-muted", className)} />;

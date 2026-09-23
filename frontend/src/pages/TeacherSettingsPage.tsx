@@ -10,6 +10,8 @@ import {
   PageHeader, Card, CardBody, CardHeader, Button, Badge, Alert, Spinner,
   Input, FormField, Select, Switch, Tabs,
 } from "../components/ui";
+import { SkeletonText, SkeletonCard, SkeletonStats, SkeletonTable, SkeletonList } from "../components/ui";
+import BillingSummaryTab from "../components/BillingSummaryTab";
 
 const TABS = [
   { key: "profile", label: "Profile" },
@@ -17,6 +19,7 @@ const TABS = [
   { key: "teaching", label: "Teaching" },
   { key: "notifications", label: "Notifications" },
   { key: "account", label: "Account" },
+  { key: "billing", label: "Billing" },
   { key: "privacy", label: "Privacy" },
 ];
 const KEY_STAGES = ["KS1", "KS2", "KS3", "KS4", "KS5"];
@@ -72,6 +75,7 @@ export default function TeacherSettingsPage() {
           {(tab === "class" || tab === "teaching") && <ClassTab flash={flash} mode={tab} />}
           {tab === "notifications" && <NotificationsTab flash={flash} />}
           {tab === "account" && <AccountTab flash={flash} onSignedOut={logout} />}
+          {tab === "billing" && <BillingSummaryTab />}
           {tab === "privacy" && <PrivacyTab flash={flash} />}
         </div>
       </div>
@@ -84,7 +88,7 @@ function ProfileTab({ flash }: { flash: (m: string) => void }) {
   const [p, setP] = useState<{ name: string; email: string; phone: string | null; timezone: string } | null>(null);
   const [saving, setSaving] = useState(false);
   useEffect(() => { teacherSettingsApi.getProfile().then(setP).catch(() => setP(null)); }, []);
-  if (!p) return <Spinner />;
+  if (!p) return <SkeletonCard lines={5} />;
   const save = async () => {
     setSaving(true);
     try { await teacherSettingsApi.updateProfile({ name: p.name, phone: p.phone ?? "", timezone: p.timezone }); flash("Profile saved"); }
@@ -112,7 +116,7 @@ function ClassTab({ flash, mode }: { flash: (m: string) => void; mode: string })
   const [hubSubjects, setHubSubjects] = useState<string[]>([]);
   useEffect(() => { teacherSettingsApi.getClassSettings().then(setC).catch(() => setC(null)); }, []);
   useEffect(() => { curriculumApi.getSubjects().then((r) => setHubSubjects(r.subjects.map((s) => s.name))).catch(() => setHubSubjects([])); }, []);
-  if (!c) return <Spinner />;
+  if (!c) return <SkeletonCard lines={5} />;
   const save = async () => {
     setSaving(true);
     try { const u = await teacherSettingsApi.updateClassSettings(c); setC(u); flash("Defaults saved — new bookings will use them"); }
@@ -211,7 +215,7 @@ function NotificationsTab({ flash }: { flash: (m: string) => void }) {
   const [prefs, setPrefs] = useState<Record<string, boolean> | null>(null);
   const [saving, setSaving] = useState(false);
   useEffect(() => { teacherSettingsApi.getNotifications().then((r) => setPrefs(r.prefs)).catch(() => setPrefs({})); }, []);
-  if (!prefs) return <Spinner />;
+  if (!prefs) return <SkeletonCard lines={5} />;
   const save = async () => {
     setSaving(true);
     try { const r = await teacherSettingsApi.updateNotifications(prefs); setPrefs(r.prefs); flash("Notification preferences saved"); }

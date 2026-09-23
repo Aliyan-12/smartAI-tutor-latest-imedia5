@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Users, TrendingUp, AlertTriangle, Grid3x3, ArrowLeft } from "lucide-react";
 import Sidebar from "../components/Sidebar";
+import PageLoading from "../components/PageLoading";
 import MasteryPanel, { type MasterySource } from "../components/MasteryPanel";
 import { teacherApi, type ClassOverview, type ClassHeatmap, type ClassStudentRow } from "../services/api";
 import { PageHeader, Card, CardBody, CardHeader, Badge, Spinner, EmptyState, StatCard, Button } from "../components/ui";
@@ -34,7 +35,7 @@ export default function TeacherProgressPage() {
     topic: (s, t) => teacherApi.studentMasteryTopic(selected.id, s, t),
   }), [selected]);
 
-  if (loading) return <div className="app-layout"><Sidebar /><div className="main-content"><div className="dashboard-content flex justify-center py-16"><Spinner /></div></div></div>;
+  if (loading) return <PageLoading />;
 
   return (
     <div className="app-layout">

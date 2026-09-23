@@ -906,7 +906,11 @@ The student has uploaded the following material for this session. Reference it w
             "  3. Give ONE compelling reason why this topic matters (real-world hook)\n"
             "  4. Ask exactly ONE prior-knowledge question to gauge the student's starting point\n"
             "Keep the entire opening under 4 sentences. Do NOT start teaching content yet.\n"
-            "Do NOT say 'Great!' or 'Welcome!' — be direct and engaging immediately."
+            "Do NOT say 'Great!' or 'Welcome!' — be direct and engaging immediately.\n"
+            "The lesson has only just begun: NEVER refer to a specific worksheet/screen question "
+            "number in this opening (do NOT say 'let's look at question 2/3 on the screen'). When "
+            "you DO begin working through a worksheet or question sheet, always start at its "
+            "Question 1 and go in order — never open on question 2 or a later one."
         )
 
     # Fetch expert tutor style examples from model_training KB
@@ -1296,6 +1300,11 @@ PROFESSIONAL CONDUCT — stay composed and in control:
 - Do NOT grovel or over-apologise. If the student points out a mistake (wrong slide, off-topic content), acknowledge it in AT MOST a short half-sentence ("Good catch —") then immediately fix it and move on. NEVER write "I am so sorry", "I got ahead of myself", "my apologies", or stack multiple apologies in a row.
 - Never repeat the same apology or self-correction twice. Fix it once, silently, and continue teaching.
 - Don't narrate your own mechanics ("let me change the slide for you", "let me get the slides caught up"). Just do it with the tool and teach.
+
+MATHS INPUT — accept how students naturally type, never penalise formatting:
+- A chat box has no equation editor, so students type maths informally. Read their INTENT, not the exact characters. Treat all of these as the SAME value: "10^-3", "10^(-3)", "10 to the power -3", "10 to the minus 3", "ten to minus three", "10**-3", and 10⁻³. Likewise "1/2" = "one half" = ½, "sqrt(9)" = "root 9" = √9, "x^2" = "x squared", "3 x 4" = "3*4" = "3 times 4".
+- NEVER mark a correct answer wrong just because of formatting, spacing, capitalisation, missing brackets, or using words instead of symbols. If the maths is right, it is right.
+- Only correct notation itself if the lesson is specifically about how to write it. Otherwise accept their input, confirm the answer, and (at most) briefly model the tidy way to write it in ONE short aside — never a telling-off.
 
 RULE 4 — SILENCE AND DISENGAGEMENT:
 If the student's message is blank, very short (".", "...", "hmm", "hello?"), random characters, or clearly looks like noise or accidental input:
@@ -1898,13 +1907,8 @@ def _build_quiz_ctx(topic: str, score: float, strong: list, weak: list) -> str:
 
 
 def _appt_id_from_chat(chat) -> Optional[int]:
-    """Resolve the appointment id a session chat belongs to (column or [session:N] title)."""
-    appt_id = getattr(chat, "appointment_id", None)
-    if not appt_id and getattr(chat, "title", None):
-        m = _re.match(r"\[session:(\d+)\]", chat.title)
-        if m:
-            appt_id = int(m.group(1))
-    return appt_id
+    """Resolve the appointment id a session chat belongs to — from its FK column only."""
+    return getattr(chat, "appointment_id", None)
 
 
 async def _resolve_appt_id(db: AsyncSession, chat_id: int) -> Optional[int]:

@@ -46,8 +46,11 @@ def _sanitize_prefs(data: dict) -> dict:
             data["default_session_length"] = max(20, min(90, int(data["default_session_length"])))
         except (TypeError, ValueError):
             data.pop("default_session_length", None)
-    data.pop("key_stage", None)
-    data.pop("year_group", None)
+    # Key Stage + Year Group ARE editable from Settings (a student may choose to work a year
+    # up to challenge themselves). Keep valid non-empty strings; drop anything blank/malformed.
+    for k in ("key_stage", "year_group"):
+        if k in data and not (isinstance(data[k], str) and data[k].strip()):
+            data.pop(k, None)
     return data
 
 

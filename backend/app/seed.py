@@ -64,7 +64,7 @@ async def _get_or_create_default_school(db):
     existing = await db.execute(
         select(School).where(School.slug == DEFAULT_SCHOOL_SLUG)
     )
-    school = existing.scalar_one_or_none()
+    school = existing.scalars().first()
     if school:
         return school
     school = School(
@@ -138,7 +138,7 @@ async def run_seed():
             existing_code = await db.execute(
                 select(InviteCode).where(InviteCode.student_id == student.id)
             )
-            if not existing_code.scalar_one_or_none():
+            if not existing_code.scalars().first():
                 code = InviteCode.generate_code()
                 invite = InviteCode(code=code, student_id=student.id, used=True)
                 db.add(invite)
@@ -163,7 +163,7 @@ async def run_seed():
 
             existing_profile = (await db.execute(
                 sa_select(StudentProfile).where(StudentProfile.student_id == student.id)
-            )).scalar_one_or_none()
+            )).scalars().first()
 
             if existing_profile is None:
                 profile = StudentProfile(

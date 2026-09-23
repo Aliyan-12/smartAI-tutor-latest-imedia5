@@ -7,12 +7,14 @@ import Sidebar from "../components/Sidebar";
 import { useAuth } from "../context/AuthContext";
 import {
   parentSettingsApi, legalApi,
-  type ParentProfile, type ChildSummary, type ParentBilling,
+  type ParentProfile, type ChildSummary,
 } from "../services/api";
+import BillingSummaryTab from "../components/BillingSummaryTab";
 import {
   PageHeader, Card, CardBody, CardHeader, Button, Badge, Alert, Spinner, EmptyState,
   Input, FormField, Switch, Tabs,
 } from "../components/ui";
+import { SkeletonText, SkeletonCard, SkeletonStats, SkeletonTable, SkeletonList } from "../components/ui";
 
 const TABS = [
   { key: "profile", label: "Profile" },
@@ -68,7 +70,7 @@ export default function ParentSettingsPage() {
           {tab === "notifications" && <NotificationsTab flash={flash} />}
           {tab === "account" && <AccountTab flash={flash} onSignedOut={logout} />}
           {tab === "privacy" && <PrivacyTab flash={flash} />}
-          {tab === "billing" && <BillingTab />}
+          {tab === "billing" && <BillingSummaryTab />}
         </div>
       </div>
       <Toast msg={toast} />
@@ -81,7 +83,7 @@ function ProfileTab({ flash }: { flash: (m: string) => void }) {
   const [p, setP] = useState<ParentProfile | null>(null);
   const [saving, setSaving] = useState(false);
   useEffect(() => { parentSettingsApi.getProfile().then(setP).catch(() => setP(null)); }, []);
-  if (!p) return <Spinner />;
+  if (!p) return <SkeletonCard lines={5} />;
   const save = async () => {
     setSaving(true);
     try {
@@ -150,7 +152,7 @@ function ChildrenTab({ flash }: { flash: (m: string) => void }) {
     await parentSettingsApi.unlinkChild(c.id); await load(); flash(`Unlinked ${c.name}`);
   };
 
-  if (!children) return <Spinner />;
+  if (!children) return <SkeletonCard lines={5} />;
   return (
     <div className="flex flex-col gap-4 max-w-3xl">
       <div className="flex gap-2">
@@ -214,7 +216,7 @@ function NotificationsTab({ flash }: { flash: (m: string) => void }) {
   const [prefs, setPrefs] = useState<Record<string, boolean> | null>(null);
   const [saving, setSaving] = useState(false);
   useEffect(() => { parentSettingsApi.getNotifications().then((r) => setPrefs(r.prefs)).catch(() => setPrefs({})); }, []);
-  if (!prefs) return <Spinner />;
+  if (!prefs) return <SkeletonCard lines={5} />;
   const save = async () => {
     setSaving(true);
     try { const r = await parentSettingsApi.updateNotifications(prefs); setPrefs(r.prefs); flash("Notification preferences saved"); }
@@ -311,60 +313,3 @@ function PrivacyTab({ flash }: { flash: (m: string) => void }) {
   );
 }
 
-/* ── Billing (read-only summary) ───────────────────────────────────────── */
-function BillingTab() {
-  const [b, setB] = useState<ParentBilling | null>(null);
-  useEffect(() => { parentSettingsApi.getBilling().then(setB).catch(() => setB(null)); }, []);
-  if (!b) return <Spinner />;
-  return (
-    <div className="flex flex-col gap-4 max-w-3xl">
-      <div className="grid sm:grid-cols-2 gap-4">
-        <Card><CardBody>
-          <div className="t-eyebrow">Credit balance</div>
-          <div className="t-kpi mt-1">{b.credits.toFixed(0)}</div>
-        </CardBody></Card>
-        <Card><CardBody>
-          <div className="t-eyebrow">Plan</div>
-          {b.subscription ? (
-            <>
-              <div className="t-card-title mt-1">{b.subscription.plan_name} <Badge tone={b.subscription.status === "active" ? "success" : "neutral"}>{b.subscription.status}</Badge></div>
-              <div className="t-helper mt-0.5">£{b.subscription.price.toFixed(2)}{b.subscription.renewal_date ? ` · renews ${new Date(b.subscription.renewal_date).toLocaleDateString()}` : ""}</div>
-            </>
-          ) : <div className="t-helper mt-1">No active subscription. Pay-as-you-go credits.</div>}
-        </CardBody></Card>
-      </div>
-
-      <Alert tone="info" title="Payment methods">
-        <span className="flex items-center gap-2"><ShieldCheck size={15} className="text-brand shrink-0" />
-          Card details are handled securely by our payment provider and never stored on our servers. Manage cards & subscriptions from the billing portal.</span>
-      </Alert>
-
-      <Card>
-        <CardHeader title="Recent transactions" />
-        <CardBody className="pt-0">
-          {b.transactions.length === 0 ? (
-            <EmptyState icon={<CreditCard size={32} />} title="No transactions yet" />
-          ) : (
-            <div className="overflow-x-auto">
-              <table className="w-full text-[13px]">
-                <thead><tr className="text-left t-eyebrow border-b border-line">
-                  <th className="py-2">Date</th><th>Description</th><th className="text-right">Amount</th><th className="text-right">Balance</th>
-                </tr></thead>
-                <tbody>
-                  {b.transactions.map((t, i) => (
-                    <tr key={i} className="border-b border-line last:border-0">
-                      <td className="py-2 text-ink-muted whitespace-nowrap">{new Date(t.created_at).toLocaleDateString()}</td>
-                      <td className="text-ink">{t.description || t.type}</td>
-                      <td className={`text-right font-semibold ${t.amount >= 0 ? "text-success" : "text-ink"}`}>{t.amount >= 0 ? "+" : ""}{t.amount.toFixed(0)}</td>
-                      <td className="text-right text-ink-muted">{t.balance_after.toFixed(0)}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
-        </CardBody>
-      </Card>
-    </div>
-  );
-}

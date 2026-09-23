@@ -10,6 +10,7 @@ import {
   applyAccessibility, coerceA11y, type AccessibilityPrefs, type TextSize,
 } from "../lib/accessibility";
 import { PageHeader, Card, CardBody, Button, Badge, Switch, Alert, Spinner } from "../components/ui";
+import { SkeletonText, SkeletonCard, SkeletonStats, SkeletonTable, SkeletonList } from "../components/ui";
 
 /* ── Option catalogues (bounded — must match backend _ALLOWED_STYLES / prompt keys) ── */
 const LEARNING_STYLES: { key: string; label: string; hint: string }[] = [
@@ -296,9 +297,7 @@ export default function StudentPreferencesPage() {
   };
 
   return (
-    <div className="app-layout">
-      <Sidebar />
-      <div className="main-content">
+    <div className="main-content">
         <div className="dashboard-content" style={{ padding: "24px 28px", overflowY: "auto" }}>
           <PageHeader
             title="Learning preferences"
@@ -306,7 +305,7 @@ export default function StudentPreferencesPage() {
           />
 
           {loading ? (
-            <div className="flex justify-center py-16"><Spinner /></div>
+            <div className="flex flex-col gap-5"><SkeletonStats /><SkeletonCard lines={5} /></div>
           ) : !draft ? (
             <Alert tone="danger" title="Couldn't load preferences">{error}</Alert>
           ) : (
@@ -476,7 +475,9 @@ export default function StudentPreferencesPage() {
                       <span>All changes saved</span>
                     )}
                   </div>
-                  <Button onClick={save} disabled={!dirty || saving} loading={saving}>
+                  <Button onClick={save} disabled={!dirty || saving} loading={saving}
+                    size="lg" leftIcon={<Check size={17} />}
+                    className="px-8 text-[15px] shadow-md">
                     Save changes
                   </Button>
                 </div>
@@ -485,6 +486,5 @@ export default function StudentPreferencesPage() {
           )}
         </div>
       </div>
-    </div>
   );
 }

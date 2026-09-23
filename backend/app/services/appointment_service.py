@@ -240,7 +240,7 @@ async def _run_post_session_pipeline(db: AsyncSession, appointment: Appointment)
     # ── Phase 2: gamification (XP, mastery, streak) ──────────────────────────
     try:
         score_percent = float(report.get("quiz_score_percent") or 70.0)
-        xp_amount = _calculate_session_xp(score_percent, appointment.duration_minutes)
+        xp_amount = _calculate_session_xp(score_percent, appointment.duration_minutes, key_stage)
         await platform_service.award_xp(
             db, appointment.student_id, xp_amount, reason="session_completed"
         )
@@ -321,12 +321,23 @@ async def _run_post_session_pipeline(db: AsyncSession, appointment: Appointment)
         logger.warning(f"Email failed for appointment_id={appointment.id}: {exc}")
 
 
-def _calculate_session_xp(score_percent: float, duration_minutes: int) -> int:
-    """Calculate XP to award based on session score and duration."""
-    base_xp = 50  # Base for completing a session
-    score_bonus = int(score_percent * 0.5)  # Up to 50 extra XP for 100% score
-    duration_bonus = min(25, duration_minutes // 4)  # Up to 25 extra XP for long sessions
-    return base_xp + score_bonus + duration_bonus
+# Key-stage difficulty multiplier — harder stages (GCSE / A-Level) earn more per session.
+_KS_DIFFICULTY = {"KS1": 0.85, "KS2": 0.95, "KS3": 1.0, "KS4": 1.15, "KS5": 1.3}
+
+
+def _calculate_session_xp(score_percent: float, duration_minutes: int, key_stage: Optional[str] = None) -> int:
+    """Effort-weighted session XP: scaled by accuracy × lesson length × key-stage difficulty.
+
+    A typical 40-min, ~70% KS3 lesson lands around 65 XP; a long, high-accuracy KS5 lesson
+    earns substantially more, while a short KS1 session earns less — so XP reflects real effort.
+    """
+    base_xp = 55
+    acc = max(0.0, min(100.0, float(score_percent or 0.0)))
+    accuracy_factor = 0.6 + (acc / 100.0) * 0.8            # 0.6 → 1.4
+    mins = max(0, min(90, int(duration_minutes or 0)))
+    length_factor = 0.7 + (mins / 90.0) * 0.8              # 0.7 → 1.5
+    ks_factor = _KS_DIFFICULTY.get((key_stage or "").upper().strip(), 1.0)
+    return max(10, round(base_xp * accuracy_factor * length_factor * ks_factor))
 
 
 async def list_appointments(

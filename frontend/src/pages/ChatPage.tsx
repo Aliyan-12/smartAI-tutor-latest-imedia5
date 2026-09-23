@@ -67,6 +67,8 @@ export default function ChatPage() {
     // Backend forces text→no-TTS and voice→TTS by message type; `true` lets the
     // voice-mode audio segments actually play on the client.
     ttsEnabled: true,
+    // Stream replies at full speed — no reading-cadence metering in the simple chat.
+    instantText: true,
     onReady: (sid) => {
       connectedSidRef.current = sid;
       if (!sessionIdParamRef.current) {
@@ -197,19 +199,7 @@ export default function ChatPage() {
   const subjectTheme = themeSource.trim() ? detectSubjectTheme(themeSource) : null;
 
   return (
-    <div className="app-layout">
-      <Sidebar
-        chatList={chatList}
-        activeSessionId={sessionId ?? null}
-        credits={credits}
-        appointments={studentAppointments}
-        onNewChat={handleNewChat}
-        onSelectChat={handleSelectChat}
-        onDeleteChat={handleDeleteChat}
-        onLoadChats={loadChats}
-      />
-
-      <div className="main-content" style={{
+    <div className="main-content" style={{
         background: subjectTheme ? subjectTheme.bg : undefined,
         transition: "background 0.4s ease",
       }}>
@@ -366,6 +356,7 @@ export default function ChatPage() {
             liveStatus={liveStatus}
             thinkingSteps={thinkingSteps}
             liveParts={liveParts}
+            plainMath
           />
         </div>
 
@@ -391,6 +382,5 @@ export default function ChatPage() {
           onResearchToggle={() => setResearchEnabled((v) => !v)}
         />
       </div>
-    </div>
   );
 }

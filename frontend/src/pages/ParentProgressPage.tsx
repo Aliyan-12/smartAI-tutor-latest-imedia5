@@ -1,9 +1,11 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Flame, Star, CalendarCheck, TrendingUp, Sparkles, ThumbsUp } from "lucide-react";
 import Sidebar from "../components/Sidebar";
+import PageLoading from "../components/PageLoading";
 import MasteryPanel, { type MasterySource } from "../components/MasteryPanel";
 import { parentApi, type ChildOverview } from "../services/api";
 import { PageHeader, Card, CardBody, CardHeader, Badge, Spinner, EmptyState, StatCard } from "../components/ui";
+import { SkeletonText, SkeletonCard, SkeletonStats, SkeletonTable, SkeletonList } from "../components/ui";
 
 interface Child { id: number; name: string }
 
@@ -42,7 +44,7 @@ export default function ParentProgressPage() {
     topic: (s, t) => parentApi.childMasteryTopic(childId, s, t),
   }), [childId]);
 
-  if (!children) return <div className="app-layout"><Sidebar /><div className="main-content"><div className="dashboard-content flex justify-center py-16"><Spinner /></div></div></div>;
+  if (!children) return <PageLoading />;
 
   return (
     <div className="app-layout">
@@ -66,7 +68,7 @@ export default function ParentProgressPage() {
                 ))}
               </div>
 
-              {loading ? <div className="flex justify-center py-12"><Spinner /></div>
+              {loading ? <div className="flex flex-col gap-5"><SkeletonStats /><SkeletonCard lines={4} /></div>
                 : error ? <Card><CardBody><div className="t-helper text-danger">{error}</div></CardBody></Card>
                 : overview && (
                   <>

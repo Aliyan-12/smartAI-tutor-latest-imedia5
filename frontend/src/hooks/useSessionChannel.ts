@@ -38,6 +38,12 @@ export interface SessionChannelOpts {
    */
   buildUrl?: (sessionId: string | null) => string;
   ttsEnabled: boolean;
+  /**
+   * Reveal each text segment INSTANTLY the moment it arrives (no reading-cadence metering).
+   * The standalone /chat sets this so replies stream at full speed like a normal chat app;
+   * in-lesson sessions leave it off so text paces with the tutor's voice.
+   */
+  instantText?: boolean;
   onTool?: (tool: string, data: Record<string, unknown>) => void;
   onCredits?: (value: number) => void;
   onUserTranscript?: (text: string) => void;
@@ -228,6 +234,14 @@ export function useSessionChannel(opts: SessionChannelOpts) {
       }
       const partIdx = parts.length - 1;
       const base = parts[partIdx].text;
+
+      // Instant mode (/chat): drop the whole segment in at once — no metered reveal.
+      if (optsRef.current.instantText) {
+        livePartsRef.current[partIdx].text = base + text;
+        syncLiveParts();
+        resolve();
+        return;
+      }
 
       const ends: number[] = [];
       const re = /\S+/g;

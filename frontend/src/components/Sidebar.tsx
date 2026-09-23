@@ -1,11 +1,18 @@
 import { useEffect, useState } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
-import { LogOut, Menu, X, Plus, MessageSquare } from "lucide-react";
+import { LogOut, Menu, X, Plus, MessageSquare, ChevronDown } from "lucide-react";
 import { useAuth } from "../context/AuthContext";
 import { adminApi, chatApi } from "../services/api";
 import NotificationBell from "./NotificationBell";
 import { getNavForRole, roleLabel, type NavItem } from "../lib/navigation";
 import type { ChatListItem, Appointment } from "../types";
+
+// Sidebar only lists simple chats (session chats are excluded server-side by their
+// appointment_id FK), so the title is already a clean conversation name — just tidy whitespace.
+function cleanChatTitle(raw?: string): string {
+  const t = (raw || "").replace(/\s+/g, " ").trim();
+  return t || "New conversation";
+}
 
 // Props are accepted for backwards-compatibility with existing callers (e.g. ChatPage still
 // passes chat props). The sidebar no longer renders an inline chat list — "Chats" is a single
@@ -139,10 +146,53 @@ const SHARED_STYLES = `
   }
   .sb-chat-new { font-weight: 700; color: var(--accent); }
   .sb-chat-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+  /* Chat row = clickable title + a delete affordance revealed on hover */
+  .sb-chat-row { position: relative; display: flex; align-items: center; }
+  .sb-chat-main { flex: 1; min-width: 0; padding-right: 28px; }
+  .sb-chat-row.active .sb-chat-main {
+    background: var(--sidebar-active); color: var(--accent); font-weight: 700;
+  }
+  .sb-chat-del {
+    position: absolute; right: 8px; top: 50%; transform: translateY(-50%);
+    display: flex; align-items: center; justify-content: center;
+    width: 20px; height: 20px; border: none; background: none; border-radius: 5px;
+    color: #94a3b8; cursor: pointer; opacity: 0;
+    transition: opacity 0.15s, background 0.15s, color 0.15s;
+  }
+  .sb-chat-row:hover .sb-chat-del,
+  .sb-chat-del:focus-visible { opacity: 1; }
+  .sb-chat-del:hover { background: rgba(239,68,68,0.12); color: #ef4444; }
   .sb-chat-empty {
     padding: 4px 12px 8px 34px;
     font-size: 11.5px;
     color: #94a3b8;
+  }
+  /* Collapsible "Recent" sub-header for the chat history list */
+  .sb-chat-subhead {
+    width: calc(100% - 22px);
+    margin-left: 22px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 6px;
+    padding: 7px 12px 4px;
+    background: none;
+    border: none;
+    cursor: pointer;
+    font-family: inherit;
+    font-size: 10px;
+    font-weight: 700;
+    color: #94a3b8;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    transition: color 0.15s;
+  }
+  .sb-chat-subhead:hover { color: #64748b; }
+  .sb-chat-subhead:focus-visible {
+    outline: none;
+    box-shadow: 0 0 0 2px var(--accent-muted);
+    border-radius: 6px;
   }
 
   .sb-badge-count {
@@ -189,6 +239,51 @@ const SHARED_STYLES = `
     text-transform: uppercase;
     letter-spacing: 0.6px;
   }
+
+  /* ── Collapsible section (dropdown) header ── */
+  .sb-section-header {
+    width: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    padding: 12px 14px 5px;
+    font-size: 10px;
+    font-weight: 700;
+    color: #94a3b8;
+    text-transform: uppercase;
+    letter-spacing: 0.6px;
+    background: none;
+    border: none;
+    cursor: pointer;
+    font-family: inherit;
+    transition: color 0.15s;
+    user-select: none;
+  }
+  .sb-section-header:hover { color: #64748b; }
+  .sb-section-header:focus-visible {
+    outline: none;
+    box-shadow: 0 0 0 2px var(--accent-muted);
+    border-radius: 6px;
+  }
+  .sb-section-header.has-active { color: var(--accent); }
+
+  .sb-chevron {
+    flex-shrink: 0;
+    transition: transform 0.22s cubic-bezier(0.4, 0, 0.2, 1);
+    opacity: 0.7;
+  }
+  .sb-section-header:hover .sb-chevron { opacity: 1; }
+  .sb-chevron.collapsed { transform: rotate(-90deg); }
+
+  /* grid-rows 1fr→0fr gives a smooth collapse without measuring heights */
+  .sb-section-items {
+    display: grid;
+    grid-template-rows: 1fr;
+    transition: grid-template-rows 0.24s cubic-bezier(0.4, 0, 0.2, 1);
+  }
+  .sb-section-items.collapsed { grid-template-rows: 0fr; }
+  .sb-section-inner { overflow: hidden; min-height: 0; }
 
   .sb-time-widget {
     margin: 8px 12px;
@@ -434,6 +529,43 @@ export default function Sidebar({
       .catch(() => {});
   }, [user?.role, location.pathname]);
 
+  // Collapsible nav sections. Open by default; the set holds the labels the user has
+  // explicitly COLLAPSED. State is independent of navigation, so selecting an item never
+  // closes its section (the reported "dropdown closes on select" bug), and the choice is
+  // persisted so it survives route changes and reloads.
+  const COLLAPSE_KEY = "smartai:sidebar:collapsed";
+  // Special collapse key for the student chat-history sub-dropdown (kept in the same set).
+  const CHATS_KEY = "__chats__";
+  const [collapsed, setCollapsed] = useState<Set<string>>(() => {
+    try {
+      const raw = localStorage.getItem(COLLAPSE_KEY);
+      return new Set<string>(raw ? (JSON.parse(raw) as string[]) : []);
+    } catch {
+      return new Set<string>();
+    }
+  });
+  // Delete a simple chat from the sidebar list (optimistic + navigate away if it's open).
+  const deleteChat = async (sessionId: string) => {
+    setChats((prev) => prev.filter((c) => c.session_id !== sessionId));
+    if (location.pathname === `/chat/${sessionId}`) navigate("/chat");
+    try { await chatApi.deleteChat(sessionId); } catch { /* already removed locally */ }
+    onDeleteChat?.(sessionId);
+  };
+
+  const toggleSection = (label: string) => {
+    setCollapsed((prev) => {
+      const next = new Set(prev);
+      if (next.has(label)) next.delete(label);
+      else next.add(label);
+      try {
+        localStorage.setItem(COLLAPSE_KEY, JSON.stringify([...next]));
+      } catch {
+        /* private mode / storage disabled — in-memory state still works */
+      }
+      return next;
+    });
+  };
+
   // Admin/administrator sidebar count badges (active users + pending approvals).
   // Re-fetched on navigation so they refresh after approve/reject + add/remove.
   useEffect(() => {
@@ -578,49 +710,95 @@ export default function Sidebar({
     <Wrapper>
       <BrandHeader />
       <nav className="sb-nav">
-        {sections.map((section, si) => (
-          <div key={si}>
-            {section.label && <div className="sb-section-label">{section.label}</div>}
-            {section.items.map((it) => {
-              const Icon = it.icon;
-              const active = itemActive(it);
-              const badge = it.badgeKey ? badges[it.badgeKey] : null;
-              const navBtn = (
-                <button
-                  className={`sb-nav-item${active ? " active" : ""}`}
-                  onClick={() => go(it.path)}
-                  aria-current={active ? "page" : undefined}
-                >
-                  <Icon size={16} /><span>{it.label}</span>
-                  {badge != null && badge > 0 && (
-                    <span style={{ marginLeft: "auto", background: "var(--accent)", color: "#fff", fontSize: 10, fontWeight: 700, borderRadius: 999, padding: "1px 7px", lineHeight: 1.6 }}>{badge}</span>
-                  )}
-                </button>
-              );
-              // Student "Chats": the destination link, a New Chat action, then the chat history.
-              if (it.id !== "s-chat") return <div key={it.id}>{navBtn}</div>;
-              return (
-                <div key={it.id}>
-                  {navBtn}
-                  <button className="sb-nav-item sb-chat-sub sb-chat-new" onClick={() => go("/chat")}>
-                    <Plus size={15} /><span>New Chat</span>
+        {sections.map((section, si) => {
+          const label = section.label;
+          const isCollapsed = label ? collapsed.has(label) : false;
+          const sectionHasActive = section.items.some(itemActive);
+          const items = (
+            <>
+              {section.items.map((it) => {
+                const Icon = it.icon;
+                const active = itemActive(it);
+                const badge = it.badgeKey ? badges[it.badgeKey] : null;
+                const navBtn = (
+                  <button
+                    className={`sb-nav-item${active ? " active" : ""}`}
+                    onClick={() => go(it.path)}
+                    aria-current={active ? "page" : undefined}
+                  >
+                    <Icon size={16} /><span>{it.label}</span>
+                    {badge != null && badge > 0 && (
+                      <span style={{ marginLeft: "auto", background: "var(--accent)", color: "#fff", fontSize: 10, fontWeight: 700, borderRadius: 999, padding: "1px 7px", lineHeight: 1.6 }}>{badge}</span>
+                    )}
                   </button>
-                  {chats.map((c) => {
-                    const chatActive = location.pathname === `/chat/${c.session_id}`;
-                    return (
-                      <button key={c.session_id} className={`sb-nav-item sb-chat-sub${chatActive ? " active" : ""}`}
-                        onClick={() => go(`/chat/${c.session_id}`)} title={c.title || "Chat"}>
-                        <MessageSquare size={14} /><span className="sb-chat-title">{c.title || "Untitled chat"}</span>
-                      </button>
-                    );
-                  })}
-                  {chats.length === 0 && <div className="sb-chat-empty">No chats yet — start one!</div>}
-                </div>
-              );
-            })}
-          </div>
-        ))}
-      </nav>
+                );
+                // Student "Chats" is its OWN collapsible dropdown: the heading toggles it
+                // open/closed, and New Chat + all recent chats live inside as its options.
+                if (it.id !== "s-chat") return <div key={it.id}>{navBtn}</div>;
+                const chatsCollapsed = collapsed.has(CHATS_KEY);
+                return (
+                  <div key={it.id}>
+                    <button
+                      type="button"
+                      className={`sb-nav-item sb-chats-head${active ? " active" : ""}`}
+                      onClick={() => toggleSection(CHATS_KEY)}
+                      aria-expanded={!chatsCollapsed}
+                      aria-controls="sb-chats-list"
+                    >
+                      <Icon size={16} /><span>{it.label}</span>
+                      <ChevronDown size={14} className={`sb-chevron${chatsCollapsed ? " collapsed" : ""}`} style={{ marginLeft: "auto" }} />
+                    </button>
+                    <div id="sb-chats-list" className={`sb-section-items${chatsCollapsed ? " collapsed" : ""}`} role="group" aria-label="Chats">
+                      <div className="sb-section-inner">
+                        <button className="sb-nav-item sb-chat-sub sb-chat-new" onClick={() => go("/chat")}>
+                          <Plus size={15} /><span>New Chat</span>
+                        </button>
+                        {chats.slice(0, 12).map((c) => {
+                          const chatActive = location.pathname === `/chat/${c.session_id}`;
+                          const title = cleanChatTitle(c.title);
+                          return (
+                            <div key={c.session_id} className={`sb-chat-row${chatActive ? " active" : ""}`}>
+                              <button className="sb-nav-item sb-chat-sub sb-chat-main"
+                                onClick={() => go(`/chat/${c.session_id}`)} title={title}>
+                                <MessageSquare size={14} /><span className="sb-chat-title">{title}</span>
+                              </button>
+                              <button className="sb-chat-del" onClick={(e) => { e.stopPropagation(); deleteChat(c.session_id); }} title="Delete chat" aria-label="Delete chat">
+                                <X size={13} />
+                              </button>
+                            </div>
+                          );
+                        })}
+                        {chats.length === 0 && <div className="sb-chat-empty">No chats yet — start one!</div>}
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </>
+          );
+
+          // Unlabelled group → render items directly (no dropdown).
+          if (!label) return <div key={si}>{items}</div>;
+
+          const sectionId = `sb-section-${si}`;
+          return (
+            <div key={si}>
+              <button
+                type="button"
+                className={`sb-section-header${sectionHasActive ? " has-active" : ""}`}
+                onClick={() => toggleSection(label)}
+                aria-expanded={!isCollapsed}
+                aria-controls={sectionId}
+              >
+                <span>{label}</span>
+                <ChevronDown size={13} className={`sb-chevron${isCollapsed ? " collapsed" : ""}`} />
+              </button>
+              <div id={sectionId} className={`sb-section-items${isCollapsed ? " collapsed" : ""}`} role="group" aria-label={label}>
+                <div className="sb-section-inner">{items}</div>
+              </div>
+            </div>
+          );
+        })}      </nav>
       <Footer roleLabel={roleLabel(user?.role)} />
     </Wrapper>
   );

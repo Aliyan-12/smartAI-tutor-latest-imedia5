@@ -13,6 +13,7 @@ import LearnIdle from "../components/LearnIdle";
 import Celebration from "../components/puzzles/Celebration";
 import type { PuzzlePayload } from "../components/puzzles/types";
 import { sessionBus, type SessionBusEvent } from "../lib/sessionBus";
+import { MathText } from "../lib/mathRender";
 import AssessmentMode from "../components/AssessmentMode";
 import PostSessionScreen from "../components/PostSessionScreen";
 import { useSessionChannel } from "../hooks/useSessionChannel";
@@ -109,6 +110,9 @@ export default function SessionPage() {
   const [testFeedback, setTestFeedback] = useState<{ selectedAnswer: number; isCorrect: boolean; explanation: string | null; correctAnswer: number | null } | null>(null);
   const [practiceAnswering, setPracticeAnswering] = useState(false);
   const [testAnswering, setTestAnswering] = useState(false);
+  // Quiz answer selected but not yet checked (select-then-check flow) + hint toggle.
+  const [testSelected, setTestSelected] = useState<number | null>(null);
+  const [testHintShown, setTestHintShown] = useState(false);
 
   const [toolResults, setToolResults] = useState<Array<{ tool: string; data: Record<string, unknown>; id: string }>>([]);
   // The resource/slide the AI is currently teaching from (drives the "learn" tab viewer).
@@ -533,7 +537,8 @@ export default function SessionPage() {
   useEffect(() => {
     const handler = (e: SessionBusEvent) => {
       const triggersReply =
-        e.type === "lesson_end_request" || e.type === "student_idle" || e.type === "latex_error";
+        e.type === "lesson_end_request" || e.type === "student_idle" ||
+        e.type === "latex_error" || e.type === "user_message";
       sendEventRef.current(e.type, e.data, triggersReply);
     };
     sessionBus.on("session", handler);
@@ -710,6 +715,8 @@ export default function SessionPage() {
     if (next < testAssessment.questions.length) {
       setTestCurrentQ(next);
       setTestFeedback(null);
+      setTestSelected(null);
+      setTestHintShown(false);
     } else {
       try {
         const capturedQuestions = testAssessment.questions;
@@ -742,6 +749,14 @@ export default function SessionPage() {
       }
     }
   };
+
+  // Age-appropriate quiz styling: playful/bright for primary (KS1–KS2),
+  // focused/cosmic for KS3 → GCSE and above.
+  const isJuniorQuiz = ["KS1", "KS2"].includes((sessionKeyStage || "").toUpperCase());
+  const quizTheme = isJuniorQuiz
+    ? { wrap: "linear-gradient(160deg,#dbeafe 0%,#bbf7d0 100%)", qBox: "#ffffff", qText: "#0f172a", chipBg: "#fef9c3", chipColor: "#a16207", track: "#e2e8f0", accent: "#2563eb" }
+    : { wrap: "linear-gradient(160deg,#0f172a 0%,#1e293b 100%)", qBox: "rgba(255,255,255,0.06)", qText: "#f8fafc", chipBg: "rgba(255,255,255,0.1)", chipColor: "#c7d2fe", track: "rgba(255,255,255,0.12)", accent: "#60a5fa" };
+  const OPT_COLORS = ["#2563eb", "#16a34a", "#ea580c", "#7c3aed"];
 
   const formatTime = (seconds: number) => {
     const m = Math.floor(seconds / 60);
@@ -1197,6 +1212,7 @@ export default function SessionPage() {
                 key={currentPuzzle.instance_id || `${currentPuzzle.puzzle_type}:${currentPuzzle.prompt}`}
                 payload={currentPuzzle}
                 locked={interactionLocked}
+                keyStage={sessionKeyStage}
                 onSubmit={(answer) =>
                   channel.sendPuzzleResult(currentPuzzle.puzzle_type, currentPuzzle.prompt, answer)
                 }
@@ -1208,9 +1224,9 @@ export default function SessionPage() {
         )}
 
         {!isPaused && learnTab === "test" && (
-          <div style={{ padding: "16px", position: "relative" }}>
+          <div style={{ flex: 1, minHeight: 0, position: "relative", display: "flex", flexDirection: "column", overflow: "auto" }}>
             {testResult ? (
-              <div>
+              <div style={{ padding: "16px" }}>
                 {/* Header */}
                 <div style={{ textAlign: "center", marginBottom: 14 }}>
                   <span style={{ fontSize: 40 }}>🏅</span>
@@ -1281,66 +1297,118 @@ export default function SessionPage() {
                 </div>
               </div>
             ) : testAssessment ? (
-              <div>
-                {/* Progress header */}
-                <div style={{ marginBottom: 12 }}>
-                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
-                    <span style={{ fontSize: 12, fontWeight: 700, color: "var(--text-muted)" }}>
+              <div style={{ flex: 1, minHeight: 0, padding: "20px clamp(16px,4vw,48px)", background: quizTheme.wrap, position: "relative", overflow: "auto", display: "flex", flexDirection: "column" }}>
+                {!isJuniorQuiz && (
+                  <div aria-hidden style={{ position: "absolute", inset: 0, opacity: 0.5, pointerEvents: "none", backgroundImage: "radial-gradient(circle at 85% 15%, rgba(99,102,241,0.28), transparent 42%), radial-gradient(circle at 8% 85%, rgba(56,189,248,0.2), transparent 46%)" }} />
+                )}
+                <div style={{ position: "relative", zIndex: 1, flex: 1, display: "flex", flexDirection: "column", justifyContent: "center", gap: 4 }}>
+                  {/* Have-a-go chip */}
+                  <div style={{ marginBottom: 12 }}>
+                    <span style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 10.5, fontWeight: 800, letterSpacing: "0.5px", textTransform: "uppercase", color: quizTheme.chipColor, background: quizTheme.chipBg, padding: "4px 11px", borderRadius: 999 }}>
+                      {sessionSubject || "Quiz"} · Have a go {isJuniorQuiz ? "🌟" : ""}
+                    </span>
+                  </div>
+
+                  {/* Progress */}
+                  <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 14 }}>
+                    <span style={{ fontSize: 12, fontWeight: 700, color: quizTheme.qText, opacity: 0.85, whiteSpace: "nowrap" }}>
                       Question {testCurrentQ + 1} of {testAssessment.questions.length}
                     </span>
-                    {quizOffer?.topic && (
-                      <span style={{ fontSize: 11, color: "var(--text-muted)", fontStyle: "italic" }}>{quizOffer.topic}</span>
-                    )}
-                  </div>
-                  <div style={{ height: 4, background: "var(--border-color)", borderRadius: 99, overflow: "hidden" }}>
-                    <div style={{ height: "100%", width: `${(testCurrentQ / testAssessment.questions.length) * 100}%`, background: "var(--accent-blue, var(--accent))", borderRadius: 99, transition: "width 0.4s ease" }} />
-                  </div>
-                </div>
-                {/* Question text */}
-                <p style={{ fontSize: 14, fontWeight: 700, color: "var(--text-primary)", lineHeight: 1.55, marginBottom: 14 }}>
-                  {testAssessment.questions[testCurrentQ].question_text}
-                </p>
-                {/* Options */}
-                <div style={{ display: "flex", flexDirection: "column", gap: 8, marginBottom: 12 }}>
-                  {testAssessment.questions[testCurrentQ].options.map((opt, idx) => {
-                    let optStyle: React.CSSProperties = { ...styles.quizOptionBtn };
-                    if (testFeedback) {
-                      if (testFeedback.correctAnswer !== null && idx === testFeedback.correctAnswer) {
-                        optStyle = { ...optStyle, background: "rgba(16,185,129,0.08)", borderColor: "#10b981", color: "#10b981", fontWeight: 700 };
-                      } else if (idx === testFeedback.selectedAnswer && !testFeedback.isCorrect) {
-                        optStyle = { ...optStyle, background: "rgba(239,68,68,0.08)", borderColor: "#ef4444", color: "#ef4444" };
-                      } else {
-                        optStyle = { ...optStyle, opacity: 0.4 };
-                      }
-                    }
-                    return (
-                      <button key={idx} disabled={!!testFeedback || testAnswering} onClick={() => handleTestAnswer(idx)} style={optStyle}>
-                        <span style={{ ...styles.optionLabel, borderColor: testFeedback && testFeedback.correctAnswer === idx ? "#10b981" : testFeedback && testFeedback.selectedAnswer === idx && !testFeedback.isCorrect ? "#ef4444" : "var(--border-color)" }}>
-                          {["A","B","C","D"][idx]}
-                        </span>
-                        {opt}
-                      </button>
-                    );
-                  })}
-                </div>
-                {/* Feedback */}
-                {testFeedback && (
-                  <div style={{ ...styles.feedbackBox, background: testFeedback.isCorrect ? "rgba(16,185,129,0.08)" : "rgba(239,68,68,0.08)", borderColor: testFeedback.isCorrect ? "rgba(16,185,129,0.3)" : "rgba(239,68,68,0.3)", marginBottom: 10 }}>
-                    <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: testFeedback.explanation ? 4 : 0 }}>
-                      <span style={{ fontSize: 14 }}>{testFeedback.isCorrect ? "✅" : "❌"}</span>
-                      <p style={{ fontSize: 13, fontWeight: 700, color: testFeedback.isCorrect ? "#10b981" : "#ef4444", margin: 0 }}>
-                        {testFeedback.isCorrect ? "Correct!" : "Not quite."}
-                      </p>
+                    <div style={{ flex: 1, height: 6, background: quizTheme.track, borderRadius: 99, overflow: "hidden" }}>
+                      <div style={{ height: "100%", width: `${((testCurrentQ + (testFeedback ? 1 : 0)) / testAssessment.questions.length) * 100}%`, background: quizTheme.accent, borderRadius: 99, transition: "width 0.4s ease" }} />
                     </div>
-                    {testFeedback.explanation && <p style={{ fontSize: 12, color: "var(--text-secondary)", lineHeight: 1.5, margin: 0 }}>{testFeedback.explanation}</p>}
+                    <span style={{ fontSize: 12, fontWeight: 800, color: quizTheme.accent }}>
+                      {Math.round(((testCurrentQ + (testFeedback ? 1 : 0)) / testAssessment.questions.length) * 100)}%
+                    </span>
                   </div>
-                )}
-                {testFeedback && (
-                  <button style={styles.generateBtn} onClick={handleTestNext}>
-                    {testCurrentQ + 1 < testAssessment.questions.length ? "Next Question →" : "See Results"}
-                  </button>
-                )}
-                {testError && <p style={{ ...styles.errorText, marginTop: 8 }}>{testError}</p>}
+
+                  {/* Question box */}
+                  <div style={{ background: quizTheme.qBox, border: isJuniorQuiz ? "1px solid #e2e8f0" : "1px solid rgba(255,255,255,0.1)", borderRadius: 14, padding: "20px 18px", textAlign: "center", marginBottom: 14, boxShadow: isJuniorQuiz ? "0 2px 8px rgba(0,0,0,0.05)" : "none" }}>
+                    <p style={{ fontSize: 17, fontWeight: 700, color: quizTheme.qText, lineHeight: 1.5, margin: 0 }}>
+                      <MathText text={testAssessment.questions[testCurrentQ].question_text} />
+                    </p>
+                  </div>
+
+                  {/* Options — 2×2 coloured cards */}
+                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginBottom: 14 }}>
+                    {testAssessment.questions[testCurrentQ].options.map((opt, idx) => {
+                      const oc = OPT_COLORS[idx] ?? "#2563eb";
+                      const selected = testSelected === idx;
+                      let border = isJuniorQuiz ? "#e2e8f0" : "rgba(255,255,255,0.14)";
+                      let bg = isJuniorQuiz ? "#fff" : "rgba(255,255,255,0.05)";
+                      let dim = false;
+                      if (testFeedback) {
+                        if (testFeedback.correctAnswer !== null && idx === testFeedback.correctAnswer) { border = "#16a34a"; bg = isJuniorQuiz ? "#f0fdf4" : "rgba(16,185,129,0.16)"; }
+                        else if (idx === testFeedback.selectedAnswer && !testFeedback.isCorrect) { border = "#ef4444"; bg = isJuniorQuiz ? "#fef2f2" : "rgba(239,68,68,0.16)"; }
+                        else dim = true;
+                      } else if (selected) { border = oc; bg = isJuniorQuiz ? `${oc}14` : "rgba(255,255,255,0.12)"; }
+                      return (
+                        <button
+                          key={idx}
+                          disabled={!!testFeedback || testAnswering}
+                          onClick={() => { if (!testFeedback) { setTestSelected(idx); channel.sendActivity(); } }}
+                          style={{ display: "flex", alignItems: "center", gap: 12, padding: "13px 15px", border: `2px solid ${border}`, background: bg, borderRadius: 12, cursor: testFeedback ? "default" : "pointer", textAlign: "left", opacity: dim ? 0.45 : 1, transition: "all 0.15s", color: quizTheme.qText, fontSize: 15, fontWeight: 600 }}
+                        >
+                          <span style={{ width: 30, height: 30, borderRadius: "50%", background: oc, color: "#fff", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 13, fontWeight: 800, flexShrink: 0 }}>
+                            {["A", "B", "C", "D"][idx]}
+                          </span>
+                          <span style={{ flex: 1 }}><MathText text={opt} /></span>
+                        </button>
+                      );
+                    })}
+                  </div>
+
+                  {/* Feedback */}
+                  {testFeedback && (
+                    <div style={{ padding: "12px 14px", borderRadius: 12, marginBottom: 12, background: testFeedback.isCorrect ? (isJuniorQuiz ? "#f0fdf4" : "rgba(16,185,129,0.12)") : (isJuniorQuiz ? "#fef2f2" : "rgba(239,68,68,0.12)"), border: `1px solid ${testFeedback.isCorrect ? "rgba(16,185,129,0.35)" : "rgba(239,68,68,0.35)"}` }}>
+                      <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: testFeedback.explanation ? 4 : 0 }}>
+                        <span style={{ fontSize: 15 }}>{testFeedback.isCorrect ? "✅" : "❌"}</span>
+                        <p style={{ fontSize: 13.5, fontWeight: 800, color: testFeedback.isCorrect ? "#16a34a" : "#ef4444", margin: 0 }}>
+                          {testFeedback.isCorrect ? (isJuniorQuiz ? "Correct! Amazing! 🎉" : "Correct! Well done.") : "Not quite — keep going!"}
+                        </p>
+                      </div>
+                      {testFeedback.explanation && <p style={{ fontSize: 12.5, color: quizTheme.qText, opacity: 0.85, lineHeight: 1.5, margin: 0 }}>{testFeedback.explanation}</p>}
+                    </div>
+                  )}
+
+                  {/* Hint */}
+                  {testHintShown && !testFeedback && (
+                    <div style={{ padding: "10px 14px", borderRadius: 12, marginBottom: 12, background: isJuniorQuiz ? "#fffbeb" : "rgba(250,204,21,0.12)", border: "1px solid rgba(234,179,8,0.35)", fontSize: 12.5, color: quizTheme.qText, opacity: 0.92, lineHeight: 1.5 }}>
+                      💡 Tip: rule out the options you know are wrong first, then pick the best remaining answer.
+                    </div>
+                  )}
+
+                  {/* Primary action */}
+                  {testFeedback ? (
+                    <button style={{ ...styles.generateBtn, background: quizTheme.accent }} onClick={handleTestNext}>
+                      {testCurrentQ + 1 < testAssessment.questions.length ? "Next Question →" : "See Results →"}
+                    </button>
+                  ) : (
+                    <button
+                      style={{ ...styles.generateBtn, background: quizTheme.accent, opacity: testSelected === null || testAnswering ? 0.55 : 1, cursor: testSelected === null || testAnswering ? "default" : "pointer" }}
+                      disabled={testSelected === null || testAnswering}
+                      onClick={() => { if (testSelected !== null) handleTestAnswer(testSelected); }}
+                    >
+                      {testAnswering ? "Checking…" : "Check Answer →"}
+                    </button>
+                  )}
+
+                  {/* Secondary controls */}
+                  {!testFeedback && (
+                    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginTop: 12 }}>
+                      <button onClick={() => { setTestHintShown((v) => !v); channel.sendActivity(); }}
+                        style={{ background: "none", border: "none", cursor: "pointer", fontSize: 12.5, fontWeight: 700, color: quizTheme.accent, display: "inline-flex", alignItems: "center", gap: 5, fontFamily: "inherit" }}>
+                        💡 Need a hint?
+                      </button>
+                      <button onClick={() => { setTestSelected(null); setTestHintShown(false); handleTestNext(); }}
+                        style={{ background: "none", border: "none", cursor: "pointer", fontSize: 12.5, fontWeight: 700, color: quizTheme.qText, opacity: 0.7, display: "inline-flex", alignItems: "center", gap: 5, fontFamily: "inherit" }}>
+                        Skip question →
+                      </button>
+                    </div>
+                  )}
+
+                  {testError && <p style={{ ...styles.errorText, marginTop: 8, color: isJuniorQuiz ? undefined : "#fca5a5" }}>{testError}</p>}
+                </div>
               </div>
             ) : (
               <div style={styles.assessCard}>
@@ -1446,6 +1514,7 @@ export default function SessionPage() {
               liveStatus={liveStatus}
               thinkingSteps={thinkingSteps}
               liveParts={liveParts}
+              plainMath
             />
             {toolResults.map((tr) => {
               if (tr.tool === "set_homework") {
@@ -1540,6 +1609,7 @@ export default function SessionPage() {
           onWebSearchToggle={() => setWebSearchEnabled((v) => !v)}
           researchEnabled={researchEnabled}
           onResearchToggle={() => setResearchEnabled((v) => !v)}
+          mathKeyboard
         />
       </div>
     </>
@@ -1736,7 +1806,7 @@ export default function SessionPage() {
           // screen while the Learn panel (slides, puzzles, the actual lesson) got 35%.
           <ResizablePanels
             panels={[
-              { id: "learn", label: "Learn", content: <div style={{ ...styles.learnPanel, width: "100%", borderRight: "none" }}>{learnPanelInner}</div> },
+              { id: "learn", label: "Learn", content: <div style={{ ...styles.learnPanel, width: "100%", flex: 1, borderRight: "none" }}>{learnPanelInner}</div> },
               { id: "chat",  label: "Chat",  content: <div style={{ ...styles.chatPanel,  flex: 1 }}>{chatPanelInner}</div> },
             ]}
             initialWidths={[70, 30]}

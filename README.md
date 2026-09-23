@@ -210,3 +210,65 @@ The Docker setup uses the `pgvector/pgvector:pg17` image which includes pgvector
 | RAG_ENABLED | Enable/disable RAG | true |
 | UPLOAD_DIR | Document upload directory | uploads/documents |
 | MAX_UPLOAD_SIZE_MB | Max file upload size | 50 |
+
+---
+
+## Production feature set
+
+On top of the core lesson/RAG/voice/puzzle platform, the following production areas are implemented
+(each developed on its own branch — see **Branch structure** below):
+
+- **Auth & tenancy** — JWT with session revocation (`token_version` = "log out of all devices"),
+  Google OAuth, email verification, Casbin RBAC, multi-tenant schools with strict cross-school isolation.
+- **School verification** — a state-machine approval workflow (draft → submitted → under_review →
+  verified/rejected) with evidence upload, duplicate checks and an audit trail.
+- **Student learning preferences** — bounded, persisted preferences (learning style, pace, practice,
+  challenge, interests, goals) that **drive the live tutor prompt**; an app-wide accessibility layer
+  (text size, dark mode, reduced motion, high contrast) applied on boot.
+- **Role settings** — parent (children, secure invite-code linking, notifications, billing), teacher
+  (classroom defaults consumed by the booking flow), and a scoped, audited **platform settings centre**
+  whose values change real behaviour (maintenance mode, default credits, school policy).
+- **Billing** — a provider-abstracted engine (Stripe, with a credential-free mock for dev), an
+  **immutable credit ledger**, idempotent webhooks (no double-crediting), parent subscriptions, and a
+  school wallet with top-ups/requests, manual credits, refunds and invoices. Card data never touches
+  the backend.
+- **Evidence-based mastery** — a deterministic, versioned algorithm separating performance from
+  confidence, weighting exact evaluators above LLM grading, with recency decay and "why this score?"
+  explanations. Auto-seeds from history so it's dynamic on first view.
+- **Reporting** — parent child-progress and teacher class-progress trackers (heatmap, distribution)
+  reading authorised, tenant-scoped data.
+- **Notifications & audit** — a central preference-aware, deduplicated notification service with an
+  in-app centre + bell, plus a sensitive-data access audit.
+- **Observability & security** — request/correlation IDs, structured logs, safe error responses,
+  readiness + dependency health, an admin metrics/reconciliation endpoint, and sensitive-endpoint rate
+  limits. See `docs/security/SECURITY_AUDIT.md`.
+- **Navigation** — a central typed navigation registry (`frontend/src/lib/navigation.tsx`); the sidebar
+  is a renderer over it, with role-correct destinations and no stale "Soon"/disabled items.
+- **Premium UI/UX** — content-shaped **skeleton loaders** on every data screen (a composite kit +
+  a full-page shell) replacing bare spinners, and **collapsible sidebar sections** whose open/closed
+  state persists (localStorage) and never closes when you select an item. Skeletons freeze under the
+  reduced-motion preference.
+
+### Setup for the full stack
+
+```bash
+docker compose up -d --build
+docker compose exec backend python -m app.setup --fresh   # clean bring-up: drop, recreate, migrate, seed
+# (--fresh is recommended for a clean install; each migration now runs in its own transaction)
+```
+
+### Branch structure
+
+Work is delivered as a linear stack of per-feature branches off `master`, in dependency order, so
+`git merge --ff-only origin/<branch>` works end-to-end and each branch's own commits are one feature:
+
+```
+feat/ui-design-system-shell → feat/ui-icons-fonts-accessibility → feat/legal-privacy-compliance →
+feat/school-verification-workflow → feat/student-learning-preferences → feat/parent-account-settings →
+feat/teacher-settings → feat/admin-platform-settings → feature/payments-token-billing →
+feat/progress-mastery-engine → feat/parent-progress-tracker → feat/teacher-progress-tracker →
+feat/reports-notifications-audit → feat/navigation-information-architecture →
+feat/premium-ui-ux-system → feat/production-security-observability-qa
+```
+
+Open each PR against the **previous** branch to review exactly one feature's diff.

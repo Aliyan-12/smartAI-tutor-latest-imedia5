@@ -4,6 +4,7 @@ import ReactMarkdown from "react-markdown";
 import { ArrowLeft, FileText } from "lucide-react";
 import { legalApi, type LegalDocSummary, type LegalDocFull } from "../services/api";
 import { Card, Badge, Spinner, EmptyState } from "../components/ui";
+import { SkeletonText, SkeletonCard, SkeletonStats, SkeletonTable, SkeletonList } from "../components/ui";
 
 /** Public legal surface — readable without login. `/legal` lists documents; `/legal/:docKey`
  *  renders one. All documents are DRAFT scaffolds pending legal review (flagged in the UI). */
@@ -30,7 +31,7 @@ export default function LegalPage() {
 function DocIndex() {
   const [docs, setDocs] = useState<LegalDocSummary[] | null>(null);
   useEffect(() => { legalApi.documents().then((r) => setDocs(r.documents)).catch(() => setDocs([])); }, []);
-  if (!docs) return <div className="flex justify-center py-16"><Spinner /></div>;
+  if (!docs) return <div className="max-w-3xl mx-auto p-6"><SkeletonCard lines={6} /></div>;
   return (
     <>
       <h1 className="t-page-title mb-1">Legal & Privacy</h1>
@@ -61,7 +62,7 @@ function DocIndex() {
 function SingleDoc({ docKey }: { docKey: string }) {
   const [doc, setDoc] = useState<LegalDocFull | null | "404">(null);
   useEffect(() => { legalApi.document(docKey).then(setDoc).catch(() => setDoc("404")); }, [docKey]);
-  if (doc === null) return <div className="flex justify-center py-16"><Spinner /></div>;
+  if (doc === null) return <div className="max-w-3xl mx-auto p-6"><SkeletonCard lines={6} /></div>;
   if (doc === "404") return <EmptyState icon={<FileText size={40} />} title="Document not found" action={<Link to="/legal" className="text-brand font-semibold">All policies</Link>} />;
   return (
     <>

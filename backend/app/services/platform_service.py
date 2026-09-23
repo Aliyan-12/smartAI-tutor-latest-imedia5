@@ -522,6 +522,76 @@ async def award_xp(db: AsyncSession, student_id: int, amount: int, reason: str =
     return profile
 
 
+def _leaderboard_name(name: Optional[str]) -> str:
+    """Privacy-friendly display name: first name + last initial (e.g. 'Alex J.')."""
+    if not name or not name.strip():
+        return "Student"
+    parts = name.strip().split()
+    if len(parts) == 1:
+        return parts[0]
+    return f"{parts[0]} {parts[-1][0]}."
+
+
+async def get_leaderboard(db: AsyncSession, student_id: int, limit: int = 50) -> Dict[str, Any]:
+    """Rank students by total XP within the caller's YEAR GROUP (inside their school).
+
+    Returns the top `limit` entries plus the caller's own rank — even when they sit
+    outside the top of the board — so the UI can always highlight "you".
+    """
+    me_profile = await get_or_create_profile(db, student_id)
+    me = (await db.execute(select(User).where(User.id == student_id))).scalar_one_or_none()
+    school_id = getattr(me, "school_id", None)
+    year_group = me_profile.year_group
+
+    q = (
+        select(
+            StudentProfile.student_id,
+            StudentProfile.xp_total,
+            StudentProfile.xp_level,
+            StudentProfile.current_streak,
+            User.name,
+        )
+        .join(User, User.id == StudentProfile.student_id)
+        .where(User.role == "student")
+    )
+    if school_id is not None:
+        q = q.where(User.school_id == school_id)
+    if year_group:
+        q = q.where(StudentProfile.year_group == year_group)
+    q = q.order_by(desc(StudentProfile.xp_total), StudentProfile.student_id.asc())
+
+    rows = (await db.execute(q)).all()
+
+    entries: List[Dict[str, Any]] = []
+    my_rank: Optional[int] = None
+    my_entry: Optional[Dict[str, Any]] = None
+    for i, r in enumerate(rows, start=1):
+        is_me = r.student_id == student_id
+        entry = {
+            "rank": i,
+            "student_id": r.student_id,
+            "name": "You" if is_me else _leaderboard_name(r.name),
+            "xp_total": int(r.xp_total or 0),
+            "level": int(r.xp_level or 1),
+            "streak": int(r.current_streak or 0),
+            "is_me": is_me,
+        }
+        if is_me:
+            my_rank = i
+            my_entry = entry
+        if i <= limit:
+            entries.append(entry)
+
+    return {
+        "scope": "year_group" if year_group else "school",
+        "year_group": year_group,
+        "total_students": len(rows),
+        "my_rank": my_rank,
+        "me": my_entry,
+        "entries": entries,
+    }
+
+
 async def check_and_update_streak(db: AsyncSession, student_id: int) -> StudentProfile:
     """
     Compare last_active_date to today UTC and update the streak accordingly.

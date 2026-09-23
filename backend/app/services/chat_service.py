@@ -55,12 +55,14 @@ async def get_or_create_session_chat(
     Mirrors the lookup in routers/chat.py:get_or_create_session_chat so the
     session WebSocket can reuse it. Returns None if the appointment does not
     belong to the user. Caller is responsible for committing.
+
+    Session chats are identified SOLELY by their appointment_id FK — never by a
+    title string — so the title stays a clean, human-readable lesson name.
     """
-    session_title_key = f"[session:{appointment_id}]"
     result = await db.execute(
         select(Chat)
         .options(selectinload(Chat.messages))
-        .where(Chat.user_id == user_id, Chat.title.like(f"{session_title_key}%"))
+        .where(Chat.user_id == user_id, Chat.appointment_id == appointment_id)
         .order_by(desc(Chat.id))
         .limit(1)
     )
@@ -74,13 +76,9 @@ async def get_or_create_session_chat(
     if not appt or appt.student_id != user_id:
         return None
 
-    display_title = appt.title or f"{appt.subject} Session"
-    full_title = f"{session_title_key} {display_title}"
-    chat = await create_chat(db, user_id, title=full_title)
-    try:
-        chat.appointment_id = appointment_id
-    except Exception:
-        pass
+    title = appt.title or f"{appt.subject} Session"
+    chat = await create_chat(db, user_id, title=title)
+    chat.appointment_id = appointment_id
     await db.flush()
     await db.refresh(chat)
     return chat

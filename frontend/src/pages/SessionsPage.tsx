@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import Sidebar from "../components/Sidebar";
+import { SkeletonList } from "../components/ui";
 import { appointmentsApi } from "../services/api";
 import type { Appointment } from "../types";
 
@@ -270,9 +271,7 @@ export default function SessionsPage() {
   const visible = filtered.slice(0, showCount);
 
   return (
-    <div className="app-layout">
-      <Sidebar />
-      <div className="main-content">
+    <div className="main-content">
         <div className="dashboard-content">
           <div style={{
             background: "linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%)",
@@ -298,11 +297,12 @@ export default function SessionsPage() {
               alt="Classroom robot"
               draggable={false}
               style={{
-                width: 110,
-                height: "auto",
+                height: 78,
+                width: "auto",
                 position: "absolute",
-                right: 20,
-                bottom: 0,
+                right: 24,
+                top: "50%",
+                transform: "translateY(-50%)",
                 pointerEvents: "none",
                 objectFit: "contain",
                 zIndex: 1,
@@ -310,13 +310,7 @@ export default function SessionsPage() {
             />
           </div>
 
-          {loading && (
-            <div style={{ padding: "60px 0", textAlign: "center" }}>
-              <div className="typing-indicator" style={{ justifyContent: "center" }}>
-                <span /><span /><span />
-              </div>
-            </div>
-          )}
+          {loading && <SkeletonList rows={5} />}
 
           {error && (
             <div style={{ padding: 14, background: "#fef2f2", border: "1px solid #fecaca", borderRadius: 8, color: "#dc2626", fontSize: 13, marginBottom: 16 }}>
@@ -588,6 +582,5 @@ export default function SessionsPage() {
           )}
         </div>
       </div>
-    </div>
   );
 }

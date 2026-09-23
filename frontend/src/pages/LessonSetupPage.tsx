@@ -5,6 +5,7 @@ import {
   ChevronRight,
   LayoutGrid,
   Bot,
+  Flame, Zap, Clock,
 } from "lucide-react";
 import Sidebar from "../components/Sidebar";
 import TutorPickerPills from "../components/TutorPickerPills";
@@ -633,10 +634,7 @@ export default function LessonSetupPage() {
   const goalLabel = goalOptions.find((g) => g.id === goal)?.label ?? "";
 
   return (
-    <div style={{ display: "flex", height: "100vh", overflow: "hidden", background: "#f8fafc" }}>
-      <Sidebar />
-
-      <main style={{ flex: 1, minWidth: 0, overflowY: "auto", height: "100%", display: "flex", flexDirection: "column" }}>
+      <main style={{ flex: 1, minWidth: 0, overflowY: "auto", height: "100%", display: "flex", flexDirection: "column", background: "#f8fafc" }}>
         <style>{`
           @media (max-width: 768px) {
             .lsp-two-col { flex-direction: column !important; padding: 12px 12px 100px !important; gap: 12px !important; }
@@ -728,7 +726,7 @@ export default function LessonSetupPage() {
                 width: 36, height: 36, borderRadius: 10,
                 background: "#eff6ff", display: "flex", alignItems: "center", justifyContent: "center",
               }}>
-                <span style={{ fontSize: 18 }}>⏱</span>
+                <Clock size={18} color="#2563eb" strokeWidth={2.2} />
               </div>
               <div>
                 <div style={{ fontSize: 11, color: "#94a3b8", fontWeight: 600, textTransform: "uppercase" as const, letterSpacing: "0.4px" }}>Session Length</div>
@@ -745,7 +743,7 @@ export default function LessonSetupPage() {
                 width: 36, height: 36, borderRadius: 10,
                 background: "#fff7ed", display: "flex", alignItems: "center", justifyContent: "center",
               }}>
-                <span style={{ fontSize: 18 }}>🔥</span>
+                <Flame size={18} color="#ea580c" fill="#ea580c" strokeWidth={2.2} />
               </div>
               <div>
                 <div style={{ fontSize: 11, color: "#94a3b8", fontWeight: 600, textTransform: "uppercase" as const, letterSpacing: "0.4px" }}>Day Streak</div>
@@ -761,7 +759,7 @@ export default function LessonSetupPage() {
                 width: 36, height: 36, borderRadius: 10,
                 background: "#fefce8", display: "flex", alignItems: "center", justifyContent: "center",
               }}>
-                <span style={{ fontSize: 18 }}>⭐</span>
+                <Zap size={18} color="#ca8a04" fill="#ca8a04" strokeWidth={2.2} />
               </div>
               <div>
                 <div style={{ fontSize: 11, color: "#94a3b8", fontWeight: 600, textTransform: "uppercase" as const, letterSpacing: "0.4px" }}>XP</div>
@@ -1604,7 +1602,6 @@ export default function LessonSetupPage() {
         </div>
 
       </main>
-    </div>
   );
 }
 

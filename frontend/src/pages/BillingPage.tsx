@@ -2,13 +2,23 @@ import { useCallback, useEffect, useState } from "react";
 import { Check, CreditCard, AlertTriangle, Sparkles, ExternalLink, RefreshCw, Send } from "lucide-react";
 import Sidebar from "../components/Sidebar";
 import { useAuth } from "../context/AuthContext";
+import PageLoading from "../components/PageLoading";
 import {
   billingApi, type BillingPlan, type BillingSummary, type InvoiceRow, type LedgerRow,
   type WalletMember, type CreditRequestRow,
 } from "../services/api";
 import {
-  PageHeader, Card, CardBody, CardHeader, Button, Badge, Alert, Spinner, EmptyState, Input,
+  PageHeader, Card, CardBody, CardHeader, Button, Badge, Alert, Spinner, EmptyState, Select,
 } from "../components/ui";
+
+// Preset credit tiers for wallet→member transfers — same options/format as the student top-up.
+const SEND_TIERS = [
+  { credits: 10, price: "£1.99" },
+  { credits: 25, price: "£4.99" },
+  { credits: 50, price: "£8.99" },
+  { credits: 100, price: "£16.99" },
+  { credits: 250, price: "£39.99" },
+];
 
 function Toast({ msg }: { msg: string | null }) {
   if (!msg) return null;
@@ -52,7 +62,7 @@ export default function BillingPage() {
     if (r.url) window.location.href = r.url; else flash("Billing portal is available in live mode");
   };
 
-  if (!me) return <div className="app-layout"><Sidebar /><div className="main-content"><div className="dashboard-content flex justify-center py-16"><Spinner /></div></div></div>;
+  if (!me) return <PageLoading />;
 
   const sub = me.subscription;
   const currentPlan = plans.find((p) => p.slug === sub?.plan_slug);
@@ -256,7 +266,12 @@ export function MemberFundingCard({ flash, onChange }: { flash: (m: string) => v
               <div className="t-helper">{m.balance.toLocaleString()} credits</div>
             </div>
             <div className="flex items-center gap-2">
-              <Input type="number" placeholder="Amount" value={amt[m.id] ?? ""} onChange={(e) => setAmt({ ...amt, [m.id]: e.target.value })} className="!h-9 w-28" />
+              <Select aria-label={`Credits to send to ${m.name}`} value={amt[m.id] ?? ""} onChange={(e) => setAmt({ ...amt, [m.id]: e.target.value })} className="!h-9 w-48">
+                <option value="">Amount…</option>
+                {SEND_TIERS.map((t) => (
+                  <option key={t.credits} value={t.credits}>{t.credits} credits — {t.price}</option>
+                ))}
+              </Select>
               <Button size="sm" loading={busy === m.id} leftIcon={<Send size={14} />} onClick={() => send(m.id)}>Send</Button>
             </div>
           </div>
