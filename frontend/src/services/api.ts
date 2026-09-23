@@ -467,6 +467,16 @@ export const subscriptionApi = {
   },
 };
 
+export interface ChildOverview {
+  mastery_counts: Record<string, number>;
+  topics_tracked: number;
+  recommendations: Array<{ subject: string; topic: string; state: string; reason: string }>;
+  assessments: { total: number; average_score: number; latest_score: number; weak_topics: string[]; strong_topics: string[] };
+  sessions_completed: number;
+  streak: number;
+  xp_total: number;
+}
+
 export const parentApi = {
   async getDashboard() {
     const res = await fetch(`${API_BASE}/parent/dashboard`, { headers: authHeaders() });
@@ -487,6 +497,16 @@ export const parentApi = {
   async getStudentAssessments(studentId: number) {
     const res = await fetch(`${API_BASE}/parent/students/${studentId}/assessments`, { headers: authHeaders() });
     return handleResponse(res);
+  },
+  async childMastery(studentId: number) {
+    return handleResponse<MasteryEngine>(await fetch(`${API_BASE}/parent/students/${studentId}/mastery`, { headers: authHeaders() }));
+  },
+  async childMasteryTopic(studentId: number, subject: string, topic: string) {
+    const q = new URLSearchParams({ subject, topic }).toString();
+    return handleResponse<MasteryBreakdown>(await fetch(`${API_BASE}/parent/students/${studentId}/mastery/topic?${q}`, { headers: authHeaders() }));
+  },
+  async childOverview(studentId: number) {
+    return handleResponse<ChildOverview>(await fetch(`${API_BASE}/parent/students/${studentId}/overview`, { headers: authHeaders() }));
   },
   async linkWithCode(code: string) {
     const res = await fetch(`${API_BASE}/parent/link`, {
