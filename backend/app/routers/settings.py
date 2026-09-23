@@ -18,6 +18,7 @@ from app.schemas.settings import (
     NotificationPrefsResponse,
 )
 from app.services import platform_service
+from app.services.user_service import get_user_by_id
 
 
 class ChangePasswordRequest(BaseModel):
@@ -27,6 +28,27 @@ class ChangePasswordRequest(BaseModel):
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/settings", tags=["settings"])
+
+# Bounded, allowed values — preferences change HOW the tutor teaches, never curriculum/safety.
+_ALLOWED_STYLES = {"visual", "examples", "step_by_step", "concise", "analogies", "diagrams", "worked_examples"}
+_ALLOWED_PACE = {"slower", "just_right", "faster"}
+
+
+def _sanitize_prefs(data: dict) -> dict:
+    """Keep preference writes bounded + safe. Students may NOT change curriculum entitlement
+    (key stage / year group) via preferences — that stays authoritative from onboarding/school."""
+    if isinstance(data.get("learning_style"), list):
+        data["learning_style"] = [s for s in data["learning_style"] if s in _ALLOWED_STYLES]
+    if data.get("teaching_pace") not in _ALLOWED_PACE:
+        data.pop("teaching_pace", None)
+    if "default_session_length" in data:
+        try:
+            data["default_session_length"] = max(20, min(90, int(data["default_session_length"])))
+        except (TypeError, ValueError):
+            data.pop("default_session_length", None)
+    data.pop("key_stage", None)
+    data.pop("year_group", None)
+    return data
 
 
 @router.get("/profile", response_model=ProfileResponse)
@@ -82,11 +104,40 @@ async def update_learning_preferences(
     current_user: User = Depends(require_student),
     db: AsyncSession = Depends(get_db),
 ):
-    """Student: update their learning preferences."""
-    data = {k: v for k, v in payload.model_dump().items() if v is not None}
+    """Student: update their learning preferences (bounded — HOW the tutor teaches)."""
+    data = _sanitize_prefs({k: v for k, v in payload.model_dump().items() if v is not None})
     profile = await platform_service.update_learning_preferences(
         db, current_user.id, data
     )
+    await db.commit()
+    return LearningPreferencesResponse.model_validate(profile)
+
+
+@router.get("/learning-preferences/for/{student_id}", response_model=LearningPreferencesResponse)
+async def view_student_preferences(
+    student_id: int,
+    current_user: User = Depends(require_any_authenticated),
+    db: AsyncSession = Depends(get_db),
+):
+    """Parent (of the child) or teacher/admin (same school) read-only view of a
+    student's learning preferences. Enforces the authorisation boundary itself so a
+    parent can never read another family's child, and a teacher never another school's."""
+    student = await get_user_by_id(db, student_id)
+    if student is None or student.role != "student":
+        raise HTTPException(status_code=404, detail="Student not found")
+
+    allowed = False
+    if current_user.role == "parent" and getattr(student, "parent_id", None) == current_user.id:
+        allowed = True
+    elif current_user.role in ("teacher", "admin", "administrator"):
+        # Administrators are cross-school; teachers/admins are scoped to their own school.
+        allowed = current_user.role == "administrator" or (
+            current_user.school_id is not None and student.school_id == current_user.school_id
+        )
+    if not allowed:
+        raise HTTPException(status_code=403, detail="You are not authorised to view this student's preferences")
+
+    profile = await platform_service.get_student_settings(db, student_id)
     await db.commit()
     return LearningPreferencesResponse.model_validate(profile)
 

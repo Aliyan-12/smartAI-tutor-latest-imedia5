@@ -616,10 +616,31 @@ export const assignmentsApi = {
   },
 };
 
+export interface LearningPreferences {
+  student_id: number;
+  learning_style: string[] | null;
+  teaching_pace: string;
+  teaching_preferences: Record<string, unknown> | null;
+  learning_goals: string | null;
+  default_session_length: number;
+  voice_responses: boolean;
+  show_hints: boolean;
+  auto_start_next_topic: boolean;
+  interests: string[] | null;
+  preferred_subjects: string[] | null;
+  year_group: string | null;
+  key_stage: string | null;
+}
+
 export const settingsApi = {
   async getLearningPreferences() {
     const res = await fetch(`${API_BASE}/settings/learning-preferences`, { headers: authHeaders() });
-    return handleResponse(res);
+    return handleResponse<LearningPreferences>(res);
+  },
+  // Parent (of the child) or teacher/admin (same school) read-only view.
+  async viewStudentPreferences(studentId: number) {
+    const res = await fetch(`${API_BASE}/settings/learning-preferences/for/${studentId}`, { headers: authHeaders() });
+    return handleResponse<LearningPreferences>(res);
   },
   async updateLearningPreferences(data: Record<string, unknown>) {
     const res = await fetch(`${API_BASE}/settings/learning-preferences`, {
@@ -627,7 +648,7 @@ export const settingsApi = {
       headers: authHeaders(),
       body: JSON.stringify(data),
     });
-    return handleResponse(res);
+    return handleResponse<LearningPreferences>(res);
   },
   async updateProfile(data: { name?: string; year_group?: string; key_stage?: string }) {
     const res = await fetch(`${API_BASE}/settings/profile`, {

@@ -14,6 +14,7 @@ import SessionsPage from "./pages/SessionsPage";
 import ProgressPage from "./pages/ProgressPage";
 import AssignmentsPage from "./pages/AssignmentsPage";
 import SettingsPage from "./pages/SettingsPage";
+import StudentPreferencesPage from "./pages/StudentPreferencesPage";
 import LessonSetupPage from "./pages/LessonSetupPage";
 import ParentReportsPage from "./pages/ParentReportsPage";
 import ParentSettingsPage from "./pages/ParentSettingsPage";
@@ -196,6 +197,14 @@ export default function App() {
             element={
               <ProtectedRoute allowedRoles={["student"]}>
                 <SettingsPage />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/preferences"
+            element={
+              <ProtectedRoute allowedRoles={["student"]}>
+                <StudentPreferencesPage />
               </ProtectedRoute>
             }
           />
