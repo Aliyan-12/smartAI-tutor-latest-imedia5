@@ -676,6 +676,75 @@ export const settingsApi = {
   },
 };
 
+export interface ParentProfile {
+  name: string; email: string; phone: string | null; timezone: string; language: string;
+}
+export interface ChildSummary {
+  id: number; name: string; email: string; is_active: boolean;
+  year_group: string | null; key_stage: string | null; preferences_summary: string;
+}
+export interface ParentBilling {
+  credits: number;
+  subscription: null | {
+    plan_name: string; status: string; price: number; credits_included: number;
+    started_at: string; renewal_date: string | null;
+  };
+  transactions: Array<{ amount: number; balance_after: number; type: string; description: string; created_at: string }>;
+}
+
+export const parentSettingsApi = {
+  async getProfile() {
+    return handleResponse<ParentProfile>(await fetch(`${API_BASE}/parent/settings/profile`, { headers: authHeaders() }));
+  },
+  async updateProfile(data: Partial<Pick<ParentProfile, "name" | "phone" | "timezone" | "language">>) {
+    return handleResponse<ParentProfile>(await fetch(`${API_BASE}/parent/settings/profile`, {
+      method: "PUT", headers: authHeaders(), body: JSON.stringify(data),
+    }));
+  },
+  async getNotifications() {
+    return handleResponse<{ prefs: Record<string, boolean> }>(await fetch(`${API_BASE}/parent/settings/notifications`, { headers: authHeaders() }));
+  },
+  async updateNotifications(prefs: Record<string, boolean>) {
+    return handleResponse<{ prefs: Record<string, boolean> }>(await fetch(`${API_BASE}/parent/settings/notifications`, {
+      method: "PUT", headers: authHeaders(), body: JSON.stringify({ prefs }),
+    }));
+  },
+  async getChildren() {
+    return handleResponse<{ children: ChildSummary[] }>(await fetch(`${API_BASE}/parent/settings/children`, { headers: authHeaders() }));
+  },
+  async addChild(data: { name: string; email: string; password: string }) {
+    return handleResponse(await fetch(`${API_BASE}/parent/settings/children`, {
+      method: "POST", headers: authHeaders(), body: JSON.stringify(data),
+    }));
+  },
+  async linkChild(code: string) {
+    return handleResponse<{ message: string }>(await fetch(`${API_BASE}/parent/settings/children/link`, {
+      method: "POST", headers: authHeaders(), body: JSON.stringify({ code }),
+    }));
+  },
+  async unlinkChild(studentId: number) {
+    const res = await fetch(`${API_BASE}/parent/settings/children/${studentId}`, { method: "DELETE", headers: authHeaders() });
+    if (!res.ok && res.status !== 204) throw new Error("Failed to unlink child");
+  },
+  async getAudit() {
+    return handleResponse<{ events: Array<{ action: string; student_id: number | null; detail: string; created_at: string }> }>(
+      await fetch(`${API_BASE}/parent/settings/audit`, { headers: authHeaders() }));
+  },
+  async changePassword(current_password: string, new_password: string) {
+    return handleResponse<{ message: string }>(await fetch(`${API_BASE}/parent/settings/account/change-password`, {
+      method: "POST", headers: authHeaders(), body: JSON.stringify({ current_password, new_password }),
+    }));
+  },
+  async logoutAll() {
+    return handleResponse<{ message: string }>(await fetch(`${API_BASE}/parent/settings/account/logout-all`, {
+      method: "POST", headers: authHeaders(),
+    }));
+  },
+  async getBilling() {
+    return handleResponse<ParentBilling>(await fetch(`${API_BASE}/parent/settings/billing`, { headers: authHeaders() }));
+  },
+};
+
 export const lessonsApi = {
   async getAvailableFilters() {
     const res = await fetch(`${API_BASE}/lessons/available-filters`, { headers: authHeaders() });

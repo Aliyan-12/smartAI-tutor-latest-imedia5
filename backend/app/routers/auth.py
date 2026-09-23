@@ -96,7 +96,7 @@ async def verify_email(payload: VerifyEmailRequest, db: AsyncSession = Depends(g
             ),
         )
 
-    token = create_access_token({"sub": str(user.id), "role": user.role})
+    token = create_access_token({"sub": str(user.id), "role": user.role, "tv": user.token_version})
     return VerifyEmailResponse(
         status="verified", access_token=token, user=UserResponse.model_validate(user),
     )
@@ -133,7 +133,7 @@ async def login(payload: UserLogin, db: AsyncSession = Depends(get_db)):
     if user.approval_status == APPROVAL_REJECTED:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="account_rejected")
 
-    token = create_access_token({"sub": str(user.id), "role": user.role})
+    token = create_access_token({"sub": str(user.id), "role": user.role, "tv": user.token_version})
     return TokenResponse(access_token=token, user=UserResponse.model_validate(user))
 
 
@@ -160,7 +160,7 @@ async def reset_password(payload: ResetPasswordRequest, db: AsyncSession = Depen
     user.is_verified = True
     await db.commit()
     await db.refresh(user)
-    token = create_access_token({"sub": str(user.id), "role": user.role})
+    token = create_access_token({"sub": str(user.id), "role": user.role, "tv": user.token_version})
     return TokenResponse(access_token=token, user=UserResponse.model_validate(user))
 
 
@@ -192,7 +192,7 @@ async def google_callback(request: Request, db: AsyncSession = Depends(get_db)):
 
     user = await _upsert_google_user(db, sub, email, name)
     await db.commit()
-    jwt = create_access_token({"sub": str(user.id), "role": user.role})
+    jwt = create_access_token({"sub": str(user.id), "role": user.role, "tv": user.token_version})
     # Hand the JWT to the SPA via the OAuth callback page (URL fragment, not query,
     # so it isn't sent to servers/logs).
     return RedirectResponse(f"{fe}/oauth/callback#token={jwt}")
