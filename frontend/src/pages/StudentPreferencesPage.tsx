@@ -5,7 +5,7 @@ import {
 } from "lucide-react";
 import { Link } from "react-router-dom";
 import Sidebar from "../components/Sidebar";
-import { settingsApi, type LearningPreferences } from "../services/api";
+import { settingsApi, curriculumApi, type LearningPreferences } from "../services/api";
 import {
   applyAccessibility, coerceA11y, type AccessibilityPrefs, type TextSize,
 } from "../lib/accessibility";
@@ -210,6 +210,14 @@ export default function StudentPreferencesPage() {
   const [error, setError] = useState<string | null>(null);
   const savedTimer = useRef<number | null>(null);
 
+  // Favourite-subject options come from the Resource Hub curriculum, never a hardcoded list.
+  const [hubSubjects, setHubSubjects] = useState<string[]>([]);
+  useEffect(() => {
+    curriculumApi.getSubjects()
+      .then((r) => setHubSubjects(r.subjects.map((s) => s.name)))
+      .catch(() => setHubSubjects([]));
+  }, []);
+
   const load = useCallback(async () => {
     try {
       const p = await settingsApi.getLearningPreferences();
@@ -370,7 +378,7 @@ export default function StudentPreferencesPage() {
                 <Section icon={<BookOpen size={18} />} title="Favourite subjects"
                   desc="Subjects you enjoy most — for suggestions and encouragement.">
                   <div className="flex flex-wrap gap-2">
-                    {SUBJECTS.map((s) => (
+                    {(hubSubjects.length ? hubSubjects : SUBJECTS).map((s) => (
                       <Chip key={s} active={draft.preferred_subjects.includes(s)}
                         onClick={() => patch({ preferred_subjects: toggleIn(draft.preferred_subjects, s) })}>
                         {s}
