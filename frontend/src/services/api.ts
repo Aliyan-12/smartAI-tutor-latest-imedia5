@@ -331,7 +331,34 @@ export const adminApi = {
   },
 };
 
+export interface ClassStudentRow {
+  id: number; name: string; avg_performance: number; topics_tracked: number;
+  needs_review: number; mastered: number; last_active: string | null; inactive: boolean; support_flag: boolean;
+}
+export interface ClassOverview {
+  student_count: number; class_avg_performance: number; mastery_distribution: Record<string, number>;
+  students: ClassStudentRow[]; needing_support: string[]; inactive_students: string[]; improving_students: string[];
+}
+export interface ClassHeatmap {
+  topics: string[];
+  rows: Array<{ student_id: number; student_name: string; cells: Array<{ state: string; evidence_count: number; last_practiced: string | null }> }>;
+}
+
 export const teacherApi = {
+  async classOverview() {
+    return handleResponse<ClassOverview>(await fetch(`${API_BASE}/teacher/class/overview`, { headers: authHeaders() }));
+  },
+  async classHeatmap(subject?: string) {
+    const q = subject ? `?subject=${encodeURIComponent(subject)}` : "";
+    return handleResponse<ClassHeatmap>(await fetch(`${API_BASE}/teacher/class/heatmap${q}`, { headers: authHeaders() }));
+  },
+  async studentMastery(studentId: number) {
+    return handleResponse<MasteryEngine>(await fetch(`${API_BASE}/teacher/students/${studentId}/mastery`, { headers: authHeaders() }));
+  },
+  async studentMasteryTopic(studentId: number, subject: string, topic: string) {
+    const q = new URLSearchParams({ subject, topic }).toString();
+    return handleResponse<MasteryBreakdown>(await fetch(`${API_BASE}/teacher/students/${studentId}/mastery/topic?${q}`, { headers: authHeaders() }));
+  },
   async getDashboard() {
     const res = await fetch(`${API_BASE}/teacher/dashboard`, { headers: authHeaders() });
     return handleResponse(res);
