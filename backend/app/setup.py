@@ -233,6 +233,12 @@ async def run_setup(fresh: bool = False, seed: bool = True):
             DROP TABLE notifications CASCADE;
           END IF;
         END $$;""",
+        # Indexes for the new high-volume queries (feature 15). IF NOT EXISTS keeps it idempotent.
+        "CREATE INDEX IF NOT EXISTS ix_mastery_evidence_student_subject_topic ON mastery_evidence(student_id, subject, topic)",
+        "CREATE INDEX IF NOT EXISTS ix_billing_ledger_wallet_created ON billing_ledger(wallet_id, created_at DESC)",
+        "CREATE INDEX IF NOT EXISTS ix_notifications_user_read ON notifications(user_id, read)",
+        "CREATE INDEX IF NOT EXISTS ix_access_audit_subject ON access_audit(subject_user_id, created_at DESC)",
+        "CREATE INDEX IF NOT EXISTS ix_topic_mastery_student_state ON topic_mastery(student_id, state)",
         "ALTER TABLE chats ADD COLUMN IF NOT EXISTS appointment_id INTEGER REFERENCES appointments(id)",
         "ALTER TABLE appointments ADD COLUMN IF NOT EXISTS paused_at TIMESTAMP WITH TIME ZONE",
         "ALTER TABLE appointments ADD COLUMN IF NOT EXISTS total_paused_seconds INTEGER DEFAULT 0",
@@ -376,13 +382,17 @@ async def run_setup(fresh: bool = False, seed: bool = True):
         "CREATE INDEX IF NOT EXISTS ix_rh_document_chunks_slide_index ON rh_document_chunks(slide_index)",
         "CREATE INDEX IF NOT EXISTS ix_rh_chunk_embedding_hnsw ON rh_document_chunks USING hnsw (embedding vector_cosine_ops) WITH (m = 16, ef_construction = 64)",
     ]
-    async with engine.begin() as conn:
-        for sql in _migrations:
-            try:
+    # Each migration runs in its OWN transaction. Previously they shared one, so a single
+    # failure (e.g. an already-applied change on a legacy DB) aborted the transaction and
+    # every remaining migration failed with "current transaction is aborted". Isolating them
+    # means one skippable migration can't cascade and block the rest.
+    for sql in _migrations:
+        try:
+            async with engine.begin() as conn:
                 await conn.execute(text(sql))
-                logger.info(f"Migration applied: {sql[:70]}")
-            except Exception as e:
-                logger.warning(f"Migration skipped (already applied?): {e}")
+            logger.info(f"Migration applied: {sql[:70]}")
+        except Exception as e:
+            logger.warning(f"Migration skipped (already applied?): {e}")
 
     # ── Seed ──────────────────────────────────────────────────────────────────────────
     # Run automatically: a freshly-wiped database with no users and no school can't be

@@ -31,6 +31,7 @@ import SchoolVerificationPage from "./pages/SchoolVerificationPage";
 import AdminSchoolReviewPage from "./pages/AdminSchoolReviewPage";
 import AdminSettingsPage from "./pages/AdminSettingsPage";
 import BillingPage from "./pages/BillingPage";
+import NotificationsPage from "./pages/NotificationsPage";
 import SchoolBillingPage from "./pages/SchoolBillingPage";
 import ParentProgressPage from "./pages/ParentProgressPage";
 import TeacherProgressPage from "./pages/TeacherProgressPage";
@@ -249,6 +250,7 @@ export default function App() {
           <Route path="/legal" element={<LegalPage />} />
           <Route path="/legal/:docKey" element={<LegalPage />} />
           <Route path="/privacy" element={<ProtectedRoute><PrivacyPage /></ProtectedRoute>} />
+          <Route path="/notifications" element={<ProtectedRoute><NotificationsPage /></ProtectedRoute>} />
           <Route path="/school/verification" element={<ProtectedRoute allowedRoles={["admin"]}><SchoolVerificationPage /></ProtectedRoute>} />
           <Route path="/admin/school-verification" element={<ProtectedRoute allowedRoles={["administrator"]}><AdminSchoolReviewPage /></ProtectedRoute>} />
           <Route path="/admin/settings" element={<ProtectedRoute allowedRoles={["admin", "administrator"]}><AdminSettingsPage /></ProtectedRoute>} />

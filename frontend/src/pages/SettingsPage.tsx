@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
-import { User, Sliders, BookOpen, Bell, Shield, Save, LogOut, Eye, EyeOff } from "lucide-react";
+import { useNavigate } from "react-router-dom";
+import { User, Bell, Shield, Save, LogOut, Eye, EyeOff } from "lucide-react";
 import Sidebar from "../components/Sidebar";
 import { settingsApi, curriculumApi } from "../services/api";
 import { useAuth } from "../context/AuthContext";
@@ -36,6 +37,7 @@ const TEACH_PREFS = [
 
 export default function SettingsPage() {
   const { user, logout } = useAuth();
+  const navigate = useNavigate();
   const [activeTab, setActiveTab] = useState<Tab>("profile");
   const [toast, setToast] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
@@ -569,17 +571,10 @@ export default function SettingsPage() {
 
                   <div className="sett-row">
                     <div>
-                      <div className="sett-row-label">Linked Accounts</div>
-                      <div className="sett-row-sub">Connect external accounts</div>
+                      <div className="sett-row-label">Privacy &amp; data</div>
+                      <div className="sett-row-sub">Manage your data, consents and privacy requests</div>
                     </div>
-                    <span style={{ fontSize: 12, color: "#94a3b8", fontWeight: 600 }}>Coming Soon</span>
-                  </div>
-                  <div className="sett-row">
-                    <div>
-                      <div className="sett-row-label">Privacy</div>
-                      <div className="sett-row-sub">Manage your data and privacy settings</div>
-                    </div>
-                    <span style={{ fontSize: 12, color: "#94a3b8", fontWeight: 600 }}>Coming Soon</span>
+                    <button className="sett-save-btn" style={{ padding: "7px 14px" }} onClick={() => navigate("/privacy")}>Manage</button>
                   </div>
                 </div>
 

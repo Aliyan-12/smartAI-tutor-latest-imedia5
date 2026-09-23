@@ -162,9 +162,28 @@ async def recommend_next(db: AsyncSession, student_id: int, limit: int = 5) -> L
     return [s for s in scored if s["state"] in ("needs_review", "emerging", "developing")][:limit]
 
 
+async def ensure_backfilled(db: AsyncSession, student_id: int) -> None:
+    """Make history-based mastery dynamic: if a student has legacy TopicMastery history but
+    no evidence rows yet, seed evidence once (idempotent). This means the evidence engine
+    lights up automatically on first view — no manual 'build from history' step required."""
+    from app.models.mastery import MasteryEvidence
+    has_evidence = await db.scalar(
+        select(MasteryEvidence.id).where(MasteryEvidence.student_id == student_id).limit(1))
+    if has_evidence is not None:
+        return
+    has_history = await db.scalar(
+        select(TopicMastery.id).where(TopicMastery.student_id == student_id).limit(1))
+    if has_history is None:
+        return
+    student = await db.get(User, student_id)
+    if student is not None:
+        await backfill_student(db, student)
+
+
 async def engine_payload(db: AsyncSession, student_id: int) -> Dict[str, Any]:
     """The mastery-engine overview payload for a student — reused by the student's own view
-    and by authorised parent/teacher views."""
+    and by authorised parent/teacher views. Auto-seeds evidence from history on first view."""
+    await ensure_backfilled(db, student_id)
     topics = await mastery_overview(db, student_id)
     recs = await recommend_next(db, student_id)
     return {

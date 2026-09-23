@@ -10,6 +10,9 @@ from starlette.middleware.sessions import SessionMiddleware
 from app.core.config import settings
 from app.middleware.rate_limit import RateLimitMiddleware
 from app.middleware.maintenance import MaintenanceMiddleware
+from app.middleware.sensitive_rate_limit import SensitiveRateLimitMiddleware
+from app.middleware.observability import ObservabilityMiddleware, RequestIdFilter, request_id_ctx
+from app.observability import metrics
 from app.routers import auth, chat, health, admin, teacher, subscription, documents
 from app.routers import parent, appointments, assessments, gamification, lessons, assignments
 from app.routers import settings as settings_router
@@ -17,12 +20,16 @@ from app.routers import sessions, curriculum, school, puzzles
 from app.routers import legal, school_verification
 from app.routers import parent_settings, teacher_settings, admin_settings, billing, school_billing
 from app.routers import notifications as notifications_router
+from app.routers import observability as observability_router
 
+# Structured logs carry the request id so a single failing request is traceable end-to-end.
 logging.basicConfig(
     level=logging.INFO,
-    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+    format="%(asctime)s [%(levelname)s] rid=%(request_id)s %(name)s: %(message)s",
     force=True,
 )
+for _h in logging.getLogger().handlers:
+    _h.addFilter(RequestIdFilter())
 logging.getLogger("uvicorn.access").setLevel(logging.INFO)
 logging.getLogger("uvicorn.error").setLevel(logging.INFO)
 logger = logging.getLogger(__name__)
@@ -92,6 +99,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 app.add_middleware(RateLimitMiddleware)
+app.add_middleware(SensitiveRateLimitMiddleware)
 app.add_middleware(MaintenanceMiddleware)
 # Required by Authlib's OAuth handshake to stash state/nonce between redirect
 # and callback. Falls back to the JWT secret when SESSION_SECRET isn't set.
@@ -101,18 +109,25 @@ app.add_middleware(
     same_site="lax",
     https_only=False,
 )
+# Added LAST so it is the OUTERMOST middleware: assigns the request id before anything else
+# and logs/measures every request (including ones the inner middlewares short-circuit).
+app.add_middleware(ObservabilityMiddleware)
 
 
 @app.exception_handler(Exception)
 async def unhandled_exception_handler(request: Request, exc: Exception):
+    # Full detail (with the request id) goes to the server log; the client gets a safe,
+    # opaque message + the id so support can correlate — never a stack trace or internals.
+    rid = request_id_ctx.get()
+    metrics.incr("http.unhandled_exception")
     logger.error(
-        "Unhandled error %s %s → %s\n%s",
-        request.method,
-        request.url.path,
-        type(exc).__name__,
-        traceback.format_exc(),
+        "Unhandled error rid=%s %s %s → %s\n%s",
+        rid, request.method, request.url.path, type(exc).__name__, traceback.format_exc(),
     )
-    return JSONResponse(status_code=500, content={"detail": "Internal server error"})
+    return JSONResponse(
+        status_code=500,
+        content={"detail": "Something went wrong. Please try again.", "request_id": rid},
+    )
 
 app.include_router(health.router)
 app.include_router(auth.router)
@@ -140,3 +155,4 @@ app.include_router(admin_settings.router)
 app.include_router(billing.router)
 app.include_router(school_billing.router)
 app.include_router(notifications_router.router)
+app.include_router(observability_router.router)
